@@ -80,7 +80,7 @@ test('a "no power reading" refusal asks the radio again and tells the owner what
   const owner = ctx.logs.filter((l) => l.startsWith('[pass] Owner:'));
   assert.strictEqual(owner.length, 1);
   assert.ok(/has never reported it this session/.test(owner[0]));
-  assert.ok(/Settings > My Rigs names this radio's exact model \(and CI-V address on an Icom\)/.test(owner[0]));
+  assert.ok(/the rig in Settings > Radio is this radio's exact model \(and CI-V address on an Icom\)/.test(owner[0]));
   assert.ok(ctx.sent.some(([w, ch]) => w === 'main' && ch === 'app-notice'));
   ctx.blocked({ reason: 'over_power', userVisible: 'y' });
   assert.strictEqual(ctx.logs.filter((l) => l.startsWith('[pass] Owner:')).length, 1, 'other refusals add nothing');

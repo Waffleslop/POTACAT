@@ -2786,6 +2786,13 @@ html, body {
   animation: ft8-toast-fade 4s ease-in-out;
   pointer-events: none;
 }
+/* A stopped QSO that can still be finished with a 73 (#807): it stays up
+   and its Send 73 button takes a tap. */
+.ft8-error-toast.ft8-error-toast-action {
+  animation: none;
+  pointer-events: auto;
+}
+.ft8-error-toast-action .ft8-qso-skip-btn { margin-left: 8px; }
 @keyframes ft8-toast-fade {
   0% { opacity: 0; transform: translateX(-50%) translateY(-10px); }
   10% { opacity: 1; transform: translateX(-50%) translateY(0); }
@@ -3597,6 +3604,36 @@ html, body {
   .audio-button { width: 60px; height: 60px; }
   .speaker-button { width: 60px; height: 60px; }
 }
+
+/* --- APRS view (phase 6): the shack's APRS window. Theme variables only. --- */
+#aprs-view { flex: 1; min-height: 0; flex-direction: column; }
+.aprs-controls { padding: 8px 10px 4px; border-bottom: 1px solid var(--border); background: var(--bg); flex-shrink: 0; }
+.aprs-line { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 12px; margin-bottom: 6px; }
+.aprs-line .dir-search { flex: 1 1 120px; }
+.aprs-feed { font-size: 13px; color: var(--text); }
+.aprs-count { font-size: 13px; color: var(--text-dim); margin-left: auto; }
+.aprs-switch { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; color: var(--text); cursor: pointer; }
+.aprs-switch input { width: 18px; height: 18px; accent-color: var(--pota); }
+.aprs-bands { display: inline-flex; gap: 4px; }
+.aprs-chip { padding: 3px 10px; border-radius: 12px; background: var(--bg-card); color: var(--text-dim); border: 1px solid var(--border); font-size: 13px; cursor: pointer; }
+.aprs-chip.active { background: var(--pota); color: #000; border-color: var(--pota); }
+.aprs-sub { font-size: 12px; color: var(--text-dim); margin-bottom: 4px; }
+.aprs-line .aprs-sub { margin-bottom: 0; }
+.aprs-beacon { padding: 6px 12px; border-radius: 8px; background: var(--bg-card); color: var(--text); border: 1px solid var(--pota); font-size: 14px; cursor: pointer; }
+.aprs-beacon:disabled { opacity: 0.6; cursor: default; }
+.aprs-refusal { font-size: 13px; color: var(--text); background: var(--bg-card); border-left: 3px solid var(--sota); padding: 6px 8px; border-radius: 4px; margin-bottom: 6px; }
+.aprs-list { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; padding: 4px 8px 80px; }
+.aprs-row { display: flex; align-items: center; gap: 10px; background: var(--bg-card); border-radius: 8px; padding: 8px 10px; margin-bottom: 4px; border-left: 3px solid transparent; }
+.aprs-row.mine { border-left-color: var(--fav); } /* heard on the shack's radio: the theme's own tint */
+.aprs-row .aprs-ico { flex-shrink: 0; }
+.aprs-row-main { flex: 1; min-width: 0; }
+.aprs-row-top { display: flex; align-items: baseline; gap: 8px; }
+.aprs-call { font-size: 15px; font-weight: 600; color: var(--text); }
+.aprs-heard { font-size: 12px; color: var(--fav); font-weight: 600; }
+.aprs-age { font-size: 12px; color: var(--text-dim); margin-left: auto; white-space: nowrap; }
+.aprs-row-sub { font-size: 12px; color: var(--text-dim); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.aprs-pin { background: none; border: none; }
+.aprs-pin.mine .aprs-ico { border-radius: 50%; box-shadow: 0 0 0 2px var(--fav); } /* heard on the shack's radio */
 
 /* --- Directory View (HF Nets & SWL) --- */
 #dir-view {

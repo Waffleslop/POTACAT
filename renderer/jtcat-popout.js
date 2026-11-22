@@ -117,7 +117,8 @@ function _applyPopoutTheme(payload) {
   // Load settings
   window.api.getSettings().then(function(s) {
     myCallsign = onAirCallPushed || (s.myCallsign || '').toUpperCase();
-    myGrid = (s.grid || '').toUpperCase().substring(0, 4);
+    // A remote desktop hears at the shack: its grid, not this computer's (#774).
+    myGrid = ((s.remoteShack && s.shackGrid) || s.grid || '').toUpperCase().substring(0, 4);
     updateCqPreview();
     applyUltracat(!!s.ultracat);
     chaseTarget = s.jtcatChaseTarget || '';
@@ -1595,6 +1596,9 @@ function _applyPopoutTheme(payload) {
 
   function applyClock(d) {
     if (!syncEl) return;
+    // Only the buttons this OS can honour (main's canFix / canOpenSettings, lib/ntp.js).
+    if (d && clockSyncBtn) clockSyncBtn.style.display = d.canFix === false ? 'none' : '';
+    if (d && clockSetBtn) clockSetBtn.style.display = d.canOpenSettings === false ? 'none' : '';
     lastClockState = d; // remembered so engine-stop can keep a bad banner up
     syncEl.classList.remove('jtcat-synced');
     syncEl.style.color = '';
@@ -1869,6 +1873,26 @@ function _applyPopoutTheme(payload) {
         });
         qsoToast.appendChild(fb);
       }
+      // The retry cap stopped a QSO whose RR73 never came: not logged (#807).
+      // Send 73 puts the 73 on the air, which logs it. Stays up for a minute.
+      if (data.send73) {
+        var sb = document.createElement('button');
+        sb.className = 'jp-toast-action';
+        sb.textContent = 'Send 73';
+        sb.addEventListener('click', function(e) {
+          e.stopPropagation();
+          window.api.jtcatSkipPhase({ unconfirmed: true });
+          qsoToast.classList.remove('visible');
+          qsoToast.classList.remove('error');
+        });
+        qsoToast.appendChild(sb);
+        if (qsoToastTimer) clearTimeout(qsoToastTimer);
+        qsoToastTimer = setTimeout(function() {
+          qsoToast.classList.remove('visible');
+          qsoToast.classList.remove('error');
+          delete qsoToast.dataset.errorToast;
+        }, 60000);
+      }
       renderQsoTracker();
       return;
     } else {
@@ -2011,7 +2035,9 @@ function _applyPopoutTheme(payload) {
   // jtcatSetMode → persist → selectBand on the active button), which fixes
   // the long-standing "FT4 spot with popout already open in FT8" gap. All
   // checks are mismatch-gated so the heard-refresh broadcasts every cycle
-  // are no-ops here.
+  // are no-ops here. A stopped engine (a voice spot QSY stops it) also goes
+  // through selectBand, which starts it, even on the same band and mode
+  // (VK4KTW #804); once started, the refreshes are no-ops again.
   function spotTargetResync(data) {
     if (!data.mode || !data.freqKhz) return;
     // JS8 is its own window now — it was removed from this popout's mode
@@ -2031,7 +2057,7 @@ function _applyPopoutTheme(payload) {
       bestBtn.classList.add('active');
       modeSelect.value = data.mode;
       modeSelect.dispatchEvent(new Event('change'));
-    } else if (activeBtn !== bestBtn) {
+    } else if (activeBtn !== bestBtn || engineStopped) {
       selectBand(bestBtn, true);
     }
   }
@@ -6405,14 +6431,14 @@ function _applyPopoutTheme(payload) {
                 // SmartSDR 4.2.18 (W4DLG 2026-10-25). Elsewhere the usual cause
                 // is the device coming back under a new ID ("2- USB Audio Device").
                 + (popoutIsFlex
-                  ? 'If you upgraded to SmartSDR 4.2.18+ (DAXv2), every DAX device changed: re-select your rig audio devices in Settings > My Rigs > Audio.'
-                  : 'The device may have been unplugged or moved to another USB port (Windows then renames it, e.g. "2- USB Audio Device"): re-select it in Settings > My Rigs > Audio.'));
+                  ? 'If you upgraded to SmartSDR 4.2.18+ (DAXv2), every DAX device changed: pick your rig audio devices again in Settings > Radio, Edit the rig, Audio Devices.'
+                  : 'The device may have been unplugged or moved to another USB port (Windows then renames it, e.g. "2- USB Audio Device"): pick it again in Settings > Radio, Edit the rig, Audio Devices, RX audio in.'));
           }
           // NEVER substitute the default input: on a Mac it is the built-in
           // microphone — decodes only with the radio's speaker up, and the room
           // audible to anyone listening (KF0WWL 2026-10-23). Same rule as the
           // ECHOCAT bridge (remote-audio.html). No audio beats the wrong audio.
-          throw new Error('The radio\'s audio input could not be opened, so nothing was captured (the microphone was NOT used). Pick the radio\'s input again in Settings > My Rigs > Audio.');
+          throw new Error('The radio\'s audio input could not be opened, so nothing was captured (the microphone was NOT used). Pick the radio\'s input again in Settings > Radio, Edit the rig, Audio Devices, RX audio in.');
         }
       }
       _audioStartStage = 'capture-ctx (state pending)';
@@ -6578,14 +6604,24 @@ function _applyPopoutTheme(payload) {
   var mapPane = document.querySelector('.jp-map-pane');
   var mapToggleBtn = document.getElementById('jp-map-toggle');
   var mapPopoutBtn = document.getElementById('jp-map-popout');
+  var MAP_VISIBLE_LS_KEY = 'jtcat-popout-map-visible';
   var mapVisible = true;
+  try {
+    var savedMapVisible = localStorage.getItem(MAP_VISIBLE_LS_KEY);
+    if (savedMapVisible !== null) mapVisible = savedMapVisible === 'true';
+  } catch (e) {}
 
-  mapToggleBtn.addEventListener('click', function() {
-    mapVisible = !mapVisible;
+  function applyMapVisibility() {
     mapPane.classList.toggle('hidden', !mapVisible);
     mapToggleBtn.classList.toggle('active', mapVisible);
     if (splitterEl) splitterEl.style.display = mapVisible ? '' : 'none';
     if (mapVisible && map) setTimeout(function() { map.invalidateSize(); }, 100);
+  }
+
+  mapToggleBtn.addEventListener('click', function() {
+    mapVisible = !mapVisible;
+    try { localStorage.setItem(MAP_VISIBLE_LS_KEY, String(mapVisible)); } catch (e) {}
+    applyMapVisibility();
   });
   // "Worked": the worked-states / countries box on the map. One preference
   // for every map window on this machine (lib/worked-overlay.js keeps it).
@@ -6616,6 +6652,7 @@ function _applyPopoutTheme(payload) {
   var splitterEl = document.getElementById('jp-splitter');
   var decodePaneEl = document.querySelector('.jp-decode-pane');
   var SPLIT_LS_KEY = 'jtcat-popout-split-pct';
+  applyMapVisibility();
   // The left side is the FT8 decode pane OR, in PSK31/JTTY, that mode's own
   // pane (the decode pane is hidden then). Every one of them gets the split:
   // set on the decode pane alone, the map's 20-80 weight fought a keyboard

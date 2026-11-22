@@ -29,6 +29,10 @@ for (const m of js8Preload.matchAll(/ipcRenderer\.on\('([a-z0-9:-]+)'/g)) incomi
 const sstvPreload = R('preload-sstv-popout.js');
 const sstvOut = [...new Set([...sstvPreload.matchAll(/ipcRenderer\.(?:send|invoke)\('([a-z0-9:-]+)'/g)].map(m => m[1]))];
 for (const m of sstvPreload.matchAll(/ipcRenderer\.on\('([a-z0-9:-]+)'/g)) incoming.add(m[1]);
+// The APRS window (#868): its listening switch and band picker run on the shack.
+const aprsPreload = R('preload-aprs-popout.js');
+const aprsOut = [...new Set([...aprsPreload.matchAll(/ipcRenderer\.(?:send|invoke)\('([a-z0-9:-]+)'/g)].map(m => m[1]))];
+for (const m of aprsPreload.matchAll(/ipcRenderer\.on\('([a-z0-9:-]+)'/g)) incoming.add(m[1]);
 
 console.log('JTCAT remote bridge');
 
@@ -38,7 +42,7 @@ test('every channel the pop-out sends is bridged or deliberately local', () => {
 });
 
 test('every bridged channel is one the pop-out really sends', () => {
-  const stale = Object.keys(B.OUT).filter(ch => !outgoing.includes(ch) && !js8Out.includes(ch) && !sstvOut.includes(ch));
+  const stale = Object.keys(B.OUT).filter(ch => !outgoing.includes(ch) && !js8Out.includes(ch) && !sstvOut.includes(ch) && !aprsOut.includes(ch));
   assert.deepStrictEqual(stale, []);
 });
 

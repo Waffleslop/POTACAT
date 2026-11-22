@@ -19,6 +19,12 @@ const { readSrc } = require('./_src');
 //
 // Hidden helper windows (audio bridges, offscreen renders) have no theme or
 // place to keep; they are named in HIDDEN with the reason.
+//
+// A window that shows a page that is not POTACAT's is named in THIRD_PARTY.
+// Its page cannot load popout-theme-boot.js and must never get a preload, so
+// the theme rule for it is its background colour only. In exchange it must be
+// locked down, and that is checked here instead: the exception is never a
+// loosening.
 // Run: node test/window-rules-test.js
 const assert = require('assert');
 const path = require('path');
@@ -37,6 +43,10 @@ const HIDDEN = {
   modemBridgeWin: 'hidden audio bridge for the Winlink modem',
   remoteAudioClientWin: 'hidden WebRTC audio for desktop-to-desktop ECHOCAT',
   remoteAudioWin: 'hidden WebRTC audio for ECHOCAT',
+};
+// Shows a third-party page (see the header): theme by background only, and locked down.
+const THIRD_PARTY = {
+  winlinkFormWin: "Pat's own Winlink form page (#346): Winlink's HTML and script, not ours",
 };
 // Restore and save their own place (settings key). Do not add to this list:
 // a new window calls rememberWindowPlace().
@@ -77,12 +87,28 @@ test('found the windows (sanity)', () => {
   assert.ok(windows.length >= 25, 'only ' + windows.length);
   assert.strictEqual((main.match(/new BrowserWindow\(/g) || []).length, windows.length,
     'a BrowserWindow not assigned to a name: give it one so this test can follow it');
-  for (const n of [...Object.keys(HIDDEN), ...Object.keys(OWN_PLACE)]) {
+  for (const n of [...Object.keys(HIDDEN), ...Object.keys(OWN_PLACE), ...Object.keys(THIRD_PARTY)]) {
     assert.ok(windows.some((w) => w.name === n), `${n} is listed here but no longer in main.js: remove it from the list`);
   }
 });
 
 for (const w of visible) {
+  if (THIRD_PARTY[w.name]) {
+    test(`${w.name} (main.js:${w.line}): a third-party page, in the theme's background and locked down`, () => {
+      assert.ok(/backgroundColor:\s*getThemeWindowBg\(\)/.test(w.opts), 'needs backgroundColor: getThemeWindowBg() in its options');
+      for (const re of [/sandbox:\s*true/, /contextIsolation:\s*true/, /nodeIntegration:\s*false/, /webSecurity:\s*true/, /\bpartition\b/]) {
+        assert.ok(re.test(w.opts), `its webPreferences need ${re.source}`);
+      }
+      assert.ok(!/preload/.test(w.opts), 'never a preload: the page is not ours');
+      assert.ok(!/nodeIntegrationInSubFrames|webviewTag|allowRunningInsecureContent|experimentalFeatures/.test(w.opts), 'nothing that loosens it');
+      assert.ok(!new RegExp(esc(w.name) + '\\.loadFile\\(').test(main), 'it shows a page that is not ours, never one of renderer/');
+    });
+    test(`${w.name} (main.js:${w.line}): remembers its place and size`, () => {
+      assert.ok(new RegExp('rememberWindowPlace\\(' + esc(w.name) + ", '\\w+Bounds'").test(main),
+        `call rememberWindowPlace(${w.name}, '<name>Bounds', { minWidth, minHeight }) right after creating it`);
+    });
+    continue;
+  }
   test(`${w.name} (main.js:${w.line}): opens in the theme`, () => {
     assert.ok(/backgroundColor:\s*getThemeWindowBg\(\)/.test(w.opts), 'needs backgroundColor: getThemeWindowBg() in its options');
     const load = main.match(new RegExp(esc(w.name) + "\\.loadFile\\(([^\\n]*?)'(?:renderer/)?([\\w-]+\\.html)'\\)?,\\s*\\{\\s*query:\\s*(\\w+(?:\\(\\))?)\\s*\\}"));

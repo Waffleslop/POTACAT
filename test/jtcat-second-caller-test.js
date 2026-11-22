@@ -10,7 +10,9 @@
  * and ECHOCAT / ECHOCAT Web hold another; main advances BOTH on every decode
  * cycle, on one transmitter. These tests drive the real state machine and the
  * real QSO clock through main's flow, with a logger that keeps jtcatAutoLog's
- * guards (reports exchanged, logged once, TIME_ON from the clock).
+ * guards (reports exchanged, logged once, TIME_ON from the clock). A QSO is
+ * logged when a 73 is received or when ours goes on the air (#807), so the
+ * shack also has main's tx-start hook (jtcatNoteTxSent).
  *
  * Run: node test/jtcat-second-caller-test.js
  */
@@ -60,6 +62,16 @@ function makeShack() {
       if (q.call && !q._logged) shack.clock.note(q.call, shack.now);
     }
   };
+  // main.js jtcatNoteTxSent: the transmission now starting carries engine._txMsg.
+  shack.txStart = (sec) => {
+    shack.now = at(sec);
+    for (const surface of ['remote', 'popout']) {
+      const q = shack.qsos[surface];
+      if (!q) continue;
+      if (q.txMsg && q.txMsg === engine._txMsg) q._txSentMsg = engine._txMsg;
+      if (sm.txLogsQso(q, engine._txMsg)) shack.autoLog(q);
+    }
+  };
   // main.js jtcatSupersedeQsos, then the reply handler's rebuild of its own slot.
   shack.click = (sec, own, newCall, buildQso) => {
     shack.now = at(sec);
@@ -91,7 +103,9 @@ test('supersedeQso: unfinished QSO with another station is dropped, never logged
   assert.strictEqual(sm.supersedeQso({ call: 'W1AW', mode: 'cq', phase: 'cq-r-report', report: '-03', sentReport: '-05' }, 'K1ABC'), 'drop');
 });
 test('supersedeQso: a complete, unlogged QSO follows the existing log rule', () => {
-  assert.strictEqual(sm.supersedeQso({ call: 'W1AW', mode: 'cq', phase: 'cq-rr73', report: '-08', sentReport: '-05' }, 'K1ABC'), 'log');
+  const rr73 = { call: 'W1AW', mode: 'cq', phase: 'cq-rr73', report: '-08', sentReport: '-05', myCall: MY, txMsg: `W1AW ${MY} RR73` };
+  assert.strictEqual(sm.supersedeQso(Object.assign({}, rr73, { _txSentMsg: rr73.txMsg }), 'K1ABC'), 'log', 'our RR73 went out but the log was missed');
+  assert.strictEqual(sm.supersedeQso(rr73, 'K1ABC'), 'drop', 'our RR73 never went out: not logged (#807)');
   assert.strictEqual(sm.supersedeQso({ call: 'W1AW', mode: 'cq', phase: 'cq-rr73', report: '-08', _logged: true }, 'K1ABC'), 'drop');
   assert.strictEqual(sm.supersedeQso({ call: 'W1AW', mode: 'reply', phase: '73', report: '-08', sentReport: '-05', _logged: true }, 'K1ABC'), 'drop');
 });
@@ -121,6 +135,8 @@ test('window: A mid-QSO (R-report sent), click caller B, complete with B: only B
   assert.deepStrictEqual(out.map((o) => o.action), ['drop']);
   // A keeps sending RR73 to us; B sends its R-report.
   s.cycle(45, [dec(`${MY} W1AW RR73`), dec(`${MY} K1ABC R-08`)]);
+  assert.strictEqual(s.log.length, 0, 'their R-report alone does not log (#807)');
+  s.txStart(45); // our RR73 to B goes on the air
   s.cycle(60, [dec(`${MY} W1AW RR73`)]);
   assert.strictEqual(s.log.length, 1, JSON.stringify(s.log));
   assert.deepStrictEqual(s.log[0], { call: 'K1ABC', grid: 'EM12', rstSent: '-05', rstRcvd: '-08', timeOn: at(30), timeOff: at(45) });
@@ -151,15 +167,27 @@ test('ECHOCAT and ECHOCAT Web: phone working A in the window\'s absence, phone t
   s.cycle(15, [dec(`${MY} W1AW -10`)]);
   s.click(30, 'remote', 'K1ABC', () => answerGrid('K1ABC', 'EM12', '-02'));
   s.cycle(45, [dec(`${MY} W1AW RR73`), dec(`${MY} K1ABC R-15`)]);
+  s.txStart(45);
   assert.deepStrictEqual(s.log.map((r) => [r.call, r.grid, r.rstSent, r.rstRcvd]), [['K1ABC', 'EM12', '-02', '-15']]);
 });
 
-test('A already complete (our RR73 out, not yet logged) when B is clicked: A logged by the existing rule, then B', () => {
+test('A\'s RR73 went on the air before B is clicked: A logged as it went out, once, then B', () => {
+  const s = makeShack();
+  s.click(0, 'popout', 'W1AW', () => ({ mode: 'cq', call: 'W1AW', grid: 'FN31', phase: 'cq-rr73', txMsg: `W1AW ${MY} RR73`, report: '-08', sentReport: '-05', myCall: MY, myGrid: MYGRID, txRetries: 0 }));
+  s.txStart(0);
+  s.click(15, 'popout', 'K1ABC', () => answerGrid('K1ABC', 'EM12', '-01'));
+  s.cycle(30, [dec(`${MY} K1ABC R-09`)]);
+  s.txStart(30);
+  assert.deepStrictEqual(s.log.map((r) => [r.call, r.rstSent, r.rstRcvd]), [['W1AW', '-05', '-08'], ['K1ABC', '-01', '-09']]);
+});
+
+test('A\'s RR73 queued but not yet on the air when B is clicked: A is not logged (#807)', () => {
   const s = makeShack();
   s.click(0, 'popout', 'W1AW', () => ({ mode: 'cq', call: 'W1AW', grid: 'FN31', phase: 'cq-rr73', txMsg: `W1AW ${MY} RR73`, report: '-08', sentReport: '-05', myCall: MY, myGrid: MYGRID, txRetries: 0 }));
   s.click(15, 'popout', 'K1ABC', () => answerGrid('K1ABC', 'EM12', '-01'));
   s.cycle(30, [dec(`${MY} K1ABC R-09`)]);
-  assert.deepStrictEqual(s.log.map((r) => [r.call, r.rstSent, r.rstRcvd]), [['W1AW', '-05', '-08'], ['K1ABC', '-01', '-09']]);
+  s.txStart(30);
+  assert.deepStrictEqual(s.log.map((r) => r.call), ['K1ABC']);
 });
 
 test('A logged and in its courtesy 73 when B is clicked: A is not logged twice', () => {
@@ -170,6 +198,7 @@ test('A logged and in its courtesy 73 when B is clicked: A is not logged twice',
   assert.strictEqual(s.qsos.popout.phase, '73');
   s.click(45, 'popout', 'K1ABC', () => replyTo('K1ABC', 'EM12'));
   s.cycle(60, [dec(`${MY} K1ABC R-11`)]);
+  s.txStart(60);
   assert.deepStrictEqual(s.log.map((r) => r.call), ['W1AW', 'K1ABC']);
 });
 
@@ -179,6 +208,7 @@ test('B\'s TIME_ON is B\'s own, even when A began long before', () => {
   for (let t = 15; t <= 120; t += 15) s.cycle(t, [dec(`${MY} W1AW -10`)]);
   s.click(135, 'popout', 'K1ABC', () => replyTo('K1ABC', 'EM12'));
   s.cycle(150, [dec(`${MY} K1ABC R-04`)]);
+  s.txStart(150);
   assert.strictEqual(s.log.length, 1);
   assert.strictEqual(s.log[0].call, 'K1ABC');
   assert.strictEqual(s.log[0].timeOn, at(135));

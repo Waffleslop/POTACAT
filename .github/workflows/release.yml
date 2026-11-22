@@ -73,7 +73,7 @@ jobs:
           ./assets/yaesu-scope/yaesu-scope.exe --synth --once | head -c 2 | grep -q YS
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.24'
+          go-version: '1.26'
           cache: false
       - name: Build Pat (Winlink client — MIT, separate exe)
         shell: bash
@@ -202,7 +202,7 @@ jobs:
           ./assets/yaesu-scope/yaesu-scope --synth --once | head -c 2 | grep -q YS
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.24'
+          go-version: '1.26'
           cache: false
       - name: Build Pat + ardopcf + Dire Wolf (Winlink client, ARDOP modem, packet TNC — separate exes)
         # Winlink sidecars (docs/winlink-integration-plan.md), built from the
@@ -319,7 +319,7 @@ jobs:
           file assets/yaesu-scope/yaesu-scope | grep -q x86_64
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.24'
+          go-version: '1.26'
           cache: false
       - name: Build Pat + ardopcf + Dire Wolf (Winlink client, ARDOP modem, packet TNC — separate exes)
         # Winlink sidecars (docs/winlink-integration-plan.md), built from the
@@ -498,7 +498,7 @@ jobs:
           ./assets/yaesu-scope/yaesu-scope --synth --once | head -c 2 | grep -q YS
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.24'
+          go-version: '1.26'
           cache: false
       - name: Build Pat + ardopcf + Dire Wolf (Winlink client, ARDOP modem, packet TNC — separate exes)
         # Winlink sidecars (docs/winlink-integration-plan.md), built from the
@@ -652,7 +652,7 @@ jobs:
           ./assets/yaesu-scope/yaesu-scope --synth --once | head -c 2 | grep -q YS
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.24'
+          go-version: '1.26'
           cache: false
       - name: Build Pat + ardopcf + Dire Wolf (Winlink client, ARDOP modem, packet TNC — separate exes)
         # Winlink sidecars (docs/winlink-integration-plan.md), built from the

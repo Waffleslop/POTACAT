@@ -59,7 +59,7 @@ for (const id of ['FTX-1 Field', 'FTX-1 Optima', 'FT-710']) {
   });
 }
 
-for (const id of ['FTDX10', 'FTDX101D/MP', 'FT-991/991A']) {
+for (const id of ['FTDX10', 'FTDX101D', 'FTDX101MP', 'FT-991/991A']) {
   test(`${id}: no documented playback stop, so the backstop sends TX0; alone`, async () => {
     const after = await stuckAfterMessage(id);
     assert.deepStrictEqual(after, ['TX0;'], JSON.stringify(after));

@@ -472,15 +472,15 @@ test('W2: nothing from the shack reaches the Mail tab through innerHTML', () => 
 test('W4a: a mode the shack cannot offer is not a segment, and the line under Send via says why', () => {
   const p = loadMail();
   const modes = [MODES[0],
-    { id: 'ardop', label: 'ARDOP (radio)', available: false, reason: 'Set up a radio first (Settings > My Rigs)' },
-    { id: 'packet', label: 'Packet (VHF/UHF radio)', available: false, reason: 'Set up a radio first (Settings > My Rigs)' },
+    { id: 'ardop', label: 'ARDOP (radio)', available: false, reason: 'Set up a radio first (Settings > Radio)' },
+    { id: 'packet', label: 'Packet (VHF/UHF radio)', available: false, reason: 'Set up a radio first (Settings > Radio)' },
     { id: 'vara', label: 'VARA HF (radio, your own VARA)', available: false, reason: 'VARA HF is a Windows program' }];
   p.mailOnMessage(state({ modes }));
   p.$('mail-open-connect').click();
   const note = p.$('mail-mode-note');
   assert.strictEqual(note.hidden, false);
   assert.deepStrictEqual(note.children.map((c) => c.textContent), [
-    'ARDOP (radio) and Packet (VHF/UHF radio) are not available: Set up a radio first (Settings > My Rigs).',
+    'ARDOP (radio) and Packet (VHF/UHF radio) are not available: Set up a radio first (Settings > Radio).',
     'VARA HF (radio, your own VARA) is not available: VARA HF is a Windows program.',
   ]);
   assert.deepStrictEqual(p.$('mail-mode').children.map((b) => [b.textContent, b.getAttribute('aria-pressed')]), [['Internet', 'true']]);
@@ -558,7 +558,7 @@ test('W4d: prediction progress while the list loads, then the order note and the
   assert.strictEqual(p.$('mail-gw-note').textContent, 'Predicting propagation for every gateway: 12 s so far, about 35 s last time.');
   assert.ok(p.$('mail-gw-retry').hidden);
   p.mailOnMessage({ type: 'winlink-gateways', mode: 'ardop', list: GATEWAYS, predicted: true, note: 'Best predicted path first, for right now', leftOut: 4, reqId: ask.reqId });
-  assert.strictEqual(p.$('mail-gw-note').textContent, 'Best predicted path first, for right now. 4 more this radio cannot call (outside the amateur bands, or bands not set up in Settings > My Rigs > Bands).');
+  assert.strictEqual(p.$('mail-gw-note').textContent, 'Best predicted path first, for right now. 4 more this radio cannot call (outside the amateur bands, or not ticked under Check all bands in Settings > Radio, Edit the rig).');
   p.clock.now += 5000;
   p.tick();
   assert.ok(/^Best predicted path first/.test(p.$('mail-gw-note').textContent), 'the progress line stops when the list arrives');
@@ -572,7 +572,7 @@ test('W4d: the texts for every case of the line under the list', () => {
   assert.strictEqual(MailView.loadingText('packet', true), 'Loading gateways…');
   assert.strictEqual(MailView.loadingText('ardop', false), 'Loading gateways…');
   assert.strictEqual(MailView.gatewayNote({ list: GATEWAYS, predicted: false, note: 'Nearest first. No propagation prediction came back.' }), 'Nearest first. No propagation prediction came back.');
-  assert.strictEqual(MailView.gatewayNote({ list: GATEWAYS, predicted: false, note: 'Nearest first', leftOut: 1 }), 'Nearest first. 1 more this radio cannot call (outside the amateur bands, or bands not set up in Settings > My Rigs > Bands).');
+  assert.strictEqual(MailView.gatewayNote({ list: GATEWAYS, predicted: false, note: 'Nearest first', leftOut: 1 }), 'Nearest first. 1 more this radio cannot call (outside the amateur bands, or not ticked under Check all bands in Settings > Radio, Edit the rig).');
   assert.strictEqual(MailView.gatewayNote({ list: GATEWAYS, predicted: true }), 'Best predicted path first, for right now.', 'no note sent: the predicted flag decides');
   assert.strictEqual(MailView.gatewayNote({ list: [], predicted: false, note: '' }), '');
 });
@@ -1007,8 +1007,8 @@ test('#435: the desktop Mail window: mode reasons whatever is picked; Ranking, n
   assert.ok(/gwLoading \? WinlinkMailView\.connectWaitText\(/.test(pop));
   assert.ok(pop.includes("note.textContent = r.note && r.note === WinlinkMailView.gridNote('') ? r.note : ''"), 'the grid note is shown, not only a tooltip');
   assert.ok(/<script src="\.\.\/lib\/winlink-mail-view\.js"><\/script>/.test(readSrc(path.join(ROOT, 'renderer', 'winlink-popout.html'))));
-  assert.deepStrictEqual(MailView.modeNoteLines([{ id: 'telnet', label: 'Internet', available: true }, { id: 'ardop', label: 'ARDOP (radio)', available: false, reason: 'Set up a radio first (Settings > My Rigs)' }]),
-    ['ARDOP (radio) is not available: Set up a radio first (Settings > My Rigs).']);
+  assert.deepStrictEqual(MailView.modeNoteLines([{ id: 'telnet', label: 'Internet', available: true }, { id: 'ardop', label: 'ARDOP (radio)', available: false, reason: 'Set up a radio first (Settings > Radio)' }]),
+    ['ARDOP (radio) is not available: Set up a radio first (Settings > Radio).']);
 });
 
 console.log(`\n${pass} passed, ${fail} failed`);

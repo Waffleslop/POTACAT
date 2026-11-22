@@ -38,7 +38,7 @@ test('149.09 MHz (W9OU-10) is refused: not an amateur band', () => {
 test('a band the radio is not set up for is refused, and says where to change it', () => {
   const r = R.gatewayReach(145090, FLEX);
   assert.strictEqual(r.ok, false);
-  assert.match(r.why, /145\.090\.00 MHz is on 2m, a band FLEX-8600 is not set up for \(Settings > My Rigs > Bands\)/);
+  assert.match(r.why, /145\.090\.00 MHz is on 2m, a band FLEX-8600 is not ticked for \(Settings > Radio, Edit the rig, Check all bands\)/);
   assert.strictEqual(R.gatewayReach(3588, FLEX).ok, false, '#336: 80 m on a radio set for 40 to 6 m');
 });
 

@@ -9,7 +9,7 @@ and websocket — it is never linked into POTACAT.
 - Pinned: see `VERSION.txt`
 - Built by `scripts/build-winlink-helpers.sh` in every release job, with
   one POTACAT source patch (next section)
-  (`CGO_ENABLED=0 go build`, `CGO_ENABLED=1` on macOS, Go >= 1.24), staged to `assets/pat/`, packaged
+  (`CGO_ENABLED=0 go build`, `CGO_ENABLED=1` on macOS, Go >= 1.26), staged to `assets/pat/`, packaged
   to `resources/bin/pat[.exe]` by `package.json` → `build.extraResources`.
 - In dev, `lib/winlink-pat.js` → `patPathCandidates()` looks in
   `assets/pat/`; run `scripts/build-winlink-helpers.sh pat` once (needs Go),
@@ -23,7 +23,7 @@ upstream's binary, and problems with the patched part belong to POTACAT, not
 to Pat's authors.
 
 - **Why.** Pat sets the ARDOP modem's ARQ link timeout to 90 seconds every
-  time it opens the modem, and Pat v1.0.0 has no setting for it. The value is
+  time it opens the modem, and Pat (v1.0.0 and v1.0.1) has no setting for it. The value is
   in Pat's dependency wl2k-go v1.0.1 (the version Pat's `go.mod` pins):
   `transport/ardop/ardop.go` line 18, `DefaultARQTimeout = 90 * time.Second`,
   sent by `transport/ardop/tnc.go` line 145,

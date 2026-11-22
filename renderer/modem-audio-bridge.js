@@ -174,7 +174,7 @@ function makeSide({ name, what, where, rx, status }) {
 }
 
 const radio = makeSide({
-  name: 'radio', what: 'radio', where: 'Settings > My Rigs > Audio',
+  name: 'radio', what: 'radio', where: 'Settings > Radio, Edit the rig, Audio Devices',
   rx: (pcm, sampleRate, peak) => window.bridge.rx(pcm, sampleRate, peak),
   status: (s) => window.bridge.status(s),
 });

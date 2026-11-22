@@ -1,0 +1,13 @@
+# A JTCAT QSO is logged only when a 73 is sent or received
+
+Recorded 2026-11-20 (#807). Casey: "its not an option - we should only log if we send a 73 or hey send a 73. That's the rule. Look at WSJTX and how they do it."
+
+**The rule.** JTCAT logs a QSO exactly when OUR RR73 / RRR / 73 to that station starts going out, or when THEIR RR73 / RRR / 73 for the QSO is received, whichever is first, once. It is not a setting. A QSO that breaks before any 73 is not logged.
+
+**WSJT-X.** The WSJT-X User Guide (2.7.0, 11.2 Button Row, "Log QSO") says that with "Prompt me to log QSO" checked (4.5 Reporting) the program raises the Log QSO screen automatically when you send a message containing 73; 7.3 Auto-Sequencing says Auto Seq is an operator aid that turns Enable Tx off at the end of each QSO. With Auto Seq, a partner who never sends RR73 leaves WSJT-X repeating its R+report until the operator or the Tx watchdog stops it, and nothing is logged. POTACAT takes that rule and logs at the START of our 73's transmission (a missed courtesy cycle does not lose the log), and also on receipt of theirs.
+
+**What changed.** Before #807: the CQ side logged on their R+report, before our RR73 went out ("log at reports-exchanged"); the reply side logged on their R+report too; the per-phase retry cap, with reports exchanged both ways and no RR73 heard, logged the QSO and sent a 73 by itself (closeoutStalledQso), which is how a QSO that broke before the 73 reached the log. After: `txLogsQso(q, message)` (lib/jtcat-state-machine.js) is asked at the one tx-start dispatch (`jtcatNoteTxSent` in main.js, after every TX-block guard); receipt of their 73-family message logs inside `advanceJtcatQso`. The retry cap ends such a QSO unlogged with no 73 and says "Not logged: CALL never sent RR73. Press Send 73 to log it." (`giveUpMessage` kind 'unconfirmed'; `send73: true` on the `jtcat-qso-state` error for the window and ECHOCAT). The stopped QSO is kept for 5 minutes (`jtcatStashUnconfirmed`), so Send 73 or Skip sends the 73 (`sendFinal73`), which logs it as it goes out, like choosing Tx5 in WSJT-X. A click on their R-report (send-rr73) no longer logs on the click; supersede logs a QSO only if its RR73 actually went out.
+
+**Left as it was.** Field Day CQ side: the ARRL FD sequence ends on their RR73 and the CQ station sends no 73; it still logs at our R+exchange. The S&P side follows the rule.
+
+Tests: test/jtcat-test.js sections "Logging rule — only when our RR73/RRR/73 goes out or theirs arrives (#807)", "Skip to the 73", "Stalled QSO — retry cap with R+report sent and no RR73"; test/jtcat-second-caller-test.js (tx-start hook in the shack harness); test/jtcat-replace-log-test.js.

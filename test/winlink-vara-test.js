@@ -3,7 +3,8 @@
 // docs/modem-audio-bridge-plan.md phase 4). Pure rules in lib/vara-process.js
 // and lib/winlink-modes.js; the probe against a fake VARA; Pat's varafm shape;
 // and source guards on main.js / the bridge window: VARA is never bundled,
-// never killed, never given PTT, and its TX audio reaches the radio only
+// never killed (one exception, #697: the VARA POTACAT itself opened for an
+// ECHOCAT session), never given PTT, and its TX audio reaches the radio only
 // while it has PTT through Pat and the shim.
 // Run: node test/winlink-vara-test.js
 'use strict';
@@ -64,7 +65,12 @@ function fnBody(src, name) {
     assert.strictEqual(o.windowsHide, false);
     assert.strictEqual(V.parseVaraVersion('VERSION VARA HF v4.8.7'), 'VARA HF v4.8.7');
     assert.strictEqual(V.parseVaraVersion('PTT ON'), null);
-    assert.ok(!/\bvaraProc\b|\bkillVara\b|VARA\.exe.*kill/i.test(main), 'POTACAT never holds a VARA process to kill');
+    assert.ok(!/\bvaraProc\b|\bkillVara\b|VARA\.exe.*kill/i.test(main), 'POTACAT never holds a VARA process to kill by name');
+    // The one exception (#697): the only kill of a VARA is the closer, and the closer is reached only through the rule.
+    const closeCheck = fnBody(main, 'winlinkVaraCloseCheck');
+    assert.ok(closeCheck.indexOf('VaraProcess.shouldCloseVara(') >= 0 && closeCheck.indexOf('VaraProcess.shouldCloseVara(') < closeCheck.indexOf('VaraProcess.closeVaraWeOpened('), 'the rule is asked before anything is closed');
+    assert.ok(/kill: \(\) => child\.kill\(\)/.test(closeCheck) && !/\/IM\b|'\/F'/.test(closeCheck), 'the spawned child itself, never by image name');
+    assert.strictEqual((main.match(/VaraProcess\.closeVaraWeOpened\(/g) || []).length, 1, 'one place closes VARA');
     const ready = fnBody(main, 'winlinkVaraReady');
     assert.ok(/VaraProcess\.varaSpawnOptions\(\)/.test(ready) && /child\.unref\(\)/.test(ready), 'started detached and let go');
     assert.ok(!/\.kill\(/.test(ready));
@@ -335,7 +341,7 @@ function fnBody(src, name) {
     assert.strictEqual(d.ok, true);
     assert.deepStrictEqual(d.vara, { inputName: 'Microphone (USB Audio CODEC)', outputName: 'Speakers (USB Audio CODEC)' });
     assert.strictEqual(S.planDirect({ capture: 'DAX Audio RX 1 (FlexRadio Systems DAX)', playback: 'x' }).vara.inputName, 'DAX Audio RX 1 (FlexRadio Syste');
-    assert.ok(/Settings > My Rigs/.test(S.planDirect({}).advice));
+    assert.ok(/Settings > Radio, Edit the rig, Audio Devices/.test(S.planDirect({}).advice));
     const txt = S.describeSetup({ kind: 'hf', plan: d, path: 'C:\\VARA\\VARA.exe', port: 8300, version: 'VARA HF 4.8.9', iniChanged: true });
     assert.ok(/uses the radio's sound card directly/.test(txt) && /No cable/.test(txt));
     const saved = S.planCablesFromSaved({ inputId: 'hifi-out', outputId: 'cab-in', inputLabel: 'Hi-Fi Cable Output (VB-Audio Hi-Fi Cable)', outputLabel: 'CABLE Input (VB-Audio Virtual Cable)', varaInputName: 'CABLE Output (VB-Audio Virtual ', varaOutputName: 'Hi-Fi Cable Input (VB-Audio Hi-' });
@@ -510,6 +516,84 @@ function fnBody(src, name) {
     assert.ok(/winlinkLog\(clash\);/.test(ready));
     const setup = fnBody(main, 'winlinkVaraSetup');
     assert.ok(/VaraSetup\.varaLogPortProblem\(tail, launchedAt\)/.test(setup) && /rig\.varaMissingNames = /.test(setup));
+  });
+
+  // -- #697: close the VARA POTACAT opened for an ECHOCAT session --
+  await test('#697 rule: closes only our own launch, after an ECHOCAT session, once the link is down', () => {
+    const base = { launchedByUs: true, startedFromEchocat: true, sessionActive: false, retryPending: false, connected: false, transmitting: false };
+    assert.deepStrictEqual(V.shouldCloseVara(base), { close: true, wait: false, why: '' });
+    const no = (over) => V.shouldCloseVara({ ...base, ...over });
+    assert.strictEqual(no({ launchedByUs: false }).close, false, 'never the operator\'s VARA, or one already running');
+    assert.strictEqual(no({ launchedByUs: false }).wait, false);
+    assert.strictEqual(no({ startedFromEchocat: false }).close, false, 'never one opened for a desktop session');
+    assert.strictEqual(no({ startedFromEchocat: false }).wait, false);
+    assert.strictEqual(no({ sessionActive: true }).close, false, 'never during a session');
+    assert.strictEqual(no({ retryPending: true }).close, false, 'never under a pending retry');
+    assert.deepStrictEqual([no({ connected: true }).close, no({ connected: true }).wait], [false, true], 'never while connected: looked at again');
+    assert.deepStrictEqual([no({ transmitting: true }).close, no({ transmitting: true }).wait], [false, true], 'never while transmitting');
+    assert.strictEqual(V.shouldCloseVara().close, false, 'nothing known: nothing closed');
+    assert.strictEqual(V.isEchocatOrigin('ECHOCAT device'), true);
+    for (const o of ['operator', 'mail window', 'automatic retry', 'auto-check (internet)', '', undefined]) assert.strictEqual(V.isEchocatOrigin(o), false, String(o));
+  });
+
+  function fakeVara({ closesOnWindow = true, diesOnKill = true } = {}) {
+    const calls = [];
+    let exited = false;
+    return {
+      calls,
+      run: async (cmd, args) => { calls.push([cmd, ...args]); if (closesOnWindow) exited = true; },
+      kill: () => { calls.push(['kill']); if (diesOnKill) exited = true; },
+      hasExited: () => exited,
+      sleep: async () => {},
+    };
+  }
+  await test('#697 closer: a window close by the exact PID first, never by name', async () => {
+    const f = fakeVara();
+    const r = await V.closeVaraWeOpened({ pid: 4242, ...f });
+    assert.deepStrictEqual(r, { closed: true, how: 'window' });
+    assert.deepStrictEqual(f.calls, [['taskkill', '/PID', '4242']], 'no /F, no /IM, no /T');
+  });
+  await test('#697 closer: still there after the grace, the spawned child itself is ended', async () => {
+    const f = fakeVara({ closesOnWindow: false });
+    const r = await V.closeVaraWeOpened({ pid: 4242, graceMs: 1000, ...f });
+    assert.deepStrictEqual(r, { closed: true, how: 'killed' });
+    assert.deepStrictEqual(f.calls, [['taskkill', '/PID', '4242'], ['kill']]);
+  });
+  await test('#697 closer: no longer ours, already gone, or no PID: nothing is sent', async () => {
+    let f = fakeVara();
+    assert.deepStrictEqual(await V.closeVaraWeOpened({ pid: 4242, ...f, stillOurs: () => false }), { closed: false, how: 'not-ours' });
+    assert.deepStrictEqual(f.calls, []);
+    f = fakeVara({ closesOnWindow: false });
+    let ours = true;
+    const r = await V.closeVaraWeOpened({ pid: 4242, graceMs: 500, ...f, stillOurs: () => { const o = ours; ours = false; return o; } });
+    assert.deepStrictEqual(r, { closed: false, how: 'not-ours' }, 'a session that started during the grace stops the kill');
+    assert.deepStrictEqual(f.calls, [['taskkill', '/PID', '4242']]);
+    f = fakeVara();
+    f.hasExited = () => true;
+    assert.deepStrictEqual(await V.closeVaraWeOpened({ pid: 4242, ...f }), { closed: true, how: 'gone' });
+    assert.deepStrictEqual(f.calls, []);
+    for (const pid of [0, -1, null, undefined, 'abc', 1.5]) {
+      f = fakeVara();
+      assert.strictEqual((await V.closeVaraWeOpened({ pid, ...f })).how, 'not-ours', String(pid));
+      assert.deepStrictEqual(f.calls, []);
+    }
+  });
+  await test('#697 wiring: the launch remembers an ECHOCAT session, a desktop session takes it over, the checks run at the right moments', () => {
+    const ready = fnBody(main, 'winlinkVaraReady');
+    assert.ok(/_varaLaunch\[kind\]\.forEchocat = _winlinkSessionFromEchocat;/.test(ready), 'marked at launch');
+    assert.ok(/if \(_varaLaunch\[kind\] && !_winlinkSessionFromEchocat\) _varaLaunch\[kind\]\.forEchocat = false;/.test(ready), 'a desktop session using it keeps it open');
+    const start = fnBody(main, 'winlinkStartSession');
+    assert.ok(/_winlinkSessionFromEchocat = VaraProcess\.isEchocatOrigin\(origin\) \|\| !!fromEchocat;/.test(start));
+    assert.ok(/origin: 'ECHOCAT device' \}\)\);/.test(main), 'the ECHOCAT Connect is the origin the rule knows');
+    assert.ok(/fromEchocat: _winlinkSessionFromEchocat,/.test(fnBody(main, 'winlinkRetryDecide')) && /fromEchocat: !!r\.fromEchocat/.test(fnBody(main, 'winlinkRetryStart')), 'the retry of a phone session is still the phone\'s');
+    const end = fnBody(main, 'winlinkEndSession');
+    assert.ok(/if \(retryWill\) winlinkRetryTick\(\);\s*else if \(wasActive\) winlinkVaraCloseSoon\(/.test(end), 'after the session, never under a pending retry');
+    assert.ok(/winlinkVaraCloseSoon\(/.test(fnBody(main, 'winlinkRetryEnd')));
+    assert.ok(/rs\.on\('client-disconnected', \(\) => \{[\s\S]{0,200}winlinkVaraCloseSoon\('the ECHOCAT device disconnected'\)/.test(main));
+    const check = fnBody(main, 'winlinkVaraCloseCheck');
+    assert.ok(/connected: !!busyWord/.test(check) && /transmitting: winlinkAnyTx\(\)/.test(check) && /retryPending: !!_winlinkRetry/.test(check));
+    assert.ok(/winlinkLog\(`closed the \$\{name\} window POTACAT opened for the ECHOCAT session/.test(check), 'one plain log line');
+    assert.ok(/_patHoldsVara\[kind\] = null;/.test(check), 'Pat\'s old connection is not reused');
   });
 
   console.log(`\n${pass} passed, ${fail} failed`);

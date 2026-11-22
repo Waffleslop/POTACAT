@@ -48,9 +48,9 @@ test('after Test Connection: reconnect, leave it to WSJT-X, or nothing to connec
 
 test('tune refusal: WSJT-X Mode, None and a missing port each name the cause; otherwise unchanged', () => {
   const plain = G.tuneRefusal({});
-  assert.strictEqual(plain.log, 'tune refused — no radio connected. Check Settings -> My Rigs.');
-  assert.strictEqual(plain.toast, 'Radio not connected — check the USB/serial link (Settings > My Rigs)');
-  assert.strictEqual(G.tuneRefusal({ verb: 'ignored' }).log, 'tune ignored — no radio connected. Check Settings -> My Rigs.');
+  assert.strictEqual(plain.log, 'tune refused — no radio connected. Check Settings > Radio.');
+  assert.strictEqual(plain.toast, 'Radio not connected — check the USB/serial link (Settings > Radio)');
+  assert.strictEqual(G.tuneRefusal({ verb: 'ignored' }).log, 'tune ignored — no radio connected. Check Settings > Radio.');
   const w = G.tuneRefusal({ wsjtxMode: true, waitingPort: 'COM9' });
   assert.ok(/WSJT-X Mode is on/.test(w.log) && /WSJT-X Mode/.test(w.toast), 'WSJT-X Mode wins: it is why nothing opened the port');
   assert.ok(!/My Rigs/.test(w.log + w.toast));

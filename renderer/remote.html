@@ -11,7 +11,9 @@
   <!-- leaflet-css -->
   <link rel="stylesheet" href="remote.css">
   <!-- freq-dots-js -->
+  <!-- log-freq-field-js -->
   <!-- adif-mode-js -->
+  <!-- worked-entry-js -->
   <!-- cq-target-js -->
   <!-- jtcat-parser-js -->
   <!-- scope-axis-js -->
@@ -26,8 +28,17 @@
   <!-- custom-cat-follow-js -->
   <!-- jtty-macros-js -->
   <!-- cw-remote-expand-js -->
+  <!-- cw-sidetone-commit-js -->
   <!-- pass-wording-js -->
   <!-- wsjtx-mode-notice-js -->
+  <!-- freedv-display-mode-js -->
+  <!-- vfo-ptt-row-js -->
+  <!-- ws-liveness-js -->
+  <!-- error-banner-text-js -->
+  <!-- APRS phase 6: the APRS window's icons and station helpers, one copy each -->
+  <!-- aprs-symbols-js -->
+  <!-- aprs-stations-js -->
+  <!-- aprs-icons-js -->
   <!-- spot-row-js -->
   <!-- decode-row-js -->
   <!-- worked-roster-js -->
@@ -669,7 +680,7 @@
             <button type="button" class="rc-btn rc-toggle" id="so-atu-auto-btn">ATU Auto</button>
           </div>
           <div class="so-toggle-group">
-            <button type="button" class="rc-btn rc-toggle" id="so-tune-click-btn" title="Tap a spot to tune the radio">Tap to Tune</button>
+            <button type="button" class="rc-btn rc-toggle" id="so-tune-click-btn" title="Play a click on the POTACAT computer when the radio confirms a frequency change">Tune Click Sound</button>
           </div>
         </div>
 
@@ -983,6 +994,8 @@
       <button class="tab hidden" data-tab="scope" id="scope-tab-btn">Scope</button>
       <!-- Winlink email through the shack (shown to the owner once winlink-state arrives; off says where to turn it on) -->
       <button class="tab hidden" data-tab="mail" id="mail-tab-btn">Mail <span id="tab-mail-badge" class="tab-badge hidden">0</span></button>
+      <!-- APRS through the shack (shown once the shack sends aprs-state; APRS phase 6) -->
+      <button class="tab hidden" data-tab="aprs" id="aprs-tab-btn">APRS</button>
     </div>
 
     <!-- Filter toolbar -->
@@ -1615,6 +1628,32 @@
       </div>
       <div id="prop-map" class="prop-map"></div>
       <div id="prop-list" class="prop-list"></div>
+    </div>
+    <!-- APRS view (phase 6): the shack's APRS window. Internet beacon only. -->
+    <div id="aprs-view" class="hidden" style="display:none;">
+      <div class="aprs-controls">
+        <div class="aprs-line"><span id="aprs-feed" class="aprs-feed"></span><span id="aprs-count" class="aprs-count"></span></div>
+        <div class="aprs-line">
+          <label class="aprs-switch"><input type="checkbox" id="aprs-listen"> Listen on my radio</label>
+          <span id="aprs-bands" class="aprs-bands"></span>
+        </div>
+        <div id="aprs-listen-line" class="aprs-sub"></div>
+        <div id="aprs-igate-row" class="aprs-line">
+          <label class="aprs-switch"><input type="checkbox" id="aprs-igate"> Report what I hear (iGate)</label>
+          <span id="aprs-igate-line" class="aprs-sub"></span>
+        </div>
+        <div id="aprs-beacon-row" class="aprs-line">
+          <button type="button" id="aprs-beacon" class="aprs-beacon">Beacon now (internet)</button>
+          <span id="aprs-beacon-line" class="aprs-sub"></span>
+        </div>
+        <div id="aprs-refusal" class="aprs-refusal hidden"></div>
+        <div class="aprs-line">
+          <label class="aprs-switch"><input type="checkbox" id="aprs-map-on"> Show on the Map</label>
+          <label class="aprs-switch"><input type="checkbox" id="aprs-mine"> Heard by me</label>
+          <input type="text" id="aprs-search" class="dir-search" placeholder="Search..." aria-label="Search stations">
+        </div>
+      </div>
+      <div id="aprs-list" class="aprs-list"></div>
     </div>
     <div id="dir-view" class="hidden">
       <div class="dir-toolbar">

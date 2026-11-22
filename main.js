@@ -91,7 +91,10 @@ require('./lib/fetch-policy').installNoBrotliFetch(globalThis);
 const CleanExitMarker = require('./lib/clean-exit-marker');
 const FreqDots = require('./lib/freq-dots'); // display only: 14.074.00 MHz, the VFO way
 const RemoteBridge = require('./lib/remote-bridge');
+const AprsRemoteShack = require('./lib/aprs-remote-shack'); // #868: APRS listening on the shack from this desktop
 const WaterfallPalettes = require('./lib/waterfall-palettes');
+const GpuStatus = require('./lib/gpu-status'); // #773: the GPU line in the session log
+const ShackGrid = require('./lib/shack-grid'); // #774: the JTCAT map on the shack's grid
 {
   const _ipcOn = ipcMain.on.bind(ipcMain);
   ipcMain.on = (channel, fn) => _ipcOn(channel, RemoteBridge.OUT[channel]
@@ -324,6 +327,16 @@ if (process.platform === 'linux' &&
     'or opt in: sudo chown root:root chrome-sandbox && sudo chmod 4755 chrome-sandbox (next to the binary). ' +
     'See https://github.com/Waffleslop/POTACAT/issues/37');
 }
+// Startup read-ahead (lib/startup-prefetch.js): the files the requires below
+// and the main window's page will read are handed to three reader threads now,
+// so a cold disk reads them in parallel instead of one require at a time. Reads
+// only; POTACAT_NO_PREFETCH=1 turns it off for measuring.
+const StartupPrefetch = require('./lib/startup-prefetch');
+if (process.env.POTACAT_NO_PREFETCH !== '1') {
+  try {
+    StartupPrefetch.start({ appDir: __dirname, userDataDir: app.getPath('userData'), fs, path, Worker: require('worker_threads').Worker, pages: ['renderer/index.html'] });
+  } catch {}
+}
 const { execFile, execFileSync, spawn } = require('child_process');
 const { fetchSpots: fetchPotaSpots, fetchSpotHistory: fetchPotaSpotHistory, parkStatesFromLocation } = require('./lib/pota');
 const { fetchSpots: fetchSotaSpots, fetchSummitCoordsBatch, summitCache, loadAssociations, getAssociationName, SotaUploader, sotaChaseSummits } = require('./lib/sota');
@@ -334,6 +347,8 @@ const { RigController } = require('./lib/rig-controller');
 const { RIG_CONTROLS } = require('./lib/rig-controls');
 const _rigGainSteps = require('./lib/rig-gain-steps'); // preamp/ATT ladders (KB2UXB)
 const { normalizeMuteRules } = require('./lib/spot-mute-rules'); // per-band region mutes (N7BBQ)
+const { normalizePresets: normalizeSpotFilterPresets } = require('./lib/spot-filter-presets'); // named spot filter sets
+const ScanRun = require('./lib/scan-run'); // #37: a phone-started scan the desktop runs in main (phone locked or not)
 const SpotAge = require('./lib/spot-age'); // Max Spot Age, shared with the table (#239)
 const SpotHides = require('./lib/spot-hides'); // hidden spots, one list for every surface (K8IKO)
 const LogAs = require('./lib/log-as'); // log a QSO for another operator on this machine (KD9WI)
@@ -341,6 +356,8 @@ const LoggerForward = require('./lib/logger-forward'); // external-logger fan-ou
 const WatchlistGroups = require('./lib/watchlist-groups'); // state tokens in the watchlist (N0KAH)
 const { normalizeSerialPath, normalizeSettingsSerialPaths } = require('./lib/serial-path'); // "COM Port 10" -> COM10 (KF0TDB)
 const { TcpTransport, SerialTransport, calloutTwin } = require('./lib/transport');
+const SerialQuit = require('./lib/serial-quit'); // every serial port closed and its native calls done before exit (#657)
+try { SerialQuit.install(require('serialport')); } catch {}
 const { RsBa1Transport } = require('./lib/rsba1-transport');
 const { Sculan10Transport } = require('./lib/sculan10-transport');
 const Sculan10 = require('./lib/sculan10-protocol');
@@ -362,6 +379,7 @@ const { getTuneQuirks, resolveSerialHandshake, holdSerialLinesLow } = require('.
 const { gridToLatLon, latLonToGrid, haversineDistanceMiles, bearing } = require('./lib/grid');
 const ActivationMapData = require('./lib/activation-map-data');
 const LogFreq = require('./lib/log-freq');
+const LogFreqField = require('./lib/log-freq-field'); // kHz to the hertz (#794)
 const LogTxPower = require('./lib/log-tx-power'); // the power a contact is logged at, never a guessed 100 W (#523)
 const RigBands = require('./lib/rig-bands');
 const SpotBandFilter = require('./lib/spot-band-filter');
@@ -375,6 +393,8 @@ const { applyQsoEdit, modeEditFields, activationSigOf } = require('./lib/qso-edi
 const ActivationClock = require('./lib/activation-clock'); // #147: a forgotten activation ends at the UTC day change or after 6 h idle
 const ActivationAnnounce = require('./lib/activation-announce'); // #508: which saved contacts join the live activation list
 const QsoExpand = require('./lib/qso-expand'); // one contact -> its ADIF records (logContact)
+const LogAfterWrite = require('./lib/log-after-write'); // #732: ECHOCAT's log-ok at the disk write, not after the uploads
+const LogQsoReplay = require('./lib/log-qso-replay'); // #733: log-qso is idempotent by uuid
 const QsoLogSource = require('./lib/qso-log-source'); // APP_POTACAT_LOG_SOURCE: ECHOCAT or blank (#634)
 const { dxccCodeForEntity } = require('./lib/dxcc-codes'); // cty.dat entity -> ADIF DXCC number (#554)
 const WatchlistEdit = require('./lib/watchlist-edit'); // watchlist add/remove by operation (ECHOCAT sync)
@@ -384,7 +404,9 @@ const wsprlive = require('./lib/wspr/wsprlive');
 const wsprBandhop = require('./lib/wspr/bandhop');
 const jtcatModehop = require('./lib/jtcat-modehop');
 const { operatorModeChange: jtcatModeChangeRule } = require('./lib/jtcat-mode-change');
+const TuneLinkGuard = require('./lib/tune-link-guard'); // a potacat://tune link stops automatic JTCAT TX before it tunes
 const FakeIt = require('./lib/jtcat-fake-it'); // split operation "Fake It" (fakeItShiftForTx / fakeItRestoreDial)
+const JtcatCaptureGate = require('./lib/jtcat-capture-gate'); // #746: ECHOCAT off releases a phone-driven capture
 const { WsprScheduler } = require('./lib/wspr/scheduler');
 const WsprPowerMemory = require('./lib/wspr-power-memory'); // pre-beacon RF power remember/restore decisions
 const WsprDbm = require('./lib/wspr/dbm'); // the dBm the beacon reports: follows its RF power, or the operator's fixed pick (#268)
@@ -468,12 +490,41 @@ const WinlinkStateLib = require('./lib/winlink-state');
 const WinlinkMailActions = require('./lib/winlink-mail-actions'); // Archive, Deleted, Reply all: which moves and buttons (#462, #475)
 const WinlinkDeleted = require('./lib/winlink-deleted'); // POTACAT's Deleted folder inside Pat's mailbox, and its purge (#475)
 const WinlinkSentRoutes = require('./lib/winlink-sent-routes'); // how each sent message went out: gateway, dial, mode or internet, when (#442)
+const WinlinkGpsd = require('./lib/winlink-gpsd'); // #346: the Settings grid's centre for Pat's forms, as a GPSd on 127.0.0.1
+const WinlinkForms = require('./lib/winlink-forms'); // #346: Winlink forms through Pat (1.0.1 or newer), its catalog, and what the form window may load
 const { createRigctldServer } = require('./lib/rigctld-server');
 const ArdopProcess = require('./lib/ardop-process');
 const DirewolfProcess = require('./lib/direwolf-process');
 const DirewolfAgwMonitor = require('./lib/direwolf-agw-monitor');
 const PacketLinkClose = require('./lib/packet-link-close');
 const PacketRigMode = require('./lib/packet-rig-mode');
+const AprsListen = require('./lib/aprs-listen');           // APRS phase 2: when "Listen on my radio" may start, and why not
+const AprsRxFilter = require('./lib/aprs-rx-filter');      // #840: 30 m listening widens a narrow Flex receive filter and puts it back
+const IdleRadioUse = require('./lib/idle-radio-use');      // Idle Mode yields to anyone using the radio, APRS listening included
+const RadioTuneRoute = require('./lib/radio-tune-route'); // the path tuneRadio drives the radio on: TCI, Flex Direct, CAT, or none
+const IcomNetworkDataMod = require('./lib/icom-network-data-mod'); // #853: which DATA MOD item gets LAN over the network (DATA1/2/3 on an IC-7610)
+const IcomUsbDataMod = require('./lib/icom-usb-data-mod'); // sweep 1a: DATA MOD to USB for a data session over USB, put back after
+const AprsRfFrequency = require('./lib/aprs-rf-frequency'); // APRS: the 2 m frequency by grid square (phase 2), 30 m worldwide (phase 3)
+const AprsRfFrames = require('./lib/aprs-rf-frames');       // APRS phase 2: Dire Wolf's AGW monitor frames -> APRS packets
+const AprsRadioReturn = require('./lib/aprs-radio-return'); // APRS phase 2: the radio goes back after listening
+const AprsListenAudio = require('./lib/aprs-listen-audio'); // APRS listening: one line a minute about the audio Dire Wolf gets
+const AprsParser = require('./lib/aprs-parser');
+const AprsIgate = require('./lib/aprs-igate');             // APRS phase 4: the receive-only iGate's rules and the uplink login
+const AprsBeacon = require('./lib/aprs-beacon');           // APRS phase 5: the beacon over APRS-IS (packet, timer, symbols, refusals)
+const AprsPosition = require('./lib/aprs-position');       // where both beacons' position comes from: Settings or the radio's GPS
+const FlexGps = require('./lib/flex-gps');                 // a FlexRadio's GPS, read only (sub gps all)
+const AprsActivation = require('./lib/aprs-activation');   // APRS extra 1: the running activation in the beacon comment (off by default)
+const AprsMessenger = require('./lib/aprs-messenger');     // APRS A1: messages over the internet (retries, acks, duplicates, unread)
+const AprsTemplates = require('./lib/aprs-templates');     // APRS A2: message templates (fills To and Text; nothing sends until Send)
+const AprsRfGate = require('./lib/aprs-rf-gate');          // APRS phase 7: when the 'aprs' owner may key (one manual beacon over the radio)
+const AprsRfBeacon = require('./lib/aprs-rf-beacon');      // APRS phase 7: the RF beacon packet, its cap, and the one-beacon run
+const AprsRfTimer = require('./lib/aprs-rf-timer');        // APRS: the timed radio beacon, 2 m only, off by default, 10 min floor
+const AprsRfMessage = require('./lib/aprs-rf-message');    // APRS A3: messages over the radio (the frame, the words, 2 m only for anything automatic)
+const TuneLinkPending = require('./lib/tune-link-pending'); // a tune link that launches POTACAT waits for the radio
+const AprsRfMeters = require('./lib/aprs-rf-meters');      // APRS window: S-meter, SWR and RF out beside the radio beacon, and its peaks
+const AprsWindowState = require('./lib/aprs-window-state'); // APRS window: the cards, banners and the "Within" range choices
+const AprsMap = require('./lib/aprs-map');                 // APRS window: the map's saved view (centre and zoom), cleaned before it is kept
+const AprsEchocat = require('./lib/aprs-echocat');         // APRS phase 6: APRS on ECHOCAT devices through this desktop
 const VaraProcess = require('./lib/vara-process');
 const VaraSetup = require('./lib/vara-setup');
 const WinlinkModes = require('./lib/winlink-modes');
@@ -521,6 +572,7 @@ const EventRegistry = require('./lib/event-registry'); // unified Events/Contest
 const { SstvManager } = require('./lib/sstv-manager');
 const sstvPost = require('./lib/sstv-post');
 const { FreedvReporterClient } = require('./lib/freedv-reporter');
+const FreedvSpotMerge = require('./lib/freedv-spot-merge'); // #742: one row per FreeDV station across PSKReporter + FreeDV Reporter
 const { IambicKeyer } = require('./lib/keyer');
 const { WinKeyer } = require('./lib/winkeyer');
 const { parsePotaParksCSV, parsePotaActivationsCSV } = require('./lib/pota-parks');
@@ -533,7 +585,9 @@ const DialSnap = require('./lib/dial-snap');
 const PlainSsbForDigital = require('./lib/plain-ssb-for-digital');
 const FreedvPtt = require('./lib/freedv-ptt'); // FreeDV mode: voice PTT refused until FreeDV transmit exists
 const FreedvStatus = require('./lib/freedv-status'); // freedv-status to ECHOCAT: state, modes, sync, SNR, plain reason
-const { decideDialFollow } = require('./lib/jtcat-dial-follow');
+const FreedvDisplayMode = require('./lib/freedv-display-mode'); // #716: FREEDV-<codec> on every surface while the engine runs
+const { FreedvDiag } = require('./lib/freedv-diag'); // #717: audio in, sync and a 30 s summary in the session log
+const { decideDialFollow, followsKnob } = require('./lib/jtcat-dial-follow');
 const JtcatRxSource = require('./lib/jtcat-rx-source'); // #243: JTCAT can hear a WebSDR instead of the radio
 const { StreamResampler } = require('./lib/stream-resampler');
 const { isWinlinkSessionFault } = require('./lib/winlink-fault');
@@ -546,7 +600,7 @@ const { HeardGrids } = require('./lib/heard-grids');
 const jtcatHeardGrids = new HeardGrids();
 let _logPopoutQuiet = false; // the next log-popout-open leaves the keyboard alone
 let _appWindowsClosing = false; // the main window went: POTACAT is quitting
-const { checkClockOffset, syncSystemClock, classifyClockOffset } = require('./lib/ntp');
+const { checkClockOffset, syncSystemClock, classifyClockOffset, clockFixSupported, timeSettingsTargets } = require('./lib/ntp');
 const StationClock = require('./lib/station-clock'); // FT8/FT4/FT2/WSPR/JTTY slot clock, correctable from an ECHOCAT device
 const JtcatParser = require('./renderer/jtcat-parser'); // shared FT8 message classifier (also a browser global in the renderers)
 const JtcatSpotTarget = require('./lib/jtcat-spot-target'); // which finished QSO ends the spot target; watcher refuses worked calls (#518)
@@ -598,7 +652,7 @@ function describeTargetShort(t) {
 function healActiveRigNow(where) {
   const r = healActiveRig(settings);
   if (r.reason === 'target-followed-rig') {
-    sendCatLog(`[CAT] the connection target (${describeTargetShort(r.staleTarget)}) belonged to no rig in My Rigs; connecting "${r.rig.name || r.rig.model || 'rig'}" on its own port, ${describeTargetShort(r.rig.catTarget)} (${where})`);
+    sendCatLog(`[CAT] the connection target (${describeTargetShort(r.staleTarget)}) belonged to no rig in Settings > Radio; connecting "${r.rig.name || r.rig.model || 'rig'}" on its own port, ${describeTargetShort(r.rig.catTarget)} (${where})`);
     try { saveSettings(settings); } catch {}
   } else if (r.reason === 'other-rig') {
     if (_healOtherRigLogged !== r.otherRig.id + '|' + r.rig.id) {
@@ -696,12 +750,16 @@ function parkInfoFor(ref) {
 // the community feed served by worker/dxpeditions — aggregated DX-World +
 // DXNews + NG3K, refreshed server-side every 6h. See README in that
 // worker for the schema served at /feeds/dxpeditions.json.
-const { getModel, getModelList, RIG_MODELS } = require('./lib/rig-models');
+const { getModel, getModelList, RIG_MODELS, migrateRigModelNames, modelFromYaesuId } = require('./lib/rig-models');
 const { resolveSetupNotes, radioTypeFromCatTarget, icomScopeBaudAction } = require('./lib/rig-setup-notes');
 const StationSetup = require('./lib/station-setup');
 const ReviewAsk = require('./lib/review-ask'); // one-time "Rate ECHOCAT" card
 const SetupShare = require('./lib/setup-share');
-const { autoUpdater } = require('electron-updater');
+// electron-updater is about 110 files: 0.1 s warm, close to 3 s from a cold
+// hard disk, all before the first window. Nothing needs it until the update
+// check 5 s after start (or a Settings click), so getAutoUpdater() loads and
+// wires it on first use.
+let _autoUpdater = null;
 let registerCloudIpc;
 try { registerCloudIpc = require('./lib/cloud-ipc').registerCloudIpc; } catch { registerCloudIpc = null; }
 const { CloudTunnelManager } = require('./lib/cloud-tunnel');
@@ -888,6 +946,10 @@ const GLOBAL_KEYS = new Set([
                        // (same reasoning as lightMode/darkVariant above)
   'wsprPreCapPower',   // {watts, rigId, at}: the RF power the WSPR beacon found on the
                        // radio before capping it at 1 W — the radio is this machine's
+  'aprsBeaconLastAt',  // when this station last beaconed over APRS-IS: the timer counts from it after a restart
+  'aprsRfBeaconLastAt', // when this station last beaconed over its radio (confirmed): the radio timer counts from it after a restart
+  'aprsListenReturn',  // {freqHz, mode, rigId, listenHz, state}: where the radio was before APRS
+                       // listening tuned it (lib/aprs-radio-return.js) — this machine's radio
   'wsprBeaconWatts',   // {watts, rigId}: the beacon's RF power when the operator set one
                        // while it was armed (#268) — also this machine's radio
   'mainMicDeviceId', 'mainPlaybackDeviceId',
@@ -912,7 +974,7 @@ const GLOBAL_KEYS = new Set([
   'winlinkVaraHfPath', // Winlink: where VARA.exe is on THIS machine (blank = the usual places)
   'winlinkVaraFmPath', // Winlink: where VARAFM.exe is on THIS machine
   'winlinkPredictionUrl', // Winlink: a VOACAP service other than api.potacat.com (dev / self-hosted); blank = POTACAT's
-  'winlinkVaraAutoLaunch', // Winlink: start the operator's VARA when a session needs it (default on; never stopped by POTACAT)
+  'winlinkVaraAutoLaunch', // Winlink: start the operator's VARA when a session needs it (default on; never stopped by POTACAT, except a VARA POTACAT itself started for an ECHOCAT session, closed when that session is over: #697)
   'winlinkDirewolfPath', // Winlink: explicit Dire Wolf binary on THIS machine
   'winlinkAgwPort',    // Winlink: Dire Wolf's AGWPE port on this machine (default 8010)
   'winlinkWaterfallSpeed', // mail-window waterfall lines/sec — a display property of this screen (as jtcatWaterfallSpeed)
@@ -1906,6 +1968,7 @@ async function _awaitPendingCatClose(ms) {
 let _icomNetworkTransport = null;
 let _icomNetworkDataModRestore = null;
 let _icomNetworkDataModSession = 0;
+let _icomNetworkDataModActive = null; // #853: the DATA number whose DATA MOD this session set to LAN (radios with DATA1/2/3 MOD)
 const DEFAULT_JTCAT_TX_PWR_PCT = 100;
 const DEFAULT_JTCAT_TX_GAIN = (DEFAULT_JTCAT_TX_PWR_PCT / 100) * (DEFAULT_JTCAT_TX_PWR_PCT / 100);
 const DIRECT_TX_PEAK_LIMIT = 0.95;
@@ -1922,6 +1985,49 @@ let solarTimer = null;
 let rigctldProc = null;
 let cluster = null; // legacy — replaced by clusterClients Map
 let desktopScanning = false; // mirror of the renderer scan engine's on/off, for ECHOCAT scan-state sync (scan-state-sync-desktop)
+// #37: a scan a phone started and the desktop runs (lib/scan-run.js). Created
+// on first use; every phone sees scanning while either this or the desktop's
+// own scan runs.
+let _phoneScanRun = null;
+function scanStateNow() { return !!(desktopScanning || (_phoneScanRun && _phoneScanRun.scanning)); }
+function broadcastScanState() {
+  if (remoteServer && remoteServer.running) remoteServer.sendToClient({ type: 'scan-state', scanning: scanStateNow() });
+  sendVfoScanState();
+}
+function phoneScanRun() {
+  if (_phoneScanRun) return _phoneScanRun;
+  _phoneScanRun = ScanRun.createScanRun({
+    getSpots: () => spotsWithinMaxAge(lastMergedSpots || []),
+    ctx: () => {
+      const hides = spotHidesNow();
+      const skips = spotSkipsNow();
+      const now = Date.now();
+      const d = new Date(now);
+      const today = d.getUTCFullYear().toString() + String(d.getUTCMonth() + 1).padStart(2, '0') + String(d.getUTCDate()).padStart(2, '0');
+      return {
+        muteRules: normalizeMuteRules(settings.spotMuteRules),
+        isHidden: (sp) => ScanRun.hiddenBy(hides, sp, now),
+        isSkipped: (sp) => skips.includes(SpotHides.skipKey(sp.callsign, sp.frequency)),
+        isWorkedToday: (sp) => ScanRun.workedToday(sp, workedQsos.get(String(sp.callsign || '').toUpperCase()), today),
+      };
+    },
+    tune: (sp) => {
+      if (_vfoLocked || isRemoteMode()) return false;
+      if (!((smartSdr && smartSdr.canTune) || (cat && cat.connected) || tciRigLinked())) return false;
+      _freqSuppressUntil = Date.now() + 3000; // as a phone's own tune: no stale echo snaps its VFO back
+      tuneRadio(sp.frequency, sp.mode, sp.bearing, { origin: 'scan' });
+      return true;
+    },
+    dialKhz: () => (Number(_currentFreqHz) || 0) / 1000,
+    txActive: () => { try { return aprsAutoListenTransmitting() || !!(cat && cat._transmitting); } catch { return false; } },
+    onState: () => broadcastScanState(),
+    log: (line) => sendCatLog('[Scan] ' + line),
+    now: () => Date.now(),
+    setTimer: (fn, ms) => setTimeout(fn, ms),
+    clearTimer: (h) => clearTimeout(h),
+  });
+  return _phoneScanRun;
+}
 let clusterSpots = []; // streaming DX cluster spots (FIFO, max 500)
 // Non-deduped spot histories so the "spot history" popover can show prior
 // spots of the same callsign (clusterSpots itself is deduped per call+band so
@@ -1997,6 +2103,7 @@ let _winlinkLastActivity = 0;
 // A session started while a Guest Pass guest had the radio is the guest's:
 // its traffic is never the owner's activity (#200 step 4).
 let _winlinkSessionByGuest = false;
+let _winlinkSessionFromEchocat = false; // this session was started from an ECHOCAT device (or is the automatic retry of one): #697
 let _winlinkSessionError = '';
 let _winlinkSessionErrorKind = '';   // 'login-failed' | 'no-answer' | 'transport-down' | 'rig-refused' | 'stopped' | '' — session.errorKind for clients
 // How this session ended, as facts for lib/winlink-outcome.js (#425). The
@@ -2025,6 +2132,7 @@ const _patProgressSaid = new WinlinkDiag.PatProgressLog(); // Pat's repainted tr
 let _winlinkMercuryWasConnected = false;
 let _winlinkAutoCheckTimer = null;
 let winlinkPopoutWin = null;
+let winlinkFormWin = null;           // #346: Pat's own form page, locked down (openWinlinkFormWindow)
 let _winlinkWatchAudio = false;      // the mail window shows the waterfall
 // ECHOCAT devices watching the Winlink waterfall (C2S winlink-watch): the
 // shack computes the spectrum AND the Busy/Clear verdict (lib/winlink-spectrum.js)
@@ -2058,6 +2166,9 @@ let js8Threads = new Js8Threads({});
 let js8Heard = [];              // stations audible now, for the right rail
 let js8HeardBy = [];            // stations that reported hearing US (SNR replies) — the other half of the reachability map
 let js8MapWin = null;           // the Heartbeat Map window
+let aprsWin = null;             // More > APRS (phase 1: read-only APRS-IS map and list)
+let aprsFeed = null;            // lib/aprs-is-feed.js, alive only while that window is open
+let aprsBatch = null;           // parsed packets, handed to the window every 500 ms
 // Multi-frame RX reassembly (the MessageBuffer role; lib/js8-rx-assembler.js)
 let js8RxAssembler = new Js8RxAssembler({});
 // The exclusive radio TX/audio path can be held by at most one mode engine at a
@@ -2648,7 +2759,7 @@ function atuWizardTrend(rigId) {
 /** The Station Setup step's live record for a rig (null = not a Flex with an ATU). */
 function atuWizardSetupLive(rig) {
   if (!rig) return null;
-  const model = rig.model ? (RIG_MODELS[rig.model] || null) : null;
+  const model = rig.model ? (getModel(rig.model, null) || null) : null;
   if (!model || model.protocol !== 'smartsdr' || !(model.caps && model.caps.atu)) return null;
   const runs = atuWizardListRuns(rig.id).filter(r => !r.verify && r.phase === 'done');
   const last = runs[0] ? { at: runs[0].at, total: runs[0].total, green: runs[0].green, problems: runs[0].problems } : null;
@@ -3032,7 +3143,7 @@ function tripSwrGuard(swr) {
   _swrTripped = true;
   _swrGuardHits = 0;
   _swrTrippedBand = _currentFreqHz ? (freqToBand(_currentFreqHz / 1e6) || '') : '';
-  const msg = `TX aborted — SWR ${swr.toFixed(1)}:1 exceeded the ${swrGuardMax().toFixed(1)}:1 limit. Run the ATU or change bands to re-enable TX (or turn off the SWR guard in Settings > My Rigs).`;
+  const msg = `TX aborted — SWR ${swr.toFixed(1)}:1 exceeded the ${swrGuardMax().toFixed(1)}:1 limit. Run the ATU or change bands to re-enable TX (or untick SWR guard in Settings > Radio, Edit the rig).`;
   _swrTripMessage = msg;
   _swrTripSwr = swr;
   _swrAtuFailed = false;
@@ -3129,6 +3240,57 @@ const JtcatTxSlot = require('./lib/jtcat-tx-slot');
 // lib/typed-call.js for the rule (most recently changed non-empty field wins).
 const { TypedCallTracker } = require('./lib/typed-call');
 const CloudBillingUi = require('./lib/cloud-billing-ui');
+const CloudTunnelAuto = require('./lib/cloud-tunnel-auto'); // ECHOCAT ask 2026-11-21 item 1: the tunnel on when the account gets access
+/**
+ * On every billing state: the account getting Cloud access (a trial starting,
+ * or no access to paid) switches the Cloud Tunnel on, unless the operator
+ * turned it off themselves (lib/cloud-tunnel-auto.js).
+ */
+function cloudTunnelOnWithAccess(sub) {
+  try {
+    // The first run of this rule only records where the account already is: an
+    // account that had access before it existed is not a new start, so its
+    // tunnel is left as the operator had it.
+    if (settings.cloudAccessSeen === undefined) {
+      settings.cloudAccessSeen = settings.cloudAccessToken ? CloudTunnelAuto.accessOf(settings.cloudSubscriptionCache, CloudBillingUi) : 'none';
+      saveSettings(settings);
+    }
+    const now = CloudTunnelAuto.accessOf(sub, CloudBillingUi);
+    const prev = settings.cloudAccessSeen || 'none';
+    if (now !== prev) { settings.cloudAccessSeen = now; saveSettings(settings); }
+    const d = CloudTunnelAuto.decide({
+      prev, now, signedIn: !!settings.cloudAccessToken,
+      tunnelOn: !!(cloudTunnel && cloudTunnel.getState().enabled),
+      userOff: settings.cloudTunnelUserOff === true,
+    });
+    if (!d.enable || !cloudTunnel) return;
+    sendCatLog(`[cloud-tunnel] the account has Cloud access now (${now}): turning the Cloud Tunnel on`);
+    cloudTunnel.enable({}).then(() => {
+      if (win && !win.isDestroyed()) win.webContents.send('app-notice', { message: 'POTACAT Cloud is on: your phone can now reach this radio from anywhere. Turn the tunnel off in Settings > Cloud if you do not want that.', duration: 15000 });
+    }).catch((err) => sendCatLog('[cloud-tunnel] could not turn on with the new access: ' + (err && err.message ? err.message : err)));
+  } catch (err) { sendCatLog('[cloud-tunnel] access check failed: ' + (err && err.message ? err.message : err)); }
+}
+/**
+ * The shack's Cloud state for its own ECHOCAT devices (ECHOCAT ask 2026-11-21,
+ * item 2): signed in, access (trial / paid / none, from the cached
+ * subscription the Cloud card already reads), the trial's end, and whether the
+ * Cloud Tunnel is on. lib/remote-server.js setCloudState sends it in auth-ok
+ * and pushes changes as cloud-state.
+ */
+function cloudStateNow() {
+  const signedIn = !!settings.cloudAccessToken;
+  const sub = signedIn && settings.cloudSubscriptionCache && typeof settings.cloudSubscriptionCache === 'object' ? settings.cloudSubscriptionCache : null;
+  const access = !sub ? 'none' : (CloudBillingUi.hasAccess(sub) ? (CloudBillingUi.isTrial(sub) ? 'trial' : 'paid') : 'none');
+  const out = { signedIn, access, tunnel: cloudTunnel && cloudTunnel.getState().enabled ? 'on' : 'off' };
+  if (access === 'trial' && sub.trialExpiresAt) {
+    const t = new Date(sub.trialExpiresAt);
+    if (!isNaN(t.getTime())) out.trialEndsAt = t.toISOString();
+  }
+  return out;
+}
+function pushCloudState() {
+  try { if (remoteServer && typeof remoteServer.setCloudState === 'function') remoteServer.setCloudState(cloudStateNow()); } catch { /* best effort */ }
+}
 const typedCalls = new TypedCallTracker();
 const CwRemoteExpand = require('./lib/cw-remote-expand');
 const CwGreeting = require('./lib/cw-greeting'); // {greeting} = GM/GA/GE by the other station's local time
@@ -3607,13 +3769,14 @@ function getRigCapabilities(rigType) {
   caps.afgain = rigSupportsAfGain(rigType);
   // The bands this radio is used on (null = not restricted), lib/rig-bands.js.
   caps.bands = activeRigBands();
-  // #293: Power Off only where POTACAT can switch the radio back on (an
-  // SCU-LAN10), or where the operator allowed it for this rig. Every client
-  // hides Power Off on false, and main refuses it (lib/rig-power.js).
+  // #293, #768: Power Off where POTACAT can switch the radio back on (a
+  // direct serial port, an SCU-LAN10), unless the operator chose otherwise
+  // for this rig: its stored allowPowerOffNoWake, true or false, wins. Every
+  // client hides Power Off on false, and main refuses it (lib/rig-power.js).
   if (caps.power) {
     caps.powerOff = RigPower.powerOffAvailable(caps, {
       linkType: settings.catTarget && settings.catTarget.type,
-      allowOffNoWake: !!(activeRig && activeRig.allowPowerOffNoWake),
+      allowOffNoWake: activeRig ? activeRig.allowPowerOffNoWake : undefined,
     });
   }
   // The rig's amplifier drive limit: every power slider stops there.
@@ -4040,10 +4203,10 @@ function spawnRigctld(target, portOverride) {
       const bridge = HAMLIB_BRIDGE_MODELS[Number(target.rigId)];
       const fixed = await hamlibModelForRadio(rigctldPath);
       if (fixed) {
-        sendCatLog(`[rigctld] Hamlib model ${target.rigId} is ${bridge}, a bridge to another program, not a radio — using ${fixed} (${getActiveRigModelName()}) for ${target.serialPort}. Set the Hamlib model to ${fixed} in Settings > My Rigs to keep it.`);
+        sendCatLog(`[rigctld] Hamlib model ${target.rigId} is ${bridge}, a bridge to another program, not a radio — using ${fixed} (${getActiveRigModelName()}) for ${target.serialPort}. To keep it, set Rig Model to ${fixed} in Settings > Radio, Edit the rig.`);
         target = { ...target, rigId: fixed };
       } else {
-        sendCatLog(`[rigctld] Hamlib model ${target.rigId} is ${bridge}, a bridge to another program, not a radio: rigctld cannot open ${target.serialPort} with it. Pick your radio's own Hamlib model in Settings > My Rigs (the list shows the number beside each radio).`);
+        sendCatLog(`[rigctld] Hamlib model ${target.rigId} is ${bridge}, a bridge to another program, not a radio: rigctld cannot open ${target.serialPort} with it. Pick your radio's own Hamlib model under Rig Model in Settings > Radio, Edit the rig (the list shows the number beside each radio).`);
       }
     }
     // rigctld opens the serial port itself, so SerialTransport's dial-in/
@@ -4229,6 +4392,7 @@ function sendCatStatus(s) {
     s = { ...s, connected: true };
   }
   customCatLinkSeen(!!(s && s.connected));
+  tuneLinkPendingNoteLinkUp(!!(s && s.connected)); // a held potacat://tune link waits for this
   // Loud radio-link transitions (see _catLinkUpLast decl). Runs on the
   // EFFECTIVE state (post canTune adjustment) and only on change — status
   // pushes are frequent. The very first status of the session is silent
@@ -4456,9 +4620,13 @@ function jtcatDialFollow(hz) {
     if (isRemoteMode() || !ft8Engine || !ft8Engine._running || !(_jtcatExpectedDialHz > 0)) return;
     if (jtcatManager && jtcatManager.sliceCount > 1) return;
     const mode = String(ft8Engine._mode || 'FT8').toUpperCase();
-    if (!/^FT[842]$/.test(mode)) return;
-    const d = decideDialFollow({ dialHz: hz, anchorHz: _jtcatExpectedDialHz, freqs: freqsForMode(mode), qsoLive: jtcatQsoLive() });
+    if (!followsKnob(mode)) return;
+    // JS8 (#714) follows onto its own calling dials; a message still going
+    // out (frames queued or keyed) is JS8's "QSO in progress".
+    const js8 = mode === 'JS8';
+    const d = decideDialFollow({ dialHz: hz, anchorHz: _jtcatExpectedDialHz, freqs: js8 ? JS8_DIAL_KHZ : freqsForMode(mode), qsoLive: jtcatQsoLive() || (js8 && !!(ft8Engine._txActive || ft8Engine.txQueueLength > 0)) });
     if (d.action !== 'follow') return;
+    if (js8) { js8FollowBand(d.dialHz, d.band); return; }
     jtcatFollowBand(d.dialHz, d.band, `the radio moved to the ${mode} dial on ${d.band}`);
   } catch { /* the guard still protects TX */ }
 }
@@ -4469,6 +4637,16 @@ function jtcatFollowBand(dialHz, band, why) {
   sendCatLog(`[JTCAT] Following the radio to ${(khz / 1000).toFixed(3)} MHz${band ? ` (${band})` : ''}: ${why}`);
   if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) jtcatPopoutWin.webContents.send('jtcat-band-follow', { band: band || '', freqKhz: khz });
   try { if (remoteServer && remoteServer.running) remoteServer.sendJtcatBandFollow({ band: band || '', freqKhz: khz }); } catch { /* no client */ }
+}
+
+// JS8's follow: the guard anchor moves and the reassembler resets (half a
+// message from the old band must not greet the new one), as js8TuneBand does.
+// The JS8 window's band picker follows the dial through js8PushStatus.
+function js8FollowBand(dialHz, band) {
+  _jtcatExpectedDialHz = Math.round(dialHz);
+  js8RxAssembler = new Js8RxAssembler({});
+  sendCatLog(`[JS8] Following the radio to ${(_jtcatExpectedDialHz / 1e6).toFixed(3)} MHz (${band}): the radio moved to the JS8 dial on ${band}`);
+  pushActivityState();
 }
 
 // "Follow the radio" on the wrong-band refusal: the operator says the radio
@@ -4488,6 +4666,11 @@ function sendCatFrequency(hz) {
     console.warn(`[CAT] Ignoring suspicious frequency: ${hz} Hz (below 100 kHz)`);
     return;
   }
+  // A held potacat://tune link waits for the radio's own readback: never our
+  // tune echo, never a listen SDR's frequency.
+  if (hz > 0 && !_jtcatTuneEcho && !(sdrHoldsDial() && hz === listenSdr.hz)) tuneLinkPendingNoteFrequency(hz);
+  // #37: a phone-started scan ends when the radio is tuned by hand.
+  if (hz > 0 && _phoneScanRun && _phoneScanRun.scanning) _phoneScanRun.noteDial(hz / 1000);
   // SWR-guard latch: leaving the band it tripped on plausibly changes the
   // match (different antenna/resonance) — re-enable TX. Single sink for every
   // frequency source (tune, knob, scan, remote), so no per-path hooks needed.
@@ -4547,6 +4730,8 @@ function sendCatFrequency(hz) {
   sendVfoState();
   broadcastRemoteRadioStatus();
   sendN1mmRadioInfo();
+  aprsRadioReturnOnDial(hz); // a return a crash or a quit left unfinished (APRS listening)
+  aprsListenOnDial(); // listening pauses when the radio moves off the APRS frequency
 }
 
 // Tokens that are never a mode, whatever codec produced them. See the same
@@ -4579,15 +4764,8 @@ function sendCatMode(mode) {
   // The old display check only caught USB/LSB, so default-config users
   // saw the renderer flip to "PKTUSB" right after tuning a RADE spot
   // and assumed FreeDV had reverted. (mac OS 26 v1.5.13 user 2026-05-05.)
-  const isFreedvSideband = mode === 'USB' || mode === 'LSB' ||
-    mode === 'DIGU' || mode === 'DIGL' ||
-    mode === 'PKTUSB' || mode === 'PKTLSB' ||
-    mode === 'USB-D' || mode === 'LSB-D';
-  let displayMode = mode;
-  if (freedvEngine && isFreedvSideband) {
-    const codec = String(freedvEngine.mode || 'RADEV1').toUpperCase();
-    displayMode = 'FREEDV-' + codec;
-  }
+  // One rule for every surface: lib/freedv-display-mode.js (#716).
+  const displayMode = FreedvDisplayMode.freedvDisplayMode(mode, freedvDisplayCodec());
   if (win && !win.isDestroyed()) win.webContents.send('cat-mode', displayMode);
   if (bandspreadPopoutWin && !bandspreadPopoutWin.isDestroyed()) {
     bandspreadPopoutWin.webContents.send('bandspread-popout-mode', displayMode);
@@ -5023,6 +5201,7 @@ function sendCatFwdPower(watts) {
     if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) jtcatPopoutWin.webContents.send('cat-fwd-power', v);
     if (sstvPopoutWin && !sstvPopoutWin.isDestroyed()) sstvPopoutWin.webContents.send('cat-fwd-power', v);
     if (winlinkPopoutWin && !winlinkPopoutWin.isDestroyed()) winlinkPopoutWin.webContents.send('cat-fwd-power', v);
+    aprsWinMeter('cat-fwd-power', v);
     remoteMeterPush('fwd-power', v);
   };
   push(_fwdPowerHold.sample(w));
@@ -5155,6 +5334,8 @@ function bindRigStateEvents(controller) {
   controller.on('ptt', (on) => txNoteRadioPtt(controller, on));
   controller.on('ptt', (on) => { if (!on && controller === cat) txMetersRestOnRx(); });
   controller.on('ptt', (on) => { if (!on && controller === cat) customCatReader.txEnded(); }); // #242: reads held during TX
+  // APRS phase 7: sent only if the radio keyed. Every readback, not only a change of POTACAT's TX state (#856).
+  controller.on('ptt-readback', (on) => { if (on && controller === cat) aprsRfNoteRadioTx(); });
   // Something the radio did that the operator must see, not only the log
   // (lib/rig-controller.js: a radio left in transmit after a CW message).
   controller.on('notice', (msg) => {
@@ -5338,7 +5519,7 @@ function passNoPowerOwnerNote() {
   const rb = _lastPowerReadback;
   const seen = rb && rb.watts > 0 ? `its last report was ${Math.round((now - rb.at) / 1000)} s ago` : 'it has never reported it this session';
   sendCatLog(`[pass] Owner: the guest's transmissions are refused because the radio is not reporting its RF power over CAT (${seen}). `
-    + 'Check that Settings > My Rigs names this radio\'s exact model (and CI-V address on an Icom), and that this log shows "rig reports mode" after connecting.');
+    + 'Check that the rig in Settings > Radio is this radio\'s exact model (and CI-V address on an Icom), and that this log shows "rig reports mode" after connecting.');
   if (win && !win.isDestroyed()) win.webContents.send('app-notice', { message: 'Guest Pass: your radio is not reporting its power, so the guest cannot transmit. See the log for the fix.', warn: true, duration: 15000 });
   return true;
 }
@@ -5407,6 +5588,7 @@ function sendCatSmeter(val, dbm) {
   // what the radio is hearing, or what it's looking into on TX.
   if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) jtcatPopoutWin.webContents.send('cat-smeter', val);
   if (js8PopoutWin && !js8PopoutWin.isDestroyed()) js8PopoutWin.webContents.send('cat-smeter', val);
+  aprsWinMeter('cat-smeter', val);
   _currentSmeter = val;
   if (remoteServer && remoteServer.running) remoteServer.sendToClient(typeof dbm === 'number' && Number.isFinite(dbm) ? { type: 'smeter', value: val, dbm } : { type: 'smeter', value: val });
 }
@@ -5419,6 +5601,7 @@ function sendCatSwr(val) {
   if (js8PopoutWin && !js8PopoutWin.isDestroyed()) js8PopoutWin.webContents.send('cat-swr', val);
   if (sstvPopoutWin && !sstvPopoutWin.isDestroyed()) sstvPopoutWin.webContents.send('cat-swr', val);
   if (winlinkPopoutWin && !winlinkPopoutWin.isDestroyed()) winlinkPopoutWin.webContents.send('cat-swr', val);
+  aprsWinMeter('cat-swr', val);
   _currentSwr = val;
   if (remoteServer && remoteServer.running) remoteServer.sendToClient({ type: 'swr', value: val });
 }
@@ -5526,6 +5709,7 @@ function broadcastRigState() {
   broadcastRemoteRadioStatus();
   pushJtcatPopoutRigPower();
   pushWinlinkRigPower();
+  pushAprsRigPower();
 }
 
 // The JTCAT popout's "TX Pwr" slider is the RADIO's RF power, in watts, and
@@ -5567,6 +5751,17 @@ function pushWinlinkRigPower(force) {
   if (!force && sig === _winlinkRigPowerSig) return;
   _winlinkRigPowerSig = sig;
   try { winlinkPopoutWin.webContents.send('winlink-rig-power', payload); } catch {}
+}
+// The APRS window's TX power control: the same payload and the same
+// set-tx-power path (Casey 2026-11-19: "change my tx signal power").
+let _aprsRigPowerSig = '';
+function pushAprsRigPower(force) {
+  if (!aprsWin || aprsWin.isDestroyed()) { _aprsRigPowerSig = ''; return; }
+  const payload = jtcatPopoutRigPowerPayload();
+  const sig = JSON.stringify(payload);
+  if (!force && sig === _aprsRigPowerSig) return;
+  _aprsRigPowerSig = sig;
+  try { aprsWin.webContents.send('aprs-rig-power', payload); } catch {}
 }
 function pushJtcatPopoutRigPower(force) {
   if (!jtcatPopoutWin || jtcatPopoutWin.isDestroyed()) { _jtcatPopoutRigPowerSig = ''; return; }
@@ -6038,47 +6233,9 @@ function applyRaisedCosineFade(samples, sampleRate = 48000, fadeMs = 10) {
   return samples;
 }
 
-const ICOM_NETWORK_DATA_MOD_SPECS = [
-  {
-    models: ['IC-7610'],
-    civAddrs: [0x98],
-    settingId: 0x0092,
-    label: 'DATA1 MOD',
-    networkLabel: 'LAN',
-    networkValue: 0x05,
-    values: { 0x00: 'MIC', 0x01: 'ACC', 0x02: 'MIC+ACC', 0x03: 'USB', 0x04: 'MIC+USB', 0x05: 'LAN' },
-  },
-  {
-    models: ['IC-9700'],
-    civAddrs: [0xA2],
-    settingId: 0x0116,
-    label: 'DATA MOD',
-    networkLabel: 'LAN',
-    networkValue: 0x05,
-    values: { 0x00: 'MIC', 0x01: 'ACC', 0x02: 'MIC+ACC', 0x03: 'USB', 0x04: 'MIC+USB', 0x05: 'LAN' },
-  },
-  {
-    models: ['IC-705'],
-    civAddrs: [0xA4],
-    settingId: 0x0119,
-    label: 'DATA MOD',
-    networkLabel: 'WLAN',
-    networkValue: 0x03,
-    values: { 0x00: 'MIC', 0x01: 'USB', 0x02: 'MIC+USB', 0x03: 'WLAN' },
-  },
-  {
-    // IC-7760 CI-V Reference Guide: set-mode item 0130 "DATA1 MOD" (0131 =
-    // DATA2, 0132 = DATA3 — each data mode has its own source; POTACAT uses
-    // DATA1, which is what `1A 06 01` selects). Value 09 = LAN.
-    models: ['IC-7760'],
-    civAddrs: [0xB2],
-    settingId: 0x0130,
-    label: 'DATA1 MOD',
-    networkLabel: 'LAN',
-    networkValue: 0x09,
-    values: { 0x00: 'MIC', 0x01: 'USB', 0x02: 'LINE-IN', 0x03: 'ACC', 0x04: 'MIC+USB', 0x05: 'MIC+LINE-IN', 0x06: 'MIC+ACC', 0x07: 'MIC+USB+ACC', 0x08: 'MIC+LINE-IN+ACC', 0x09: 'LAN' },
-  },
-];
+// The Icom DATA MOD auto-LAN table and the per-DATA-number choice live in
+// lib/icom-network-data-mod.js (#853: the IC-7610 has DATA1/2/3 MOD).
+const ICOM_NETWORK_DATA_MOD_SPECS = IcomNetworkDataMod.SPECS;
 
 /**
  * Setup notes for a rig as the editor (or a saved rig) describes it. Icoms are
@@ -6090,7 +6247,7 @@ function rigSetupNotesFor(q) {
   const model = String(q.model || target.civModel || '').trim();
   return resolveSetupNotes({
     model,
-    modelInfo: model ? (RIG_MODELS[model] || null) : null,
+    modelInfo: model ? (getModel(model, null) || null) : null,
     radioType: q.radioType || radioTypeFromCatTarget(q.catTarget),
     cwKeyLine: q.cwKeyLine || 'auto',
     platform: process.platform,
@@ -6101,7 +6258,7 @@ function rigSetupNotesFor(q) {
 }
 
 /**
- * " — see Settings > My Rigs > Setup instructions" when the active rig has a
+ * " — see Settings > Radio, Edit the rig, Setup instructions" when the active rig has a
  * required setup note for this feature that the operator has not ticked, so a
  * log line about a symptom points at the fix. Empty otherwise.
  */
@@ -6111,7 +6268,7 @@ function activeRigSetupPointer(feature) {
     if (!rig) return '';
     const open = rigSetupNotesFor({ model: rig.model, catTarget: rig.catTarget, cwKeyLine: rig.cwKeyLine, done: rig.setupDone })
       .filter(n => n.level === 'required' && !n.done && (!feature || n.feature === feature));
-    return open.length ? ' — see Settings > My Rigs > (this rig) > Setup instructions: "' + open[0].title + '"' : '';
+    return open.length ? ' — see Settings > Radio, Edit the rig, Setup instructions: "' + open[0].title + '"' : '';
   } catch { return ''; }
 }
 
@@ -6276,7 +6433,7 @@ function stationSetupLive(rig) {
   const isActive = rig.id === settings.activeRigId;
   const catConnected = isActive && (!!_catLinkUpLast || !!(smartSdr && smartSdr.canTune));
   let scope = null;
-  const info = rig.model ? (RIG_MODELS[rig.model] || null) : null;
+  const info = rig.model ? (getModel(rig.model, null) || null) : null;
   if (info && info.caps && info.caps.nativeScope === 'yaesu-ft4222') {
     const f = findFt4222();
     const st = (typeof yaesuScopeState !== 'undefined' && yaesuScopeState) || {};
@@ -6337,7 +6494,7 @@ function stationSetupPayload(rigId) {
       audioSource: rig.audioSource || (rig.id === settings.activeRigId ? settings.audioSource : ''),
       inputDeviceId: rig.remoteAudioInput || '', outputDeviceId: rig.remoteAudioOutput || '',
     },
-    modelInfo: rig.model ? (RIG_MODELS[rig.model] || null) : null,
+    modelInfo: rig.model ? (getModel(rig.model, null) || null) : null,
     platform: process.platform,
     notes: rigSetupNotesFor({ model: rig.model, catTarget: rig.catTarget, cwKeyLine: rig.cwKeyLine, done: rig.setupDone }),
     live: stationSetupLive(rig),
@@ -6460,7 +6617,7 @@ function stationSetupShareBuild(rigId, req = {}) {
     rig,
     radioType: radioTypeFromCatTarget(rig.catTarget),
     family: RigFamily.rigFamily(rig) || '',
-    modelInfo: rig.model ? (RIG_MODELS[rig.model] || null) : null,
+    modelInfo: rig.model ? (getModel(rig.model, null) || null) : null,
     result: res,
     live: stationSetupLive(rig),
     levels: { jtcatTxGain: settings.jtcatTxGain, jtcatRxGain: settings.jtcatRxGain, txDrive: settings.txDrive },
@@ -6643,7 +6800,7 @@ async function _runStationSetupTxTest(rigId, { keepPower = false, voice = false 
     }
   }
 
-  const info = RIG_MODELS[rig.model] || {};
+  const info = getModel(rig.model, null) || {};
   const testW = Math.min(5, Number(info.maxPower) || 100);
   const prevW = Number(_currentTxPower) || 0;
   let lowered = false;
@@ -6800,11 +6957,34 @@ function waitForIcomDataMod(controller, settingId, timeoutMs = 1500) {
   });
 }
 
-async function prepareIcomNetworkDataMod(controller, target, rigModel, sessionId, liveCivAddr = null) {
+/**
+ * #853: the DATA number the radio uses (1/2/3), for a radio with one DATA MOD
+ * per data mode (IC-7610). Waits briefly for the radio's first 1A 06 report,
+ * since POTACAT re-selects the number the radio reported; unknown = 1.
+ */
+async function icomNetworkDataNumber(dataNumberOf, timeoutMs = 1500) {
+  if (typeof dataNumberOf !== 'function') return 1;
+  const until = Date.now() + timeoutMs;
+  for (;;) {
+    const n = Number(dataNumberOf()) || 0;
+    if (n >= 1 && n <= 3) return n;
+    if (Date.now() >= until) return 1;
+    await new Promise((r) => setTimeout(r, 100));
+  }
+}
+
+async function prepareIcomNetworkDataMod(controller, target, rigModel, sessionId, liveCivAddr = null, dataNumberOf = null) {
   if (!controller || !controller.connected) return;
   if (!target || target.type !== 'icom-network') return;
   if (settings.audioSource !== 'icom-network') return;
-  const spec = getIcomNetworkDataModSpec(target, rigModel, liveCivAddr);
+  const baseSpec = getIcomNetworkDataModSpec(target, rigModel, liveCivAddr);
+  let spec = baseSpec;
+  if (baseSpec && baseSpec.perData) {
+    const n = await icomNetworkDataNumber(dataNumberOf);
+    if (sessionId !== _icomNetworkDataModSession || cat !== controller || !controller.connected) return;
+    spec = IcomNetworkDataMod.specForDataNumber(baseSpec, n);
+    _icomNetworkDataModActive = { sessionId, dataNumber: spec.dataNumber, baseSpec, target, rigModel, liveCivAddr, dataNumberOf };
+  }
   if (!spec) {
     logIcomNetworkAudio('[Icom-Network-Audio] DATA MOD auto-LAN is not configured for this Icom model; leaving radio MOD input unchanged.');
     return;
@@ -6838,7 +7018,75 @@ async function prepareIcomNetworkDataMod(controller, target, rigModel, sessionId
   controller.setDataMod(spec.settingId, spec.networkValue);
 }
 
+// Sweep 3c (Casey 2026-11-21): learn the CI-V address from the radio's own
+// replies. An Icom ignores every frame not addressed to it, so a wrong address
+// in the rig editor was a healthy-looking link and a radio that never answered,
+// and the setup note asked the operator to find the address in the radio's
+// menu. Now: if the configured address has not answered 5 s after the port
+// opens, POTACAT asks for the frequency (a read) at every address an Icom in
+// its model list uses; the radio answers only to its own address, from its own
+// address (lib/codecs/civ-codec.js huntAddress / _noteFromAddr). A transceive
+// broadcast from another address (the operator turns the knob) is learned the
+// same way. The address found is used at once and saved on this rig.
+const ICOM_CIV_HUNT_MS = 5000;
+function icomCivHuntAddrs(first) {
+  const addrs = Object.values(RIG_MODELS).filter((m) => m && m.protocol === 'civ' && Number.isInteger(m.civAddr)).map((m) => m.civAddr);
+  return [first, ...addrs];
+}
+function icomCivAddressLearn(controller, codec, transport, target) {
+  codec.on('address-learned', ({ was, now, by }) => {
+    const hex = (a) => '0x' + Number(a).toString(16).toUpperCase().padStart(2, '0');
+    sendCatLog(`[CI-V] the radio answers at CI-V address ${hex(now)}, not ${hex(was)} (${by === 'reply' ? 'it answered the address search' : 'its own transceive frames'}); using ${hex(now)} and saving it for this radio`);
+    let saved = false;
+    for (const r of settings.rigs || []) {
+      const ct = r && r.catTarget;
+      if (ct && ct.type === 'icom' && ct.path === target.path) { ct.civAddress = now; saved = true; }
+    }
+    if (settings.catTarget && settings.catTarget.type === 'icom' && settings.catTarget.path === target.path) { settings.catTarget.civAddress = now; saved = true; }
+    if (saved) saveSettings(settings);
+    if (win && !win.isDestroyed()) {
+      win.webContents.send('app-notice', { message: `Your radio answers at CI-V address ${hex(now)}, not ${hex(was)}. POTACAT now uses ${hex(now)} and saved it for this radio.`, duration: 12000 });
+    }
+  });
+  transport.once('connect', () => {
+    setTimeout(() => {
+      if (cat !== controller || !controller.connected || codec.heardFromRadio) return;
+      const n = codec.huntAddress(icomCivHuntAddrs(codec.radioAddress));
+      if (n) sendCatLog(`[CI-V] no answer at CI-V address 0x${codec.radioAddress.toString(16).toUpperCase().padStart(2, '0')} in ${ICOM_CIV_HUNT_MS / 1000} s: asking for the frequency at ${n} other Icom addresses (a read; nothing is changed on the radio)`);
+    }, ICOM_CIV_HUNT_MS);
+  });
+}
+// Sweep 1a (Casey 2026-11-21): over a USB CI-V link, DATA MOD to USB while
+// POTACAT has the radio in a DATA mode, put back afterwards (lib/icom-usb-data-mod.js).
+let _icomUsbDataMod = null; // { guard, controller }
+function icomUsbDataModAttach(controller, codec) {
+  const modelName = getActiveRigModelName();
+  _icomUsbDataMod = null;
+  if (!IcomUsbDataMod.specFor(modelName)) return;
+  const rigOf = () => (settings.rigs || []).find((r) => r && r.id === settings.activeRigId);
+  const guard = IcomUsbDataMod.createGuard({
+    model: modelName,
+    enabled: () => { const r = rigOf(); return !(r && r.icomUsbDataModOff); },
+    read: async (id) => { const d = await waitForIcomDataMod(controller, id, 1500); return d ? d.value : null; },
+    write: (id, v) => controller.setDataMod(id, v),
+    log: (line) => sendCatLog('[Icom DATA MOD] ' + line),
+    notice: (message) => { if (win && !win.isDestroyed()) win.webContents.send('app-notice', { message, duration: 15000 }); },
+  });
+  _icomUsbDataMod = { guard, controller };
+  codec.on('data-set', (ev) => {
+    if (cat !== controller || !_icomUsbDataMod || _icomUsbDataMod.guard !== guard) return;
+    guard.onDataSet(ev).catch((e) => sendCatLog('[Icom DATA MOD] ' + e.message));
+  });
+}
+function restoreIcomUsbDataMod(reason) {
+  const h = _icomUsbDataMod;
+  _icomUsbDataMod = null;
+  if (!h || !h.controller || !h.controller.connected) return;
+  try { h.guard.restore(reason); } catch (e) { sendCatLog('[Icom DATA MOD] ' + e.message); }
+}
+
 async function restoreIcomNetworkDataMod(reason = 'disconnect') {
+  restoreIcomUsbDataMod(reason); // every disconnect path calls this one: the USB DATA MOD goes back first
   const state = _icomNetworkDataModRestore;
   if (!state) return false;
   _icomNetworkDataModRestore = null;
@@ -7293,7 +7541,7 @@ function scheduleCloudDeviceReRegister(reason, delayMs = 2500) {
   }, delayMs);
 }
 
-async function ensureCloudDeviceRegistered(reason) {
+async function ensureCloudDeviceRegistered(reason, _afterRotate) {
   if (!cloudIpc) return;
   const sync = cloudIpc.getCloudSync();
   if (!sync || !settings.cloudAccessToken) return;
@@ -7327,7 +7575,15 @@ async function ensureCloudDeviceRegistered(reason) {
     _cloudDeviceLastPayloadJson = payloadJson;
   } catch (err) {
     sendCatLog(`[cloud-devices] register failed: ${err.message || err}`);
-    return;
+    // The id is held by another account: two computers once shared a
+    // settings file. This computer takes a new id and registers once more.
+    if (!_afterRotate && require('./lib/cloud-pair-errors').shouldRotateDeviceId(err)) {
+      settings.cloudDeviceId = require('crypto').randomUUID();
+      saveSettings(settings);
+      sendCatLog(`[cloud-devices] device id was in use by another account; this computer now uses ${settings.cloudDeviceId}`);
+      return ensureCloudDeviceRegistered(reason, true);
+    }
+    return { error: err }; // callers that must not go on (pairing) read this
   }
 
   // Heartbeat — fires every 60s while signed in. Cheaper than a full
@@ -7509,6 +7765,9 @@ function refuseRemoteFeature(feature) {
 // switch gates both text and paddle; its voice macros are its own recordings
 // (it syncs them to every client at connect), played into its radio there.
 let remoteShackCw = { enabled: false, paddle: false, paddleReason: '' };
+// The driven shack's grid (auth-ok / settings-update settings.grid), so the
+// JTCAT map centres where the decodes are heard (#774). '' = not known.
+let remoteShackGrid = '';
 let remoteShackVoice = { labels: [], filled: [] };
 const REMOTE_CW_OFF_MSG = 'Remote CW is off on the shack. Turn on Settings > ECHOCAT > Remote CW Keyer on the shack PC.';
 function remoteCwRefusal(paddle) {
@@ -7558,7 +7817,9 @@ function remoteShackScopeSubscribe(on) {
     if (on) remoteShackScopeState({ status: 'unavailable', available: false, diag: { key: 'remote-link', severity: 'blocker', headline: 'Waiting for the shack', detail: REMOTE_NOT_LINKED_MSG } });
     return;
   }
-  remoteClient.sendRaw({ type: 'scope-subscribe', on: !!on });
+  // bins: the scope window draws only full 850-point frames; without it the
+  // shack sends a phone's 256 and the window drops every one (#772).
+  remoteClient.sendRaw({ type: 'scope-subscribe', on: !!on, bins: YaesuScope.BINS });
 }
 function remoteShackScopeState(state) {
   const payload = { ...(state || {}), remote: true };
@@ -7594,7 +7855,23 @@ function pushActivationToRemoteShack() {
 
 // The JTCAT bridge (lib/remote-bridge.js): pop-out IPC → the shack's wire,
 // and the shack's JTCAT frames → the pop-out channels.
-const _remoteBridgeState = { holdTx: false, fullAuto: false, tune: false, running: false };
+const _remoteBridgeState = { holdTx: false, fullAuto: false, tune: false, running: false, aprs: false, aprsListenOn: false, aprsRfSeen: new Map() };
+// APRS on the shack (#868): the APRS window's listening card shows the shack's
+// own state (its aprs-state, mapped by lib/remote-bridge.js IN), and this
+// desktop watches the shack's APRS while the window is open, so the stations
+// its radio hears arrive and listening this desktop started stops when the
+// window closes (the shack's lib/aprs-echocat.js rule for any device).
+let _remoteAprsListen = null; // the window's 'aprs-listen' payload from the shack, or null
+let _remoteAprsWanted = false;
+function remoteAprsWatch(on) {
+  _remoteAprsWanted = !!on;
+  if (on) _remoteBridgeState.aprsRfSeen.clear(); // a fresh window store: the shack's snapshot fills it
+  if (isRemoteLinked()) remoteClient.sendRaw({ type: 'aprs-subscribe', on: !!on });
+}
+/** The listening card says a refusal made on this desktop (the link is down, the shack is too old). */
+function remoteAprsRefusedHere(sentence) {
+  if (aprsWin && !aprsWin.isDestroyed()) aprsWin.webContents.send('aprs-listen', AprsRemoteShack.refusedHere(sentence, _remoteAprsListen));
+}
 let _remoteJtcatMode = '';
 let _remoteSpectrumTimers = [];
 function remoteJtcatSubscribeSpectrum(on) {
@@ -7617,9 +7894,11 @@ function bridgeIpcToShack(channel, args, e) {
   const r = rule(args || [], _remoteBridgeState) || { drop: true };
   if (r.drop) return true;
   const fromSstv = !!(sstvPopoutWin && !sstvPopoutWin.isDestroyed() && e && e.sender === sstvPopoutWin.webContents);
+  const fromAprs = !!(aprsWin && !aprsWin.isDestroyed() && e && e.sender === aprsWin.webContents);
   if (r.refuse) {
     sendCatLog('[Remote] ' + r.refuse);
-    if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed() && e && e.sender === jtcatPopoutWin.webContents) jtcatPopoutWin.webContents.send('jtcat-qso-state', { phase: 'error', error: r.refuse });
+    if (fromAprs) remoteAprsRefusedHere(r.refuse);
+    else if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed() && e && e.sender === jtcatPopoutWin.webContents) jtcatPopoutWin.webContents.send('jtcat-qso-state', { phase: 'error', error: r.refuse });
     else { try { if (e && e.sender && !e.sender.isDestroyed()) e.sender.send('tune-blocked', r.refuse); } catch {} }
     return true;
   }
@@ -7630,6 +7909,7 @@ function bridgeIpcToShack(channel, args, e) {
     }
     // An SSTV send left on "Encoding..." with HALT showing is the failure to avoid.
     if (fromSstv) sstvPopoutWin.webContents.send('sstv-tx-status', { state: 'rx', error: REMOTE_NOT_LINKED_MSG });
+    if (fromAprs) remoteAprsRefusedHere(REMOTE_NOT_LINKED_MSG);
     return true;
   }
   if (r.photo) {
@@ -7662,8 +7942,13 @@ function bridgeInboundFromShack(msg) {
   const rule = RemoteBridge.IN[msg.type];
   if (!rule) return false;
   RemoteBridge.trackState(_remoteBridgeState, msg);
-  const out = rule(msg) || [];
+  const out = rule(msg, _remoteBridgeState) || [];
   for (const [ch, payload] of out) {
+    if (ch.startsWith('aprs-')) {
+      if (ch === 'aprs-listen') _remoteAprsListen = payload;
+      if (aprsWin && !aprsWin.isDestroyed()) aprsWin.webContents.send(ch, payload);
+      continue;
+    }
     if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) jtcatPopoutWin.webContents.send(ch, payload);
     if (js8PopoutWin && !js8PopoutWin.isDestroyed()) js8PopoutWin.webContents.send(ch, payload);
     if (ch.startsWith('sstv-') && sstvPopoutWin && !sstvPopoutWin.isDestroyed()) sstvPopoutWin.webContents.send(ch, payload);
@@ -7976,6 +8261,7 @@ function ensureRemoteClient() {
     _remoteClientAuthFail = null;
     if (target.kind === 'pass') { delete target.passSessionClosed; delete target.passEndReason; }
     remoteShackCw = { enabled: !!info.cwAvailable, paddle: !!info.cwPaddleAvailable, paddleReason: String(info.cwPaddleReason || '') };
+    remoteShackGrid = ShackGrid.shackGridFrom(info.settings);
     remoteShackVoice = { labels: [], filled: [] };
     remoteJs8Reset();
     _vfoLocked = !!info.vfoLocked;
@@ -7987,7 +8273,10 @@ function ensureRemoteClient() {
     // and turn the speaker button into "Operate from this device".
     remoteShackInfo = info.audioHeldBy ? { audioElsewhere: true, audioHolder: String(info.audioHeldBy.name || '') } : null;
     pushRemoteShackInfo();
-    if (_remoteScopeWanted) remoteClient.sendRaw({ type: 'scope-subscribe', on: true });
+    if (_remoteScopeWanted) remoteClient.sendRaw({ type: 'scope-subscribe', on: true, bins: YaesuScope.BINS });
+    // APRS (#868): this shack's aprs-state follows (an older shack sends none); watch again while the window is open.
+    _remoteBridgeState.aprs = false; _remoteBridgeState.aprsListenOn = false; _remoteAprsListen = null;
+    if (aprsWin && !aprsWin.isDestroyed()) remoteAprsWatch(true);
     if (sstvPopoutWin && !sstvPopoutWin.isDestroyed()) { _remoteSstvWindowOpen = false; remoteClient.sendRaw({ type: 'sstv-open' }); }
     if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed() && _remoteJtcatMode) {
       remoteClient.sendRaw({ type: 'jtcat-start', mode: _remoteJtcatMode });
@@ -8010,6 +8299,8 @@ function ensureRemoteClient() {
     // Tear the answerer down with the link — its peer is dead and the creds
     // are tied to this session. A fresh connect re-starts audio explicitly.
     stopRemoteClientAudio();
+    // APRS (#868): the shack stops listening a device it lost started; the card says the link is down until the shack answers again.
+    if (wasAuthed && _remoteAprsListen) { _remoteAprsListen = AprsRemoteShack.refusedHere(REMOTE_NOT_LINKED_MSG, _remoteAprsListen); aprsListenPush(); }
   });
   remoteClient.on('kicked', (info) => {
     // This PC stops driving the shack and does not reconnect by itself: the
@@ -8095,6 +8386,7 @@ function ensureRemoteClient() {
   // reached this desktop at all.
   remoteClient.on('message', (msg) => {
     if (bridgeInboundFromShack(msg)) return;
+    if (msg.type === 'settings-update' && msg.settings && typeof msg.settings.grid === 'string') remoteShackGrid = ShackGrid.shackGridFrom(msg.settings);
     // Skip Grid / Hound ride the shack's settings blob, not a JTCAT frame.
     if (msg.type === 'settings-update' && msg.settings && jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
       for (const key of ['jtcatSkipTx1', 'jtcatHoundMode']) {
@@ -8113,6 +8405,7 @@ function ensureRemoteClient() {
         for (const w of [win, vfoPopoutWin, jtcatPopoutWin, js8PopoutWin, sstvPopoutWin]) {
           if (w && !w.isDestroyed()) w.webContents.send('cat-swr-ratio', v);
         }
+        aprsWinMeter('cat-swr-ratio', v);
       }
       return;
     }
@@ -8362,6 +8655,9 @@ function tearDownRemoteClient() {
   remoteShackVoice = { labels: [], filled: [] };
   // A scope window left open goes back to this PC's own source (or says why not).
   if (_remoteScopeWanted) { _remoteScopeWanted = false; if (yaesuScopeWanted()) startYaesuScope(); }
+  // APRS (#868): the listening card goes back to this PC's own radio.
+  _remoteAprsWanted = false; _remoteBridgeState.aprs = false; _remoteBridgeState.aprsListenOn = false; _remoteAprsListen = null;
+  try { aprsListenPush(); } catch { /* the APRS state is declared further down; nothing to show yet */ }
   if (_remotePaddleHoldTimer) { clearInterval(_remotePaddleHoldTimer); _remotePaddleHoldTimer = null; }
   // The shack's VFO lock was mirrored here; this PC's radio starts unlocked.
   if (_vfoLocked) {
@@ -8833,7 +9129,7 @@ async function connectCat() {
   // link: a reconnecting shack must not let this PC open its own port.
   if (isRemoteMode()) {
     logConnectCatSkip('[CAT] Not connecting to the local radio: POTACAT is operating a REMOTE shack ' +
-      '(Settings > Connections). The rig in Settings > My Rigs is deliberately left alone — ' +
+      '(View > Remote Radios). The rig in Settings > Radio is deliberately left alone — ' +
       'switch back to this station to use it.');
     return;
   }
@@ -8894,7 +9190,7 @@ async function connectCat() {
     stopCatPortWatch();
     cat = null;
     _currentFreqHz = 0;
-    logConnectCatSkip('[CAT] No radio selected (None) — not connecting. Pick a rig in Settings > My Rigs or the CAT menu to connect.');
+    logConnectCatSkip('[CAT] No radio selected (None) — not connecting. Pick a rig in Settings > Radio or the CAT menu to connect.');
     sendCatStatus({ connected: false });
     return;
   }
@@ -8916,10 +9212,10 @@ async function connectCat() {
       target = settings.catTarget;
       sendCatLog('[CAT] No active rig was selected — auto-activating the only configured rig (' + (rig.name || rig.model || 'rig') + ').');
     } else if (rigsWithTarget.length > 1) {
-      sendCatLog('[CAT] Not connecting: ' + rigsWithTarget.length + ' rigs are configured but none is set ACTIVE. Pick one in Settings > My Rigs.');
+      sendCatLog('[CAT] Not connecting: ' + rigsWithTarget.length + ' rigs are configured but none is set ACTIVE. Pick one in Settings > Radio.');
       return;
     } else {
-      sendCatLog('[CAT] Not connecting: no rig is configured. Add one in Settings > My Rigs.');
+      sendCatLog('[CAT] Not connecting: no rig is configured. Add one in Settings > Radio.');
       return;
     }
   }
@@ -9024,20 +9320,20 @@ async function connectCat() {
     cat.on('port-moved', ({ from, to }) => {
       if (win && !win.isDestroyed()) {
         win.webContents.send('app-notice', {
-          message: `Radio's serial port moved: ${from} is gone, same USB device found on ${to} — update Settings > My Rigs`,
+          message: `Radio's serial port moved: ${from} is gone, same USB device found on ${to} — update Settings > Radio, Edit the rig, Serial Port`,
           warn: true, duration: 12000,
         });
       }
     });
     cat.on('frequency', catFrequencyHandler);
-    // Serial CAT port opened but the radio never echoes our tune — classically a
-    // Yaesu (FTDX1200/3000/5000) with menu "CAT RTS" enabled while we de-assert
-    // RTS, or a DTR/RTS-blocked USB interface. The port connects (so QRZ/logging
-    // look fine) but FA tune commands are silently dropped. Surface the fix.
+    // A network CAT link (this CatClient branch: TCP or K4 network) answers but
+    // never echoes our tune. No serial line is involved, so the cause is the
+    // program or radio at the other end, not a CAT RTS menu (#849; a direct-
+    // serial radio waiting for RTS is handled by the serial handshake trial).
     cat.on('tune-unconfirmed', (info) => {
       const fKhz = info && info.targetHz ? (info.targetHz / 1000).toFixed(1) : '?';
-      sendCatLog(`[CAT] Radio not responding to tune commands (${fKhz} kHz never echoed after ${info && info.attempts} tries). ` +
-        `Likely CAT RTS / DTR-RTS handshake — check the radio's CAT menu and the "Disable DTR/RTS on connect" setting.`);
+      sendCatLog(`[CAT] Radio not responding to tune commands (${fKhz} kHz never echoed after ${info && info.attempts} tries) on a network CAT link: ` +
+        `the program or radio at the other end did not take the frequency (no serial RTS/DTR is involved).`);
       if (win && !win.isDestroyed()) {
         win.webContents.send('cat-tune-unconfirmed', info || {});
       }
@@ -9237,10 +9533,12 @@ async function connectCat() {
     // CI-V pacing (CivPacer): 'auto' keeps the old burst timing and switches
     // to one command at a time only on a radio seen dropping replies (NA4DQ
     // IC-7300, 2026-11-05); the rig editor can force it either way.
-    codec = new CivCodec(model, (data) => transport.write(data), { pace: civPaceFor(target) });
+    codec = new CivCodec(model, (data) => transport.write(data), { pace: civPaceFor(target), learnAddress: true }); // sweep 3c: one radio on a USB link
     civPaceRemember(codec);
     cat = new RigController(model, transport, codec);
     cat._debug = true;
+    icomCivAddressLearn(cat, codec, transport, target); // sweep 3c: a wrong CI-V address is found and fixed, not a silent radio
+    icomUsbDataModAttach(cat, codec); // sweep 1a: DATA MOD to USB for a data session, put back after
     cat.on('log', sendCatLog);
     cat.on('status', sendCatStatus);
     cat.on('frequency', catFrequencyHandler);
@@ -9352,7 +9650,7 @@ async function connectCat() {
       const activeRig = (settings.rigs || []).find((r) => r && r.id === settings.activeRigId);
       if (activeRig && activeRig.catTarget && activeRig.catTarget.type === 'yaesu-lan' && !activeRig.audioSource) {
         const def = RigFamily.defaultAudioSourceFor('yaesu-lan');
-        if (settings.audioSource !== def) sendCatLog(`[SCU-LAN10] this rig has no audio source saved; using ${def === 'yaesu-lan' ? 'Yaesu LAN audio' : def} instead of the previous rig's "${settings.audioSource || 'none'}". Pick one in Settings > My Rigs.`);
+        if (settings.audioSource !== def) sendCatLog(`[SCU-LAN10] this rig has no audio source saved; using ${def === 'yaesu-lan' ? 'Yaesu LAN audio' : def} instead of the previous rig's "${settings.audioSource || 'none'}". Pick one in Settings > Radio, Edit the rig, Audio source for JTCAT / SSTV.`);
         activeRig.audioSource = def;
         settings.audioSource = def;
       }
@@ -9459,10 +9757,23 @@ async function connectCat() {
     cat.on('status', (s) => {
       if (!s || !s.connected || !enableTxAudio) return;
       setTimeout(() => {
-        prepareIcomNetworkDataMod(networkCat, target, model, dataModSession, networkCodec.radioAddress).catch((err) => {
+        prepareIcomNetworkDataMod(networkCat, target, model, dataModSession, networkCodec.radioAddress, icomDataNumberOf).catch((err) => {
           sendCatLog(`[Icom-Network-Audio] DATA MOD auto-LAN failed: ${err.message || err}`);
         });
       }, 700);
+    });
+    // #853: the DATA number the radio reports (it is what POTACAT re-selects). When
+    // the operator moves to another one (USB-D1 -> USB-D2), the LAN source moves with
+    // it: the old item goes back to the operator's value, the new one is set to LAN.
+    const icomDataNumberOf = () => (networkCodec._dataModeSeen ? networkCodec._dataByte : 0);
+    networkCodec.on('data-mode', ({ on, data }) => {
+      const act = _icomNetworkDataModActive;
+      if (!on || !data || !act || act.sessionId !== dataModSession || act.dataNumber === data || !enableTxAudio) return;
+      logIcomNetworkAudio(`[Icom-Network-Audio] the radio is on DATA${data} now (was DATA${act.dataNumber}): moving the LAN source to DATA${data} MOD`);
+      _icomNetworkDataModActive = null;
+      restoreIcomNetworkDataMod(`DATA${data} selected`).then(() =>
+        prepareIcomNetworkDataMod(networkCat, act.target, act.rigModel, dataModSession, act.liveCivAddr, icomDataNumberOf)
+      ).catch((err) => sendCatLog(`[Icom-Network-Audio] DATA MOD auto-LAN failed: ${err.message || err}`));
     });
     transport.on('audio-ready', () => {
       const msg = `[Icom-Network-Audio] audio stream ready${transport.txReady ? ' (RX/TX)' : ' (RX only)'}`;
@@ -9558,10 +9869,10 @@ async function connectCat() {
     let hs = resolveSerialHandshake(model, target);
     if (hs.source === 'model' && _serialHsTrial.get(target.path) === 'hardware') hs = { handshake: 'hardware', source: 'trial' };
     if (hs.handshake === 'hardware') {
-      sendCatLog(`[CAT] RTS/CTS flow control on (${hs.source === 'rig' ? 'set on this rig' : hs.source === 'trial' ? 'trying it: the radio did not answer with RTS held low' : 'the radio model default'}) — RTS stays asserted. If the radio transmits as soon as POTACAT connects, set My Rigs > RTS line to "Held low".`);
+      sendCatLog(`[CAT] RTS/CTS flow control on (${hs.source === 'rig' ? 'set on this rig' : hs.source === 'trial' ? 'trying it: the radio did not answer with RTS held low' : 'the radio model default'}) — RTS stays asserted. If the radio transmits as soon as POTACAT connects, set RTS line to "Held low" (Settings > Radio, Edit the rig).`);
       if (hs.source !== 'rig') armSerialHandshakeFallback(cat, target);
     } else if (hs.handshake === 'asserted') {
-      sendCatLog('[CAT] RTS line: asserted, no flow control (set on this rig) — RTS held high, DTR low. If the radio transmits as soon as POTACAT connects, set My Rigs > RTS line to "Held low".');
+      sendCatLog('[CAT] RTS line: asserted, no flow control (set on this rig) — RTS held high, DTR low. If the radio transmits as soon as POTACAT connects, set RTS line to "Held low" (Settings > Radio, Edit the rig).');
     }
     // The RTS/CTS trial is for the Kenwood-style Yaesus' CAT RTS menu. The
     // FT-817/818/857/897 legacy protocol has no handshake, and asserting RTS
@@ -9999,7 +10310,7 @@ function connectCluster() {
         if (r) {
           settings.clusterNodes = r.nodes;
           saveSettings(settings);
-          sendCatLog(`[cluster] ${r.from} is not answering; trying ${r.to} instead (picked for you — choose your own in Settings > Spot Sources)`);
+          sendCatLog(`[cluster] ${r.from} is not answering; trying ${r.to} instead (picked for you — choose your own in Settings > Spots)`);
           setImmediate(() => { disconnectCluster(); connectCluster(); });
         }
       }
@@ -11242,6 +11553,59 @@ const _varaLaunch = { hf: null, fm: null }; // { child, at } for a VARA POTACAT 
 // answering" until VARA was restarted (W7RTA IC-7300, 2026-10-24).
 const _patHoldsVara = { hf: null, fm: null };
 let _patVaraKind = null; // the VARA this session hands Pat: the one to clear above if Pat could not open it
+// ── closing the VARA POTACAT opened for an ECHOCAT session (#697) ──────────
+// Casey 2026-11-21: "close VARA we opened". The rule is
+// VaraProcess.shouldCloseVara; this is the glue. Looked at after a session
+// ends (with no retry pending), after the retry is skipped or cancelled, and
+// when an ECHOCAT device disconnects. A link still closing is looked at again
+// every few seconds, for up to two minutes.
+let _varaCloseTimer = null;
+let _varaCloseLooks = 0;
+function winlinkVaraCloseSoon(why, delayMs = 3000) {
+  if (!_varaLaunch.hf && !_varaLaunch.fm) return;
+  clearTimeout(_varaCloseTimer);
+  _varaCloseLooks = 0;
+  _varaCloseTimer = setTimeout(() => { winlinkVaraCloseCheck(why).catch((e) => winlinkLog(`VARA close check failed: ${e.message}`)); }, delayMs);
+}
+async function winlinkVaraCloseCheck(why) {
+  _varaCloseTimer = null;
+  for (const kind of VaraProcess.KINDS) {
+    const l = _varaLaunch[kind];
+    if (!l) continue;
+    const child = l.child;
+    const busyWord = (patClient && !winlinkSessionActive()) ? await winlinkPatStillBusy() : '';
+    const d = VaraProcess.shouldCloseVara({
+      launchedByUs: !!(child && child.pid && child.exitCode === null && child.signalCode === null),
+      startedFromEchocat: !!l.forEchocat,
+      sessionActive: winlinkSessionActive(),
+      retryPending: !!_winlinkRetry,
+      connected: !!busyWord,
+      transmitting: winlinkAnyTx(),
+    });
+    if (d.wait) {
+      if (++_varaCloseLooks <= 24 && !_varaCloseTimer) _varaCloseTimer = setTimeout(() => { winlinkVaraCloseCheck(why).catch(() => {}); }, 5000);
+      else if (_varaCloseLooks > 24) winlinkLog(`${VaraProcess.varaName(kind)} stays open: ${d.why} two minutes after ${why}`);
+      continue;
+    }
+    if (!d.close) continue;
+    const name = VaraProcess.varaName(kind);
+    const r = await VaraProcess.closeVaraWeOpened({
+      pid: child.pid,
+      run: (cmd, args) => new Promise((resolve) => { require('child_process').execFile(cmd, args, { timeout: 5000, windowsHide: true }, () => resolve()); }),
+      kill: () => child.kill(),
+      hasExited: () => child.exitCode !== null || child.signalCode !== null,
+      stillOurs: () => _varaLaunch[kind] === l && !winlinkSessionActive(),
+    });
+    if (r.how === 'not-ours') continue;
+    if (_varaLaunch[kind] === l) _varaLaunch[kind] = null;
+    if (r.closed) {
+      _patHoldsVara[kind] = null; // Pat's old command connection went with it; the next session opens a new one
+      winlinkLog(`closed the ${name} window POTACAT opened for the ECHOCAT session${r.how === 'killed' ? ' (it did not close by itself, so the process POTACAT started was ended)' : ''}`);
+    } else {
+      winlinkLog(`could not close the ${name} window POTACAT opened for the ECHOCAT session: close it on the shack PC`);
+    }
+  }
+}
 async function winlinkVaraReady(mode, { configured } = {}) {
   const kind = VaraProcess.kindOfMode(mode);
   const name = VaraProcess.varaName(kind);
@@ -11310,6 +11674,7 @@ async function winlinkVaraReady(mode, { configured } = {}) {
           child.on('exit', () => { if (_varaLaunch[kind] && _varaLaunch[kind].child === child) _varaLaunch[kind] = null; });
           child.unref();
           _varaLaunch[kind] = { child, at: Date.now() };
+          _varaLaunch[kind].forEchocat = _winlinkSessionFromEchocat; // #697: closed again after the ECHOCAT session, never otherwise
         } catch (e) {
           _winlinkSessionErrorKind = 'vara-not-answering';
           throw new Error(`${name} could not be started on the shack PC (${e.message}) — start it there yourself, with its PTT set to VOX`);
@@ -11348,6 +11713,8 @@ async function winlinkVaraReady(mode, { configured } = {}) {
     throw new Error(`${name} did not accept a new connection; is another program using it?`);
   }
   if (accept.tries > 1) winlinkLog(`${name}: took ${accept.waitedMs} ms to accept a new connection after the check`);
+  // A desktop session that uses a VARA POTACAT opened for the phone makes it the desktop's: it then stays open (#697).
+  if (_varaLaunch[kind] && !_winlinkSessionFromEchocat) _varaLaunch[kind].forEchocat = false;
   _patVaraKind = kind;
   _patHoldsVara[kind] = patProc; // Pat opens it this session and keeps it (cleared if Pat says it could not)
   winlinkLog(`${name} ready on ${where}${probe.version ? ' — ' + probe.version : probe.silent ? ' (answered the connection, no VERSION reply)' : ''}`);
@@ -11548,6 +11915,27 @@ async function winlinkCheckVoacapService() {
   _voacapService.why = v.why;
 }
 
+// #346: Pat's forms read the position from GPSd only; POTACAT answers as one,
+// with the centre of the Settings grid (no grid: no fix). 127.0.0.1 on a port
+// chosen at start; only POTACAT's own Pat config points at it.
+let _winlinkGpsd = null;
+async function startWinlinkGpsd() {
+  if (_winlinkGpsd) return;
+  const g = WinlinkGpsd.createGridGpsd({ getGrid: () => settings.grid });
+  try {
+    await g.start();
+    _winlinkGpsd = g;
+    winlinkLog(`forms: the grid's position for Pat's forms on 127.0.0.1:${g.port}`);
+  } catch (e) {
+    winlinkLog(`forms: no position for Pat's forms (${e.message})`);
+  }
+}
+function stopWinlinkGpsd() {
+  if (!_winlinkGpsd) return;
+  _winlinkGpsd.stop().catch(() => {});
+  _winlinkGpsd = null;
+}
+
 /** Write Pat's config for this launch / this session. Returns the varahf address written. */
 function writePatConfig({ varaAddr } = {}) {
   const p = winlinkPaths();
@@ -11569,6 +11957,8 @@ function writePatConfig({ varaAddr } = {}) {
       agwPort: _winlinkAgwPort(),
     },
     prediction: winlinkPredictionConfig(),
+    // #346: the Settings grid's centre for Pat's forms, from POTACAT's GPSd stand-in (lib/winlink-gpsd.js).
+    gpsdAddr: _winlinkGpsd ? `127.0.0.1:${_winlinkGpsd.port}` : '',
   });
   // Written owner-only where the OS honours it: it holds the Winlink password.
   fs.writeFileSync(p.config, JSON.stringify(cfg, null, 2), { mode: 0o600 });
@@ -11748,6 +12138,7 @@ async function connectWinlink() {
     return;
   }
   await startWinlinkShim();
+  await startWinlinkGpsd();
   await winlinkCheckVoacapService();
   try { writePatConfig(); }
   catch (e) { winlinkState.setPat({ ready: false, error: e.message }); winlinkLog(`could not write Pat's config: ${e.message}`); winlinkPush(); return; }
@@ -11801,6 +12192,7 @@ function winlinkRestartPat(why) {
       const port = await winlinkFreePort(WinlinkPat.PAT_DEFAULTS.httpPortRange);
       if (!port) throw new Error('no free local port for Pat (8590-8599)');
       _patHttpPort = port;
+      await startWinlinkGpsd();
       writePatConfig({ varaAddr: _patVaraAddr || undefined });
       await spawnPat();
       patClient = new WinlinkClient({ port: _patHttpPort });
@@ -11857,6 +12249,7 @@ function disconnectWinlink({ quit } = {}) {
   killDirewolf();
   killPat();
   stopWinlinkShim();
+  stopWinlinkGpsd();
   winlinkState.setPat({ ready: false, error: '' });
   if (!quit) winlinkPush();
 }
@@ -12128,11 +12521,13 @@ async function startWinlinkAudio({ modemRate = ModemAudioServerMod.MODEM_RATE } 
   // discard cost 44 of 50 ARDOP connect requests their leader (#289).
   srv.on('tx-note', (n) => { if (winlinkTxActive) _winlinkTxBurst.noteLevel(n.samples, n.peak, n.rate); });
   srv.on('tx-out', (mono24k) => { if (winlinkTxActive) winlinkDispatchOut(mono24k); });
+  srv.on('tx-out', (mono24k) => { if (_aprsRfKeyed && !winlinkTxActive) winlinkDispatchOut(mono24k); }); // APRS phase 7: a radio beacon's one frame takes the same road
   srv.on('prekey-sent', (d) => winlinkPreKeyNoted(d.ms));
   srv.on('tx-boost', (l) => winlinkLog(`modem transmit audio raised ${l.boostDb} dB — the modem plays about ${l.inDb} dBFS peak and full scale is the set RF power (the modem's own drive slider does the same)`));
   srv.on('tx-cut', (c) => { _winlinkTxCutMs = Math.max(_winlinkTxCutMs, Number(c.totalMs) || 0); winlinkLog(`modem audio: ${c.ms} ms of transmit audio cut — the sound card stopped taking it (${c.totalMs} ms this session)`); });
   srv.on('over-report', (o) => { const t = modemBridgeOverText({ gaps: Number(o.gaps) || 0, gapMs: Number(o.gapMs) || 0, droppedMs: Number(o.droppedMs) || 0 }); if (t) winlinkLog(t); });
-  srv.on('drained', () => winlinkLaneDrained());
+  srv.on('drained', () => { winlinkLaneDrained(); aprsRfLaneDrained(); });
+  srv.on('stats', (d) => { if (_aprsAudioMinute.running()) _aprsAudioMinute.noteStats(d); }); // APRS listening's audio line (lib/aprs-listen-audio.js)
   srv.on('exit', () => { if (winlinkAudio === srv) { winlinkAudio = null; if (winlinkSessionActive()) winlinkAbortSession('the modem audio process stopped', { kind: 'audio-stopped' }); } });
   try {
     await srv.listen(0);
@@ -12360,6 +12755,8 @@ function winlinkCableConfigured() {
 }
 function modemBridgeWanted() {
   if (winlinkIpAudioRoute() || isRemoteMode()) return false;
+  if (aprsRfInFlight()) return true;       // APRS phase 7: one beacon over the radio, playback for its few seconds
+  if (aprsListenWantsAudio()) return true; // APRS "Listen on my radio": receive audio only, no playback
   if (!winlinkState.snapshot().modes.some((m) => m.available && (m.id === 'ardop' || m.id === 'packet' || ((m.id === 'vara' || m.id === 'varafm') && winlinkCableConfigured())))) return false;
   return !!((winlinkPopoutWin && !winlinkPopoutWin.isDestroyed()) || _winlinkRemoteWatchers > 0 || winlinkSessionActive() || _winlinkRetry);
 }
@@ -12461,7 +12858,7 @@ function stopModemBridge(why) {
 /** Open or close the bridge to match demand; call whenever demand may have changed. */
 function winlinkSyncModemBridge() {
   const want = modemBridgeWanted();
-  if (want && modemBridge.state === 'off') startModemBridge({ playback: winlinkSessionActive() });
+  if (want && modemBridge.state === 'off') startModemBridge({ playback: winlinkSessionActive() || aprsRfInFlight() });
   else if (!want && modemBridgeWin && modemBridge.cable.state === 'off') stopModemBridge();
   else if (!want && modemBridge.state !== 'off' && modemBridgeWin) {
     // The cable side still runs (a VARA session): drop only the radio side.
@@ -12680,6 +13077,7 @@ function winlinkPreviewQsy({ dialKhz, mode } = {}) {
   const reach = WinlinkReach.gatewayReach(khz, winlinkReachOpts());
   if (!reach.ok) { winlinkLog(`gateway pick refused: ${reach.why}`); return { ok: false, error: reach.why, reason: 'out-of-reach' }; }
   winlinkNoteHandTune();
+  aprsListenYieldToWinlink('gateway pick'); // the modem and the radio are Winlink's now; APRS's saved place becomes the return point
   if (!_winlinkPreviewReturnTo && _currentFreqHz) _winlinkPreviewReturnTo = winlinkDialHere('before the gateway pick');
   // FM data the operator sets by hand (#128): the pick moves the dial and leaves the radio's mode alone.
   const pickPm = mode === 'packet' ? winlinkPacketRigMode(mode) : null;
@@ -12841,6 +13239,8 @@ function winlinkAgwMonitorStart(attempt = 0) {
       direwolfRingPush(`heard: ${text}`); // Report a Bug's Dire Wolf block: its stdout arrives late or never (#128)
       if (logged++ < 300) winlinkLog(`direwolf heard: ${text}`);
       else if (logged === 301) winlinkLog('direwolf heard: (more frames not logged)');
+      const linkNews = _winlinkPacketWatch ? _winlinkPacketWatch.takeNews() : ''; // #791: the gateway polling the fresh link keeps it
+      if (linkNews) winlinkLog(linkNews);
     },
     onClose: (code) => {
       if (_direwolfMonitor !== mon) return; // stopped by us
@@ -12949,6 +13349,1855 @@ async function spawnDirewolf() {
     setTimeout(() => fail(DirewolfProcess.agwTimeoutMessage({ port: _winlinkAgwPort(), seconds: 15, lastLines, lastProbe })), 15000);
   });
 }
+
+// ── APRS "Listen on my radio" (phase 2: 2 m; phase 3: 30 m; receive only) ────
+// Phase 3: a band chip per APRS band the rig has (lib/aprs-listen.js
+// bandChoices, from lib/rig-bands.js). 30 m is 10.1476 MHz in DIGU (JTCAT's
+// data mode, plain USB when its DATA-mode setting is off) and Dire Wolf's
+// MODEM 300 config; everything else below is the same for both bands.
+// One switch in the APRS window. On: the radio's place is saved (to disk,
+// first), the radio goes to the regional APRS frequency (lib/aprs-rf-frequency.js)
+// in FM or its FM data mode (the packet rule, lib/packet-rig-mode.js), and a
+// SECOND Dire Wolf config — MODEM 1200, NO PTT line (lib/direwolf-process.js
+// buildDirewolfAprsRxConfig) — decodes the radio's audio from the same modem
+// audio lane Winlink packet uses. Its AGW monitor's UI frames go through the
+// phase 1 parser to the window, marked as heard on the radio.
+// Off, the window closing, or quit: the radio goes back (lib/aprs-radio-return.js;
+// a crash is finished on the next start's first readback).
+// One audio user at a time: a Winlink gateway pick or radio session takes the
+// modem (aprsListenYieldToWinlink), and listening resumes once Winlink has
+// given the radio back. FT8 decoding ends it. The radio moving off the APRS
+// frequency or mode, whoever moved it, pauses it and the radio stays where it
+// was put (aprsListenMovedOff). Nothing here keys the radio.
+const aprsListen = {
+  on: false,          // the operator's switch
+  state: 'off',       // 'off' | 'starting' | 'listening' | 'paused' | 'refused'
+  band: '',           // '2m' | '30m': the band listened on (AprsListen.chooseBand)
+  bandWanted: '',     // the chip the operator picked this session ('' = the rig's default)
+  sentence: '',       // the one sentence when it cannot listen
+  freq: null,         // {hz, mhz, id, country, source}
+  heard: 0,           // frames heard this session
+  lastAt: 0,
+  note: '',           // the rig's setup line (lib/rig-setup-notes.js), verbatim
+  proc: null,         // its Dire Wolf
+  monitor: null,      // its AGW monitor
+  lane: null,         // the winlinkAudio lane Dire Wolf was started on
+  ownLane: null,      // the lane APRS itself started (it stops with listening, aprsReleaseLane)
+  laneWasWinlinks: false, // that start replaced Winlink's idle lane (Pat's shim), which comes back after
+  pausedAt: 0,
+  freeSince: 0,       // when Winlink last let go of the radio, for the resume
+  seq: 0,             // the start attempt; a stopped one never finishes a later one
+  restarts: 0,
+  unreportedData: '', // a data mode the radio reads back as FM (the FT-857's PKT)
+  devTimer: null,
+  watch: null,        // AprsListen.createMoveWatch while listening: has the radio moved off?
+  moved: null,        // {hz, mode, band}: listening paused because the radio moved (state 'refused', switch off)
+  movedPushedHz: 0,   // the dial the paused card last showed
+  movedPushedMode: '',
+};
+/** "Listen on my radio" has the radio, so Idle Mode keeps off it (lib/idle-radio-use.js). */
+function aprsListenHoldsRadio() { return IdleRadioUse.aprsListenHoldsRadio(aprsListen); }
+let _aprsCountries = null;
+let _aprsTickTimer = null;
+let _aprsLastReturnAt = 0;
+const _aprsAudioMinute = AprsListenAudio.createAudioMinute(); // one log line a minute while listening
+// Dev only (never in a packaged build): recorded Dire Wolf AGW frames stand in
+// for the radio and the modem, so the window can be checked with no radio.
+// POTACAT_APRS_DEV_REFUSE=ft8|winlink|noband|rejected|no-cat|no-freq shows that refusal.
+// POTACAT_APRS_DEV_BANDS=hf|vu|both|none stands in for the rig's bands (the chips).
+const APRS_DEV_FRAMES = (!app.isPackaged && process.env.POTACAT_APRS_DEV_FRAMES) ? String(process.env.POTACAT_APRS_DEV_FRAMES) : '';
+
+const aprsReturn = AprsRadioReturn.createRadioReturn({
+  load: () => settings.aprsListenReturn || null,
+  save: (m) => {
+    if (m) settings.aprsListenReturn = m; else delete settings.aprsListenReturn;
+    try { saveSettings(settings); } catch (e) { sendCatLog(`[APRS] could not save the radio's place: ${e.message}`); }
+  },
+  tune: (hz, mode) => {
+    _aprsLastReturnAt = Date.now();
+    try { tuneRadio(hz / 1000, mode || undefined, undefined, { origin: 'APRS listening: the radio goes back' }); } catch {}
+    // A radio that reports its packet mode as FM never left FM to POTACAT, so the
+    // mode is sent again by name (the Winlink return does the same, winlinkReturnModeByName).
+    const was = aprsListen.unreportedData;
+    aprsListen.unreportedData = '';
+    if (was && mode) setTimeout(() => { try { if (RadioTuneRoute.modeOverCat(radioTuneRoute()) && cat.setModeOnly) cat.setModeOnly(mode, hz, { noAnchor: true }); } catch {} }, 400);
+  },
+  log: (s) => sendCatLog('[APRS] ' + s),
+});
+
+/**
+ * The path tuneRadio() drives the radio on now (lib/radio-tune-route.js), from
+ * the same checks tuneRadio makes. On Flex Direct the CAT entry is SmartSDR's
+ * 5002 shim, dead without SmartSDR, while the API tunes the slice: asking
+ * `cat && cat.connected` refused APRS on a FLEX-8600M (2026-11-18).
+ */
+function radioTuneRoute() {
+  return RadioTuneRoute.tuneRoute({
+    tciTarget: !!tciRigTarget(),
+    tciLinked: tciRigLinked(),
+    wsjtxMode: !!settings.enableWsjtx,
+    smartSdrConnected: !!(smartSdr && smartSdr.connected),
+    smartSdrCanTune: !!(smartSdr && smartSdr.canTune),
+    smartSdrSelf: !!(smartSdr && smartSdr.mode === 'self'),
+    catConnected: !!(cat && cat.connected),
+    catTargetType: (settings.catTarget && settings.catTarget.type) || '',
+  });
+}
+
+function aprsLog(s) { sendCatLog('[APRS] ' + s); }
+function aprsWinSend(ch, data) {
+  if (aprsWin && !aprsWin.isDestroyed()) aprsWin.webContents.send(ch, data);
+  try { aprsEcho.tap(ch, data); } catch { /* phase 6: ECHOCAT devices see what the window sees */ }
+}
+/**
+ * The radio's meters for the APRS window (cat-smeter, cat-swr, cat-swr-ratio,
+ * cat-fwd-power: the values every window gets), and the radio beacon's peaks
+ * while it is keyed (lib/aprs-rf-meters.js createPeak). Window only: ECHOCAT
+ * devices have their own meter frames (remoteMeterPush).
+ */
+function aprsWinMeter(ch, v) {
+  if (_aprsRfPeak.active()) _aprsRfPeak.note(ch === 'cat-fwd-power' ? 'fwd' : ch === 'cat-swr-ratio' ? 'swr-ratio' : ch === 'cat-swr' ? 'swr' : '', ch === 'cat-swr' ? AprsRfMeters.swrFromWire(v) : v);
+  if (aprsWin && !aprsWin.isDestroyed()) aprsWin.webContents.send(ch, v);
+}
+/** The rig's bands for APRS (activeRigBands; a dev stand-in when POTACAT_APRS_DEV_BANDS is set). */
+function aprsRigBands() {
+  const dev = APRS_DEV_FRAMES ? String(process.env.POTACAT_APRS_DEV_BANDS || '') : '';
+  if (dev === 'hf') return RigBands.bandsForRig({}, 'IC-7300', null);
+  if (dev === 'vu') return RigBands.bandsForRig({}, 'IC-9700', null);
+  if (dev === 'both') return RigBands.bandsForRig({}, 'IC-705', null);
+  if (dev === 'none') return ['6m', '70cm'];
+  return activeRigBands();
+}
+function aprsListenPayload() {
+  const rigBands = aprsRigBands();
+  const bands = AprsListen.bandChoices(rigBands);
+  // Switched on: the band it is (or tried) listening on. Off: the chip it would start on.
+  const band = (aprsListen.on && aprsListen.band) ? aprsListen.band : (AprsListen.chooseBand(rigBands, aprsListen.bandWanted) || '');
+  return {
+    on: aprsListen.on, state: aprsListen.state, band, bands,
+    modeLabel: AprsListen.modeLabel(band),
+    mhz: aprsListen.on && aprsListen.freq ? aprsListen.freq.mhz : '', heard: aprsListen.heard, lastAt: aprsListen.lastAt, note: aprsListen.note,
+    // Off: where the radio is now, so the card can say where it goes back to when listening stops.
+    dialMhz: !aprsListen.on && Number(_currentFreqHz) > 0 ? (Number(_currentFreqHz) / 1e6).toFixed(3) : '',
+    dialMode: !aprsListen.on && Number(_currentFreqHz) > 0 ? String(_currentMode || '') : '',
+    // Paused because the radio moved: the card's title and line, from where the radio is now.
+    // ECHOCAT gets the same words in sentence (state 'refused', as when FT8 ends listening).
+    moved: aprsListenMovedView(band),
+    sentence: aprsListen.moved && !aprsListen.on ? AprsListen.movedSentence(aprsListenMovedPlace(band)) : aprsListen.sentence,
+  };
+}
+function aprsListenMovedPlace(band) {
+  const hz = Number(_currentFreqHz) > 0 ? Number(_currentFreqHz) : (aprsListen.moved && aprsListen.moved.hz) || 0;
+  const mode = Number(_currentFreqHz) > 0 ? String(_currentMode || '') : (aprsListen.moved && aprsListen.moved.mode) || '';
+  return { hz, mode, band: band || (aprsListen.moved && aprsListen.moved.band) || '' };
+}
+function aprsListenMovedView(band) {
+  if (!aprsListen.moved || aprsListen.on) return null;
+  return { title: AprsListen.MOVED_TITLE, line: AprsListen.movedLine(aprsListenMovedPlace(band)) };
+}
+function aprsListenPush() {
+  // Driving a remote shack, the card shows the shack's listening (#868), not this PC's.
+  if (isRemoteMode() && _remoteAprsListen) { if (aprsWin && !aprsWin.isDestroyed()) aprsWin.webContents.send('aprs-listen', _remoteAprsListen); }
+  else aprsWinSend('aprs-listen', aprsListenPayload());
+  aprsIgateSync();
+  aprsRfTimerSync();
+}
+
+/** The modem bridge holds the radio's sound card while APRS listens (modemBridgeWanted). */
+function aprsListenWantsAudio() {
+  return !APRS_DEV_FRAMES && aprsListen.on && (aprsListen.state === 'starting' || aprsListen.state === 'listening');
+}
+
+function aprsListenFrequency(band) {
+  if (!_aprsCountries) {
+    try { _aprsCountries = JSON.parse(fs.readFileSync(path.join(__dirname, 'assets', 'geo', 'countries.json'), 'utf8')); } catch { _aprsCountries = { features: [] }; }
+  }
+  return AprsRfFrequency.frequencyForBand(band || aprsListen.band || '2m', settings.grid, _aprsCountries);
+}
+
+function aprsSetupLine() {
+  try {
+    const rig = (settings.rigs || []).find((r) => r && r.id === settings.activeRigId);
+    if (!rig) return '';
+    return AprsListen.setupLine(rigSetupNotesFor({ model: rig.model, catTarget: rig.catTarget, radioType: rig.radioType, cwKeyLine: rig.cwKeyLine }), aprsListen.band);
+  } catch { return ''; }
+}
+
+/** Winlink holds the radio: a session, its retry, or a dial it will give back when the mail window closes. */
+function aprsWinlinkHoldsRadio() {
+  return winlinkSessionActive() || !!_winlinkPreviewReturnTo || !!_winlinkRetry;
+}
+
+/** A Winlink hold is a pause (the switch stays on and listening resumes after it); anything else is a refusal. */
+function aprsNotNow(no) {
+  if (no.reason === 'winlink') {
+    aprsListen.state = 'paused'; aprsListen.sentence = no.sentence; aprsListen.pausedAt = Date.now(); aprsListen.freeSince = 0;
+    aprsListenPush();
+    return;
+  }
+  aprsRefuse(no);
+}
+
+function aprsRefuse(no) {
+  aprsListen.state = 'refused';
+  aprsListen.sentence = no.sentence;
+  aprsLog(`not listening: ${no.sentence}`);
+  aprsListenPush();
+}
+
+function aprsDevRefusal(freq) {
+  const r = String(process.env.POTACAT_APRS_DEV_REFUSE || '');
+  if (!r) return null;
+  if (r === 'rejected') return { reason: 'rejected', sentence: AprsListen.rejectedSentence(freq || { hz: 144390000, mhz: '144.390' }) };
+  const f = { remote: false, catConnected: true, bands: aprsRigBands(), band: aprsListen.band, freq: freq || { hz: 144390000, mhz: '144.390' }, modemFound: true, ft8Decoding: false, winlinkHasModem: false };
+  if (r === 'ft8') f.ft8Decoding = true;
+  else if (r === 'winlink') f.winlinkHasModem = true;
+  else if (r === 'noband') f.bands = ['160m', '80m', '40m', '20m', '15m', '10m', '6m'];
+  else if (r === 'no-cat') f.catConnected = false;
+  else if (r === 'no-freq') f.freq = null;
+  return AprsListen.whyNot(f);
+}
+
+/** Wait for the radio's own readback to show the APRS frequency. */
+async function aprsWaitDial(hz, ms, seq) {
+  const until = Date.now() + ms;
+  while (Date.now() < until) {
+    if (seq !== aprsListen.seq) return false;
+    if (AprsListen.tuneAccepted(hz, _currentFreqHz, aprsListen.band)) return true;
+    await new Promise((r) => setTimeout(r, 200));
+  }
+  return AprsListen.tuneAccepted(hz, _currentFreqHz, aprsListen.band);
+}
+
+/** The modem audio lane at Dire Wolf's rate and the radio's receive audio on it. Receive only: no playback is asked for. */
+async function aprsAudioReady() {
+  if (!winlinkAudio || !winlinkAudio.port || winlinkAudio.modemRate !== DirewolfProcess.DIREWOLF_RATE) {
+    const replaced = !!(winlinkAudio && winlinkAudio.port);
+    await startWinlinkAudio({ modemRate: DirewolfProcess.DIREWOLF_RATE });
+    if (aprsListen.ownLane !== winlinkAudio) aprsListen.laneWasWinlinks = replaced || (!!aprsListen.ownLane && aprsListen.laneWasWinlinks);
+    aprsListen.ownLane = winlinkAudio; // APRS started this one: it stops with listening
+  } else if (aprsListen.ownLane !== winlinkAudio) {
+    aprsListen.ownLane = null; // someone else's lane (a Winlink packet session's): never ours to stop
+  }
+  if (!winlinkAudio || !winlinkAudio.port) throw new Error('The modem audio did not start');
+  if (settings.audioSource === 'smartsdr' && !(smartSdrAudio && smartSdrAudio.connected)) throw new Error('Flex Direct audio is not connected');
+  if (settings.audioSource === 'icom-network' && !_icomNetworkTransport) throw new Error('Icom Network audio is not connected');
+  if (!winlinkIpAudioRoute()) {
+    winlinkSyncModemBridge(); // modemBridgeWanted() is true now: the bridge opens the radio's input, no output
+    const ok = await modemBridgeReady(10000);
+    if (!ok) throw new Error(modemBridge.error || 'The radio\'s sound card did not open in time');
+  }
+  return winlinkAudio;
+}
+
+function aprsOnMonitorFrame(f) {
+  _aprsAudioMinute.noteFrame(); // every frame Dire Wolf decoded, for the minute's audio line
+  // Phase 4: the iGate takes every UI frame heard (its own rules decide), parsed or not.
+  const heard = AprsRfFrames.fromMonitorFrame(f);
+  if (heard) aprsIgateOfferRf(heard.line);
+  if (heard) { try { aprsMsgRadioHeard(heard.line); } catch (e) { aprsLog('message heard on the radio: ' + e.message); } } // A3: messages to us heard on the radio
+  const p = AprsRfFrames.packet(f, AprsParser.parse, aprsListen.band); // rf.band: the band listened on (ECHOCAT 2026-11-21)
+  if (!p) return;
+  aprsListen.heard++;
+  aprsListen.lastAt = Date.now();
+  if (aprsBatch) aprsBatch.push(p); else aprsWinSend('aprs-packets', [p]);
+  aprsListenPush();
+}
+
+function aprsStopModem() {
+  if (aprsListen.devTimer) { clearInterval(aprsListen.devTimer); aprsListen.devTimer = null; }
+  aprsListen.monitorToken = null; // a monitor closed on purpose is not lost (#841)
+  aprsListen.monitorLost = false;
+  if (aprsListen.monitor) { const m = aprsListen.monitor; aprsListen.monitor = null; try { m.close(); } catch {} }
+  if (aprsListen.proc) { const p = aprsListen.proc; aprsListen.proc = null; try { p.kill(); } catch {} }
+  aprsListen.lane = null;
+}
+
+/**
+ * Winlink still needs the modem audio lane: a session, its retry, or its modem
+ * running. Pat's shim alone does not (a session rebuilds the lane at its own
+ * rate); its idle lane is put back instead (aprsReleaseLane).
+ */
+function aprsLaneNeededByOthers() {
+  return !!(winlinkSessionActive() || _winlinkRetry || direwolfProc || ardopProc);
+}
+
+/**
+ * Listening stopped: the modem audio lane APRS started stops too, unless
+ * Winlink or another user still needs it (Casey 2026-11-19; lib/aprs-listen.js mayStopLane).
+ */
+function aprsReleaseLane() {
+  const own = aprsListen.ownLane;
+  const giveBack = aprsListen.laneWasWinlinks;
+  aprsListen.ownLane = null;
+  aprsListen.laneWasWinlinks = false;
+  if (!AprsListen.mayStopLane({ startedByAprs: !!own, isCurrent: !!own && own === winlinkAudio, othersNeed: aprsLaneNeededByOthers() })) return;
+  aprsLog('the modem audio stops with listening');
+  stopWinlinkAudio();
+  // APRS had replaced Winlink's idle lane (Pat's shim is up): Winlink gets its own back, as before.
+  if (giveBack && winlinkShim) startWinlinkAudio().catch((e) => aprsLog('the Winlink modem audio did not restart: ' + e.message));
+}
+
+/** Dire Wolf with the receive-only APRS config (no PTT line), and its AGW monitor. */
+async function aprsSpawnDirewolf(seq) {
+  aprsStopModem();
+  const bin = findDirewolf();
+  if (!bin.found) throw new Error(AprsListen.SENTENCES.noModem);
+  const lane = await aprsAudioReady();
+  if (seq !== aprsListen.seq) return;
+  const p = winlinkPaths();
+  fs.mkdirSync(p.dir, { recursive: true });
+  const confPath = path.join(p.dir, 'direwolf-aprs.conf');
+  const agw = DirewolfProcess.aprsAgwPort(_winlinkAgwPort());
+  fs.writeFileSync(confPath, DirewolfProcess.buildDirewolfAprsRxConfig({ mycall: settings.myCallsign, audioPort: lane.port, agwPort: agw, band: aprsListen.band || '2m' }));
+  const args = DirewolfProcess.buildDirewolfArgs({ configName: path.basename(confPath) });
+  aprsLog(`Dire Wolf for APRS: ${DirewolfProcess.APRS_RX_MODEM_LINES[aprsListen.band || '2m']}, receive only (no PTT line), audio on 127.0.0.1:${lane.port}, AGW ${agw}`);
+  const proc = spawn(bin.path, args, { cwd: p.dir, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+  aprsListen.proc = proc;
+  aprsListen.lane = lane;
+  let lines = 0;
+  const onLine = (chunk) => { for (const line of chunk.toString().split(/\r?\n/).filter(Boolean)) if (lines++ < 20) aprsLog('direwolf: ' + line); };
+  proc.stdout.on('data', onLine);
+  proc.stderr.on('data', onLine);
+  proc.on('error', (e) => { if (aprsListen.proc === proc) { aprsListen.proc = null; aprsLog('Dire Wolf did not start: ' + e.message); } });
+  proc.on('exit', (code) => { if (aprsListen.proc === proc) { aprsListen.proc = null; aprsLog(`Dire Wolf stopped (code ${code})`); } });
+  // Ready = the AGW port accepting (Dire Wolf's stdout can arrive late or never on Windows, #128).
+  const until = Date.now() + 15000;
+  let ready = false;
+  while (Date.now() < until) {
+    if (seq !== aprsListen.seq || aprsListen.proc !== proc) return;
+    if ((await DirewolfProcess.probeAgwPort({ port: agw })).ok) { ready = true; break; }
+    await new Promise((r) => setTimeout(r, 250));
+  }
+  if (seq !== aprsListen.seq || aprsListen.proc !== proc) return;
+  // #841: a port that never opened means nothing Dire Wolf decodes can reach POTACAT; say so, never "Listening".
+  if (!ready) {
+    aprsStopModem();
+    throw new Error(`Dire Wolf did not open its AGW port ${agw} for POTACAT within 15 s`);
+  }
+  // The monitor closing on its own (not by aprsStopModem) is lost: the tick starts the modem again.
+  const token = {};
+  aprsListen.monitorToken = token;
+  aprsListen.monitorLost = false;
+  aprsListen.monitor = DirewolfAgwMonitor.createAgwMonitor({
+    port: agw, onLog: aprsLog,
+    onFrame: (f) => aprsOnMonitorFrame(f),
+    onClose: (code) => {
+      if (aprsListen.monitorToken !== token) return;
+      aprsListen.monitorLost = true;
+      aprsLog(`the Dire Wolf monitor connection closed (${code}); the modem starts again`);
+    },
+  });
+}
+
+/** Recorded frames instead of a radio (dev only). */
+function aprsDevFeed() {
+  let frames = [];
+  try { frames = JSON.parse(fs.readFileSync(APRS_DEV_FRAMES, 'utf8')).frames.map((f) => ({ ...f, data: Buffer.from(f.dataHex, 'hex') })); } catch (e) { aprsLog('dev frames: ' + e.message); }
+  let i = 0;
+  const next = () => { if (i < frames.length) aprsOnMonitorFrame(frames[i++]); else { clearInterval(aprsListen.devTimer); aprsListen.devTimer = null; } };
+  next();
+  aprsListen.devTimer = setInterval(next, 700);
+}
+
+/** Our Flex slice now, for the receive filter guard (#840): null when no Flex is connected or its status has not arrived. */
+function aprsFlexSliceNow() {
+  if (!smartSdr || !smartSdr.connected) return null;
+  const idx = smartSdr.ourSliceIndex != null ? smartSdr.ourSliceIndex : getFlexSliceIndex();
+  if (idx == null || _flexSliceKvIndex !== idx) return null;
+  const kv = _flexSliceKv || {};
+  return { idx, lo: kv.filter_lo, hi: kv.filter_hi, mode: kv.mode || '', ritOn: kv.rit_on, ritHz: kv.rit_freq };
+}
+const aprsRxFilter = AprsRxFilter.createRxFilterGuard({
+  read: aprsFlexSliceNow,
+  set: (idx, lo, hi) => { if (smartSdr && smartSdr.connected) smartSdr.setSliceFilter(idx, lo, hi); },
+  log: (line) => aprsLog(line),
+});
+/**
+ * After the tune: wait for the slice's status in the listening mode (the radio
+ * reports the new mode's filter edges), then widen a filter that would cut a
+ * tone. The note line says what changed; RIT gets its sentence. No Flex: the
+ * width warning set at the start stays (lib/aprs-listen.js filterSentence).
+ */
+async function aprsRxFilterWiden(seq) {
+  if (!smartSdr || !smartSdr.connected) return;
+  const until = Date.now() + 1500;
+  while (Date.now() < until) {
+    if (seq !== aprsListen.seq) return;
+    const s = aprsFlexSliceNow();
+    if (s && AprsListen.modeFamily(s.mode) === 'usb') break;
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  if (seq !== aprsListen.seq) return;
+  const r = aprsRxFilter.widen(aprsListen.band);
+  if (r.action === 'unknown') return; // nothing usable read: the width warning stays
+  aprsListen.note = [aprsSetupLine(), r.sentence, r.rit].filter(Boolean).join(' ');
+  aprsListenPush();
+}
+
+async function aprsListenStart({ resume = false } = {}) {
+  const seq = ++aprsListen.seq;
+  aprsListen.on = true;
+  aprsListen.sentence = '';
+  aprsListen.restarts = 0;
+  aprsListen.moved = null; // turning it on again after the radio moved: the normal start, it tunes back to APRS
+  aprsListen.watch = null;
+  if (!resume) { aprsListen.heard = 0; aprsListen.lastAt = 0; }
+  const bands = aprsRigBands();
+  aprsListen.band = AprsListen.chooseBand(bands, aprsListen.bandWanted) || '';
+  const freq = aprsListen.band ? aprsListenFrequency() : null;
+  aprsListen.freq = freq;
+  aprsListen.noteBase = [aprsSetupLine(), AprsListen.filterSentence(aprsListen.band, settings.digitalFilterWidth)].filter(Boolean).join(' ');
+  aprsListen.sideband = '';
+  aprsListen.note = aprsListen.noteBase;
+  if (APRS_DEV_FRAMES) {
+    const no = aprsListen.band ? aprsDevRefusal(freq) : { reason: 'no-band', sentence: AprsListen.SENTENCES.noBand };
+    if (no) { aprsNotNow(no); return; }
+    aprsListen.state = 'listening';
+    aprsListenPush();
+    aprsDevFeed();
+    return;
+  }
+  // The radio is reachable when tuneRadio can tune it: Flex Direct, TCI or CAT.
+  const route = radioTuneRoute();
+  const no = AprsListen.whyNot({
+    remote: isRemoteMode(),
+    catConnected: route !== '',
+    bands,
+    band: aprsListen.band,
+    freq,
+    modemFound: DirewolfProcess.direwolfSupported(process.platform) && findDirewolf().found,
+    ft8Decoding: autoSstvBlockedByJtcat(),
+    winlinkHasModem: aprsWinlinkHoldsRadio(),
+  });
+  if (no) { aprsNotNow(no); return; }
+  aprsListen.state = 'starting';
+  aprsListenPush();
+  const pm = aprsListen.band === '2m' ? winlinkPacketRigMode('packet') : null;
+  const plan = AprsListen.listenModePlan(pm, aprsListen.band);
+  // The place before, from the route's own readback: on Flex Direct the slice
+  // (the dial is mirrored from the SmartSDR API, never the shim); an Icom's
+  // USB + DATA is saved as DIGU on CAT only (winlinkDialHere does the same).
+  const ptt = pttModeReport();
+  const icomData = !!(ptt && ptt.data && cat && cat._codec && cat._codec._dataReportAt);
+  const here = RadioTuneRoute.placeBefore({ route, freqHz: _currentFreqHz, mode: _currentMode, catDataForm: icomData ? PttModeSwap.dataFormOf(_currentMode || '') : '' });
+  // Over an idle session (Auto-SSTV, WSPR, ...) the place is where that session
+  // found the radio, not its idle frequency (Casey 2026-11-19, lib/idle-radio-use.js).
+  const home = IdleRadioUse.listenReturnPoint(here, { active: autoSstvActive, home: idleRxHome, last: idleRxLast, nowHz: _currentFreqHz, now: Date.now() });
+  if (home.from === 'idle') aprsLog(`the radio goes back to ${(home.freqHz / 1e6).toFixed(4)} MHz${home.mode ? ' ' + home.mode : ''} afterwards, where it was before Idle Mode`);
+  // The place is on disk before the radio moves.
+  aprsReturn.begin({ freqHz: home.freqHz, mode: home.mode, rigId: settings.activeRigId || null, listenHz: freq.hz }, () => {
+    aprsLog(`listening on ${freq.mhz} MHz ${plan.tuneMode || '(mode set by hand)'}${plan.dataMode ? ' then ' + plan.dataMode : ''}${freq.baud ? ', ' + freq.baud + ' baud' : ''} — ${freq.source}`);
+    tuneRadio(freq.hz / 1000, plan.tuneMode, undefined, { origin: 'APRS listening' });
+  });
+  const took = await aprsWaitDial(freq.hz, 4000, seq);
+  if (seq !== aprsListen.seq) return;
+  if (!took) {
+    aprsListen.on = false;
+    aprsReturn.end(freq.hz); // whatever it did take, the radio goes back
+    aprsRefuse({ reason: 'rejected', sentence: AprsListen.rejectedSentence(freq) });
+    return;
+  }
+  if (plan.dataMode && RadioTuneRoute.modeOverCat(route) && cat.setModeOnly) {
+    await new Promise((r) => setTimeout(r, 500));
+    if (pm && !pm.confirm) aprsListen.unreportedData = plan.dataMode;
+    try { cat.setModeOnly(plan.dataMode, freq.hz, { noAnchor: true }); } catch (e) { aprsLog('the data mode could not be set: ' + e.message); }
+  }
+  // 30 m on a Flex: a receive filter that does not pass 1450 to 1950 Hz is widened now and put back when listening stops (#840).
+  if (aprsListen.band === '30m') {
+    await aprsRxFilterWiden(seq);
+    if (seq !== aprsListen.seq) return;
+  }
+  try {
+    await aprsSpawnDirewolf(seq);
+  } catch (e) {
+    if (seq !== aprsListen.seq) return;
+    aprsLog('the modem did not start: ' + e.message);
+    aprsListenStop('the modem did not start');
+    aprsRefuse({ reason: 'no-modem', sentence: e.message === AprsListen.SENTENCES.noModem ? e.message : 'The modem did not start. The log has the reason.' });
+    return;
+  }
+  if (seq !== aprsListen.seq) return;
+  aprsListen.state = 'listening';
+  // From here a move off the APRS frequency or mode is the operator's (or a spot's, or the phone's): it pauses listening.
+  aprsListen.watch = AprsListen.createMoveWatch({ band: aprsListen.band, listenHz: freq.hz });
+  aprsListen.listeningSince = Date.now();
+  _aprsAudioMinute.start();
+  aprsListenPush();
+}
+
+/** Switch off, window closed, quit, or the modem failing. The radio goes back. */
+function aprsListenStop(why) {
+  const was = aprsListen.on || aprsListen.state !== 'off';
+  aprsListen.seq++;
+  aprsListen.on = false;
+  aprsListen.watch = null;
+  aprsListen.moved = null;
+  _aprsAudioMinute.stop();
+  aprsRfAbort(`listening stopped: ${why}`); // phase 7: a radio beacon in flight unkeys at once
+  aprsStopModem();
+  aprsReleaseLane();
+  aprsRxFilter.restore(why); // #840: before the radio goes back, while the slice is still in the listening mode
+  if (APRS_DEV_FRAMES) { aprsListen.state = 'off'; aprsListen.sentence = ''; aprsListenPush(); return; }
+  if (aprsListen.state === 'paused') {
+    // Winlink has the radio and gives it back itself (its return point is the place APRS saved).
+    aprsReturn.drop();
+  } else if (was && radioTuneRoute()) {
+    // The same route the listen start tuned on (Flex Direct included).
+    aprsReturn.end(_currentFreqHz);
+  }
+  if (was) aprsLog(`stopped (${why})`);
+  aprsListen.state = 'off';
+  aprsListen.sentence = '';
+  aprsListenPush();
+  try { winlinkSyncModemBridge(); } catch {}
+}
+
+/**
+ * A Winlink gateway pick or radio session takes the modem and the radio. APRS
+ * lets go without moving the radio: Winlink is about to tune it, and Winlink's
+ * own return point becomes the place APRS saved, so the radio ends up where the
+ * operator had it. Listening resumes once Winlink has let go (aprsListenTick).
+ */
+function aprsListenYieldToWinlink(why) {
+  if (!aprsListen.on || aprsListen.state === 'paused' || aprsListen.state === 'refused') return;
+  aprsRfAbort(`the Winlink ${why} needs the radio`); // phase 7
+  aprsListen.seq++;
+  aprsListen.watch = null; // Winlink is about to tune the radio: that is not the operator moving it
+  _aprsAudioMinute.stop();
+  aprsStopModem();
+  aprsRxFilter.restore(`the Winlink ${why} needs the radio`); // #840: the resume widens it again if it needs to
+  const m = aprsReturn.pending();
+  if (m && m.freqHz && !_winlinkPreviewReturnTo) _winlinkPreviewReturnTo = { freqHz: m.freqHz, mode: m.mode || '', from: 'before APRS listening' };
+  aprsListen.state = 'paused';
+  aprsListen.sentence = AprsListen.SENTENCES.winlink;
+  aprsListen.pausedAt = Date.now();
+  aprsListen.freeSince = 0;
+  aprsLog(`paused: the Winlink ${why} has the modem; listening resumes after it`);
+  aprsListenPush();
+}
+
+/**
+ * While listening: has the radio left the APRS frequency or mode? Any cause
+ * counts (a spot click, ECHOCAT, the VFO knob, another window); POTACAT's own
+ * tune to APRS is over before the watch exists, and an APRS radio beacon in
+ * flight never counts (lib/aprs-listen.js createMoveWatch). On air 2026-11-20
+ * a FLEX-8600M went from 30 m APRS to 10 m FT8 and 20 m SSB and the window
+ * kept saying "Listening on my radio" on 30 m for an hour.
+ */
+function aprsListenCheckMoved() {
+  if (APRS_DEV_FRAMES || !aprsListen.on || aprsListen.state !== 'listening' || !aprsListen.watch) return false;
+  const m = aprsListen.watch.check({ hz: _currentFreqHz, mode: _currentMode, rfInFlight: aprsRfInFlight() });
+  if (!m) { aprsListenSidebandNote(); return false; }
+  aprsListenMovedOff(m);
+  return true;
+}
+
+/**
+ * A 30 m radio on lower sideband hears none of the tones (#843): the note line
+ * says so while it lasts (lib/aprs-listen.js sidebandSentence), and goes when
+ * the radio reads back upper sideband.
+ */
+function aprsListenSidebandNote() {
+  // Readbacks settle (the data mode is set after the tune) before a sideband counts, as for a move.
+  if (Date.now() - (aprsListen.listeningSince || 0) < AprsListen.MOVED_GRACE_MS) return;
+  const sb = AprsListen.sidebandSentence(aprsListen.band, _currentMode);
+  if (sb === (aprsListen.sideband || '')) return;
+  aprsListen.sideband = sb;
+  aprsListen.note = [aprsListen.noteBase || '', sb].filter(Boolean).join(' ');
+  if (sb) aprsLog('the radio reads back ' + _currentMode + ' (lower sideband) while listening on 30 m: nothing will decode until its data mode is USB');
+  aprsListenPush();
+}
+
+/**
+ * The radio moved: listening pauses with the switch off and lets go of the
+ * radio. The return to the place saved before listening is DROPPED, not run:
+ * the operator moved on deliberately, so the radio stays where they put it.
+ * This is aprs-radio-return's own rule ("a radio the operator moved since is
+ * left where they put it", end() and onReadback() leave a radio off the APRS
+ * frequency alone); dropping the marker now also keeps a later readback or the
+ * next start from ever tuning it back. Turning listening on again is the
+ * normal start: it saves the new place and tunes to APRS.
+ */
+function aprsListenMovedOff(m) {
+  const listenMhz = aprsListen.freq ? aprsListen.freq.mhz : '';
+  aprsListen.seq++;
+  aprsListen.on = false;
+  aprsListen.watch = null;
+  _aprsAudioMinute.stop();
+  aprsStopModem();
+  aprsReleaseLane();
+  aprsRxFilter.restore('the radio moved'); // #840: put back only if the slice is still in the mode it was widened in
+  aprsReturn.drop();
+  aprsListen.moved = { hz: Number(m.hz) || 0, mode: String(m.mode || ''), band: aprsListen.band };
+  aprsListen.state = 'refused'; // switch off, the card says why (ECHOCAT: as when FT8 ends listening)
+  aprsListen.sentence = '';
+  aprsListen.movedPushedHz = Number(_currentFreqHz) || 0;
+  aprsListen.movedPushedMode = String(_currentMode || '');
+  aprsLog(AprsListen.movedLogLine({ hz: m.hz, mode: m.mode, listenMhz, why: m.why }));
+  aprsListenPush();
+  try { winlinkSyncModemBridge(); } catch {}
+}
+
+/** Every frequency readback: a move pauses listening; once paused, the card follows the radio. */
+function aprsListenOnDial() {
+  if (aprsListen.on) { aprsListenCheckMoved(); return; }
+  if (!aprsListen.moved) return;
+  const hz = Number(_currentFreqHz) || 0;
+  const mode = String(_currentMode || '');
+  if (Math.abs(hz - aprsListen.movedPushedHz) <= AprsListen.MOVED_TOL_HZ && mode === aprsListen.movedPushedMode) return;
+  aprsListen.movedPushedHz = hz;
+  aprsListen.movedPushedMode = mode;
+  aprsListenPush();
+}
+
+/** Every 2 s while the switch is on: resume after Winlink, end for FT8, pause when the radio moved, restart a modem that went away. */
+function aprsListenTick() {
+  if (!aprsListen.on || APRS_DEV_FRAMES) return;
+  if (aprsListen.state === 'paused') {
+    if (aprsWinlinkHoldsRadio()) { aprsListen.freeSince = 0; return; }
+    if (!aprsListen.freeSince) { aprsListen.freeSince = Date.now(); return; }
+    // Winlink's return tune lands 1.5 s after a session; wait past it, then listen again.
+    if (Date.now() - aprsListen.freeSince >= 4000) aprsListenStart({ resume: true }).catch((e) => aprsLog('resume failed: ' + e.message));
+    return;
+  }
+  if (aprsListen.state !== 'listening') return;
+  // Once a minute: the audio Dire Wolf gets, and what it decoded (lib/aprs-listen-audio.js).
+  const audioLine = _aprsAudioMinute.due({ mhz: aprsListen.freq ? aprsListen.freq.mhz : '' });
+  if (audioLine) aprsLog(audioLine);
+  if (aprsListenCheckMoved()) return; // a mode change, or a readback the dial hook has not seen
+  if (aprsRfInFlight()) return; // phase 7: the beacon's own Dire Wolf has the modem for its few seconds
+  if (autoSstvBlockedByJtcat()) {
+    aprsListenStop('FT8 started decoding');
+    aprsRefuse({ reason: 'ft8', sentence: AprsListen.SENTENCES.ft8 });
+    return;
+  }
+  // The lane was rebuilt under Dire Wolf (Pat restarting its shim), Dire Wolf exited, or its monitor connection closed (#841): start it again.
+  if (AprsListen.modemRestartWhy({ laneChanged: !!(aprsListen.lane && winlinkAudio !== aprsListen.lane), procAlive: !!aprsListen.proc, monitorLost: !!aprsListen.monitorLost })) {
+    if (aprsListen.restarts++ >= 3) { aprsListenStop('the modem kept stopping'); aprsRefuse({ reason: 'no-modem', sentence: 'The modem did not start. The log has the reason.' }); return; }
+    const seq = ++aprsListen.seq;
+    aprsSpawnDirewolf(seq).catch((e) => aprsLog('the modem did not restart: ' + e.message));
+  }
+}
+
+/** Every frequency readback: finish a return a crash, a quit or a lost command left (lib/aprs-radio-return.js). */
+function aprsRadioReturnOnDial(hz) {
+  if (!settings.aprsListenReturn || isRemoteMode() || !hz) return;
+  if (aprsListen.on) return; // listening, or paused under Winlink: not ours to move now
+  if (Date.now() - _aprsLastReturnAt < 3000) return; // give the last return time to land
+  setTimeout(() => aprsReturn.onReadback(hz, { rigId: settings.activeRigId || null, listening: aprsListen.on }), 0);
+}
+
+/**
+ * A band chip. Listening moves to the new band at once; the place saved
+ * before listening stays the place the radio goes back to (aprsReturn.begin
+ * keeps the first one). Paused under Winlink: the resume uses the new band.
+ */
+function aprsListenSetBand(band) {
+  if (AprsListen.BANDS.indexOf(band) < 0) return;
+  aprsListen.bandWanted = band;
+  const next = AprsListen.chooseBand(aprsRigBands(), band) || '';
+  const moving = aprsListen.on && (aprsListen.state === 'starting' || aprsListen.state === 'listening');
+  if (moving && next !== aprsListen.band) {
+    aprsLog(`band chip: ${aprsListen.band || '?'} -> ${next}`);
+    aprsRfAbort('the band changed'); // phase 7
+    aprsListen.seq++;
+    aprsStopModem();
+    aprsListenStart().catch((e) => { aprsLog('start failed: ' + e.message); aprsListenStop('start failed'); });
+    return;
+  }
+  if (aprsListen.state !== 'paused') { aprsListen.band = next; aprsListen.freq = null; }
+  aprsListenPush();
+}
+
+// Listen on open (Casey 2026-11-20): the APRS window starts receive-only
+// listening by itself when it opens, unless something has or is keying the
+// radio (lib/aprs-listen.js autoListenOnOpen decides; the Listen switch's own
+// refusals hold too). Once per window open: a reload is not an open, and once
+// the operator switches listening off it stays off until the window opens again.
+// It only tunes for receive; no beacon is sent and nothing transmits.
+let _aprsAutoListenPending = false;  // set when the window is created; the first 'aprs-ready' uses it
+let _aprsListenOffByOperator = false; // the operator switched listening off since the window opened
+/** Anything is keying the radio now (PTT, CAT, JTCAT, Winlink, the phone, a Flex, a tune). */
+function aprsAutoListenTransmitting() {
+  try { if (rigPresetTransmitting()) return true; } catch {}
+  if (aprsRfOtherTx()) return true;
+  if (_flexTxRf) return true;
+  return !!(jtcatTuneState && jtcatTuneState.active);
+}
+function aprsAutoListenOnOpen() {
+  const firstOpen = _aprsAutoListenPending;
+  _aprsAutoListenPending = false;
+  if (!firstOpen) return; // a reload of the open window, not an open
+  const dev = !!APRS_DEV_FRAMES;
+  const d = AprsListen.autoListenOnOpen({
+    firstOpen,
+    operatorOff: _aprsListenOffByOperator,
+    listening: !!aprsListen.on,
+    transmitting: aprsAutoListenTransmitting(),
+    rfInFlight: aprsRfInFlight(),
+    jtcatQso: jtcatQsoLive(),
+    radioOwner,
+    guestPass: aprsGuestPassOn(),
+    bandWanted: aprsListen.bandWanted,
+    remote: isRemoteMode(),
+    catConnected: dev || radioTuneRoute() !== '',
+    bands: aprsRigBands(),
+    freq: (band) => aprsListenFrequency(band),
+    modemFound: dev || (DirewolfProcess.direwolfSupported(process.platform) && findDirewolf().found),
+    ft8Decoding: autoSstvBlockedByJtcat(),
+    winlinkHasModem: aprsWinlinkHoldsRadio(),
+  });
+  if (!d.start) { aprsLog(`not listening on open (${d.reason}); the switch is off`); return; }
+  aprsLog(`listening on open on ${AprsListen.LABELS[d.band] || d.band} (receive only)`);
+  markUserActive(); // the same as the operator pressing the switch: an idle session lets go of the radio first
+  aprsListenSet(true);
+}
+
+function aprsListenSet(on) {
+  if (on) {
+    if (aprsListen.on && aprsListen.state !== 'refused') return;
+    if (!_aprsTickTimer) _aprsTickTimer = setInterval(aprsListenTick, 2000);
+    aprsListenStart().catch((e) => { aprsLog('start failed: ' + e.message); aprsListenStop('start failed'); });
+  } else {
+    aprsListenStop('switched off');
+  }
+}
+
+// ── APRS phase 4: the receive-only iGate ──────────────────────────────────────
+// "Report what I hear to APRS-IS (iGate)" (settings.aprsIgate, off by default):
+// while the radio listens to APRS (the window's switch or the APRS idle mode),
+// each packet Dire Wolf hears goes to APRS-IS through the one uplink under a
+// verified login. Every rule is lib/aprs-igate.js (receive only, never
+// internet to radio; no TCPIP/TCPXX/NOGATE/RFONLY; no generic queries; third
+// party unwrapped; ,qAO,<call> added and nothing else; no duplicate in 30 s).
+// Everything gated is in the log, the audit trail of what went out under the
+// operator's callsign. Small marks in the APRS window and Settings; no pop-ups.
+let aprsIgate = null;      // lib/aprs-igate.js createIgate, for this run (counts survive a stop)
+let _aprsIgateCall = '';
+/** A Guest Pass session is on this station: active, ending soon, or the owner holding the radio back. */
+function aprsGuestPassOn() {
+  const st = passEnforcement && passEnforcement.getState ? passEnforcement.getState() : 'idle';
+  return st !== 'idle' && st !== 'ended';
+}
+/** Why the iGate gates nothing now (a Guest Pass, Casey 2026-11-19), or null (lib/aprs-igate.js igatePause). */
+function aprsIgatePause() { return AprsIgate.igatePause({ guestPass: aprsGuestPassOn() }); }
+function aprsIgateWanted() {
+  return settings.aprsIgate === true && aprsListen.on &&
+    (aprsListen.state === 'starting' || aprsListen.state === 'listening' || aprsListen.state === 'paused') &&
+    !aprsIgatePause() && // a Guest Pass: nothing is gated, whoever started listening, and the uplink is let go
+    !aprsEcho.guestListening(); // phase 6: listening a Guest Pass started never gates under the owner's callsign
+}
+function aprsIgateSync() {
+  const want = aprsIgateWanted();
+  if (want !== _aprsUplinkUsers.has('igate')) aprsUplinkWant('igate', want);
+}
+/** One line Dire Wolf heard on the radio (TNC2). Gated only with the setting on and a verified login. */
+function aprsIgateOfferRf(line) {
+  if (!aprsIgateWanted() || !aprsUplink) return;
+  if (!aprsIgate || _aprsIgateCall !== aprsUplink.call) {
+    _aprsIgateCall = aprsUplink.call;
+    aprsIgate = AprsIgate.createIgate({ call: _aprsIgateCall, send: (l) => !!(aprsUplink && aprsUplink.send(l)), paused: () => aprsIgatePause() });
+  }
+  const r = aprsIgate.offer(line);
+  if (r.ok) sendCatLog('[APRS iGate] gated: ' + r.out);
+  aprsIgatePush();
+}
+function aprsIgateStatus() {
+  const login = AprsIgate.uplinkLogin(settings.myCallsign);
+  const st = aprsIgate ? aprsIgate.stats() : { gated: 0, lastAt: 0, lastFrom: '' };
+  const link = aprsUplink && _aprsUplinkUsers.has('igate') ? aprsUplink.status().state : 'stopped';
+  const pause = settings.aprsIgate === true ? aprsIgatePause() : null;
+  return {
+    on: settings.aprsIgate === true,
+    active: aprsIgateWanted(),
+    call: login.ok ? login.call : '',
+    sentence: settings.aprsIgate === true && !login.ok ? login.sentence : '',
+    link,               // 'stopped'|'connecting'|'connected'|'verified'|'unverified'|'waiting'
+    paused: pause ? pause.sentence : '', // "iGate paused: a guest has the radio" while a Guest Pass runs
+    gated: st.gated, lastAt: st.lastAt, lastFrom: st.lastFrom,
+  };
+}
+function aprsIgatePush() {
+  const s = aprsIgateStatus();
+  aprsWinSend('aprs-igate', s);
+  if (win && !win.isDestroyed()) { try { win.webContents.send('aprs-igate-status', s); } catch {} }
+}
+
+// ── APRS phase 5: the beacon over APRS-IS (never on the air) ──────────────────
+// The APRS window's Beacon section: "Beacon now" and a timer (Off, 10, 20 or
+// 30 min; lib/aprs-beacon.js holds it at 10 min or more and never sooner than
+// the interval after the last beacon). The packet is lib/aprs-beacon.js's
+// (CALL-10>APZPCT,TCPIP*:!pos symbol comment, approximate to the minute by
+// default) and goes through the one uplink under a verified login. With no
+// callsign, a placeholder, no position or no verified login, nothing is sent
+// and the window says why in one sentence. The timer runs only while the APRS
+// window is open. Settings: aprsBeaconSymbol, aprsBeaconComment,
+// aprsBeaconApprox, aprsBeaconIntervalMin, aprsBeaconLat, aprsBeaconLon.
+const aprsBeacon = { timer: null, releaseTimer: null, lastAt: 0, lastTryAt: 0, lastPacket: '', sentence: '', backAt: 0, sending: false, nextAt: 0, armedAt: 0, loaded: false };
+/** The last beacon's time comes back from settings once (a restart never beacons early). */
+function aprsBeaconLoad() {
+  if (aprsBeacon.loaded) return;
+  aprsBeacon.loaded = true;
+  aprsBeacon.lastAt = AprsBeacon.lastBeaconAt(settings, Date.now());
+}
+// The radio's GPS (lib/flex-gps.js): the latest state lib/smartsdr.js reported
+// from `sub gps all`, null with no Flex connected. Read only; it goes to the
+// APRS window and to Settings and nowhere else. The beacons read it through
+// lib/aprs-position.js when the operator picked "From my radio's GPS".
+let flexGps = null;
+function flexGpsPayload() {
+  const s = flexGps;
+  if (!s) return { installed: false, fix: false, lat: null, lon: null, grid: '', tracked: 0, visible: 0, status: '', line: '' };
+  return Object.assign({}, s, { line: FlexGps.statusLine(s) });
+}
+function flexGpsPush() {
+  const p = flexGpsPayload();
+  if (aprsWin && !aprsWin.isDestroyed()) { try { aprsWin.webContents.send('aprs-gps', p); } catch {} }
+  if (win && !win.isDestroyed()) { try { win.webContents.send('flex-gps', p); } catch {} }
+  // A fix can be home (the map's centre, the "near my home" beacon) as well as the GPS source.
+  const h = aprsHomePosition();
+  aprsBeaconPush();
+  if (AprsBeacon.beaconSettings(settings).source === 'gps' || (h && h.kind === 'gps')) { try { aprsRfPush(); } catch {} }
+}
+function flexGpsSet(s) {
+  flexGps = s || null;
+  flexGpsPush();
+}
+/**
+ * The operator's best known position, "home" (lib/aprs-beacon.js homePosition):
+ * the point picked on the map, else the radio's GPS fix, else the Settings
+ * grid's centre. { lat, lon, kind } or null. The APRS map centres on it and
+ * draws the operator there; it is never the ambiguous beacon position.
+ */
+function aprsHomePosition() {
+  const st = AprsBeacon.beaconSettings(settings);
+  return AprsBeacon.homePosition({ lat: st.lat, lon: st.lon, gps: flexGps, grid: settings.grid, gridToLatLon, source: st.source });
+}
+/** The precision that applies now: the saved choice, else the default (near, or grid4 with only a 4-character grid). */
+function aprsBeaconPrecision() {
+  const st = AprsBeacon.beaconSettings(settings);
+  return AprsBeacon.effectivePrecision({ precision: st.precision, approx: st.approx, source: st.source, home: aprsHomePosition() });
+}
+/** { ok, lat, lon, source, precision, approx } or { ok:false, reason, sentence } (lib/aprs-position.js). */
+function aprsBeaconPosition() {
+  const st = AprsBeacon.beaconSettings(settings);
+  // Position precision (the APRS settings panel) applies to every source; a grid never uses a picked point.
+  const precision = aprsBeaconPrecision();
+  const p = AprsPosition.beaconPositionFrom({ source: st.source, precision, gps: flexGps, lat: st.lat, lon: st.lon, grid: settings.grid, gridToLatLon });
+  // approx: every beacon (internet and radio) sends to the minute unless the precision is exact.
+  return p.ok ? Object.assign(p, { precision, approx: AprsBeacon.approxFor(precision) }) : p;
+}
+// APRS extra 1: "Add my activation to the beacon comment" (off by default).
+// While an activation runs, both beacons' comment starts with the park ref(s),
+// the frequency and the mode ("POTA US-1234 14.062 CW", lib/aprs-activation.js,
+// always within the 43-character comment). The window shows the comment that
+// will go out before anything is sent.
+// Dev only (POTACAT_APRS_DEV_FRAMES set, never packaged): POTACAT_APRS_DEV_ACT_FREQ=14062000:CW
+// stands in for the dial and mode, for screenshots with no radio.
+function aprsActivationNow() {
+  if (!activationRunning()) return null;
+  const refs = liveActivationMyRefs();
+  if (!refs.length) return null;
+  const dev = APRS_DEV_FRAMES ? /^(\d+):([A-Za-z0-9-]*)$/.exec(String(process.env.POTACAT_APRS_DEV_ACT_FREQ || '')) : null;
+  const f = dev ? { hz: Number(dev[1]), mode: dev[2] } : AprsActivation.activationFrequency({
+    dialHz: _currentFreqHz, radioMode: _currentMode,
+    jtcatMode: ft8Engine && ft8Engine._running ? String(ft8Engine._mode || 'FT8') : '',
+    listening: !!aprsListen.on, returnTo: settings.aprsListenReturn || null,
+  });
+  return { refs, hz: f.hz, mode: f.mode };
+}
+/** The comment both beacons send now: { comment, added, text, running }. */
+function aprsBeaconComment(st) {
+  const s = st || AprsBeacon.beaconSettings(settings);
+  return AprsActivation.beaconComment({ comment: s.comment, on: s.activation, activation: aprsActivationNow() });
+}
+function aprsBeaconState() {
+  aprsBeaconLoad();
+  const login = AprsIgate.uplinkLogin(settings.myCallsign);
+  return {
+    activation: aprsBeaconComment(),
+    settings: AprsBeacon.beaconSettings(settings), call: login.ok ? login.call : '',
+    // "My APRS SSID": the call the radio beacon goes out as (the internet one stays on the login, call).
+    rfCall: login.ok ? AprsRfBeacon.rfSource(settings.myCallsign, login.base, AprsBeacon.beaconSettings(settings).rfSsid) : '',
+    grid: String(settings.grid || '').toUpperCase(), ...(() => {
+      const p = aprsBeaconPosition();
+      return { position: p.ok ? { lat: p.lat, lon: p.lon, source: p.source, approx: p.approx } : null, positionSentence: p.ok ? '' : p.sentence };
+    })(),
+    // The precision that applies (the saved choice or the default), home (the map's centre and
+    // the operator's marker, never the ambiguous position) and the units for the words.
+    precision: aprsBeaconPrecision(), home: aprsHomePosition(), unit: settings.distUnit === 'km' ? 'km' : 'mi',
+    gps: flexGpsPayload(),
+    lastAt: aprsBeacon.lastAt, lastPacket: aprsBeacon.lastPacket, sentence: aprsBeacon.sentence, backAt: aprsBeacon.backAt,
+    sending: aprsBeacon.sending, timerOn: !!aprsBeacon.timer, nextAt: aprsBeacon.timer ? aprsBeacon.nextAt : 0,
+    // The 2 m radio timer: pending or not, when, and why not (30 m, window).
+    rfTimerOn: !!aprsRfTimer.timer, rfNextAt: aprsRfTimer.timer ? aprsRfTimer.nextAt : 0, rfTimerSentence: aprsRfTimer.sentence, rfBand: aprsListen.band || '',
+    rf: aprsRfPhoneState(), // the radio beacon for the phone's "Send over the radio" (2026-11-21)
+  };
+}
+function aprsBeaconPush() { aprsWinSend('aprs-beacon', aprsBeaconState()); }
+function aprsBeaconRefuse(sentence) {
+  aprsBeacon.sentence = sentence;
+  aprsLog('beacon not sent: ' + sentence);
+  aprsBeaconPush();
+}
+/** A one-off beacon lets the uplink go a few seconds after its write; the timer keeps it. */
+function aprsBeaconRelease() {
+  if (aprsBeacon.releaseTimer) clearTimeout(aprsBeacon.releaseTimer);
+  aprsBeacon.releaseTimer = setTimeout(() => {
+    aprsBeacon.releaseTimer = null;
+    if (!aprsBeacon.timer && !aprsBeacon.sending) aprsUplinkWant('beacon', false);
+  }, 5000);
+}
+async function aprsBeaconSend(why) {
+  if (aprsBeacon.sending) return;
+  aprsBeacon.lastTryAt = Date.now();
+  const st = AprsBeacon.beaconSettings(settings);
+  const pos = aprsBeaconPosition(); // the latest GPS fix when the source is the radio's GPS; a refusal with none
+  const b = AprsBeacon.buildBeacon({ settingsCall: settings.myCallsign, lat: pos.ok ? pos.lat : null, lon: pos.ok ? pos.lon : null, positionSentence: pos.ok ? '' : pos.sentence, symbol: st.symbol, comment: aprsBeaconComment(st).comment, approx: pos.ok ? pos.approx : true });
+  if (!b.ok) { aprsBeaconRefuse(b.sentence); return; }
+  if (!aprsIsServer()) { aprsBeaconRefuse('This test build plays recorded packets and sends nothing to APRS-IS.'); return; }
+  aprsBeacon.sending = true;
+  aprsBeacon.sentence = '';
+  aprsBeaconPush();
+  aprsUplinkWant('beacon', true);
+  const end = Date.now() + 10000;
+  while (Date.now() < end && !(aprsUplink && (aprsUplink.verified || aprsUplink.state === 'unverified'))) await new Promise((r) => setTimeout(r, 200));
+  aprsBeacon.sending = false;
+  const u = aprsUplink;
+  if (!u || !u.verified) {
+    // Unverified: APRS-IS takes nothing from this login, and nothing is sent.
+    aprsBeaconRefuse(u && u.state === 'unverified'
+      ? `APRS-IS did not verify the login for ${b.call}, so nothing was sent.`
+      : 'APRS-IS could not be reached, so nothing was sent.');
+    aprsBeaconRelease();
+    return;
+  }
+  if (!u.send(b.packet)) { aprsBeaconRefuse('APRS-IS could not be reached, so nothing was sent.'); aprsBeaconRelease(); return; }
+  aprsBeacon.lastAt = Date.now();
+  aprsBeacon.lastPacket = b.packet;
+  settings.aprsBeaconLastAt = aprsBeacon.lastAt; // kept: a restart never beacons early
+  try { saveSettings(settings); } catch (e) { aprsLog('could not save the beacon time: ' + e.message); }
+  sendCatLog(`[APRS beacon] sent (${why}): ${b.packet}`);
+  aprsBeaconRelease();
+  if (why !== 'timer') aprsBeaconSchedule(); // a manual beacon moves the next timed one back
+  aprsBeaconPush();
+}
+/**
+ * The timer: only while the APRS window is open; never under 10 min (lib/aprs-beacon.js).
+ * arm: an interval was just picked or the window just opened. Neither sends at
+ * once: the first timed beacon is one interval after the later of the last
+ * beacon and that moment (Casey 2026-11-19). "Beacon now" is unchanged.
+ */
+function aprsBeaconSchedule({ arm = false } = {}) {
+  aprsBeaconLoad();
+  if (arm) aprsBeacon.armedAt = Date.now();
+  if (aprsBeacon.timer) { clearTimeout(aprsBeacon.timer); aprsBeacon.timer = null; }
+  aprsBeacon.nextAt = 0;
+  const min = AprsBeacon.intervalMinutes(settings.aprsBeaconIntervalMin);
+  if (!aprsWin || aprsWin.isDestroyed() || !min) { aprsBeaconRelease(); aprsBeaconPush(); return; }
+  const last = Math.max(aprsBeacon.lastAt, aprsBeacon.lastTryAt);
+  const due = AprsBeacon.nextDueMs({ intervalMin: min, lastAt: last, armedAt: aprsBeacon.armedAt, now: Date.now() });
+  aprsBeacon.nextAt = Date.now() + due;
+  aprsUplinkWant('beacon', true);
+  aprsBeacon.timer = setTimeout(() => {
+    aprsBeacon.timer = null;
+    aprsBeaconSend('timer').catch((e) => aprsLog('beacon failed: ' + e.message)).finally(() => aprsBeaconSchedule());
+  }, due);
+  aprsBeaconPush();
+}
+/** The APRS window closed: the timer stops and the uplink is let go. */
+function aprsBeaconStop() {
+  if (aprsBeacon.timer) { clearTimeout(aprsBeacon.timer); aprsBeacon.timer = null; }
+  aprsBeacon.nextAt = 0;
+  if (!aprsBeacon.sending) aprsUplinkWant('beacon', false);
+}
+/** A change from the window: only the beacon's own keys, each cleaned (lib/aprs-beacon.js settingsPatch). */
+function aprsBeaconSet(patch) {
+  const o = AprsBeacon.settingsPatch(patch);
+  if (!Object.keys(o).length) { aprsBeaconPush(); return; }
+  Object.assign(settings, o);
+  saveSettings(settings);
+  if ('aprsBeaconLat' in o) aprsLog(o.aprsBeaconLat === null ? 'beacon position: the grid square centre' : 'beacon position: a point picked on the map');
+  if ('aprsRfSsid' in o) aprsLog('My APRS SSID for the radio beacon: ' + (o.aprsRfSsid === null ? 'as the Settings callsign' : o.aprsRfSsid === 0 ? 'none' : '-' + o.aprsRfSsid));
+  if ('aprsRfSsid' in o) aprsRfPush();
+  if ('aprsBeaconPrecision' in o) { aprsLog('beacon position precision: ' + o.aprsBeaconPrecision); aprsRfPush(); }
+  if ('aprsRadioMsgAutoRetry' in o) aprsLog('messages over the radio: automatic retries ' + (o.aprsRadioMsgAutoRetry ? 'on (2 m only)' : 'off: each retry is one press'));
+  if ('aprsRadioMsgAutoAck' in o) aprsLog('messages over the radio: automatic acks on the radio ' + (o.aprsRadioMsgAutoAck ? 'on (2 m only)' : 'off'));
+  if ('aprsRadioMsgAutoRetry' in o || 'aprsRadioMsgAutoAck' in o) { aprsMessagesPush(); aprsMessagesRun(); }
+  aprsBeacon.sentence = '';
+  if ('aprsRfBeaconIntervalMin' in o) {
+    aprsLog('radio timer: ' + (o.aprsRfBeaconIntervalMin ? 'every ' + o.aprsRfBeaconIntervalMin + ' min on 2 m while the APRS window is open and listening' : 'off'));
+    aprsRfTimerStop();
+    aprsRfTimerSchedule(); // picking never sends: the first timed beacon is one interval on
+  }
+  if ('aprsBeaconIntervalMin' in o) {
+    aprsLog('beacon timer: ' + (o.aprsBeaconIntervalMin ? 'every ' + o.aprsBeaconIntervalMin + ' min while the APRS window is open' : 'off'));
+    aprsBeaconSchedule({ arm: true });
+  }
+  aprsBeaconPush();
+}
+
+// ── APRS A1: messages over the internet ─────────────────────────────────────
+// The rules are lib/aprs-messenger.js (retries, acks, duplicates, unread) and
+// lib/aprs-message.js (the formats); this is glue. Messages go out as the
+// uplink's login (the Settings callsign with -10) through the one verified
+// APRS-IS uplink, which is wanted ('messages') only while a message is going
+// out or an ack is owed. Messages to any SSID of ours come in over the
+// read-only feed (its g/ filter, lib/aprs-is-feed.js), so they arrive while
+// the feed runs (the APRS window, or an ECHOCAT device watching APRS). Acks
+// for them go out at once, over the internet only. Nothing here keys a radio.
+// The conversations are kept per profile in aprs-messages.json.
+let aprsMsgr = null;
+let _aprsMsgTimer = null;
+let _aprsMsgSaveTimer = null;
+let _aprsMsgViewing = '';
+let _aprsMsgRelease = null;
+function aprsMessagesPath() {
+  return path.join(profileDir(settings.activeProfile || settings.myCallsign || 'default'), 'aprs-messages.json');
+}
+function aprsMessenger() {
+  const login = AprsIgate.uplinkLogin(settings.myCallsign);
+  const call = login.ok ? login.call : '';
+  if (aprsMsgr) { if (aprsMsgr.call !== call) aprsMsgr.setCall(call, login.ok ? login.base : ''); return aprsMsgr; }
+  let saved = null;
+  try { saved = JSON.parse(fs.readFileSync(aprsMessagesPath(), 'utf8')); } catch { /* none yet */ }
+  aprsMsgr = AprsMessenger.createMessenger({
+    myCall: call, myBase: login.ok ? login.base : '', state: saved,
+    canSend: () => !!(aprsUplink && aprsUplink.verified && aprsIsServer()),
+    send: (line) => {
+      if (!aprsUplink || !aprsUplink.verified || !aprsIsServer()) return false;
+      const ok = aprsUplink.send(line);
+      if (ok) sendCatLog('[APRS message] sent: ' + line);
+      return ok;
+    },
+    // A3: a message sent over the radio, and radio acks, leave this block by one door (the APRS A3 section).
+    sendRadio: (job) => aprsMsgRadioStart(job),
+    radioAutoRetry: () => aprsMsgRadioAuto('retry'),
+    radioAutoAck: () => aprsMsgRadioAuto('ack'),
+  });
+  return aprsMsgr;
+}
+function aprsMessagesSaveNow() {
+  if (_aprsMsgSaveTimer) { clearTimeout(_aprsMsgSaveTimer); _aprsMsgSaveTimer = null; }
+  if (!aprsMsgr) return;
+  const p = aprsMessagesPath();
+  try {
+    fs.mkdirSync(path.dirname(p), { recursive: true });
+    fs.writeFileSync(p + '.tmp', JSON.stringify(aprsMsgr.serialize()));
+    fs.renameSync(p + '.tmp', p);
+  } catch (e) { aprsLog('could not save the messages: ' + e.message); }
+}
+function aprsMessagesSave() {
+  if (_aprsMsgSaveTimer) return;
+  _aprsMsgSaveTimer = setTimeout(aprsMessagesSaveNow, 1000);
+}
+function aprsMessagesState() {
+  const m = aprsMessenger();
+  const login = AprsIgate.uplinkLogin(settings.myCallsign);
+  const link = !aprsIsServer() ? 'test-build' : !login.ok ? 'no-call'
+    : aprsUplink ? aprsUplink.state : 'stopped';
+  if (_aprsMsgViewing) m.markRead(_aprsMsgViewing);
+  return {
+    call: login.ok ? login.call : '', sentence: login.ok ? '' : login.sentence, link,
+    convos: m.list(), unread: m.unread(), viewing: _aprsMsgViewing, thread: _aprsMsgViewing ? m.thread(_aprsMsgViewing) : [],
+    radio: aprsMsgRadioInfo(), // A3: band, frequency, the call and the two default-off settings, for the compose box
+  };
+}
+function aprsMessagesPush() { aprsWinSend('aprs-messages', aprsMessagesState()); }
+/** Run the outbox now and again when tick() says; keep the uplink only while it is needed. */
+function aprsMessagesRun() {
+  const m = aprsMessenger();
+  if (_aprsMsgTimer) { clearTimeout(_aprsMsgTimer); _aprsMsgTimer = null; }
+  if (m.needsLink()) {
+    if (_aprsMsgRelease) { clearTimeout(_aprsMsgRelease); _aprsMsgRelease = null; }
+    aprsUplinkWant('messages', true);
+  }
+  const wake = m.tick();
+  if (m.lastTickChanged) { aprsMessagesSave(); aprsMessagesPush(); }
+  if (wake !== null) _aprsMsgTimer = setTimeout(aprsMessagesRun, Math.max(200, wake));
+  if (!m.needsLink() && _aprsMessagesWanted() && !_aprsMsgRelease) {
+    _aprsMsgRelease = setTimeout(() => { _aprsMsgRelease = null; if (!aprsMsgr || !aprsMsgr.needsLink()) aprsUplinkWant('messages', false); }, 10000);
+  }
+}
+function _aprsMessagesWanted() { return _aprsUplinkUsers.has('messages'); }
+/** A line from the read-only feed: a message, ack or rej for us, or nothing. */
+function aprsMessagesFeedLine(line) {
+  const r = aprsMessenger().receive(line, { via: 'internet' });
+  if (r.kind === 'message') sendCatLog(`[APRS message] from ${r.call}`);
+  if (r.changed) { aprsMessagesSave(); aprsMessagesPush(); }
+  if (r.kind === 'message' || r.kind === 'retry-copy') aprsMessagesRun(); // the ack goes out (or waits for the link)
+}
+function aprsMessageSend(d) {
+  const m = aprsMessenger();
+  if (!aprsIsServer()) return { ok: false, sentence: 'This test build plays recorded packets and sends nothing to APRS-IS.' };
+  const over = d && d.over === 'radio' ? 'radio' : 'internet';
+  if (over === 'radio') { const why = aprsMsgRadioRefusal(); if (why) return { ok: false, sentence: why }; } // A3: the same gate as the radio beacon
+  const r = m.compose(d && d.to, d && d.text, { over });
+  if (!r.ok) return { ok: false, sentence: r.sentence };
+  _aprsMsgViewing = r.msg.to;
+  aprsMessagesSave();
+  aprsMessagesRun();
+  aprsMessagesPush();
+  return { ok: true };
+}
+
+// ── APRS A2: message templates ──────────────────────────────────────────────
+// The list and the fill are lib/aprs-templates.js; the window fills the
+// compose box and nothing sends until Send (A1's path). The fields come from
+// the running activation (park, summit, frequency, mode, as the beacon's
+// activation comment), else the radio's dial and mode, and the Settings
+// callsign. My templates live in the profile's settings (aprsMsgTemplates).
+function aprsTemplatesContext() {
+  const act = aprsActivationNow();
+  const f = act || AprsActivation.activationFrequency({
+    dialHz: _currentFreqHz, radioMode: _currentMode,
+    jtcatMode: ft8Engine && ft8Engine._running ? String(ft8Engine._mode || 'FT8') : '',
+    listening: !!aprsListen.on, returnTo: settings.aprsListenReturn || null,
+  });
+  const refs = act ? act.refs : [];
+  const sig = (r) => String((r && r.sig) || 'POTA').toUpperCase();
+  const park = refs.find((r) => sig(r) !== 'SOTA');
+  const summit = refs.find((r) => sig(r) === 'SOTA');
+  return {
+    park: park ? String(park.ref).toUpperCase() : '', summit: summit ? String(summit.ref).toUpperCase() : '',
+    freq: AprsActivation.freqWord(f.hz), mode: AprsActivation.modeWord(f.mode),
+    call: String(settings.myCallsign || '').toUpperCase().trim(), running: !!act,
+  };
+}
+function aprsTemplatesPush() {
+  aprsWinSend('aprs-templates', { context: aprsTemplatesContext(), mine: AprsTemplates.normalizeMine(settings.aprsMsgTemplates) });
+}
+function aprsTemplatesSave(t) {
+  const r = AprsTemplates.saveMine(settings.aprsMsgTemplates, t || {});
+  if (!r.ok) return { ok: false, sentence: r.sentence };
+  settings.aprsMsgTemplates = r.list;
+  saveSettings(settings);
+  aprsTemplatesPush();
+  return { ok: true, tpl: r.tpl };
+}
+
+// ── APRS phase 7: ONE manual beacon over the radio (2 m and 30 m) ─────────────
+// "Beacon now (radio)" in the APRS window, next to the internet beacon. One
+// click transmits (Casey 2026-11-19: "I should just be able to do a 1-click
+// transmit"); the button itself reads band, frequency and the rig's power
+// before the click, and the line under it mode, path, call and air time. The
+// beacon never changes power (the window's TX power control is the rig's
+// own set-tx-power, outside this block). No timer: every RF beacon is a click.
+// The safer of the two designs, a config SWAP: listening runs the receive-only
+// Dire Wolf (no PTT line at all). For the beacon it is stopped, a transmit
+// Dire Wolf (buildDirewolfAprsTxConfig: PTT through a shim of its own) gets
+// the one frame over AGW, and the receive-only config comes back as soon as
+// the frame is sent, refused or cut. Outside those few seconds no process
+// exists that could key the radio for APRS, and inside them every key-down
+// still has to pass lib/aprs-rf-gate.js mayKey (window open, Listen on, a
+// real callsign, the dial on the APRS frequency, nothing else keyed, this
+// beacon in flight). lib/aprs-rf-beacon.js runs it and holds the cap;
+// lib/tx-limit.js (aprs2m / aprs30m) is the ceiling behind it.
+let aprsRf = null;                 // lib/aprs-rf-beacon.js createRfBeacon, made on first use
+let aprsRfShim = null;             // its own loopback rigctld shim, alive only during a beacon
+let _aprsRfKeyed = false;          // POTACAT holds PTT for the beacon now
+let _aprsRfUnkeyTimer = null;
+let _aprsRfUnkeyDone = null;       // the pending graceful unkey (the lane's 'drained' or the timer ends it)
+let _aprsRfTiming = null;          // TXDELAY / TXTAIL of the beacon in flight
+let _aprsRfKeyedAt = 0;            // when POTACAT keyed for the beacon (the on-air banner's elapsed time)
+let _aprsRfAirMs = 0;              // the beacon in flight's expected time on the air
+const APRS_RF_SHIM_PORTS = [4550, 4559];
+const APRS_RF_SENTENCE_MS = 20000; // a result or refusal line stays this long, then the live state shows again
+const aprsRfUi = { sentence: '', sentenceAt: 0, lastAt: 0, lastPacket: '', lastBand: '', lastPeak: null, lastHeldMs: 0 };
+let _aprsRfSending = false;        // a click is being acted on: a second click does nothing
+let _aprsRfPhoneAsk = false;       // the beacon in hand was asked for by the owner's phone (aprs-beacon-rf)
+const _aprsRfPeak = AprsRfMeters.createPeak(); // SWR and RF out peaks while the beacon is keyed
+function aprsRfSay(sentence) { aprsRfUi.sentence = sentence || ''; aprsRfUi.sentenceAt = Date.now(); }
+
+function aprsRfInFlight() { return !!(aprsRf && aprsRf.inFlight()); }
+
+// Sent means the radio transmitted (2026-11-19: the 8600M refused, the app
+// said sent). The existing readbacks feed the runner; no new poll.
+function aprsRfNoteRadioTx() {
+  if (aprsRf && aprsRf.inFlight() && _aprsRfKeyed) aprsRf.noteRadioTx(true);
+}
+function aprsRfNoteRadioRefusal(text) {
+  if (!aprsRf || !aprsRf.inFlight() || !_aprsRfKeyed || !AprsRfBeacon.isTxRefusalText(text)) return;
+  aprsRf.noteRadioRefusal({ message: text, interlockState: smartSdr ? smartSdr.interlockState : '', interlockReason: smartSdr ? smartSdr.interlockReason : '' });
+}
+/** Can the connected radio prove it transmitted (lib/aprs-rf-beacon.js txProofFor)? */
+function aprsRfTxProof() {
+  const flex = !!(smartSdr && smartSdr.connected && smartSdr.interlockState);
+  const m = (cat && cat._model) || {};
+  const catReadsPtt = !!(cat && cat.connected && cat._codec && typeof cat._codec.getPtt === 'function' && cat._codecTxSeenAt > 0 && m.pollDuringTx !== false);
+  return AprsRfBeacon.txProofFor({ flexInterlock: flex ? smartSdr.interlockState : '', catReadsPtt, catPollMs: m.pollIntervalMs || (m.protocol === 'rigctld' ? 500 : 1000) });
+}
+
+// 30 m: the beacon's narrow transmit passband (lib/aprs-rf-beacon.js
+// planTxPassband; 2026-11-19 an 8600M refused the 30 m beacon OUT_OF_BAND
+// with its TX filter at 100-3100 Hz). Only a Flex, where POTACAT can set and
+// read the TX filter; any other radio is left alone with one log line. The
+// Flex connection is chosen as for `transmit set dax`: transmit config is
+// per station, so the bound audio connection first (lib/smartsdr-audio.js).
+let _aprsRfTxConn = null;          // the Flex connection the narrow filter was sent on
+function aprsRfFlexTxConn() {
+  if (smartSdrAudio && smartSdrAudio.connected && typeof smartSdrAudio.setTxFilter === 'function' && smartSdrAudio.txFilter) return smartSdrAudio;
+  if (smartSdr && smartSdr.connected && typeof smartSdr.setTxFilter === 'function') return smartSdr;
+  return null;
+}
+/** The radio's reply in words, for the log. */
+function aprsRfTxReply(res) {
+  if (res.status != null) return `reply 0x${(res.status >>> 0).toString(16)}`;
+  return res.reason === 'no-reply' ? 'no reply' : (res.reason || 'no reply');
+}
+/** The beacon's TX filter plan for this band on the connected radio (lib/aprs-rf-beacon.js planTxPassband). */
+function aprsRfTxPlan(band) {
+  const conn = aprsRfFlexTxConn();
+  return { conn, plan: AprsRfBeacon.planTxPassband({ band, flex: conn ? { connected: true, filter: conn.txFilter, allowed: conn.txFilterChangesAllowed } : null }) };
+}
+/** The narrow filter the beacon will set ({lo,hi}), or null: for the gate and the confirmation line. */
+function aprsRfTxNarrow(band) {
+  try { const { plan } = aprsRfTxPlan(band); return plan.action === 'narrow' ? plan.target : null; } catch { return null; }
+}
+/** The Flex's interlock now, for the wait after the narrow filter (null: no Flex interlock to read). */
+function aprsRfTxInterlock() {
+  if (!smartSdr || !smartSdr.connected || !smartSdr.interlockState) return null;
+  return { state: smartSdr.interlockState, reason: smartSdr.interlockReason || '' };
+}
+/** null (nothing sent) or Promise<{saved, ok, reason, reply}> (lib/aprs-rf-beacon.js narrowTx). */
+function aprsRfNarrowTx(band) {
+  const { conn, plan } = aprsRfTxPlan(band);
+  if (plan.action === 'none') return null;
+  if (plan.action === 'unsupported') { aprsLog('beacon over the radio: ' + plan.log); return null; }
+  const { saved, target } = plan;
+  const dial = aprsListen.freq ? aprsListen.freq.hz : 0;
+  aprsLog(`beacon over the radio: transmit filter ${saved.lo}-${saved.hi} Hz narrowed to ${target.lo}-${target.hi} Hz for the ${AprsRfBeacon.BAND_LABEL[band]} beacon${dial ? ` (top edge ${aprsRfMhz(dial + target.hi)} MHz)` : ''}; it goes back after`);
+  _aprsRfTxConn = conn;
+  return Promise.resolve(conn.setTxFilter(target)).then((res) => {
+    if (!res.ok) aprsLog(`beacon over the radio: ${res.cmd || 'the narrow filter'}: ${aprsRfTxReply(res)}`);
+    return { saved, ok: !!res.ok, reason: res.reason, reply: aprsRfTxReply(res) };
+  });
+}
+function aprsRfRestoreTx(saved) {
+  const conn = _aprsRfTxConn && _aprsRfTxConn.connected ? _aprsRfTxConn : aprsRfFlexTxConn();
+  _aprsRfTxConn = null;
+  if (!conn) { aprsLog(`beacon over the radio: the Flex is not connected, so its transmit filter could not be put back to ${saved.lo}-${saved.hi} Hz`); return null; }
+  // One command with both edges (FlexLib _SetTXFilter): never an in-between filter.
+  const interlockAtStart = smartSdr && smartSdr.connected ? (smartSdr.interlockState || '') : '';
+  return Promise.resolve(conn.setTxFilter(saved)).then((res) => {
+    if (!res.ok) { aprsLog(`beacon over the radio: the transmit filter was not put back to ${saved.lo}-${saved.hi} Hz (${aprsRfTxReply(res)})`); return null; }
+    aprsLog(`beacon over the radio: transmit filter put back to ${saved.lo}-${saved.hi} Hz (reply 0); confirming from the radio`);
+    return aprsRfConfirmRestore(conn, saved, interlockAtStart);
+  });
+}
+/**
+ * After the put-back's zero reply, confirm it from something that refreshes
+ * (lib/aprs-rf-beacon.js confirmTxRestore): a fresh transmit status after
+ * `sub tx all`, or the interlock going back to OUT_OF_BAND when the saved
+ * filter is out of band on this dial. Never the cached lo=/hi= (stale after
+ * a filter set, on-air 2026-11-20). Not confirmed in 2 s: a warning only;
+ * the beacon is already over.
+ */
+function aprsRfConfirmRestore(conn, saved, interlockAtStart) {
+  const sinceSeq = typeof conn.refreshTxStatus === 'function' ? conn.refreshTxStatus() : (conn.txFilterSeq || 0);
+  const fit = AprsRfGate.narrowFits({ band: aprsListen.band, dialHz: _currentFreqHz, mode: _currentMode, filter: saved });
+  const outOfBandExpected = fit.loHz != null && !fit.fits;
+  return AprsRfBeacon.confirmTxRestore({
+    saved, sinceSeq, outOfBandExpected, interlockAtStart,
+    read: () => ({
+      statusSeq: conn.txFilterSeq || 0, filter: conn.txFilter,
+      interlockState: smartSdr && smartSdr.connected ? smartSdr.interlockState : '',
+      interlockReason: smartSdr && smartSdr.connected ? smartSdr.interlockReason : '',
+    }),
+    setTimer: setTimeout, now: Date.now,
+  }).then((c) => {
+    aprsLog(c.confirmed
+      ? `beacon over the radio: the radio confirmed the transmit filter is back at ${saved.lo}-${saved.hi} Hz (${c.by})`
+      : `beacon over the radio: warning: the radio did not confirm the transmit filter is back at ${saved.lo}-${saved.hi} Hz within 2 s (no fresh transmit status${outOfBandExpected ? ' and no OUT_OF_BAND interlock' : ''}); check it in SmartSDR`);
+    return c;
+  });
+}
+
+/** Something other than an APRS beacon is keying the radio, by name ('' = nothing). */
+function aprsRfOtherTx() {
+  try { if (jtcatAnyTxActive()) return 'JTCAT'; } catch {}
+  if (winlinkTxActive) return 'Winlink';
+  if (remoteServer && remoteServer._pttActive) return 'The phone';
+  return '';
+}
+
+/** The live state lib/aprs-rf-gate.js judges. */
+function aprsRfGateState() {
+  return {
+    remote: isRemoteMode(),
+    windowOpen: !!(aprsWin && !aprsWin.isDestroyed()),
+    // The owner's phone pressed "Send over the radio": that one beacon counts as the window (2026-11-21).
+    askedFrom: _aprsRfPhoneAsk ? 'phone' : 'window',
+    listenOn: aprsListen.on,
+    listenState: aprsListen.state,
+    band: aprsListen.band,
+    settingsCall: settings.myCallsign,
+    aprsHz: aprsListen.freq ? aprsListen.freq.hz : 0,
+    dialHz: _currentFreqHz,
+    radioOwner,
+    pttKeyed: !!_remoteTxState && !_aprsRfKeyed,
+    otherTx: aprsRfOtherTx(),
+    swrTripped: !!_swrTripped,
+    // The radio's own "not ready to transmit here", where it reports it (a Flex's interlock NOT_READY).
+    txInterlock: smartSdr && smartSdr.connected ? (smartSdr.interlockState || '') : '',
+    txInterlockReason: smartSdr && smartSdr.connected ? (smartSdr.interlockReason || '') : '',
+    // The beacon's narrow TX filter (30 m, Flex) and the live mode: OUT_OF_BAND that the narrow filter clears does not disable the button.
+    txNarrow: aprsListen.band ? aprsRfTxNarrow(aprsListen.band) : null,
+    dialMode: _currentMode,
+    modemFound: DirewolfProcess.direwolfSupported(process.platform) && findDirewolf().found,
+    inFlight: aprsRfInFlight(),
+  };
+}
+
+/**
+ * Dev only (never packaged, and only with POTACAT_APRS_DEV_FRAMES): a stand-in
+ * gate answer for screenshots. POTACAT_APRS_DEV_RF=ready shows the button
+ * enabled; listen, dial, call, owner, transmitting, notready or busy shows that
+ * refusal. A dev build never transmits: Send is refused.
+ */
+function aprsRfDevReadiness() {
+  const r = APRS_DEV_FRAMES ? String(process.env.POTACAT_APRS_DEV_RF || '') : '';
+  if (!r) return undefined;
+  const band = aprsListen.band || '30m';
+  const hz = aprsListen.freq ? aprsListen.freq.hz : (band === '2m' ? 144390000 : 10147600);
+  const base = { remote: false, windowOpen: true, listenOn: true, listenState: 'listening', band, settingsCall: settings.myCallsign,
+    aprsHz: hz, dialHz: hz, radioOwner: 'none', pttKeyed: false, otherTx: '', swrTripped: false, modemFound: true, inFlight: false };
+  const tweak = { ready: {}, listen: { listenOn: false }, dial: { dialHz: 7171000 }, call: { settingsCall: 'N0CALL' }, owner: { radioOwner: 'jtcat' }, transmitting: { otherTx: 'SSTV' }, notready: { txInterlock: 'NOT_READY' }, busy: { inFlight: true } }[r];
+  return AprsRfGate.readiness({ ...base, ...(tweak || {}) });
+}
+
+function aprsRfMhz(hz) { const n = Number(hz) || 0; return n >= 1e8 ? (n / 1e6).toFixed(3) : (n / 1e6).toFixed(4); }
+function aprsRfReadiness() {
+  const dev = aprsRfDevReadiness();
+  return dev !== undefined ? dev : AprsRfGate.readiness(aprsRfGateState());
+}
+
+/**
+ * The beacon as it would go out now: band, frequency, packet and air time.
+ * The button's words and the send use this one plan, so what the operator
+ * reads before the click is what goes out.
+ */
+function aprsRfPlan() {
+  const band = aprsListen.band || '30m';
+  const hz = aprsListen.freq ? aprsListen.freq.hz : (band === '2m' ? 144390000 : 10147600);
+  const st = AprsBeacon.beaconSettings(settings);
+  const pos = aprsBeaconPosition(); // the latest GPS fix when the source is the radio's GPS; a refusal with none
+  const b = AprsRfBeacon.buildRfBeacon({ settingsCall: settings.myCallsign, band, lat: pos.ok ? pos.lat : null, lon: pos.ok ? pos.lon : null, positionSentence: pos.ok ? '' : pos.sentence, symbol: st.symbol, comment: aprsBeaconComment(st).comment, approx: pos.ok ? pos.approx : true, ssid: st.rfSsid });
+  const timing = DirewolfProcess.packetTiming(settings);
+  const drainMs = winlinkIpAudioRoute() ? WINLINK_UNKEY_DRAIN_IP_MS : WINLINK_UNKEY_DRAIN_BRIDGE_MS;
+  const cap = b.ok ? AprsRfBeacon.capFor({ band, packet: b.packet, txDelayMs: timing.txDelayMs, txTailMs: timing.txTailMs, drainMs }) : null;
+  const powerW = Number(_currentTxPower) > 0 ? Math.round(Number(_currentTxPower) * 10) / 10 : 0;
+  return { band, bandLabel: AprsRfBeacon.BAND_LABEL[band], hz, mhz: aprsRfMhz(hz), mode: AprsListen.modeLabel(band), powerW, b, timing, cap, txNarrow: aprsRfTxNarrow(band) };
+}
+
+function aprsRfPayload() {
+  const no = aprsRfReadiness();
+  const band = aprsListen.band || '';
+  let preview = null;
+  try {
+    const p = aprsRfPlan();
+    if (p.b.ok) preview = AprsRfBeacon.rfPreview({ bandLabel: p.bandLabel, mhz: p.mhz, mode: p.mode, powerW: p.powerW, path: p.b.path, airMs: p.cap.airMs, source: p.b.source, txNarrow: p.txNarrow });
+  } catch { /* the line under the button stays empty */ }
+  return {
+    allowed: !no, reason: no ? no.reason : '', why: no ? no.sentence : '',
+    band, bandLabel: AprsRfBeacon.BAND_LABEL[band] || '', mode: AprsListen.modeLabel(band),
+    mhz: aprsListen.freq ? aprsRfMhz(aprsListen.freq.hz) : '',
+    powerW: Number(_currentTxPower) > 0 ? Math.round(Number(_currentTxPower)) : 0,
+    preview, sending: _aprsRfSending, phase: aprsRf ? aprsRf.state().phase : 'idle', keyed: _aprsRfKeyed,
+    // The meters the radio has reported (the VFO window's rule): no SWR reading = "No SWR from this radio".
+    meters: vfoMetersAvailable(), lastPeak: aprsRfUi.lastPeak,
+    sentence: aprsRfUi.sentence && Date.now() - aprsRfUi.sentenceAt < APRS_RF_SENTENCE_MS ? aprsRfUi.sentence : '', lastAt: aprsRfUi.lastAt, lastPacket: aprsRfUi.lastPacket, lastBand: aprsRfUi.lastBand,
+    // The window's on-air banner and its result line: key-down time, the expected air time, how long the last one held PTT.
+    keyedAt: _aprsRfKeyed ? _aprsRfKeyedAt : 0, airMs: _aprsRfAirMs, lastHeldMs: aprsRfUi.lastHeldMs,
+    txNarrow: band ? aprsRfTxNarrow(band) : null,
+  };
+}
+function aprsRfPush() { aprsWinSend('aprs-rf', aprsRfPayload()); }
+
+/**
+ * The click: one beacon, at once (no confirmation step). A click while one
+ * is being sent does nothing. Every condition is judged here, and again at
+ * the key-down.
+ */
+async function aprsRfSend() {
+  if (_aprsRfSending || aprsRfInFlight()) return; // one click, one beacon
+  _aprsRfSending = true;
+  try { await aprsRfTransmit(); } finally { _aprsRfSending = false; aprsRfTimerSchedule(); aprsRfPush(); } // a click moves the next timed one back
+}
+async function aprsRfTransmit(why = 'click') {
+  aprsRfSay('');
+  aprsRfPush();
+  if (APRS_DEV_FRAMES) { aprsRfSay('This test build plays recorded packets and transmits nothing.'); return; }
+  const no = AprsRfGate.readiness(aprsRfGateState());
+  if (no) { aprsRfSay(no.sentence); aprsLog('beacon over the radio not sent: ' + no.sentence); return; }
+  const c = aprsRfPlan();
+  const b = c.b;
+  if (!b.ok) { aprsRfSay(b.sentence); aprsLog('beacon over the radio not sent: ' + b.sentence); return; }
+  _aprsRfTiming = c.timing;
+  const cap = c.cap;
+  _aprsRfAirMs = cap.airMs;
+  aprsLog(`beacon over the radio: ${b.packet} on ${c.mhz} MHz ${c.mode}, rig power ${c.powerW ? c.powerW + ' W' : 'not reported'}, about ${(cap.airMs / 1000).toFixed(1)} s on air, cap ${(cap.capMs / 1000).toFixed(1)} s`);
+  const res = await aprsRfRunner().send({ packet: b, capMs: cap.capMs });
+  if (_aprsRfPeak.active()) aprsRfUi.lastPeak = _aprsRfPeak.end(); // it keyed: its peak SWR and RF out
+  // What the phone shows after its press: did the RADIO transmit (the 2026-11-19 interlock case).
+  aprsRfUi.lastResult = res.ok ? (res.confirmed ? 'confirmed' : 'unconfirmed') : 'not-sent';
+  if (res.ok && res.confirmed) {
+    // Only a beacon the radio reported transmitting counts as sent and gets a last-beacon time.
+    aprsRfUi.lastAt = Date.now(); aprsRfUi.lastPacket = b.packet; aprsRfUi.lastBand = c.band;
+    settings.aprsRfBeaconLastAt = aprsRfUi.lastAt; // kept: a restart never beacons early on the radio timer
+    try { saveSettings(settings); } catch (e) { aprsLog('could not save the radio beacon time: ' + e.message); }
+    sendCatLog(`[APRS beacon] sent over the radio${why === 'timer' ? ' by the 2 m timer' : ''} (${c.bandLabel}, ${c.mhz} MHz; the radio reported transmit): ${b.packet}`);
+    try { aprsEcho.beaconSent(b.source); } catch (e) { aprsLog('heard you: ' + e.message); } // 15 minutes on APRS-IS for who heard it (read only)
+  } else if (res.ok) {
+    aprsRfSay(res.sentence || AprsRfBeacon.SENT_SENTENCES.noReadback);
+    sendCatLog(`[APRS beacon] keyed but not confirmed (${c.bandLabel}, ${c.mhz} MHz): ${aprsRfUi.sentence}`);
+  } else {
+    aprsRfSay(res.sentence || 'The beacon was not sent.');
+    aprsLog('beacon over the radio not sent: ' + aprsRfUi.sentence);
+  }
+}
+
+// ── The radio beacon from the owner's phone (ECHOCAT ask 2026-11-21, Casey's go) ──
+// One press, one beacon: the window's own run (aprsRfSend), gate and caps. The
+// press counts as the window. With Listen off the desktop sets the radio up for
+// the beacon by starting listening on the band (the same tune, mode and filter,
+// with the same return), sends, and stops listening again so the radio goes
+// back where it was. A Guest Pass never gets here.
+const APRS_RF_PHONE_SETUP_MS = 20000; // how long the radio may take to be listening before the press is refused
+
+/** The band the phone's press would use: the one listening on, else the one asked for, else the chosen band. */
+function aprsRfPhoneBand(asked) {
+  if (aprsListen.on && aprsListen.band) return aprsListen.band;
+  return AprsListen.chooseBand(aprsRigBands(), asked || aprsListen.bandWanted || aprsListen.band || '2m') || '';
+}
+
+/** aprs-state.beacon.rf: may one press send now, and what it would send (band, MHz, mode, power, air time). */
+function aprsRfPhoneState() {
+  try {
+    const band = aprsRfPhoneBand('');
+    const f = band ? aprsListenFrequency(band) : null;
+    const s = { ...aprsRfGateState(), band, aprsHz: aprsListen.on && aprsListen.freq ? aprsListen.freq.hz : (f && f.hz) || 0 };
+    const r = AprsRfGate.phoneReadiness(s);
+    let airSeconds = 0;
+    if (aprsListen.on) { try { const p = aprsRfPlan(); if (p.cap) airSeconds = Math.round(p.cap.airMs / 100) / 10; } catch {} }
+    return {
+      ready: r.ready, setup: r.setup, sentence: r.ready ? '' : (r.sentence || ''),
+      band, mhz: s.aprsHz ? aprsRfMhz(s.aprsHz) : '', modeLabel: band ? AprsListen.modeLabel(band) : '',
+      powerW: Number(_currentTxPower) > 0 ? Math.round(Number(_currentTxPower)) : 0, airSeconds,
+      sending: _aprsRfSending || aprsRfInFlight(), lastAt: aprsRfUi.lastAt, lastResult: aprsRfUi.lastResult || '',
+      lastSentence: aprsRfUi.sentence && Date.now() - aprsRfUi.sentenceAt < APRS_RF_SENTENCE_MS ? aprsRfUi.sentence : '',
+    };
+  } catch (e) { return { ready: false, setup: false, sentence: 'The radio beacon is not available: ' + e.message }; }
+}
+
+/** Wait until listening is up on the APRS frequency, refused, or out of time. */
+function aprsRfPhoneWaitListening() {
+  return new Promise((resolve) => {
+    const until = Date.now() + APRS_RF_PHONE_SETUP_MS;
+    const look = () => {
+      if (!aprsListen.on || aprsListen.state === 'refused') return resolve({ ok: false, sentence: aprsListenPayload().sentence || 'The radio could not be set up for APRS.' });
+      if (aprsListen.state === 'listening') return resolve({ ok: true });
+      if (Date.now() > until) return resolve({ ok: false, sentence: 'The radio did not get to the APRS frequency in time, so nothing was sent.' });
+      setTimeout(look, 250);
+    };
+    look();
+  });
+}
+
+/** The phone's press. reply(refused) goes back to that device only. */
+async function aprsRfSendFromPhone({ clientId, band } = {}) {
+  const refuse = (reason, text) => {
+    aprsLog('radio beacon from the phone not sent: ' + text);
+    if (remoteServer && remoteServer.sendAprsTo) remoteServer.sendAprsTo(clientId, { type: 'refused', of: 'aprs-beacon-rf', reason, text });
+  };
+  if (_aprsRfSending || aprsRfInFlight() || _aprsRfPhoneAsk) return refuse('busy', AprsRfGate.SENTENCES.busy);
+  const st = aprsRfPhoneState();
+  if (!st.ready) return refuse('not-ready', st.sentence || 'The radio cannot send a beacon now.');
+  _aprsRfPhoneAsk = true;
+  let startedListen = false;
+  try {
+    if (!aprsListen.on) {
+      const b = aprsRfPhoneBand(band);
+      startedListen = true;
+      aprsLog(`radio beacon from the phone: setting the radio to ${AprsListen.LABELS[b] || b} APRS for the beacon; it goes back afterwards`);
+      if (b) aprsListenSetBand(b);
+      aprsListenSet(true);
+      const w = await aprsRfPhoneWaitListening();
+      if (!w.ok) return refuse('setup', w.sentence);
+    }
+    await aprsRfSend();
+    if (aprsRfUi.lastResult === 'not-sent') refuse('not-sent', aprsRfUi.sentence || 'The beacon was not sent.');
+  } finally {
+    _aprsRfPhoneAsk = false;
+    if (startedListen) aprsListenSet(false); // the radio back where it was (aprsListenStop's return)
+    try { aprsEcho.stateChanged(); } catch {}
+  }
+}
+
+/** Stop a beacon in flight now; PTT drops at once. Safe to call any time. */
+function aprsRfAbort(why) {
+  if (aprsRf && aprsRf.inFlight()) aprsRf.abort(why);
+}
+
+// ── APRS: the timed radio beacon, 2 m ONLY (Casey 2026-11-21) ────────────────
+// Off by default; Off, 10, 20 or 30 min, never under 10 (lib/aprs-rf-timer.js).
+// 30 m has no timer: unattended HF beaconing needs an FCC 97.221 check first.
+// The timed beacon is the click's own beacon (aprsRfTransmit: the gate, the
+// plan, the cap, the run); this is only WHEN. It never sends on a pick or an
+// open: whenever no timed beacon is pending, the timer starts counting now
+// (armedAt), one interval after the later of that and the last radio beacon.
+// Only while the APRS window is open. A round that is due while the radio is
+// not listening on 2 m, or is sending something else, or that the gate
+// refuses, is skipped, and the next is a full interval later.
+const aprsRfTimer = { timer: null, nextAt: 0, armedAt: 0, lastTryAt: 0, band: '', sentence: '' };
+function aprsRfTimerLastAt() {
+  return Math.max(aprsRfUi.lastAt || 0, AprsRfTimer.lastAtFrom(settings, Date.now()), aprsRfTimer.lastTryAt || 0);
+}
+function aprsRfTimerSchedule() {
+  const pending = !!aprsRfTimer.timer;
+  if (pending) { clearTimeout(aprsRfTimer.timer); aprsRfTimer.timer = null; }
+  aprsRfTimer.band = aprsListen.band || '';
+  const now = Date.now();
+  if (!pending) aprsRfTimer.armedAt = now; // never on a pick, an open or a return to 2 m: one interval on
+  const p = AprsRfTimer.plan({ intervalMin: settings.aprsRfBeaconIntervalMin, band: aprsRfTimer.band, windowOpen: !!(aprsWin && !aprsWin.isDestroyed()), lastAt: aprsRfTimerLastAt(), armedAt: aprsRfTimer.armedAt, now });
+  aprsRfTimer.sentence = p.on ? '' : (p.sentence || '');
+  if (!p.on) { aprsRfTimer.nextAt = 0; return; }
+  aprsRfTimer.nextAt = now + p.dueMs;
+  aprsRfTimer.timer = setTimeout(aprsRfTimerDue, p.dueMs);
+}
+/** The radio's band changed (listening started, stopped or moved): plan again. */
+function aprsRfTimerSync() {
+  if ((aprsListen.band || '') !== aprsRfTimer.band) aprsRfTimerSchedule();
+}
+function aprsRfTimerStop() {
+  if (aprsRfTimer.timer) { clearTimeout(aprsRfTimer.timer); aprsRfTimer.timer = null; }
+  aprsRfTimer.nextAt = 0;
+}
+async function aprsRfTimerDue() {
+  aprsRfTimer.timer = null;
+  aprsRfTimer.lastTryAt = Date.now(); // a skipped or refused round still waits a full interval
+  const skip = AprsRfTimer.dueCheck({ band: aprsListen.band, listenOn: aprsListen.on, listenState: aprsListen.state, busy: _aprsRfSending || aprsRfInFlight() });
+  if (skip) {
+    aprsLog('radio timer: this round skipped: ' + skip.sentence);
+  } else {
+    _aprsRfSending = true;
+    try { await aprsRfTransmit('timer'); } catch (e) { aprsLog('radio timer: ' + e.message); } finally { _aprsRfSending = false; aprsRfPush(); }
+  }
+  aprsRfTimerSchedule();
+  aprsBeaconPush();
+}
+
+/** POTACAT's key-down for the beacon: the same dispatcher, guards and modem audio road as Winlink packet. */
+function aprsRfKey() {
+  const band = aprsListen.band;
+  const icom = detectRigType() === 'icom' || (getActiveRigModel()?.brand === 'Icom');
+  // 2 m: the packet rule (FM or the radio's FM data mode, set when listening started). 30 m: DIGU as listening set it, never swapped.
+  const pttMode = band === '2m' ? PacketRigMode.keyDownOpts({ icom, resolved: winlinkPacketRigMode('packet') }) : { forceDataMode: false, noDataSwap: true };
+  if (settings.audioSource === 'icom-network') icomNetworkVoiceTx(true, 'APRS');
+  let keyed = false;
+  try { keyed = handleRemotePtt(true, { audio: true, ...pttMode, emission: 'DATA', txKind: AprsRfBeacon.TX_KIND[band] || 'aprs30m' }) !== false; }
+  catch (e) { aprsLog('beacon over the radio: PTT failed: ' + e.message); keyed = false; }
+  if (!keyed) {
+    if (winlinkAudio) winlinkAudio.key(false);
+    if (settings.audioSource === 'icom-network') icomNetworkVoiceTx(false, 'APRS');
+    return false;
+  }
+  _aprsRfKeyed = true;
+  _aprsRfPeak.start();
+  _aprsRfKeyedAt = Date.now();
+  modemBridgeOver(true);
+  const saved = settings.winlinkModemTxGain && Number(settings.winlinkModemTxGain.packet);
+  if (winlinkAudio) winlinkAudio.key(true, { seedGain: saved >= 1 && saved <= 8 ? saved : 1, bridge: !winlinkIpAudioRoute() });
+  return true;
+}
+
+/** PTT off: after the frame's audio has played (Dire Wolf's TXTAIL covers part of it), or at once. */
+function aprsRfUnkey(now) {
+  return new Promise((resolve) => {
+    const off = () => {
+      if (_aprsRfUnkeyTimer) { clearTimeout(_aprsRfUnkeyTimer); _aprsRfUnkeyTimer = null; }
+      const pending = _aprsRfUnkeyDone;
+      _aprsRfUnkeyDone = null;
+      if (_aprsRfKeyed) {
+        _aprsRfKeyed = false;
+        if (_aprsRfKeyedAt) aprsRfUi.lastHeldMs = Date.now() - _aprsRfKeyedAt;
+        try { handleRemotePtt(false); } catch {}
+      }
+      if (winlinkAudio) winlinkAudio.key(false);
+      modemBridgeOver(false);
+      if (settings.audioSource === 'icom-network') icomNetworkVoiceTx(false, 'APRS');
+      if (pending && pending !== off) pending();
+      resolve();
+    };
+    if (now || !_aprsRfKeyed) { off(); return; }
+    const tail = _aprsRfTiming ? _aprsRfTiming.txTailMs : DirewolfProcess.DIREWOLF_DEFAULTS.txTailMs;
+    _aprsRfUnkeyDone = off;
+    if (winlinkLaneDrains()) {
+      winlinkAudio.endOver({ leaveMs: DirewolfProcess.packetUnkeyLeaveMs(tail) });
+      _aprsRfUnkeyTimer = setTimeout(off, WINLINK_UNKEY_DRAIN_BRIDGE_MS + WINLINK_LANE_DRAIN_BACKSTOP_MS); // the beacon's cap cuts this sooner
+    } else {
+      _aprsRfUnkeyTimer = setTimeout(off, DirewolfProcess.packetUnkeyDrainMs(winlinkIpAudioRoute() ? WINLINK_UNKEY_DRAIN_IP_MS : WINLINK_UNKEY_DRAIN_BRIDGE_MS, tail));
+    }
+  });
+}
+/** The bridge has played the beacon's last sample. */
+function aprsRfLaneDrained() { if (_aprsRfUnkeyDone) _aprsRfUnkeyDone(); }
+
+/** The modem lane with transmit: on a sound-card rig the bridge opens the radio's output for the beacon. */
+async function aprsRfAudioReady() {
+  const lane = await aprsAudioReady();
+  if (!winlinkIpAudioRoute() && !modemBridge.playback) {
+    modemBridgePlayback(true);
+    const ok = await modemBridgeReady(8000);
+    if (!ok || !modemBridge.playback) throw new Error(modemBridge.error || 'The radio\'s sound card did not open for transmit');
+  }
+  return lane;
+}
+
+/** The transmit Dire Wolf for one beacon: its config, its process and an AGW socket to hand it the frame. */
+async function aprsRfStartModem({ shimPort }) {
+  aprsStopModem(); // the receive-only Dire Wolf goes; this one stands in for a few seconds
+  const bin = findDirewolf();
+  if (!bin.found) throw new Error(AprsListen.SENTENCES.noModem);
+  const lane = await aprsRfAudioReady();
+  const p = winlinkPaths();
+  fs.mkdirSync(p.dir, { recursive: true });
+  const confPath = path.join(p.dir, 'direwolf-aprs-tx.conf');
+  const agw = DirewolfProcess.aprsTxAgwPort(_winlinkAgwPort());
+  const t = _aprsRfTiming || DirewolfProcess.packetTiming(settings);
+  const band = aprsListen.band;
+  const source = AprsRfBeacon.buildRfBeacon({ settingsCall: settings.myCallsign, band, lat: 0, lon: 0, ssid: AprsBeacon.beaconSettings(settings).rfSsid }).source;
+  fs.writeFileSync(confPath, DirewolfProcess.buildDirewolfAprsTxConfig({ mycall: source, audioPort: lane.port, agwPort: agw, shimPort, band, txDelayMs: t.txDelayMs, txTailMs: t.txTailMs }));
+  const ac = DirewolfProcess.APRS_CHANNEL_ACCESS[band];
+  aprsLog(`Dire Wolf for the beacon: ${DirewolfProcess.APRS_MODEM_LINES[band]}, PTT only through POTACAT's shim :${shimPort}, TXDELAY ${t.txDelayMs} ms, SLOTTIME ${ac.slottime * 10} ms, PERSIST ${ac.persist}, AGW ${agw}`);
+  const proc = spawn(bin.path, DirewolfProcess.buildDirewolfArgs({ configName: path.basename(confPath) }), { cwd: p.dir, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+  let lines = 0;
+  const onLine = (chunk) => { for (const line of chunk.toString().split(/\r?\n/).filter(Boolean)) if (lines++ < 20) aprsLog('direwolf (beacon): ' + line); };
+  proc.stdout.on('data', onLine);
+  proc.stderr.on('data', onLine);
+  let exited = null;
+  const exitCbs = [];
+  proc.on('exit', (code) => { exited = code; for (const cb of exitCbs) cb(code); });
+  proc.on('error', (e) => { aprsLog('Dire Wolf (beacon) did not start: ' + e.message); exited = -1; for (const cb of exitCbs) cb(-1); });
+  const kill = (sock) => { try { if (sock) sock.destroy(); } catch {} try { proc.kill(); } catch {} try { fs.unlinkSync(confPath); } catch {} };
+  const until = Date.now() + 15000;
+  let up = false;
+  while (Date.now() < until && exited === null && !(up = (await DirewolfProcess.probeAgwPort({ port: agw })).ok)) await new Promise((r) => setTimeout(r, 250));
+  if (!up || exited !== null) { kill(null); throw new Error(`Dire Wolf for the beacon did not open AGW ${agw}`); }
+  const sock = _wlNet.connect({ host: '127.0.0.1', port: agw });
+  try { await new Promise((resolve, reject) => { sock.once('connect', resolve); sock.once('error', reject); }); }
+  catch (e) { kill(sock); throw e; }
+  sock.on('error', () => {});
+  return {
+    send: (req) => { try { sock.write(AprsRfBeacon.encodeAgwUnproto(req)); return true; } catch (e) { aprsLog('could not hand the beacon to Dire Wolf: ' + e.message); return false; } },
+    kill: () => kill(sock),
+    onExit: (cb) => { if (exited !== null) cb(exited); else exitCbs.push(cb); },
+  };
+}
+
+/** Its own shim, alive only for the beacon: keys only through the runner (owner 'aprs'), never tunes. */
+async function aprsRfStartShim(onPtt) {
+  aprsRfStopShim();
+  const port = await winlinkFreePort(APRS_RF_SHIM_PORTS);
+  if (!port) throw new Error('no free port 4550-4559 for the beacon\'s radio control shim');
+  const shim = createRigctldServer({
+    getFreqHz: () => _currentFreqHz || 0,
+    getPtt: () => _aprsRfKeyed,
+    setFreqHz: (hz) => { aprsLog(`beacon over the radio: refused a tune to ${(hz / 1e6).toFixed(4)} MHz (the beacon never moves the radio)`); return false; },
+    setPtt: (on) => onPtt(!!on),
+  }, { host: '127.0.0.1', log: aprsLog });
+  aprsRfShim = shim;
+  await shim.listen(port);
+  return port;
+}
+function aprsRfStopShim() { if (aprsRfShim) { const s = aprsRfShim; aprsRfShim = null; try { s.close(); } catch {} } }
+
+/** Listening comes back on the receive-only config; the transmit output closes again. */
+function aprsRfRestoreListen() {
+  if (!winlinkIpAudioRoute() && modemBridge.playback && !winlinkSessionActive()) { try { modemBridgePlayback(false); } catch {} }
+  if (aprsListen.on && aprsListen.state === 'listening' && !aprsListen.proc) {
+    const seq = ++aprsListen.seq;
+    aprsSpawnDirewolf(seq).catch((e) => aprsLog('listening did not restart after the beacon: ' + e.message));
+  }
+  try { winlinkSyncModemBridge(); } catch {}
+}
+
+function aprsRfRunner() {
+  if (aprsRf) return aprsRf;
+  aprsRf = AprsRfBeacon.createRfBeacon({
+    now: Date.now, setTimer: setTimeout, clearTimer: clearTimeout,
+    log: (s) => aprsLog('beacon over the radio: ' + s),
+    begin: () => acquireRadio('aprs'),
+    end: () => { releaseRadio('aprs'); },
+    startShim: aprsRfStartShim,
+    stopShim: aprsRfStopShim,
+    startModem: aprsRfStartModem,
+    restoreListen: aprsRfRestoreListen,
+    mayKey: () => AprsRfGate.mayKey(aprsRfGateState()),
+    key: aprsRfKey,
+    unkey: ({ now }) => aprsRfUnkey(now),
+    onState: () => aprsRfPush(),
+    txProof: aprsRfTxProof,
+    narrowTx: aprsRfNarrowTx,
+    restoreTx: aprsRfRestoreTx,
+    txInterlock: aprsRfTxInterlock,
+  });
+  return aprsRf;
+}
+
+// ── APRS A3: messages over the radio ──────────────────────────────────────────
+// "Send over: Radio" in the compose box (Casey 2026-11-21). The messenger
+// (lib/aprs-messenger.js) decides when a radio try or a radio ack is due and
+// hands it here as one job; it goes out through the beacon's own run above
+// (aprsRfRunner: the swap-in transmit Dire Wolf, the 'aprs' owner, the gate at
+// every key-down, the cap, the 30 m narrow transmit filter, "sent" only when
+// the radio reported transmit). One packet at a time: a beacon and a message
+// never overlap (_aprsRfSending). Nothing transmits unless the operator
+// pressed Send or Try again, or turned on one of the two settings that are
+// off by default (automatic retries, automatic acks): retries on 2 m and
+// 30 m, acks on 2 m only (lib/aprs-rf-message.js AUTO_BANDS). Desktop window only: the
+// ECHOCAT wire is unchanged.
+let _aprsMsgRadioJob = null;       // the messenger job on the air now
+/** A default-off automatic radio transmission ('retry' or 'ack'): on, and on a band that allows it. */
+function aprsMsgRadioAuto(kind) {
+  const on = kind === 'ack' ? settings.aprsRadioMsgAutoAck === true : settings.aprsRadioMsgAutoRetry === true;
+  return AprsRfMessage.autoAllowed(on, aprsListen.band, kind === 'ack' ? 'ack' : 'retry');
+}
+/** The call the radio frames go out as (the beacon's RF source), or '' with no real callsign. */
+function aprsMsgRadioSource() {
+  const login = AprsIgate.uplinkLogin(settings.myCallsign);
+  return login.ok ? AprsRfBeacon.rfSource(settings.myCallsign, login.base, AprsBeacon.beaconSettings(settings).rfSsid) : '';
+}
+/** What the compose box says about the radio: band, frequency, the call, the two settings. */
+function aprsMsgRadioInfo() {
+  const band = aprsListen.band || '';
+  return {
+    band, bandLabel: AprsRfBeacon.BAND_LABEL[band] || '', mhz: aprsListen.freq ? aprsRfMhz(aprsListen.freq.hz) : '',
+    call: aprsMsgRadioSource(), autoRetry: aprsMsgRadioAuto('retry'), autoAck: aprsMsgRadioAuto('ack'),
+    autoRetryOn: settings.aprsRadioMsgAutoRetry === true, autoAckOn: settings.aprsRadioMsgAutoAck === true,
+  };
+}
+/** May a radio message be queued now? null = yes, else the gate's refusal in a message's words. A packet on the air is fine: it waits. */
+function aprsMsgRadioRefusal() {
+  if (APRS_DEV_FRAMES) return 'This test build plays recorded packets and transmits nothing.';
+  const no = AprsRfGate.readiness(aprsRfGateState());
+  if (!no || no.reason === 'busy') return null;
+  return AprsRfMessage.messageWords(no.sentence);
+}
+/** A frame Dire Wolf heard on the radio: a message, ack or rej for us goes to the messenger as heard on radio. */
+function aprsMsgRadioHeard(line) {
+  const m = aprsMessenger();
+  const src = aprsMsgRadioSource();
+  const r = m.receive(line, { via: 'radio', ownCalls: src ? [src] : [] });
+  if (r.kind === 'message') sendCatLog(`[APRS message] heard on the radio from ${r.call}`);
+  if (r.changed) { aprsMessagesSave(); aprsMessagesPush(); }
+  if (r.kind === 'message' || r.kind === 'retry-copy') aprsMessagesRun(); // its acks (internet; radio only with the setting on)
+}
+/**
+ * The messenger's sendRadio(job): start one radio transmission for a message
+ * try or an ack. false = the radio is busy with another packet (the messenger
+ * waits). The result goes back through radioDone when the run is over.
+ */
+function aprsMsgRadioStart(job) {
+  if (_aprsRfSending || aprsRfInFlight()) return false;
+  _aprsRfSending = true;
+  _aprsMsgRadioJob = job;
+  aprsRfPush();
+  aprsMsgRadioTransmit(job)
+    .catch((e) => ({ ok: false, reason: 'error', sentence: 'The message did not start. The log has the reason.', err: e }))
+    .then((res) => {
+      if (res && res.err) aprsLog('message over the radio failed: ' + res.err.message);
+      _aprsRfSending = false;
+      _aprsMsgRadioJob = null;
+      const r = res && res.sentence ? { ...res, sentence: AprsRfMessage.messageWords(res.sentence) } : res;
+      const m = aprsMessenger();
+      if (m.radioDone(job.key, r)) aprsMessagesSave();
+      aprsRfPush();
+      aprsMessagesPush();
+      aprsMessagesRun();
+    });
+  return true;
+}
+/** One message frame (or ack) over the radio: the gate, the frame, the cap, the beacon's run. */
+async function aprsMsgRadioTransmit(job) {
+  if (APRS_DEV_FRAMES) return { ok: false, reason: 'dev', sentence: 'This test build plays recorded packets and transmits nothing.' };
+  const no = AprsRfGate.readiness(aprsRfGateState());
+  if (no) { aprsLog('message over the radio not sent: ' + no.sentence); return { ok: false, reason: no.reason, sentence: no.sentence }; }
+  const band = aprsListen.band;
+  const f = AprsRfMessage.buildRfFrame({ settingsCall: settings.myCallsign, band, ssid: AprsBeacon.beaconSettings(settings).rfSsid, info: job.info });
+  if (!f.ok) return f;
+  const timing = DirewolfProcess.packetTiming(settings);
+  const drainMs = winlinkIpAudioRoute() ? WINLINK_UNKEY_DRAIN_IP_MS : WINLINK_UNKEY_DRAIN_BRIDGE_MS;
+  const cap = AprsRfBeacon.capFor({ band, packet: f.packet, txDelayMs: timing.txDelayMs, txTailMs: timing.txTailMs, drainMs });
+  _aprsRfTiming = timing;
+  _aprsRfAirMs = cap.airMs;
+  const mhz = aprsListen.freq ? aprsRfMhz(aprsListen.freq.hz) : '';
+  const what = job.kind === 'ack' ? 'ack' : 'message';
+  aprsLog(`${what} over the radio: ${f.packet} on ${mhz} MHz, about ${(cap.airMs / 1000).toFixed(1)} s on air, cap ${(cap.capMs / 1000).toFixed(1)} s`);
+  const res = await aprsRfRunner().send({ packet: f, capMs: cap.capMs });
+  if (_aprsRfPeak.active()) aprsRfUi.lastPeak = _aprsRfPeak.end();
+  if (res.ok && res.confirmed) sendCatLog(`[APRS ${what}] sent over the radio (${AprsRfBeacon.BAND_LABEL[band]}, ${mhz} MHz; the radio reported transmit): ${f.packet}`);
+  else if (res.ok) sendCatLog(`[APRS ${what}] keyed but not confirmed (${AprsRfBeacon.BAND_LABEL[band]}, ${mhz} MHz)`);
+  else aprsLog(`${what} over the radio not sent: ${res.sentence}`);
+  return res;
+}
+/** Stop on a radio message: the run on the air for it stops too (PTT drops at once). */
+function aprsMsgRadioStop(lid) {
+  if (_aprsMsgRadioJob && _aprsMsgRadioJob.lid === lid) aprsRfAbort('Stop was pressed');
+}
+
+// ── APRS phase 6: APRS on ECHOCAT devices through this desktop ────────────────
+// A client whose hello lists 'aprs' gets aprs-state and, while subscribed,
+// aprs-stations (lib/aprs-echocat.js has every rule). Its requests go to the
+// functions the APRS window and Settings call, so every gate and sentence is
+// theirs. The internet beacon only: the radio beacon is not reachable here.
+let aprsFeedHooks = null; // { start, stop, setRange }: the APRS-IS feed, set where the window's IPC is wired
+/** The iGate switch from an owner's device: the same steps as Settings' save. */
+function aprsIgateSetFromDevice(on) {
+  settings.aprsIgate = on === true;
+  saveSettings(settings);
+  aprsLog('iGate ' + (settings.aprsIgate ? 'on' : 'off') + ' from an ECHOCAT device');
+  try { aprsUplinkWant(null); aprsIgateSync(); aprsIgatePush(); aprsBeaconPush(); } catch { /* not yet */ }
+}
+/**
+ * The iGate switch in the APRS window's settings panel: the one setting the
+ * Idle Mode line shows (settings.aprsIgate), the same steps as Settings' save.
+ */
+function aprsIgateSetFromWindow(on) {
+  settings.aprsIgate = on === true;
+  saveSettings(settings);
+  aprsLog('iGate ' + (settings.aprsIgate ? 'on' : 'off') + ' from the APRS window');
+  try { aprsUplinkWant(null); aprsIgateSync(); aprsIgatePush(); aprsBeaconPush(); } catch { /* not yet */ }
+}
+const aprsEcho = AprsEchocat.createController({
+  startFeed: () => { if (aprsFeedHooks) aprsFeedHooks.start(); },
+  stopFeed: () => { if (aprsFeedHooks) aprsFeedHooks.stop(); },
+  feedRunning: () => !!aprsFeed,
+  setFeedRange: (km) => { if (aprsFeedHooks) aprsFeedHooks.setRange(km); },
+  setFollow: (calls) => { if (aprsFeedHooks) aprsFeedHooks.setFollow(calls); }, // aprs-find: calls passed beyond the range
+  sendTo: (id, m) => { if (remoteServer && remoteServer.sendAprsTo) remoteServer.sendAprsTo(id, m); },
+  setWatch: (calls) => { if (aprsFeedHooks) aprsFeedHooks.setWatch(calls); }, // heard you: my beacon's call and who heard it
+  ownLogin: () => { const l = AprsIgate.uplinkLogin(settings.myCallsign); return l.ok ? l.call : ''; },
+  heardChanged: (map) => { if (aprsWin && !aprsWin.isDestroyed()) aprsWin.webContents.send('aprs-heard-you', map); },
+  windowOpen: () => !!(aprsWin && !aprsWin.isDestroyed()),
+  listenSet: (on) => aprsListenSet(on),
+  listenSetBand: (b) => aprsListenSetBand(b),
+  igateSet: (on) => aprsIgateSetFromDevice(on),
+  beaconNow: () => aprsBeaconSend('now').catch((e) => aprsLog('beacon failed: ' + e.message)),
+  beaconRf: (req) => aprsRfSendFromPhone(req).catch((e) => aprsLog('radio beacon from the phone failed: ' + e.message)),
+  markUserActive: () => markUserActive(),
+  getState: () => ({ listen: aprsListenPayload(), igate: aprsIgateStatus(), beacon: aprsBeaconState() }),
+  sendState: (st) => { if (remoteServer && remoteServer.broadcastAprsState) remoteServer.broadcastAprsState(st); },
+  sendStations: (id, m) => { if (remoteServer && remoteServer.sendAprsStations) remoteServer.sendAprsStations(id, m); },
+  home: () => { const p = aprsHomePosition(); return p ? { lat: p.lat, lon: p.lon } : null; },
+  log: (line) => sendCatLog(line),
+});
+onRemoteServer((rs) => {
+  rs.on('aprs-request', ({ clientId, guest, req } = {}) => aprsEcho.handle(clientId, req, { guest: !!guest }));
+  rs.on('aprs-client-gone', ({ clientId } = {}) => aprsEcho.clientGone(clientId));
+  setImmediate(() => { try { aprsEcho.stateNow(); } catch { /* settings not loaded yet */ } });
+});
 
 function killArdop() {
   if (ardopProc) { try { ardopProc.kill(); } catch {} ardopProc = null; }
@@ -13127,7 +15376,7 @@ function winlinkSessionPush() {
  * the pop-out's Connect and ECHOCAT's winlink-connect, both operator actions.
  * @returns {{ok:boolean, error?:string, reason?:string}}
  */
-async function winlinkStartSession({ mode, gateway, dialKhz, url: rowUrl, origin, autoRetry } = {}) {
+async function winlinkStartSession({ mode, gateway, dialKhz, url: rowUrl, origin, autoRetry, fromEchocat } = {}) {
   if (!(await winlinkEnsureStarted())) return { ok: false, error: winlinkState.snapshot().patError || 'Winlink could not start — see the [Winlink] lines in the log' };
   if (!settings.winlinkNoticeAcceptedAt) return { ok: false, error: 'Read and accept the Winlink notice first' };
   if (!settings.winlinkPassword) return { ok: false, error: 'Set your Winlink password in Settings > Station > Winlink first' };
@@ -13170,6 +15419,7 @@ async function winlinkStartSession({ mode, gateway, dialKhz, url: rowUrl, origin
     if (!acquireRadio('winlink')) return { ok: false, error: `The radio is in use by ${radioOwner}`, reason: 'radio-busy' };
   }
 
+  if (radio) aprsListenYieldToWinlink('session'); // before the return point is read: it is the place APRS saved
   const capMin = Math.max(10, Math.min(60, parseInt(settings.winlinkSessionCapMin, 10) || 30));
   if (radio) winlinkNoteHandTune(); // a later attempt starts from here; the return point stays the original
   if (radio) winlinkHoldAwake(true, mode);
@@ -13189,6 +15439,7 @@ async function winlinkStartSession({ mode, gateway, dialKhz, url: rowUrl, origin
   _winlinkPatConnected = false;
   if (radio) _winlinkPreviewReturnTo = null; // the session's returnTo carries it now
   _winlinkSessionByGuest = !!(passEnforcement && ['active', 'expiring'].includes(passEnforcement.getState()));
+  _winlinkSessionFromEchocat = VaraProcess.isEchocatOrigin(origin) || !!fromEchocat;
   winlinkSessionTouch();
   winlinkSessionPush();
   winlinkLog(`session start: ${mode}${radio ? ` → ${String(gateway).toUpperCase()} on ${Number(dialKhz).toFixed(1)} kHz dial` : ''} (${origin || 'operator'})`);
@@ -13743,6 +15994,7 @@ function winlinkEndSession(state, text, received = 0) {
     .catch((e) => winlinkLog(`how the messages went out could not be noted: ${e.message}`))
     .then(() => winlinkRefreshMailboxes());
   if (retryWill) winlinkRetryTick();
+  else if (wasActive) winlinkVaraCloseSoon('the session ended'); // #697: only a VARA POTACAT opened for an ECHOCAT session
 }
 
 // ── one automatic retry after a dropped link (#425) ─────────────────────────
@@ -13785,7 +16037,7 @@ function winlinkRetryDecide(s, outcome) {
   }
   const noCat = winlinkNoCat();
   _winlinkRetry = {
-    gateway: String(s.gateway).toUpperCase(), mode: s.mode, dialKhz: Number(s.dialKhz), url: s.url || '', origin: s.origin || '',
+    gateway: String(s.gateway).toUpperCase(), mode: s.mode, dialKhz: Number(s.dialKhz), url: s.url || '', origin: s.origin || '', fromEchocat: _winlinkSessionFromEchocat,
     noCat, endsAt: Date.now() + WinlinkAutoRetry.COUNTDOWN_S * 1000, tryNow: false,
     watch: new WinlinkAutoRetry.ChannelWatch(), acc: null, busy: null, ofStartedAt: s.startedAt, holdsReturn: false, timer: null,
   };
@@ -13833,12 +16085,13 @@ async function winlinkRetryStart() {
   winlinkRetryStop();
   winlinkLog(`automatic retry started: ${r.gateway} on ${r.dialKhz.toFixed(1)} kHz dial (${WinlinkModes.LABELS[r.mode] || r.mode})${r.tryNow ? ', now: the operator pressed Try now' : ''}`);
   winlinkRetryShow({ retryState: 'starting', retryInS: 0, retryText: WinlinkOutcome.retryText({ state: 'starting', gateway: r.gateway }) });
-  const res = await winlinkStartSession({ mode: r.mode, gateway: r.gateway, dialKhz: r.dialKhz, url: r.url, origin: 'automatic retry', autoRetry: true });
+  const res = await winlinkStartSession({ mode: r.mode, gateway: r.gateway, dialKhz: r.dialKhz, url: r.url, origin: 'automatic retry', autoRetry: true, fromEchocat: !!r.fromEchocat });
   if (!res || !res.ok) {
     const why = WinlinkOutcome.plainReason((res && res.error) || 'it could not start', 160).replace(/[.\s]+$/, '');
     winlinkLog(`automatic retry skipped: it could not start (${why})`);
     winlinkRetryShow({ retryState: 'skipped', retryInS: 0, retryText: WinlinkOutcome.retryText({ state: 'skipped', gateway: r.gateway, why: why.charAt(0).toLowerCase() + why.slice(1) }) });
     if (r.holdsReturn) winlinkRetryReturnDial();
+    winlinkVaraCloseSoon('the automatic retry could not start');
   }
 }
 
@@ -13869,6 +16122,7 @@ function winlinkRetryEnd(state, why) {
   winlinkLog(state === 'cancelled' ? `automatic retry cancelled: ${why}` : `automatic retry skipped: ${why === 'busy' ? `the channel stayed busy for ${WinlinkAutoRetry.BUSY_WAIT_S} s after the countdown` : why}`);
   winlinkRetryShow({ retryState: state, retryInS: 0, retryText: WinlinkOutcome.retryText({ state, gateway: r.gateway, why }) });
   if (r.holdsReturn && (state === 'skipped' || why === WinlinkAutoRetry.cancelReason('cancel'))) winlinkRetryReturnDial();
+  winlinkVaraCloseSoon(`the automatic retry was ${state}`);
 }
 
 /**
@@ -14077,8 +16331,8 @@ function winlinkPacketTimerStart() {
     const v = w.stuck(Date.now());
     if (!v.stuck) return;
     clearInterval(_winlinkPacketTimer); _winlinkPacketTimer = null;
-    winlinkLog(PacketLinkClose.stuckLogText({ why: v.why, gateway: winlinkState.session.gateway }));
-    winlinkAbortSession('the gateway is still holding the last link', { kind: 'stuck-link', detail: v.why });
+    winlinkLog(PacketLinkClose.stuckLogText({ why: v.why, nr: v.nr, gateway: winlinkState.session.gateway }));
+    winlinkAbortSession(PacketLinkClose.stuckAbortWhy(v.why), { kind: 'stuck-link', detail: v.why });
   }, 1000);
 }
 
@@ -14151,7 +16405,7 @@ function winlinkArmAutoCheck() {
 
 // ── mailbox actions shared by every surface ─────────────────────────────────
 
-async function winlinkSend({ to, cc, subject, body, p2p, attachments } = {}) {
+async function winlinkSend({ to, cc, subject, body, p2p, attachments, formId } = {}) {
   if (!patClient) return { ok: false, error: 'Pat is not running' };
   if (!settings.winlinkNoticeAcceptedAt) return { ok: false, error: 'Read and accept the Winlink notice first' };
   // A POTA spot by email: the service reads one line per message, so an
@@ -14166,7 +16420,7 @@ async function winlinkSend({ to, cc, subject, body, p2p, attachments } = {}) {
     winlinkLog(`POTA spot by email: ${sp.bodies.join(' | ')} — in the Outbox`);
     return { ok: true, spots: sp.bodies.length };
   }
-  const r = await winlinkSendOne({ to, cc, subject, body, p2p, attachments });
+  const r = await winlinkSendOne({ to, cc, subject, body, p2p, attachments, formId });
   // The address book ranks people by when you last wrote to them.
   if (r && r.ok) {
     const t = WinlinkContacts.touch(settings.winlinkContacts, WinlinkContacts.splitAddresses(`${to || ''},${cc || ''}`));
@@ -14231,18 +16485,27 @@ function winlinkPotaSpotTemplate(over = {}) {
   return PotaEmailSpot.buildSpotMessage({ call: settings.myCallsign || '', refs, freqKhz, mode, comment: over.comment || '' });
 }
 
-async function winlinkSendOne({ to, cc, subject, body, p2p, attachments } = {}) {
+async function winlinkSendOne({ to, cc, subject, body, p2p, attachments, formId } = {}) {
   const c = WinlinkPat.composeFields({ to, cc, subject, body, p2p });
   if (!c.ok) return c;
+  // A message made with a Winlink form (#346): Pat adds the form's XML itself
+  // when the outbox POST carries that form's instance cookie.
+  const form = formId ? _winlinkFormIds.get(String(formId)) : null;
+  if (formId && !form) return { ok: false, error: 'That form is no longer open in Pat. Fill it in again from Forms.' };
+  if (form && form.readOnly && WinlinkForms.bodyChanged(form.body, body)) {
+    return { ok: false, error: 'This form says its message may not be changed. Fill it in again from Forms.' };
+  }
   const files = (Array.isArray(attachments) ? attachments : []).filter((a) => a && a.name && a.data).map((a) => ({ name: path.basename(String(a.name)), data: Buffer.isBuffer(a.data) ? a.data : Buffer.from(String(a.data), 'base64') }));
   const total = files.reduce((n, f) => n + f.data.length, 0);
   if (total > 2 * 1024 * 1024) return { ok: false, error: `Attachments are ${(total / 1048576).toFixed(1)} MB — Winlink over radio needs them far smaller (keep it under 100 kB for HF)` };
   try {
-    await patClient.send(c.fields, files);
-    winlinkLog(`queued "${c.fields.subject}" to ${c.fields.to}${files.length ? ` with ${files.length} attachment${files.length === 1 ? '' : 's'}` : ''} — it goes out on the next session`);
+    await patClient.send(c.fields, files, form ? { formInstance: String(formId) } : {});
+    if (form) _winlinkFormIds.delete(String(formId));
+    winlinkLog(`queued "${c.fields.subject}" to ${c.fields.to}${files.length ? ` with ${files.length} attachment${files.length === 1 ? '' : 's'}` : ''}${form ? ` with the form "${form.name}"` : ''} — it goes out on the next session`);
     await winlinkRefreshMailboxes(['out']);
     return { ok: true };
   } catch (e) {
+    if (form && /form instance key not valid/i.test(e.message)) return { ok: false, error: 'Pat no longer has this form (Pat was restarted). Fill it in again from Forms.' };
     return { ok: false, error: e.message };
   }
 }
@@ -14262,6 +16525,273 @@ async function winlinkRead(box, mid) {
     }
     return { ok: true, message: winlinkWithSentRoute(box, msg) };
   } catch (e) { return { ok: false, error: e.message }; }
+}
+
+// ── Winlink forms (#346) ────────────────────────────────────────────────────
+// Pat does the forms: its catalog, its form pages, and the message with its
+// RMS_Express_Form XML. POTACAT offers them only on Pat 1.0.1 or newer
+// (lib/winlink-forms.js formsAllowed), shows Pat's own page in a locked-down
+// window (openWinlinkFormWindow), and the filled form comes back to the
+// compose pane, so the Outbox, the address book and Send stay one path. Pat
+// downloads the forms on this machine (POST /api/formsUpdate); none are bundled.
+
+let _patVersionSeen = { port: 0, text: '' };
+// Forms filled in this run, by instance id: { name, path, readOnly, body }.
+const _winlinkFormIds = new Map();
+let _winlinkFormsUpdating = null;
+let _winlinkPendingFormResult = null; // a filled form for a Mail window that was closed meanwhile
+
+/** Are forms offered with the Pat that is running? Starts Pat when it is not. */
+async function winlinkFormsGate() {
+  if (!(await winlinkEnsureStarted()) || !patClient) return { ok: false, why: winlinkState.snapshot().patError || 'Pat is not running.' };
+  if (_patVersionSeen.port !== _patHttpPort || !_patVersionSeen.text) {
+    let text = '';
+    try { text = await patClient.patVersion(); } catch (e) { winlinkLog(`forms: could not read Pat's version: ${e.message}`); }
+    _patVersionSeen = { port: _patHttpPort, text };
+  }
+  const g = WinlinkForms.formsAllowed(_patVersionSeen.text);
+  return { ok: g.ok, why: g.why, version: g.version };
+}
+
+/** The Forms picker's list: installed or not, the version, favourites first, every form. */
+async function winlinkFormsCatalog() {
+  const g = await winlinkFormsGate();
+  if (!g.ok) return { ok: true, allowed: false, why: g.why };
+  try {
+    const cat = WinlinkForms.shapeCatalog(await patClient.formCatalog());
+    return { ok: true, allowed: true, patVersion: g.version, updating: !!_winlinkFormsUpdating, ...cat };
+  } catch (e) {
+    return { ok: false, allowed: true, error: `Pat could not list its forms: ${e.message}` };
+  }
+}
+
+/** "Get the standard forms": Pat downloads the newest Winlink Standard Forms from getpat.io. One at a time. */
+async function winlinkFormsUpdate() {
+  const g = await winlinkFormsGate();
+  if (!g.ok) return { ok: false, text: g.why };
+  if (!_winlinkFormsUpdating) {
+    winlinkLog('forms: asking Pat for the newest Winlink Standard Forms (Pat downloads them from getpat.io)');
+    _winlinkFormsUpdating = patClient.formsUpdate()
+      .then((r) => WinlinkForms.formsUpdateMessage(r, null), (e) => WinlinkForms.formsUpdateMessage(null, e))
+      .finally(() => { _winlinkFormsUpdating = null; });
+  }
+  const m = await _winlinkFormsUpdating;
+  winlinkLog(`forms: ${m.text}`);
+  return m;
+}
+
+/** The template's own "Readonly: True" line, read from Pat's forms folder on this machine. */
+function winlinkTemplateReadOnly(templatePath) {
+  const dir = path.resolve(winlinkPaths().forms);
+  const abs = path.resolve(dir, WinlinkForms.slashPath(templatePath));
+  if (!abs.startsWith(dir + path.sep)) return false;
+  try { return WinlinkForms.templateReadOnly(fs.readFileSync(abs, 'utf8')); } catch { return false; }
+}
+
+/**
+ * The reply form a received form names, if any (#346 phase 2): read from the
+ * form's own XML (form_parameters > reply_template), so the reader offers
+ * "Reply with form" only when there is one.
+ */
+async function winlinkFormInfo(o = {}) {
+  const g = await winlinkFormsGate();
+  if (!g.ok) return { ok: false, error: g.why };
+  const box = String(o.box || ''), mid = String(o.mid || ''), file = String(o.file || '');
+  if (!WinlinkForms.formAttachment([file]) || !WinlinkForms.inReplyToRef(box, mid)) return { ok: false, error: 'That is not a form.' };
+  try {
+    const xml = await patClient.attachment(box, mid, file);
+    const reply = WinlinkForms.formReplyTemplate(xml.toString('utf8'));
+    return { ok: true, reply: !!reply, replyName: reply.replace(/\.0$/, '') };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+}
+
+/**
+ * Open a form in the form window. o.kind 'new': fill in o.path (Pat's
+ * template_path); 'view': a received form, o.box / o.mid / o.file; 'reply'
+ * (#346 phase 2): the reply form that received form names, pre-linked to it.
+ * A reply is Pat's own: GET the form attachment with ?rendertohtml=true and
+ * in-reply-to=<box>/<mid> renders the reply template with the original's
+ * values (Pat v1.0.1 api/mailbox.go attachmentHandler, forms.go RenderForm),
+ * and its Submit posts to /api/form?in-reply-to=...&template=... (forms.go
+ * PostFormDataHandler). v1.0.1 checks both in-reply-to paths stay inside the
+ * mailbox. Pat is asked first whether it can render the page, so a missing
+ * form set is said in words, not shown as Pat's error page.
+ */
+async function winlinkFormOpen(o = {}) {
+  const g = await winlinkFormsGate();
+  if (!g.ok) return { ok: false, error: g.why };
+  if (winlinkFormWin && !winlinkFormWin.isDestroyed()) {
+    winlinkFormWin.focus();
+    return { ok: false, error: 'A form is already open in its own window. Submit it or close that window first.' };
+  }
+  const origin = WinlinkForms.patOrigin(_patHttpPort);
+  const kind = o.kind === 'view' || o.kind === 'reply' ? o.kind : 'new';
+  let url = '', name = '', readOnly = false, reply = null;
+  if (kind === 'new') {
+    const tpl = String(o.path || '');
+    url = WinlinkForms.fillUrl(origin, tpl);
+    name = WinlinkForms.slashPath(tpl).split('/').pop().replace(/\.txt$/i, '');
+    readOnly = winlinkTemplateReadOnly(tpl);
+  } else {
+    const box = String(o.box || ''), mid = String(o.mid || ''), file = String(o.file || '');
+    const att = WinlinkForms.formAttachment([file]);
+    name = att ? att.form : '';
+    if (kind === 'view') {
+      url = WinlinkForms.viewUrl(origin, box, mid, file);
+    } else {
+      const info = await winlinkFormInfo({ box, mid, file });
+      if (!info.ok) return { ok: false, error: info.error };
+      if (!info.reply) return { ok: false, error: 'This form names no reply form. Use Reply to answer it as a plain message.' };
+      url = WinlinkForms.viewUrl(origin, box, mid, file, WinlinkForms.inReplyToRef(box, mid));
+      name = info.replyName;
+      // The reply goes back to the sender, as "Re: <subject>", unless the reply form says otherwise.
+      try {
+        const orig = await patClient.message(box, mid);
+        reply = { to: (orig && orig.from) || '', subject: WinlinkMailActions.replySubject((orig && orig.subject) || '') };
+      } catch { reply = { to: '', subject: '' }; }
+    }
+  }
+  if (!url) return { ok: false, error: 'That is not a form POTACAT can open.' };
+  const probe = await patClient.probe(url.slice(origin.length)).catch((e) => ({ status: 0, text: e.message }));
+  if (probe.status !== 200) {
+    winlinkLog(`forms: Pat could not open ${kind === 'view' ? 'the received form' : `"${name}"`}: HTTP ${probe.status} ${probe.text}`);
+    return { ok: false, error: kind === 'view'
+      ? 'Pat cannot show this form: it needs the Winlink Standard Forms on this computer. Use Forms > Get the standard forms, then try again. The form\'s text is in the message itself.'
+      : kind === 'reply'
+        ? `Pat cannot open the reply form "${name}": it needs the Winlink Standard Forms on this computer. Use Forms > Get the standard forms, then try again.`
+        : `Pat could not open the form "${name}". Use Forms > Get the standard forms to get them again.` };
+  }
+  const id = WinlinkForms.newFormInstanceId(require('crypto').randomBytes);
+  if (kind !== 'view') _winlinkFormIds.set(id, { name, path: String(o.path || ''), readOnly, body: '', reply });
+  const title = kind === 'new' ? `Winlink form: ${name}` : kind === 'reply' ? `Reply with form: ${name}` : `Received form: ${name}`;
+  await openWinlinkFormWindow({ url, origin, id, submit: kind !== 'view', title });
+  winlinkLog(`forms: opened ${kind === 'new' ? `"${name}" to fill in` : kind === 'reply' ? `the reply form "${name}"` : `the received form "${name}"`}`);
+  return { ok: true };
+}
+
+/** Pat took the form's Submit: fetch what it built and hand it to the compose pane. */
+async function winlinkFormSubmitted(id) {
+  const f = _winlinkFormIds.get(id);
+  if (!f || !patClient) return;
+  let msg;
+  try {
+    const c = WinlinkForms.formResultToCompose(await patClient.formData(id), { readOnly: f.readOnly });
+    // A reply form (#346 phase 2) that leaves To or Subject empty goes back to the sender as Re: <subject>.
+    if (f.reply && !c.to) c.to = f.reply.to;
+    if (f.reply && !c.subject) c.subject = f.reply.subject;
+    f.body = c.body;
+    msg = { id, name: f.name, ...c };
+    winlinkLog(`forms: "${f.name}" filled in; it is in the compose pane`);
+  } catch (e) {
+    msg = { error: `Pat did not give back the filled form: ${e.message}` };
+  }
+  if (winlinkFormWin && !winlinkFormWin.isDestroyed()) winlinkFormWin.close();
+  if (winlinkPopoutWin && !winlinkPopoutWin.isDestroyed()) winlinkPopoutSend('winlink-form-result', msg);
+  else _winlinkPendingFormResult = msg;
+}
+
+let _winlinkFormAsking = false;
+/** A form wants a web page: the operator's browser, after a yes; never inside the form window. */
+async function winlinkFormAskExternal(parent, url) {
+  if (_winlinkFormAsking) return;
+  _winlinkFormAsking = true;
+  try {
+    const r = await dialog.showMessageBox(parent && !parent.isDestroyed() ? parent : undefined, {
+      type: 'question', buttons: ['Open in my browser', 'Cancel'], defaultId: 1, cancelId: 1,
+      title: 'A web page outside POTACAT', message: 'This form wants to open a web page.',
+      detail: `${String(url).slice(0, 300)}\n\nIt opens in your own browser, not in POTACAT.`,
+    });
+    if (r.response === 0) await require('electron').shell.openExternal(url);
+  } catch { /* closed */ } finally { _winlinkFormAsking = false; }
+}
+
+/**
+ * The form window: Pat's own page for a form (Winlink's HTML and script, not
+ * ours). Locked down: sandboxed renderer, context isolation, no Node, NO
+ * preload, web security on, and a fresh in-memory session per form (no
+ * "persist:"), so no other window's cookies or storage are shared. Its
+ * requests reach only Pat's form pages (lib/winlink-forms.js requestAllowed);
+ * a link elsewhere opens in the browser after a confirm; every permission is
+ * refused except geolocation, which is answered with the centre of the grid
+ * in Settings, never the computer's location, and refused with no grid. The
+ * form instance cookie is added to its requests to Pat here, so the page
+ * never needs to set it (Pat v1.0.1 serves form pages with a null origin).
+ */
+async function openWinlinkFormWindow({ url, origin, id, title, submit }) {
+  const { session } = require('electron');
+  const partition = `winlink-form-${id}`;
+  const ses = session.fromPartition(partition, { cache: false });
+  const cookie = WinlinkForms.formCookieHeader(id);
+  let geo = WinlinkForms.geolocationFromGrid(settings.grid);
+  ses.webRequest.onBeforeRequest((d, cb) => {
+    const ok = WinlinkForms.requestAllowed({ url: d.url, method: d.method, resourceType: d.resourceType }, origin, { submit });
+    if (!ok) winlinkLog(`form window: refused ${d.method} ${String(d.url).slice(0, 120)}`);
+    cb({ cancel: !ok });
+  });
+  ses.webRequest.onBeforeSendHeaders({ urls: [`${origin}/*`] }, (d, cb) => cb({ requestHeaders: { ...d.requestHeaders, Cookie: cookie } }));
+  if (submit) {
+    ses.webRequest.onCompleted({ urls: [`${origin}/api/form*`] }, (d) => {
+      if (d.method === 'POST' && d.statusCode === 200 && d.resourceType === 'mainFrame' && WinlinkForms.formUrlKind(d.url, origin) === 'submit') winlinkFormSubmitted(id);
+    });
+  }
+  ses.setPermissionRequestHandler((_wc, permission, cb) => cb(WinlinkForms.permissionAllowed(permission, geo)));
+  ses.setPermissionCheckHandler((_wc, permission) => WinlinkForms.permissionAllowed(permission, geo));
+  ses.setDevicePermissionHandler(() => false);
+  winlinkFormWin = new BrowserWindow({
+    width: 1040, height: 800, minWidth: 560, minHeight: 420,
+    title, backgroundColor: getThemeWindowBg(), show: false, icon: getIconPath(), autoHideMenuBar: true,
+    webPreferences: {
+      sandbox: true, contextIsolation: true, nodeIntegration: false, webSecurity: true,
+      partition, safeDialogs: true, spellcheck: false,
+    },
+  });
+  const w = winlinkFormWin;
+  rememberWindowPlace(winlinkFormWin, 'winlinkFormBounds', { minWidth: 560, minHeight: 420 });
+  w.setMenuBarVisibility(false);
+  w.on('page-title-updated', (e) => e.preventDefault());
+  const wc = w.webContents;
+  const guard = (e, u) => {
+    const v = WinlinkForms.navigationVerdict(u, origin, { submit });
+    if (v.allow) return;
+    e.preventDefault();
+    if (v.external) winlinkFormAskExternal(w, v.external);
+    else winlinkLog(`form window: did not follow ${String(u).slice(0, 120)}`);
+  };
+  wc.on('will-frame-navigate', (e) => guard(e, e.url));
+  wc.on('will-redirect', (e, u) => guard(e, (e && e.url) || u));
+  wc.setWindowOpenHandler(({ url: u }) => {
+    const v = WinlinkForms.navigationVerdict(u, origin, { submit });
+    if (v.external) winlinkFormAskExternal(w, v.external);
+    return { action: 'deny' };
+  });
+  wc.on('will-attach-webview', (e) => e.preventDefault());
+  // A form page is drawn for a browser's white page and sets no background of its
+  // own; the theme's window colour showed through it (black text on the dark
+  // themes). The browser default comes back as a user style, so the form's own
+  // CSS still wins: the page keeps Winlink's look, not ours. Electron has no
+  // prompt(), which the forms call on Submit and for every date and time:
+  // WinlinkForms.PROMPT_SHIM takes what the form suggests (lib/winlink-forms.js).
+  wc.on('dom-ready', () => {
+    wc.insertCSS('html { background-color: #ffffff; color-scheme: light; }', { cssOrigin: 'user' }).catch(() => {});
+    wc.executeJavaScript(WinlinkForms.PROMPT_SHIM).catch(() => {});
+  });
+  if (geo) {
+    try {
+      wc.debugger.attach('1.3');
+      await wc.debugger.sendCommand('Emulation.setGeolocationOverride', geo);
+    } catch (e) {
+      geo = null;
+      winlinkLog(`form window: location from the grid unavailable (${e.message}); location requests are refused`);
+    }
+  }
+  w.once('ready-to-show', () => { if (!w.isDestroyed()) w.show(); });
+  w.on('closed', () => {
+    if (winlinkFormWin === w) winlinkFormWin = null;
+    ses.clearStorageData().catch(() => {});
+  });
+  w.loadURL(url).catch((e) => winlinkLog(`form window: ${e.message}`));
 }
 
 // ── Folders (#462, #475): Archive, the Deleted folder, Restore ───────────
@@ -14449,7 +16979,7 @@ async function winlinkGateways(mode, band) {
       list = list.map((g) => ({ ...g, mercury: tagged.has(g.call) }));
     }
     // Only gateways this radio can call (lib/winlink-reach.js): an amateur
-    // band it is set up for (Settings > My Rigs), inside its range. The Band
+    // band it is set up for (Settings > Radio), inside its range. The Band
     // picker offers only those bands, and "All" means all of them.
     const onBands = WinlinkReach.gatewaysInReach(list, winlinkReachOpts());
     list = onBands.list;
@@ -14472,7 +17002,7 @@ async function winlinkGateways(mode, band) {
   } catch (e) {
     // Said in the log: a list that never arrives was invisible in every bug
     // report (i5ekx: VARA HF, "it no longer downloads the list of gateways").
-    winlinkLog(`gateway list (${mode}) failed after ${Math.round((Date.now() - t0) / 1000)} s: ${e.message}${predicting ? ' (Pat ranks every gateway by propagation first; Settings > Winlink can turn the ranking off)' : ''}`);
+    winlinkLog(`gateway list (${mode}) failed after ${Math.round((Date.now() - t0) / 1000)} s: ${e.message}${predicting ? ' (Pat ranks every gateway by propagation first; Rank gateways by predicted propagation in Settings > Station, Winlink, turns that off)' : ''}`);
     return { ok: false, error: e.message };
   }
 }
@@ -14710,7 +17240,10 @@ onRemoteServer((rs) => {
   // A device's Mail tab open or closed; gone = its connection went with the tab open.
   rs.on('winlink-mail-view', ({ open, clientId, gone } = {}) => winlinkMailViewSet(clientId, !!open, { gone: !!gone }));
   // The last device is gone: nothing of theirs is open any more.
-  rs.on('client-disconnected', () => { if (_winlinkMailDevices.any()) { _winlinkMailDevices.clear(); winlinkMailDeviceGone(); } });
+  rs.on('client-disconnected', () => {
+    if (_winlinkMailDevices.any()) { _winlinkMailDevices.clear(); winlinkMailDeviceGone(); }
+    winlinkVaraCloseSoon('the ECHOCAT device disconnected'); // #697: still only once the session is over
+  });
   // A freshly built server hydrates new devices from its own cache — on or
   // off: an off shack hydrates {enabled:false} rather than nothing.
   if (typeof rs.broadcastWinlinkState === 'function' && settings) winlinkPush();
@@ -14836,7 +17369,7 @@ function js8PushStatus() {
     hbAck: js8HbAck,                       // ⚙ auto-reply to heartbeats (session-only)
     swrAutoTune: !!settings.swrAutoTune,   // ⚙ run the ATU once on an SWR-guard trip
     aprsGate: !!settings.js8AprsGate,      // ⚙ RF→APRS-IS gateway opt-in
-    aprsGateUp: !!(aprsGate && aprsGate.verified),
+    aprsGateUp: !!(settings.js8AprsGate && _aprsUplinkUsers.has('js8') && aprsUplink && aprsUplink.verified),
     groups: js8CustomGroups(),             // joined @NETS (⚙ gear)
     mailUnread: _js8Mailbox ? _js8Mailbox.unread : 0,   // count only — content stays owner-side
     mailHold: settings.js8MailHold !== false,        // ⚙ hold mail for other stations
@@ -14964,25 +17497,73 @@ function js8HandleRx(d) {
   if (msg.to === '@APRSIS') js8GateAprs(msg);
 }
 
+// ── The one APRS-IS uplink: JS8 gateway, APRS iGate (phase 4), APRS beacon (phase 5) ──
+// One verified connection (lib/aprs-is.js AprsIsClient), logged in as the
+// Settings callsign with SSID -10 (lib/aprs-igate.js uplinkLogin: the APRS SSID
+// recommendation for internet stations and iGates). Each user asks for it with
+// aprsUplinkWant(user, on); it closes when no user is left. Lines it receives
+// are never read: nothing from APRS-IS reaches the radio. The passcode is
+// computed for the Settings callsign inside the login line and nowhere else.
+let aprsUplink = null;               // AprsIsClient while any user wants it
+const _aprsUplinkUsers = new Set();  // 'js8' | 'igate' | 'beacon' | 'messages' (A1)
+// Dev only (never in a packaged build): POTACAT_APRS_IS_SERVER=127.0.0.1:14580
+// points the feed and the uplink at a local fake server
+// (test/fixtures/fake-aprs-is-server.js). With recorded RF frames playing
+// (POTACAT_APRS_DEV_FRAMES) and no fake server, the uplink never connects, so
+// recorded packets can never reach the real APRS-IS.
+const APRS_IS_DEV_SERVER = (() => {
+  if (app.isPackaged || !process.env.POTACAT_APRS_IS_SERVER) return null;
+  const m = /^([^:\s]+):(\d{1,5})$/.exec(String(process.env.POTACAT_APRS_IS_SERVER).trim());
+  return m ? { host: m[1], port: Number(m[2]) } : null;
+})();
+function aprsIsServer() {
+  if (APRS_IS_DEV_SERVER) return APRS_IS_DEV_SERVER;
+  if (!app.isPackaged && process.env.POTACAT_APRS_DEV_FRAMES) return null;
+  return { host: null, port: null }; // the client's own default (rotate.aprs2.net:14580)
+}
+function aprsUplinkWant(user, on) {
+  if (user) { if (on) _aprsUplinkUsers.add(user); else _aprsUplinkUsers.delete(user); }
+  const login = AprsIgate.uplinkLogin(settings.myCallsign);
+  const server = aprsIsServer();
+  const want = _aprsUplinkUsers.size > 0 && login.ok && !!server;
+  if (aprsUplink && (!want || aprsUplink.call !== login.call)) {
+    const u = aprsUplink;
+    aprsUplink = null;
+    try { u.removeAllListeners(); u.disconnect(); } catch { /* gone */ }
+    sendCatLog('[APRS-IS] uplink closed');
+    aprsUplinkChanged();
+  }
+  if (!want || aprsUplink) return;
+  const { AprsIsClient } = require('./lib/aprs-is');
+  const u = new AprsIsClient({ call: login.call, version: app.getVersion(), host: server.host, port: server.port });
+  aprsUplink = u;
+  u.on('connected', () => sendCatLog(`[APRS-IS] connected — logging in as ${u.call}`));
+  u.on('logresp', (line) => sendCatLog('[APRS-IS] server answered: ' + AprsIgate.logrespForLog(line)));
+  u.on('verified', () => { sendCatLog(`[APRS-IS] login verified (${u.call})`); aprsUplinkChanged(); });
+  u.on('status', (st) => { if (st.state === 'unverified') sendCatLog(`[APRS-IS] login NOT verified (${u.call}) — nothing will be sent`); aprsUplinkChanged(); });
+  u.on('disconnected', () => { sendCatLog('[APRS-IS] disconnected'); aprsUplinkChanged(); });
+  u.on('error', (err) => sendCatLog('[APRS-IS] ' + (err.message || err)));
+  u.connect();
+  aprsUplinkChanged();
+}
+function aprsUplinkChanged() {
+  try { js8PushStatus(); } catch { /* JS8 not up */ }
+  try { aprsIgatePush(); } catch { /* not yet */ }
+  // A1: a message waiting for the link goes as soon as the login is verified.
+  if (aprsMsgr && aprsMsgr.needsLink()) setImmediate(() => { try { aprsMessagesRun(); } catch { /* not yet */ } });
+  if (aprsWin && !aprsWin.isDestroyed()) setImmediate(() => { try { aprsMessagesPush(); } catch { /* not yet */ } });
+}
+
 // ── JS8 → APRS-IS gateway ────────────────────────────────────────────────────
-let aprsGate = null;                 // AprsIsClient when the gate is up
 let _aprsGateStamps = [];            // global rate window
 const _aprsGatePerCall = new Map();  // per-source last-gated ms
 
 function connectAprsGate() {
-  if (aprsGate || !settings.js8AprsGate || !settings.myCallsign || passLease) return; // the gate logs in as the owner
-  const { AprsIsClient } = require('./lib/aprs-is');
-  aprsGate = new AprsIsClient({ call: settings.myCallsign, version: app.getVersion() });
-  aprsGate.on('connected', () => sendCatLog('[APRS-IS] connected — logging in'));
-  aprsGate.on('verified', () => { sendCatLog('[APRS-IS] login verified — gateway active'); js8PushStatus(); });
-  aprsGate.on('disconnected', () => { sendCatLog('[APRS-IS] disconnected'); js8PushStatus(); });
-  aprsGate.on('error', (err) => sendCatLog('[APRS-IS] ' + (err.message || err)));
-  aprsGate.connect();
+  if (!settings.js8AprsGate || !settings.myCallsign || passLease) return; // the gate logs in as the owner
+  aprsUplinkWant('js8', true);
 }
 function disconnectAprsGate() {
-  if (!aprsGate) return;
-  try { aprsGate.disconnect(); } catch { /* gone */ }
-  aprsGate = null;
+  aprsUplinkWant('js8', false);
   js8PushStatus();
 }
 
@@ -14990,7 +17571,7 @@ function disconnectAprsGate() {
  *  source 1/min, global 10/min) and fully logged — everything forwarded under
  *  the operator's callsign must be visible to them. */
 function js8GateAprs(msg) {
-  if (!settings.js8AprsGate || !aprsGate || !aprsGate.verified) return;
+  if (!settings.js8AprsGate || !_aprsUplinkUsers.has('js8') || !aprsUplink || !aprsUplink.verified) return; // the uplink is shared: only JS8's own use gates (a Guest Pass drops it)
   const src = String(msg.from || '').toUpperCase();
   if (!src || src.startsWith('<') || src.startsWith('@')) return;
   const now = Date.now();
@@ -15002,7 +17583,7 @@ function js8GateAprs(msg) {
   }
   const { buildGatePacket, buildPositionPacket } = require('./lib/aprs-is');
   const text = String(msg.text || '').replace(/^@APRSIS\s*/i, '').trim();
-  const gate = settings.myCallsign.toUpperCase();
+  const gate = aprsUplink.call; // the uplink's login (the Settings callsign with -10)
   let packet = null;
   let what = '';
   const cmd = /^CMD\s+(.+)$/is.exec(text);
@@ -15010,7 +17591,7 @@ function js8GateAprs(msg) {
   if (cmd) { packet = buildGatePacket(src, gate, cmd[1]); what = 'CMD'; }
   else if (grid) { packet = buildPositionPacket(src, gate, grid[1], 'JS8'); what = 'GRID ' + grid[1].toUpperCase(); }
   if (!packet) return;   // not a gateable form — never guess at raw payloads
-  if (aprsGate.send(packet)) {
+  if (aprsUplink.send(packet)) {
     _aprsGatePerCall.set(src, now);
     _aprsGateStamps.push(now);
     // The full packet in the log IS the audit trail: everything gated under
@@ -15751,6 +18332,19 @@ function connectFreedvReporter() {
     sendCatLog(`[FreeDV Reporter] Error: ${err.message}`);
   });
 
+  // A station that leaves FreeDV Reporter leaves the list (#742).
+  freedvReporter.on('remove', (ev) => {
+    if (!ev || !ev.callsign) return;
+    const before = freedvReporterSpots.length;
+    freedvReporterSpots = FreedvSpotMerge.dropFreedvStation(freedvReporterSpots, ev.callsign);
+    if (freedvReporterSpots.length !== before && !freedvReporterFlushTimer) {
+      freedvReporterFlushTimer = setTimeout(() => {
+        freedvReporterFlushTimer = null;
+        sendMergedSpots();
+      }, 2000);
+    }
+  });
+
   freedvReporter.on('spot', (raw) => {
     if (!raw.callsign || !raw.frequency) return;
     const freqHz = typeof raw.frequency === 'number' ? raw.frequency : parseInt(raw.frequency, 10);
@@ -16069,6 +18663,9 @@ function shouldForwardClientDriven() {
 let passQsoOutbox = null;
 function passGuestLogContact(qsoData, ctx, canReceive, origin) {
   if (!qsoData.stationCallsign) qsoData.stationCallsign = onAirCall();
+  // Where the contact was made: this station's grid, state and county, as it
+  // logs its own (#822). The guest's POTACAT keeps them over its own home.
+  Object.assign(qsoData, StationCounty.guestPassStationFor(qsoData, { grid: settings.grid, fill: (r) => stationLocationFillFor(r, settings) }));
   qsoData.guestPass = true; // the guest's own POTACAT forwards it to their loggers (#553)
   if (passLease) {
     if (!qsoData.operator) qsoData.operator = onAirCall();
@@ -16161,9 +18758,12 @@ function activationStationFillFor(rec, s = settings) {
  * operator's own state and county (lib/station-county.js; AE5JE 2026-10-27):
  * an activation takes the county chosen for that park, anything else the
  * home state and county when made from the home grid. Blanks only.
+ * A Guest Pass contact keeps the lending station's location and never takes
+ * this operator's home (#822, StationCounty.ownStationFillApplies).
  */
 function stationLocationFillFor(rec, s = settings) {
   if (!rec) return {};
+  if (!StationCounty.ownStationFillApplies(rec)) return {};
   const a = activationStationFillFor(rec, s);
   const b = StationCounty.stationLocationFor({ ...rec, ...a }, {
     home: { state: s.homeState, county: s.homeCounty, grid: s.grid },
@@ -16440,6 +19040,19 @@ function announceActivationContact(records, targets) {
   }
 }
 
+// ECHOCAT log-qso replies by uuid (#733, lib/log-qso-replay.js). After a
+// restart the book is empty and the log answers: the saved records holding
+// the uuid, through the log's uuid index (no re-read unless it is there).
+const logQsoReplies = LogQsoReplay.createReplyBook();
+function logQsoReplyFromLog(uuid) {
+  const logPath = qsoLogPath();
+  if (!QsoLog.hasUuid(logPath, uuid)) return null;
+  return LogQsoReplay.replyFromLogRecords(QsoLog.findByUuid(logPath, uuid), {
+    operator: String(settings.myCallsign || '').toUpperCase(),
+    cloudJournal: !!(cloudIpc && typeof cloudIpc.currentOwnerId === 'function' && cloudIpc.currentOwnerId()),
+  });
+}
+
 // The saved record's own fields for a log-ok `records[]` entry (additive;
 // older devices ignore them). Only fields the record actually holds.
 const LOG_OK_SAVED_FIELDS = ['frequency', 'band', 'mode', 'state', 'gridsquare', 'country', 'dxcc', 'name', 'county'];
@@ -16479,11 +19092,19 @@ async function logContact(entry, opts) {
   }));
   const ownRef = !!(entry.mySig && entry.mySigInfo);
   const actAt = ActivationClock.contactTime(entry, Date.now()); // #147: its own timestamp decides
-  const myRefs = ownRef
-    ? [{ sig: String(entry.mySig).toUpperCase(), ref: entry.mySigInfo }]
-    : (entry.activation === false ? [] : activationRefsAt(actAt));
+  // entry.deviceMyRef: the phone's own park, kept when this desktop's
+  // activation does not apply at the contact's time (#734, 00Z).
+  const mine = ActivationClock.contactMyRefs({
+    ownRef: ownRef ? { sig: String(entry.mySig).toUpperCase(), ref: entry.mySigInfo } : null,
+    skipActivation: entry.activation === false,
+    activationRefsAt: () => activationRefsAt(actAt),
+    deviceRef: entry.deviceMyRef,
+  });
+  const myRefs = mine.refs;
+  if (mine.from === 'device') sendCatLog(`[Activation] ${entry.callsign}: the desktop's activation has ended; logged at the phone's park ${mine.refs[0].ref}`);
   const e = { ...entry, myRig };
   delete e.activation;
+  delete e.deviceMyRef;
   // Never a record with no MODE (pota.app refuses the file; NA4DQ 2026-10-27).
   // A blank mode takes the radio's voice/CW mode; a data mode cannot name the
   // digital mode worked, and no radio means nothing to go by: refused, with
@@ -16563,6 +19184,10 @@ async function logContact(entry, opts) {
   const records = QsoExpand.expandContact(e, expandOpts(false));
   const written = [];
   let first = null, failure = null;
+  // opts.replyOnWrite (ECHOCAT's log-qso, #732): go on once each record is on
+  // disk; the forwarders, respots and SOTA upload finish in the background
+  // and their respot outcome comes back on result.after.
+  const afters = [];
   // Several operators ("Log as: both") are split HERE, not inside
   // saveQsoRecord, so every copy is reported with the uuid it was written
   // under and whose logbook it went into (`operator` on log-ok records).
@@ -16571,7 +19196,17 @@ async function logContact(entry, opts) {
     const targets = LogAs.logAsTargets(rec.logAs);
     const copies = targets.length > 1 ? LogAs.splitForOperators(rec, targets) : [rec];
     for (const q of copies) {
-      const r = await saveQsoRecord(q, opts);
+      let r;
+      if (opts.replyOnWrite) {
+        const w = await LogAfterWrite.untilWritten((onWritten) => saveQsoRecord(q, { ...opts, onWritten }));
+        r = w.result;
+        afters.push(w.after.then((a) => {
+          if (a && a.afterError) sendCatLog(`[QSO] ${q.callsign} is saved; a step after the save failed: ${a.afterError}`);
+          return a;
+        }));
+      } else {
+        r = await saveQsoRecord(q, opts);
+      }
       if (!first) first = r;
       if (r && r.success) {
         q.bookOf = (typeof q.logAs === 'string' && q.logAs.trim()) ? q.logAs.trim().toUpperCase() : activeCall;
@@ -16579,7 +19214,7 @@ async function logContact(entry, opts) {
       } else if (!failure) failure = r;
     }
   }
-  if (written.length && !ownRef && myRefs.length) activationNoteContact(actAt);
+  if (written.length && mine.from === 'activation') activationNoteContact(actAt);
   // The live activation list hears of it here, once, whichever surface saved
   // it; the main window's own forms list it themselves (opts.listed). #508
   if (written.length) {
@@ -16600,6 +19235,7 @@ async function logContact(entry, opts) {
     error: failure ? failure.error : undefined,
     records: written,
     calls,
+    after: opts.replyOnWrite ? Promise.all(afters).then(LogAfterWrite.mergeAfterResults) : undefined,
   };
 }
 
@@ -16898,7 +19534,11 @@ async function saveQsoRecord(qsoData, opts) {
   // The cloud copy is exactly the record written to the file. (The journal
   // used to upper-case qsoData's own keys: CALLSIGN, QSODATE, FREQUENCY.)
   const sink = logAs ? logAsLogSink(ops, logAs.call) : qsoLogSink;
-  QsoLog.appendRecords(logPath, [buildAdifFields(qsoData)], { existing: [], sink });
+  // The uuid collision check runs against the log's uuid index (#733): a uuid
+  // already in the log gets a fresh one here, never a second record with it.
+  const adifFields = buildAdifFields(qsoData);
+  QsoLog.appendRecords(logPath, [adifFields], { sink });
+  qsoData.uuid = adifFields.APP_POTACAT_UUID; // what log-ok reports is what the file holds
   if (logAs) sendCatLog(`[QSO] Logged ${qsoData.callsign} for ${logAs.call}: their logbook, callsign, QRZ and Cloud settings (the active operator's worked lists are untouched)`);
 
   // Notify QSO pop-out window (it shows the active operator's logbook)
@@ -16981,6 +19621,41 @@ async function saveQsoRecord(qsoData, opts) {
   }
   // Debounced POTA.app pull — no-ops unless the user has enabled auto-sync.
   if (!logAs && loggedParkRef && potaSync) { try { potaSync.noteQsoLogged(); } catch {} }
+
+  // The record is on disk: a caller that answers a device now can (ECHOCAT's
+  // log-qso, #732). Everything below is uploads and respots; the yield lets
+  // that answer go out before any of it runs.
+  if (typeof opts.onWritten === 'function') {
+    opts.onWritten({ uuid: qsoData.uuid });
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+
+  // Push the updated log to any connected mobile/browser clients so
+  // their QSO list reflects the new entry without a reconnect.
+  // Mallory KD5ZZU 2026-05-06: she logged a QSO from the desktop UI
+  // and her iOS app's logbook stayed stale until she restarted the
+  // app, because the desktop never told the app the log changed.
+  // Clients advertising 'qso-delta' get just the appended record;
+  // everyone else still gets the full snapshot (chunked or the
+  // byte-capped legacy frame) — re-pushing the whole log on every
+  // save is what produced the 9.6MB frames of BUG-N3VD-20260701.
+  try {
+    // Only with a device connected: this re-parses the WHOLE log, synchronously.
+    // On a 124k-QSO log that held the main process ~1 s after every save with
+    // the ECHOCAT server merely listening, and the FT8 engine missed the 73's
+    // slot (IK4IDF 2026-10-17). A device that connects later gets the log then.
+    if (remoteServer && remoteServer.running && remoteServer.hasClient()) {
+      const logPath = ops.adifLogPath || path.join(app.getPath('userData'), 'potacat_qso_log.adi');
+      const qsos = parseAllRawQsos(logPath);
+      const mapped = CallZones.withQsoZones(qsos.map((q, i) => ({ idx: i, ...q })), callZonesOf); // + derived CQ/ITU zones (display only)
+      const last = mapped.length ? mapped[mapped.length - 1] : null;
+      if (!last || !remoteServer.sendQsoAdded(last, mapped.length)) {
+        remoteServer.sendAllQsos(mapped);
+      }
+    }
+  } catch (err) {
+    console.warn('[QSO] Broadcast to mobile clients failed:', err.message);
+  }
 
   // Forward to the external loggers if enabled: main logbook, Extra UDP, QRZ
   // Logbook (lib/logger-forward.js — the Cloud pull forwards a phone's
@@ -17165,33 +19840,6 @@ async function saveQsoRecord(qsoData, opts) {
 
   const didRespot = (qsoData.respot && qsoData.sig === 'POTA') || qsoData.wwffRespot || qsoData.llotaRespot || qsoData.dxcRespot;
 
-  // Push the updated log to any connected mobile/browser clients so
-  // their QSO list reflects the new entry without a reconnect.
-  // Mallory KD5ZZU 2026-05-06: she logged a QSO from the desktop UI
-  // and her iOS app's logbook stayed stale until she restarted the
-  // app, because the desktop never told the app the log changed.
-  // Clients advertising 'qso-delta' get just the appended record;
-  // everyone else still gets the full snapshot (chunked or the
-  // byte-capped legacy frame) — re-pushing the whole log on every
-  // save is what produced the 9.6MB frames of BUG-N3VD-20260701.
-  try {
-    // Only with a device connected: this re-parses the WHOLE log, synchronously.
-    // On a 124k-QSO log that held the main process ~1 s after every save with
-    // the ECHOCAT server merely listening, and the FT8 engine missed the 73's
-    // slot (IK4IDF 2026-10-17). A device that connects later gets the log then.
-    if (remoteServer && remoteServer.running && remoteServer.hasClient()) {
-      const logPath = ops.adifLogPath || path.join(app.getPath('userData'), 'potacat_qso_log.adi');
-      const qsos = parseAllRawQsos(logPath);
-      const mapped = CallZones.withQsoZones(qsos.map((q, i) => ({ idx: i, ...q })), callZonesOf); // + derived CQ/ITU zones (display only)
-      const last = mapped.length ? mapped[mapped.length - 1] : null;
-      if (!last || !remoteServer.sendQsoAdded(last, mapped.length)) {
-        remoteServer.sendAllQsos(mapped);
-      }
-    }
-  } catch (err) {
-    console.warn('[QSO] Broadcast to mobile clients failed:', err.message);
-  }
-
   return { success: true, resposted: didRespot || false, logbookError, qrzError };
 }
 
@@ -17289,7 +19937,7 @@ function connectWsjtx() {
       const wsjtxMode = f.SUBMODE || f.MODE || '';
       const qsoData = {
         callsign: f.CALL || '',
-        frequency: String(Math.round(freqMHz * 1000)),
+        frequency: LogFreqField.exactKhzText(freqMHz * 1000), // to the hertz: 40 m FT4 is 7047.5 (#794)
         mode: wsjtxMode,
         qsoDate: f.QSO_DATE || '',
         timeOn: f.TIME_ON || '',
@@ -19210,18 +21858,31 @@ async function maybeFetchWsprHeard(force) {
 // Band hopping — QSY the radio to the next band in the hop set at cycle end.
 // Pure schedule (lib/wspr/bandhop) decides; here we tune + retune the decoder
 // dial. No-op unless hopping is on, in WSPR mode, with >=2 bands.
+// Never during our own beacon's TX slot (#766): the hop is held to the next decode.
+let _wsprHopPending = false;
 function maybeHopBand() {
   if (!jtcatWsprHopEnabled || !ft8Engine || ft8Engine._mode !== 'WSPR') return;
   // Never to a band this radio is not used on (lib/rig-bands.js).
   const bands = IdleWsprBand.hopBandsForRig(jtcatWsprHopBands, activeRigBands());
   if (!Array.isArray(bands) || bands.length < 2) return;
   const curSlot = wsprBandhop.slotNumber(Date.now());
-  if (!wsprBandhop.bandChangesNext(curSlot, bands, jtcatWsprHopDwell)) return; // dwell — stay put
-  const nb = wsprBandhop.nextBand(curSlot, bands, jtcatWsprHopDwell);
+  const curBandEntry = wsprBands.bandForFreq(ft8Engine._wsprDialMHz);
+  const hop = wsprBandhop.decideHop({
+    slot: curSlot, bands, dwell: jtcatWsprHopDwell,
+    txActive: !!ft8Engine._txActive,
+    txSlot: !!(jtcatWsprScheduler && jtcatWsprScheduler.isTxSlot(StationClock.now())),
+    pending: _wsprHopPending,
+    currentBand: curBandEntry ? curBandEntry.band : null,
+  });
+  _wsprHopPending = hop.pending;
+  if (hop.action === 'hold') { sendCatLog('[JTCAT] WSPR band hop held: ' + hop.reason); return; }
+  if (hop.action !== 'hop') return; // dwell — stay put
+  const nb = hop.band;
   const mhz = wsprBands.dialForBand(nb);
   if (!mhz) return;
   ft8Engine.setWsprDial(mhz);
-  tuneRadio(mhz * 1000, 'DIGU'); // kHz dial; WSPR rides USB/DIGU
+  // The purpose lets the band-change ATU tune skip a receive-only hop (#747).
+  tuneRadio(mhz * 1000, 'DIGU', undefined, { purpose: 'wspr-hop' }); // kHz dial; WSPR rides USB/DIGU
   settings.wsprDial = mhz;
   sendCatLog(`[JTCAT] WSPR band hop → ${nb} (${mhz.toFixed(4)} MHz) for the next cycle`);
   if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) jtcatPopoutWin.webContents.send('jtcat-wspr-hop-band', { band: nb });
@@ -19330,6 +21991,10 @@ let _wsprBeaconLevelLogTimer = null;
 // having been *sent* (see wsprReconcilePreCapPower).
 function wsprBeaconArmed() {
   return !!(jtcatWsprScheduler && jtcatWsprScheduler.enabled);
+}
+// Set to transmit: armed with a TX % above 0 (lib/wspr/bandhop.js, #747).
+function wsprBeaconWillTransmit() {
+  return wsprBandhop.beaconWillTransmit({ armed: wsprBeaconArmed(), txPct: jtcatWsprScheduler ? jtcatWsprScheduler.txPct : 0 });
 }
 
 function wsprForgetPreCapPower() {
@@ -19520,6 +22185,8 @@ function wsprBeaconTick() {
     return;
   }
   if (ft8Engine._txActive) return;
+  // An owed band-change tune is running (#747): draw no slot until it is done.
+  if (Date.now() < _wsprOwedTuneHoldUntil) return;
   // Announce each slot's draw to the popout/phone. The random 20% default
   // means MOST slots are listen slots, and a beacon that says nothing during
   // them is indistinguishable from a dead one — N7BBQ armed it, watched 5
@@ -19639,6 +22306,7 @@ function setWsprBeacon(on, opts = {}) {
         ? ` ${restoreWatts} W will be restored when the beacon stands down.`
         : ` No pre-beacon power level was known, so it stays at ${beaconW} W until you raise it.`)
     : `[JTCAT] WSPR: could NOT set radio power automatically (no live CAT/SmartSDR power control) — set your radio to ${beaconW} W or less BY HAND before it transmits.`);
+  wsprRunOwedAtuTune();
   tellPopout(true);
 }
 
@@ -19660,6 +22328,7 @@ function applyWsprBeaconControl(opts) {
   if (jtcatWsprScheduler) {
     if (opts.txPct != null) jtcatWsprScheduler.setTxPct(settings.wsprTxPct);
     if (dbmChanged) jtcatWsprScheduler.setDbm(wsprReportedDbm());
+    if (opts.txPct != null) wsprRunOwedAtuTune();
   }
   if (opts.enabled != null) setWsprBeacon(!!opts.enabled);
   else if (dbmChanged) wsprBroadcastBeaconState();
@@ -19860,7 +22529,9 @@ async function jtcatAutoLog(qso, opts) {
   if (JtcatAutoRespot.applyAutoRespot(qsoData, respotPlan, settings)) {
     sendCatLog(`[JTCAT] Re-spot after the contact: ${qsoData.callsign} @ ${[respotPlan.pota && `POTA ${respotPlan.pota}`, respotPlan.wwff && `WWFF ${respotPlan.wwff}`].filter(Boolean).join(', ')}`);
   }
-  await jtcatWriteLog(qsoData, relogKeyStr);
+  const res = await jtcatWriteLog(qsoData, relogKeyStr);
+  // Not written: an older phone must not be told it was (lib/jtcat-qso-view.js).
+  if (!res || !res.success) q._logFailed = true;
 }
 
 // Re-spot a hunted activator after a JTCAT contact (#351, opt-in, the JTCAT
@@ -20022,23 +22693,62 @@ function _autoSeqEnabled() {
   return !eng || eng._autoSeq !== false;
 }
 
-// Shared TX/log callbacks — the state-machine advance AND the give-up
-// closeout (closeoutStalledQso) go through the same plumbing so the final
-// courtesy 73 routes to the same engine and log path as a normal advance.
+// Shared TX/log callbacks — the state-machine advance, the tx-start log
+// (jtcatNoteTxSent) and Skip's final 73 (sendFinal73) go through the same
+// plumbing so the 73 routes to the same engine and log path as a normal advance.
 async function popoutJtcatSetTxMsg(msg) {
   const txEng = jtcatManager ? jtcatManager.txEngine : ft8Engine;
   if (txEng) await txEng.setTxMessage(msg);
   popoutBroadcastQso();
 }
-// The courtesy leg (73 / RR73 after the log) ends only once its message has
-// actually gone out: stamp the QSO(s) whose pending message this transmission
-// carries. Called from the tx-start dispatch, after every TX-block guard, so a
-// refused cycle never counts as sent (lib/jtcat-state-machine.js
-// _courtesyPending; IK4IDF 2026-10-15).
+// Called from the tx-start dispatch, after every TX-block guard, so a refused
+// cycle never counts as sent. Two jobs:
+// - The courtesy leg (73 / RR73) ends only once its message has actually gone
+//   out: stamp the QSO(s) whose pending message this transmission carries
+//   (lib/jtcat-state-machine.js _courtesyPending; IK4IDF 2026-10-15).
+// - The log rule (#807): a QSO is logged when OUR RR73 / RRR / 73 starts going
+//   out (or when theirs is received, in the state machine), never before. This
+//   is the one place "we send a 73" is seen, whether the auto-sequence, Skip or
+//   the operator put the 73 on the air. Each surface logs through its own path,
+//   so the window's "Open the Log QSO window before saving" opens right here.
 function jtcatNoteTxSent(message) {
-  for (const q of [popoutJtcatQso, remoteJtcatQso]) {
-    if (q && q.txMsg && q.txMsg === message) q._txSentMsg = message;
+  for (const surface of ['popout', 'remote']) {
+    const q = surface === 'popout' ? popoutJtcatQso : remoteJtcatQso;
+    if (!q) continue;
+    if (q.txMsg && q.txMsg === message) q._txSentMsg = message;
+    if (_jtcatStateMachine.txLogsQso(q, message)) {
+      sendCatLog(`[JTCAT] ${q.call}: "${message}" is going out — logging the QSO`);
+      const done = surface === 'popout' ? popoutJtcatOnDone(q) : remoteJtcatOnDone(q);
+      done().catch((e) => sendCatLog(`[JTCAT] Log at TX start failed for ${q.call}: ${e && e.message}`));
+    }
   }
+}
+// A QSO the retry cap stopped with reports exchanged both ways but no RR73 from
+// them (#807): not logged and no 73 sent. It is kept for a few minutes so the
+// operator's Send 73 (the notice's button, or Skip) can still send the 73 and
+// log it. Only while nothing else has started on that surface since.
+const JTCAT_UNCONFIRMED_KEEP_MS = 5 * 60 * 1000;
+const _jtcatUnconfirmed = { popout: null, remote: null };
+function jtcatStashUnconfirmed(surface, q, slot) {
+  if (surface !== 'popout' && surface !== 'remote') return;
+  _jtcatUnconfirmed[surface] = { q, slot, at: Date.now() };
+}
+function jtcatTakeUnconfirmed(surface) {
+  const u = _jtcatUnconfirmed[surface];
+  _jtcatUnconfirmed[surface] = null;
+  const current = surface === 'popout' ? popoutJtcatQso : remoteJtcatQso;
+  if (!u || current || u.q._logged || Date.now() - u.at > JTCAT_UNCONFIRMED_KEEP_MS) return null;
+  return u;
+}
+// Send the final 73 for a stopped, unconfirmed QSO: back on its slot, TX on.
+// The 73 going out logs it (jtcatNoteTxSent).
+function jtcatSendStashed73(u, eng, setTxMsg) {
+  if (!_jtcatStateMachine.sendFinal73(u.q, setTxMsg, { log: sendCatLog })) return false;
+  u.q.txRetries = 0;
+  if (u.slot === 'even' || u.slot === 'odd') eng.setTxSlot(u.slot);
+  eng._txEnabled = true;
+  if (typeof eng.tryImmediateTx === 'function') eng.tryImmediateTx();
+  return true;
 }
 function popoutJtcatOnDone(qso) {
   return async () => {
@@ -20185,11 +22895,13 @@ async function jtcatTryAnswerDirectCaller(results, myCall, myGrid) {
 //              cycle since 2026-07 — heard-but-stuck no longer resets it;
 //              that reset let a partner repeating a non-advancing message
 //              hang the QSO forever, KQ4MHD)
-//   closeout → reports exchanged both ways: log + one final courtesy 73 via
-//              the same setTxMsg/onDone plumbing; the QSO stays live so the
-//              courtesy-73 leg can tear down normally (do NOT null it here)
 //   rearm    → Full Auto CQ run mode: drop the stalled QSO, resume CQ
 //   abort    → tear down TX, drop the QSO unlogged, notify
+// With reports exchanged both ways (outcome.unconfirmed) the QSO still ends
+// unlogged and no 73 is sent (#807: a QSO is logged only when a 73 is sent or
+// received). The notice says so and offers Send 73, which sends the 73 and
+// logs it (jtcatTakeUnconfirmed in the Skip handlers). Until #807 the cap
+// logged and sent a 73 on its own (closeoutStalledQso).
 function jtcatHandleRetryStall(o) {
   const qso = o.qso;
   // A courtesy leg (73 / RR73 after the log) waits for its OWN transmission,
@@ -20252,18 +22964,13 @@ function jtcatHandleRetryStall(o) {
   });
   qso.txRetries = outcome.retries;
   const max = qso.phase === 'cq' ? JTCAT_MAX_CQ_RETRIES : maxQso;
-  if (outcome.action === 'closeout') {
-    const notice = _jtcatStateMachine.giveUpMessage({ kind: 'closeout', call: qso.call, max });
-    _jtcatStateMachine.closeoutStalledQso(qso, o.setTxMsg, async () => {
-      await o.onDone();
-      // Notify after the log resolves so the notice wins the shared popout
-      // toast slot from the green "Logged" toast.
-      if (o.notifyCloseout) o.notifyCloseout(notice);
-    }, { log: sendCatLog });
-    qso.txRetries = 0;
-    jtcatFullAutoCqLastActivity = Date.now(); // counts as progress for the watchdog
-  } else if (outcome.action === 'rearm') {
+  if (outcome.action === 'rearm') {
     sendCatLog('[JTCAT] Full Auto CQ — ' + (qso.call || 'partner') + ' stalled, resuming CQ');
+    if (outcome.unconfirmed) {
+      const notice = _jtcatStateMachine.giveUpMessage({ kind: 'unconfirmed', call: qso.call, max, run: true });
+      sendCatLog('[JTCAT] ' + notice);
+      if (o.notifyNotice) o.notifyNotice(notice);
+    }
     if (qso.call) jtcatSessionMark(qso.call);
     // Re-arm under whichever owner is running — was hardcoded 'popout' when
     // run mode was popout-only; the phone control path (jtcat-full-auto-cq)
@@ -20271,10 +22978,12 @@ function jtcatHandleRetryStall(o) {
     // rearmCq into a silent no-op (run stalls after the first stalled QSO).
     rearmCq(jtcatFullAutoCqOwner);
   } else if (outcome.action === 'abort') {
-    const msg = _jtcatStateMachine.giveUpMessage({
-      kind: 'abort', phase: qso.phase, call: qso.call,
-      heard: !!qso._heardThisCycle, hound: !!qso.hound, max,
-    });
+    const msg = outcome.unconfirmed
+      ? _jtcatStateMachine.giveUpMessage({ kind: 'unconfirmed', call: qso.call, max })
+      : _jtcatStateMachine.giveUpMessage({
+        kind: 'abort', phase: qso.phase, call: qso.call,
+        heard: !!qso._heardThisCycle, hound: !!qso.hound, max,
+      });
     // sendCatLog, not console.log: a QSO given up on has to be visible in the
     // bug report, or the log just jumps to the next station with no reason
     // (N2FSM 2026-09-14, KI7SKT -> W0CTX).
@@ -20286,6 +22995,10 @@ function jtcatHandleRetryStall(o) {
       sendCatLog(`[JTCAT] Hunt skips ${qso.call} for ${jtcatAutoSkipMin()} min on ${bm.band || 'this band'} ${bm.mode || ''}`.trimEnd());
     }
     const eng = o.engine;
+    if (outcome.unconfirmed) {
+      const surface = qso === popoutJtcatQso ? 'popout' : (qso === remoteJtcatQso ? 'remote' : null);
+      jtcatStashUnconfirmed(surface, qso, eng && eng._txSlot);
+    }
     if (eng) {
       eng._txEnabled = false;
       eng.setTxMessage('');
@@ -20293,7 +23006,7 @@ function jtcatHandleRetryStall(o) {
       if (eng._txActive) eng.txComplete();
     }
     o.clearQso();
-    if (o.notifyAbort) o.notifyAbort(msg);
+    if (o.notifyAbort) o.notifyAbort(msg, { send73: !!outcome.unconfirmed });
   }
 }
 
@@ -20535,6 +23248,7 @@ function startJtcat(mode) {
     jttyProfile: settings.jttyProfile || 'unknown',
   });
   ft8Engine = jtcatManager.engine; // Phase 0 alias
+  ft8Engine.on('log', (line) => sendCatLog('[JTCAT] ' + line)); // before Hold below, so its line is logged
 
   // Apply persisted JTCAT calibration to the freshly-started engine.
   // Soundcard latency: by default the engine auto-calibrates from the
@@ -20768,8 +23482,8 @@ function startJtcat(mode) {
 
   // Surface engine-level info (which decoder is in use, etc.) in the
   // Verbose CAT log so the user can verify ft8_lib (native) is loaded
-  // without opening DevTools / Node console.
-  ft8Engine.on('log', (line) => sendCatLog('[JTCAT] ' + line));
+  // without opening DevTools / Node console. The listener is attached
+  // right after the engine is built (#688: "Hold TX Freq: ON").
 
   ft8Engine.on('decode', async (data) => {
     // Enrich decodes with "needed" flags for call roster
@@ -20915,13 +23629,13 @@ function startJtcat(mode) {
           workableCount: runWorkable,
           setTxMsg: remoteJtcatSetTxMsg, onDone: remoteJtcatOnDone(qso),
           clearQso: () => { remoteJtcatQso = null; remoteJtcatBroadcastQso(); },
-          notifyAbort: (msg) => {
+          notifyAbort: (msg, extra) => {
             if (remoteServer.hasClient()) {
-              remoteServer.broadcastJtcatQsoState({ phase: 'error', error: msg });
+              // send73: the stopped QSO can still be finished with a 73 (#807);
+              // the client's Skip (jtcat-skip-phase) sends it.
+              remoteServer.broadcastJtcatQsoState(Object.assign({ phase: 'error', error: msg }, extra && extra.send73 ? { send73: true } : {}));
             }
           },
-          // No closeout notice on the wire — the phone just sees the normal
-          // QSO broadcast advance 73 → done (no new phase values for ECHOCAT).
         });
       } else if (remoteJtcatQso && remoteJtcatQso.phase !== phaseBefore) {
         remoteJtcatQso.txRetries = 0;
@@ -20941,12 +23655,12 @@ function startJtcat(mode) {
           workableCount: runWorkable,
           setTxMsg: popoutJtcatSetTxMsg, onDone: popoutJtcatOnDone(qso),
           clearQso: () => { popoutJtcatQso = null; popoutBroadcastQso(); },
-          notifyAbort: (msg) => {
+          notifyAbort: (msg, extra) => {
             if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
-              jtcatPopoutWin.webContents.send('jtcat-qso-state', { phase: 'error', error: msg });
+              jtcatPopoutWin.webContents.send('jtcat-qso-state', Object.assign({ phase: 'error', error: msg }, extra && extra.send73 ? { send73: true } : {}));
             }
           },
-          notifyCloseout: (msg) => {
+          notifyNotice: (msg) => {
             if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
               jtcatPopoutWin.webContents.send('jtcat-qso-notice', { message: msg });
             }
@@ -21303,6 +24017,15 @@ function startJtcat(mode) {
       }
       // ...and on the ECHOCAT device: a web/phone-owned session was refused in silence.
       if (remoteServer && remoteServer.hasClient()) remoteServer.broadcastJtcatQsoState({ phase: 'error', error: dialMsg });
+      // JS8 runs in its own window, which never sees jtcat-qso-state: its
+      // refusal reached only the CAT log (#714). Its existing refusal channel.
+      if (ft8Engine._mode === 'JS8') {
+        const js8Msg = 'TX blocked — the radio is on ' + (_currentFreqHz / 1e6).toFixed(3) + ' MHz' + bandOf(_currentFreqHz) +
+          ' but JS8 is set to ' + (_jtcatExpectedDialHz / 1e6).toFixed(3) + ' MHz' + bandOf(_jtcatExpectedDialHz) +
+          '. Turn the radio to a JS8 dial, or pick a band in the JS8 window.';
+        if (js8PopoutWin && !js8PopoutWin.isDestroyed()) js8PopoutWin.webContents.send('js8call-send-result', { ok: false, error: js8Msg });
+        if (remoteServer && remoteServer.hasClient()) remoteServer.sendJs8SendResult({ ok: false, error: js8Msg });
+      }
       jtcatRefuseTx('the radio is on ' + (_currentFreqHz / 1e6).toFixed(3) + ' MHz' + bandOf(_currentFreqHz) +
         ', JTCAT on ' + (_jtcatExpectedDialHz / 1e6).toFixed(3) + ' MHz' + bandOf(_jtcatExpectedDialHz));
       return;
@@ -21625,7 +24348,9 @@ function broadcastJtcatClock(payload) {
 // the correction in use (how far the computer's clock is ahead, ms).
 function stationClockFields() {
   const sc = StationClock.info();
-  return { source: sc ? 'device' : 'ntp', correctionMs: StationClock.aheadMs() };
+  // canFix / canOpenSettings: which clock buttons this OS can honour (lib/ntp.js).
+  return { source: sc ? 'device' : 'ntp', correctionMs: StationClock.aheadMs(),
+    canFix: clockFixSupported(process.platform), canOpenSettings: timeSettingsTargets(process.platform).length > 0 };
 }
 
 // What NTP last said about the computer's RAW clock: 'ok'|'warn'|'bad', or
@@ -21678,6 +24403,17 @@ function stationClockClear(why) {
 // resync that only SLEWS the clock was reported as success while the banner
 // stayed exactly where it was (K3SBP 2026-10-15), and a button that does
 // nothing visible with no word why is worse than no button.
+// "Time settings" on every surface: the OS date and time page (lib/ntp.js
+// timeSettingsTargets). It used to do nothing on a Mac (NJ2DX 2026-11-21).
+async function openTimeSettings() {
+  const { shell } = require('electron');
+  for (const url of timeSettingsTargets(process.platform)) {
+    try { await shell.openExternal(url); return true; }
+    catch (err) { sendCatLog(`[Clock] Could not open ${url}: ${err && err.message ? err.message : err}`); }
+  }
+  return false;
+}
+
 async function runClockFix() {
   const before = jtcatLastClock && Number.isFinite(jtcatLastClock.offsetMs) ? jtcatLastClock.offsetMs : null;
   const sync = await syncSystemClock();
@@ -22420,6 +25156,14 @@ function connectSmartSdr() {
   // confirmed from the transmit-status readback, never from the command.
   smartSdr.on('atu-status', (kv) => { if (atuWizardRun) atuWizardRun.noteAtuStatus(kv); });
   smartSdr.on('interlock', (kv) => { if (atuWizardRun) atuWizardRun.noteInterlock(kv); });
+  // APRS phase 7: a radio beacon counts as sent only when the interlock says
+  // TRANSMITTING; the radio's refusal ends it with the radio's own words.
+  smartSdr.on('interlock', (kv) => { if (kv.state === 'TRANSMITTING') aprsRfNoteRadioTx(); });
+  smartSdr.on('radio-message', (m) => aprsRfNoteRadioRefusal(m && m.text));
+  // The radio's GPS (read only): the APRS position source and the Settings grid offer.
+  smartSdr.on('gps', (s) => flexGpsSet(s));
+  smartSdr.on('disconnected', () => flexGpsSet(null));
+  smartSdr.on('cmd-error', ({ status, line }) => { const t = String(line || '').split('|').pop(); if ((status >>> 0) === 0x50000043 || AprsRfBeacon.isTxRefusalText(t)) aprsRfNoteRadioRefusal(t); });
   smartSdr.on('frequency', (hz) => { if (atuWizardRun) atuWizardRun.noteSliceMoved(hz); });
   smartSdr.on('transmit-status', () => atuWizardOnTransmitStatus());
   smartSdr.on('slice-ready', () => { try { atuWizardRecoverOnConnect(); } catch (err) { sendCatLog(`[ATU wizard] recovery check failed: ${err.message}`); } });
@@ -22606,6 +25350,7 @@ function connectSmartSdr() {
     if (sstvPopoutWin && !sstvPopoutWin.isDestroyed()) sstvPopoutWin.webContents.send('cat-swr-ratio', swr);
     if (winlinkPopoutWin && !winlinkPopoutWin.isDestroyed()) winlinkPopoutWin.webContents.send('cat-swr-ratio', swr);
     if (js8PopoutWin && !js8PopoutWin.isDestroyed()) js8PopoutWin.webContents.send('cat-swr-ratio', swr);
+    aprsWinMeter('cat-swr-ratio', swr);
     remoteMeterPush('swr-ratio', swr);
     // SWR guard: these frames only flow during TX (src=TX- bridge meter), so
     // a sustained over-limit value here means we are RIGHT NOW transmitting
@@ -22700,7 +25445,7 @@ function connectSmartSdr() {
     if (_externalGuis > 0) {
       sendCatLog(`Flex multiFlex: ${_externalGuis} other GUI client${_externalGuis === 1 ? '' : 's'} open (SmartSDR / AetherSDR), so POTACAT registered as an INDEPENDENT GUI client and works its OWN slice. `
         + 'Tuning a spot here moves POTACAT\'s slice — the panadapter in your SDR window is a different slice and will not follow it, and the frequency POTACAT shows is its own slice, not the one on screen there. '
-        + 'To drive the slice you are actually watching, turn off "Give POTACAT its own slice when SmartSDR / AetherSDR is open" in Settings > My Rigs > (edit the rig) and reconnect. '
+        + 'To drive the slice you are actually watching, turn off "Give POTACAT its own slice when SmartSDR / AetherSDR is open" (Settings > Radio, Edit the rig) and reconnect. '
         + `(client_id=${clientId})`);
     } else {
       sendCatLog(`Flex Direct active — POTACAT is the GUI client; radio control works with no SmartSDR open (client_id=${clientId})`);
@@ -22906,6 +25651,7 @@ function disconnectSmartSdr() {
     smartSdr.disconnect();
     smartSdr = null;
   }
+  if (flexGps) flexGpsSet(null); // no radio, no GPS
   stopSmartSdrAudio();
 }
 
@@ -23775,7 +26521,7 @@ function icomLanVoicePttOpts() {
   if (rig && rig.lanVoiceInSsb) return { audio: true };
   return {
     audio: true, forceDataMode: true,
-    dataReason: 'voice over the LAN: at the radio\'s factory setting LAN audio reaches the transmitter only in DATA mode. If its DATA OFF MOD menu is LAN, tick "Voice over the LAN stays in USB / LSB" in Settings > My Rigs',
+    dataReason: 'voice over the LAN: at the radio\'s factory setting LAN audio reaches the transmitter only in DATA mode. If its DATA OFF MOD menu is LAN, tick "Voice over the LAN stays in USB / LSB" in Settings > Radio, Edit the rig',
   };
 }
 
@@ -24506,6 +27252,7 @@ function tciRigTxMeter(kind, value) {
     sendCatAlc(Math.round(value * 255 / 100));
   } else if (kind === 'swr') {
     for (const w of [win, vfoPopoutWin, jtcatPopoutWin]) if (w && !w.isDestroyed()) w.webContents.send('cat-swr-ratio', value);
+    aprsWinMeter('cat-swr-ratio', value);
     remoteMeterPush('swr-ratio', value);
     // The SWR guard, as on a Flex: each frame judged with the power beside it.
     if (!tciRig || !tciRig.txActive || settings.swrGuard === false || _swrTripped || Date.now() <= _swrGuardSuppressUntil) return;
@@ -24593,7 +27340,7 @@ function connectTciRig() {
   const t = TciTarget.normalize(target);
   const bad = TciTarget.validate(t);
   if (bad) {
-    sendCatLog(`[TCI] Not connecting: ${bad}. Fix it in Settings > My Rigs.`);
+    sendCatLog(`[TCI] Not connecting: ${bad}. Fix it in Settings > Radio, Edit the rig.`);
     sendCatStatus({ connected: false });
     return;
   }
@@ -25528,7 +28275,7 @@ function nocatSerialPtt(state, target) {
   const portPath = String(target.pttPort || '').trim();
   const line = target.pttLine === 'dtr' ? 'dtr' : 'rts';
   if (!portPath) {
-    sendCatLog('[PTT] FAILED: no PTT port is set. Settings > My Rigs > this radio > Transmit (PTT): pick the interface\'s COM port.');
+    sendCatLog('[PTT] FAILED: no PTT port is set. Settings > Radio, Edit the rig, Transmit (PTT): pick the interface\'s COM port.');
     return;
   }
   if (settings.cwKeyPort && settings.cwKeyPort.toLowerCase() === portPath.toLowerCase()) {
@@ -26423,6 +29170,14 @@ function _sendCwTextToRadioImpl(text, opts) {
 // node-serialport DTR. Returns a label if it keyed, else false.
 function keyCwTextOnKeyPort(expanded, wpm, txtPins, live) {
   const pinLabel = txtPins.dtr && txtPins.rts ? 'DTR+RTS' : (txtPins.rts ? 'RTS' : 'DTR');
+  // BK-IN on before the first element, as the CAT text path does: an FTX-1
+  // keyed on its KEY input with BK-IN off gives sidetone and no RF (#745).
+  // The rule and the restore live in RigController.cwKeyLineStarting; no CAT
+  // link (or the legacy CatClient) keys exactly as before.
+  const keyPortReady = !!(_cwKeyPortPathForPython || (cwKeyPort && cwKeyPort.isOpen));
+  if (keyPortReady && cat && cat.connected && typeof cat.cwKeyLineStarting === 'function') {
+    try { cat.cwKeyLineStarting(expanded, wpm); } catch { /* the link going down must not stop the keying */ }
+  }
   if (_cwKeyPortPathForPython) {
     // Prefer the persistent keyer (also carries real-time paddle); it owns
     // the port, so the per-message python is only the fallback when the
@@ -27214,7 +29969,7 @@ function buildPaddleKeyRig() {
           let hint;
           if (brand === 'icom') {
             hint = `IC-7300/705/7610: SET > Connectors > USB SEND/Keying > USB Keying (CW) = ${line}. ` +
-              `POTACAT is driving ${line}; if your radio menu uses the other line, change one to match (Settings > Rig > CW keying line).`;
+              `POTACAT is driving ${line}; if your radio menu uses the other line, change one to match (Settings > Radio, Edit the rig, CW keying line).`;
           } else if (brand === 'yaesu') {
             hint = `Yaesu: OPERATION SETTING > TUNING > CAT PORT setup + CW KEYING source = ${line}.`;
           } else if (brand === 'kenwood') {
@@ -27312,7 +30067,9 @@ function buildPaddleKeyRig() {
         sendCatLog(`[CW] Keying on the CW Key Port with ${kpLabel}. The radio's PC KEYING (or CW keying) menu must be set to ${kpLabel}${activeRigSetupPointer('CW')}`);
       }
       const pinState = { dtr: kpPins.dtr ? !!down : false, rts: kpPins.rts ? !!down : false };
+      const setStartedAt = Date.now(); // #244 diagnostic: how long the line change takes
       cwKeyPort.set(pinState, (err) => {
+        if (remoteServer) remoteServer.noteCwKeyLineSetMs(Date.now() - setStartedAt);
         if (err && !cwKeyPort._dtrLoggedError) {
           console.log(`[CW Key Port] Pin set error: ${err.message} (pins: ${JSON.stringify(pinState)})`);
           cwKeyPort._dtrLoggedError = true; // log once, don't spam
@@ -27330,6 +30087,7 @@ function connectRemote() {
   // Local network and Cloud is the always-on 0.0.0.0 of before.
   const remoteAccess = RemoteAccess.normalizeRemoteAccess(settings).access;
   if (!settings.enableRemote || remoteAccess === 'off') {
+    releasePhoneDrivenJtcat();
     sendCatLog('[Echo CAT] Access: ' + RemoteAccess.describeRemoteAccess('off'));
     return;
   }
@@ -27339,6 +30097,7 @@ function connectRemote() {
   for (const hook of _remoteServerHooks) {
     try { hook(remoteServer); } catch (err) { sendCatLog('[Echo CAT] wiring hook failed: ' + (err && err.message ? err.message : err)); }
   }
+  pushCloudState(); // auth-ok carries `cloud` from the first device on
   // Seed the activity cache at birth. Without this a phone connecting to a
   // freshly-launched idle desktop gets NO activity-state despite the hello
   // advertising the capability — "idle" must be a stated fact, not an
@@ -27622,7 +30381,16 @@ function connectRemote() {
 
   // Scan on/off sync (scan-state-sync-desktop). The scan engine lives in the
   // renderer, so these inbound peer messages are forwarded over IPC.
-  remoteServer.on('scan-control', ({ action }) => {
+  remoteServer.on('scan-control', ({ action, filters, dwellSec, fromFreqKhz }) => {
+    // #37 (scan-remote-v1): a start that carries the phone's own scan runs here,
+    // in main, with the phone's filters; the desktop's own scan stops first.
+    if (action === 'start' && filters && !isRemoteMode()) {
+      if (desktopScanning && win && !win.isDestroyed()) win.webContents.send('remote-scan-control', { action: 'stop' });
+      markUserActive();
+      phoneScanRun().start({ filters, dwellSec, fromFreqKhz });
+      return;
+    }
+    if (action === 'stop' && _phoneScanRun && _phoneScanRun.scanning) _phoneScanRun.stop('stop');
     // Mobile asks us to start/stop the desktop scan. The renderer acts and
     // then emits scan-state-changed, which broadcasts the new state back.
     if (win && !win.isDestroyed()) win.webContents.send('remote-scan-control', { action });
@@ -27688,7 +30456,7 @@ function connectRemote() {
     pushSstvDecoderState({ force: true });
     // Seed the (re)connecting phone with the desktop's current scan state so a
     // mid-scan reconnect shows the in-progress scan (scan-state-sync-desktop).
-    remoteServer.sendToClient({ type: 'scan-state', scanning: desktopScanning });
+    remoteServer.sendToClient({ type: 'scan-state', scanning: scanStateNow() });
     // Send current source toggles to phone
     remoteServer.sendSourcesToClient({
       pota: settings.enablePota !== false,
@@ -28132,6 +30900,21 @@ function connectRemote() {
     });
   };
 
+  // ECHOCAT ask 2026-11-21 item 3 (Casey: yes; this one case changes "the door
+  // is set at the desktop only"): an owner device turns the Cloud Tunnel ON,
+  // only while the account has Cloud access. A Guest Pass never reaches here
+  // (remote-server refuses it). Off stays a desktop choice.
+  cloudBridge('cloud-tunnel-enable', async () => {
+    if (!cloudTunnel) return { ok: false, error: 'not_ready', message: 'The Cloud Tunnel is not ready on the desktop yet.' };
+    if (!settings.cloudAccessToken) return { ok: false, error: 'signed_out', message: 'Sign in to POTACAT Cloud first.' };
+    if (!CloudBillingUi.hasAccess(settings.cloudSubscriptionCache)) return { ok: false, error: 'no_access', message: 'This account has no Cloud access. Start a trial or subscribe first.' };
+    if (cloudTunnel.getState().enabled) return { ok: true };
+    await cloudTunnel.enable({});
+    if (settings.cloudTunnelUserOff) { delete settings.cloudTunnelUserOff; saveSettings(settings); }
+    sendCatLog('[cloud-tunnel] turned on from an ECHOCAT device (the account has Cloud access)');
+    return { ok: true };
+  });
+
   // Remove the direct handler above and use the bridge pattern for all cloud events
   remoteServer.removeAllListeners('cloud-login');
   cloudBridge('cloud-login', async (msg) => {
@@ -28158,6 +30941,8 @@ function connectRemote() {
     settings.cloudAccessToken = result.accessToken;
     settings.cloudRefreshToken = result.refreshToken;
     settings.cloudUser = result.user;
+    // Same as the desktop's own sign-up (lib/cloud-ipc.js): a new account syncs from the first contact.
+    settings.cloudSyncEnabled = true;
     saveSettings(settings);
     // Fresh client + device registration (see cloud-login above) so the
     // welcome screen's "find your shacks" flow has this desktop at once.
@@ -29084,6 +31869,17 @@ function connectRemote() {
       remoteServer.sendLogResult({ success: false, error: 'Missing callsign', reqId });
       return;
     }
+    // Idempotent by uuid (#733): a device that never heard log-ok sends the
+    // same QSO again under the same uuid. One already logged (or being
+    // logged right now) is not written again; the first reply goes back.
+    const claimUuid = typeof data.uuid === 'string' && QsoLog.isValidUuid(data.uuid) ? data.uuid : '';
+    const claimed = await logQsoReplies.claim(claimUuid, logQsoReplyFromLog);
+    if (claimed.prior) {
+      sendCatLog(`[QSO] ${data.callsign}: already logged (same QSO id) — not logged again`);
+      remoteServer.sendLogResult(LogQsoReplay.replayReply(claimed.prior, reqId));
+      return;
+    }
+    const release = claimed.release;
     try {
       // What the operator logged, as an entry for logContact — which decides
       // the records exactly as every desktop form does (QRZ name per call,
@@ -29139,13 +31935,20 @@ function connectRemote() {
       }
       // A device's own activation ref is used as-is only when this desktop
       // runs no activation; when it does, its full set of parks + cross refs
-      // applies (logContact), as the old cross-product here did.
+      // applies (logContact), as the old cross-product here did. If that
+      // activation has ended by the contact's time (the UTC day change, 6 h
+      // idle; #147), the device's ref still applies (#734): it rides along
+      // as deviceMyRef and logContact decides.
       if (data.mySig && data.mySigInfo && !liveActivationMyRefs().length) {
         entry.mySig = String(data.mySig).toUpperCase();
         entry.mySigInfo = data.mySigInfo;
+      } else if (data.mySig && data.mySigInfo) {
+        entry.deviceMyRef = { sig: String(data.mySig).toUpperCase(), ref: data.mySigInfo };
       }
 
-      const result = await logContact(entry, { origin: 'ws-log-qso' });
+      // The reply goes out once the records are on disk (#732); the uploads,
+      // respots and SOTA chase finish after it (result.after).
+      const result = await logContact(entry, { origin: 'ws-log-qso', replyOnWrite: true });
       if (!result.success) throw new Error(result.error || 'not logged');
 
       // Session contacts (dupe = same call + band in this session), one per call.
@@ -29161,7 +31964,7 @@ function connectRemote() {
         });
         if (!first) first = contact;
       }
-      remoteServer.sendLogResult({
+      const reply = {
         success: true,
         callsign: result.calls.join(', '),
         nr: first.nr,
@@ -29200,15 +32003,31 @@ function connectRemote() {
           if (LogAs.logAsTargets(entry.logAs).some((c) => c !== active)) return true;
           return !!(cloudIpc && typeof cloudIpc.currentOwnerId === 'function' && cloudIpc.currentOwnerId());
         })(),
+        // Not known yet: the respot runs after this reply. Its outcome comes
+        // in a second log-ok with followUp: true (the same reply, so a device
+        // that missed this one still gets the records).
         resposted: result.resposted || false,
         respotError: result.respotError || result.wwffRespotError || result.llotaRespotError || result.wwbotaRespotError || result.dxcRespotError || '',
-      });
+      };
+      logQsoReplies.remember(claimUuid, reply);
+      release();
+      remoteServer.sendLogResult(reply);
       // Several callsigns in one contact: the reply above describes the
       // first; the session list (one row per call) is the truth.
       if (result.calls.length > 1) remoteServer.sendSessionContacts();
+      if (result.after) {
+        result.after.then((outcome) => {
+          const follow = LogAfterWrite.respotFollowUp(reply, outcome);
+          if (!follow) return;
+          logQsoReplies.patch(claimUuid, { resposted: follow.resposted, respotError: follow.respotError });
+          remoteServer.sendLogResult(follow);
+        }).catch((err) => console.error('[Echo CAT] Log QSO follow-up:', err.message));
+      }
     } catch (err) {
       console.error('[Echo CAT] Log QSO error:', err.message);
       remoteServer.sendLogResult({ success: false, error: err.message, reqId });
+    } finally {
+      release(); // a refused or failed save remembers nothing: a resend tries again
     }
   });
 
@@ -29250,6 +32069,9 @@ function connectRemote() {
     // confirm. (Gap 9, mobile dev report 2026-05-03.)
     if (remoteServer.hasClient()) {
       remoteServer.broadcastJtcatStatus({ state: 'running', mode: mode || 'FT8' });
+      // The phone's FT8 screen starts with Hold TX off and learns it only
+      // from this message; a screen opened after connect never saw it (#688).
+      remoteServer.sendToClient({ type: 'jtcat-hold-tx-state', enabled: !!settings.jtcatHoldTxFreq });
     }
   });
 
@@ -29524,8 +32346,9 @@ function connectRemote() {
       phase = '73';
     } else if (nextStep === 'send-rr73') {
       // CQ SIDE: they answered our CQ with R+signal → we send RR73. CQ-mode
-      // phase so the state machine advances + the QSO logs (reply mode has no
-      // 'rr73' handler — WZ1H/W7RTA 2026-06-22). Log on setup (past the log pt).
+      // phase so the state machine advances (reply mode has no 'rr73'
+      // handler — WZ1H/W7RTA 2026-06-22). Logged when the RR73 goes out
+      // (jtcatNoteTxSent, #807), not on the click.
       txMsg = jtcatDirectedMsg(call, myCall, 'RR73');
       phase = 'cq-rr73';
       const sameCall = remoteJtcatQso && remoteJtcatQso.call && remoteJtcatQso.call.toUpperCase() === call.toUpperCase();
@@ -29536,8 +32359,8 @@ function connectRemote() {
         report: theirReport || (sameCall ? remoteJtcatQso.report : null),
         sentReport: (sameCall ? remoteJtcatQso.sentReport : null) || ourRpt,
         myCall, myGrid, txRetries: 0, sliceId: sliceKey,
+        _logged: !!(sameCall && remoteJtcatQso._logged),
       };
-      if (!sameCall) await jtcatAutoLog(remoteJtcatQso);
     } else if (nextStep === 'send-r-report') {
       txMsg = jtcatDirectedMsg(call, myCall, 'R' + ourRpt);
       phase = 'r+report';
@@ -29567,7 +32390,7 @@ function connectRemote() {
       remoteJtcatQso = { mode: 'reply', call, grid: theirGrid || (sameCall ? prev.grid : ''), phase, txMsg,
         report: sameCall ? prev.report : null,
         sentReport: sameCall ? prev.sentReport : null,
-        myCall, myGrid, txRetries: 0, sliceId: sliceKey };
+        myCall, myGrid, txRetries: 0, sliceId: sliceKey, _logged: !!(sameCall && prev._logged) };
       await remoteJtcatSetTxMsg(txMsg);
       targetEngine._txEnabled = true;
       fireReply();
@@ -30304,18 +33127,33 @@ function connectRemote() {
 
   remoteServer.on('jtcat-follow-radio', () => { jtcatFollowRadioNow('the ECHOCAT device'); });
 
-  remoteServer.on('jtcat-skip-phase', async () => {
-    if (!remoteJtcatQso || remoteJtcatQso.phase === 'done' || remoteJtcatQso.phase === 'idle') return;
+  remoteServer.on('jtcat-skip-phase', async (opts) => {
+    // The retry cap stopped a QSO whose RR73 never came (#807): the notice's
+    // Send 73 ({ unconfirmed: true }), or Skip with nothing running, sends the
+    // 73 now, and the 73 going out logs it. Send 73 never touches a QSO that
+    // has started since (Hunt may already be calling the next station).
+    const onlyUnconfirmed = !!(opts && opts.unconfirmed);
+    if (!remoteJtcatQso || onlyUnconfirmed) {
+      const u = jtcatTakeUnconfirmed('remote');
+      if (u) {
+        remoteJtcatQso = u.q;
+        jtcatSendStashed73(u, ft8Engine, (m) => { remoteJtcatSetTxMsg(m); });
+        remoteJtcatBroadcastQso();
+      } else if (onlyUnconfirmed) {
+        sendCatLog('[JTCAT] Send 73: that QSO is no longer waiting (another QSO started, or 5 minutes passed)');
+      }
+      return;
+    }
+    if (remoteJtcatQso.phase === 'done' || remoteJtcatQso.phase === 'idle') return;
     const q = remoteJtcatQso;
     const myCall = q.myCall;
     const validCall = q.call && /^[A-Z0-9/]{2,}$/i.test(q.call);
     if (q.mode === 'cq' && _jtcatStateMachine.canCloseoutQso(q)) {
-      // Compressed reply with reports both ways: Skip declares it done —
-      // log + one courtesy 73, the same closeout the retry cap uses.
-      _jtcatStateMachine.closeoutStalledQso(q,
-        (m) => { remoteJtcatSetTxMsg(m); },
-        async () => { await jtcatAutoLog(q); },
-        { log: sendCatLog });
+      // Compressed reply with reports both ways: Skip sends the 73, which
+      // logs the QSO as it goes out (#807).
+      _jtcatStateMachine.sendFinal73(q, (m) => { remoteJtcatSetTxMsg(m); }, { log: sendCatLog });
+      q.txRetries = 0;
+      remoteJtcatBroadcastQso();
       return;
     }
     if (q.mode === 'cq') {
@@ -30342,18 +33180,15 @@ function connectRemote() {
         q.txMsg = jtcatDirectedMsg(q.call, myCall, 'R' + rpt);
         q.phase = 'r+report';
       } else if (q.phase === 'r+report') {
-        // Skip on a reports-both-ways QSO = the operator declaring it done.
+        // Skip on a reports-both-ways QSO = the operator sending the 73.
         // Speed POTA activators often never send RR73 at all (they take the
-        // R-report and CQ the next hunter), so the natural advance-and-log
-        // never fires — and this branch used to move to the 73 phase WITHOUT
-        // calling the logger, so Skip sent 73s but the QSO stayed unlogged
-        // (W8ATE 2026-08-26). Route through the SAME closeout the retry cap
-        // uses: log + one courtesy 73 + normal teardown.
+        // R-report and CQ the next hunter), so the natural advance never
+        // fires (W8ATE 2026-08-26). Skip queues the 73, and the 73 going out
+        // logs the QSO (#807: "we send a 73"), like choosing Tx5 in WSJT-X.
         if (_jtcatStateMachine.canCloseoutQso(q)) {
-          _jtcatStateMachine.closeoutStalledQso(q,
-            (m) => { remoteJtcatSetTxMsg(m); },
-            async () => { await jtcatAutoLog(q); },
-            { log: sendCatLog });
+          _jtcatStateMachine.sendFinal73(q, (m) => { remoteJtcatSetTxMsg(m); }, { log: sendCatLog });
+          q.txRetries = 0;
+          remoteJtcatBroadcastQso();
           return;
         }
         q.txMsg = jtcatDirectedMsg(q.call, myCall, 'RR73');
@@ -30619,6 +33454,24 @@ function disconnectRemote() {
   destroyRemoteAudioWindow();
 }
 
+// ECHOCAT access turned off (#746). FT8/JS8 the phone started is captured by
+// the main window; disconnectRemote() drops the server's listeners, so the
+// disconnect grace that would release it never runs and the radio's input
+// stayed busy until POTACAT quit. Not called on a restart of the server.
+function releasePhoneDrivenJtcat() {
+  const d = JtcatCaptureGate.remoteOffRelease({
+    engineRunning: !!ft8Engine,
+    desktopWindowOpen: !!((jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) || (js8PopoutWin && !js8PopoutWin.isDestroyed())),
+  });
+  if (d.stopEngine) {
+    try { if (js8Engine()) js8SetHeartbeat(false); } catch { /* no JS8 */ }
+    stopJtcat();
+    remoteJtcatQso = null;
+    sendCatLog('[JTCAT] ECHOCAT turned off: stopped the engine the phone started and released the radio audio input');
+  }
+  if (d.releaseCapture && win && !win.isDestroyed()) win.webContents.send('jtcat-stop-for-remote');
+}
+
 let _ssbModeBeforePtt = null; // original mode saved during DATA-mode PTT workaround
 let _ssbFreqBeforePtt = 0;    // dial freq saved at swap time — restore re-anchors here, never to a mid-TX polled freq
 let _ssbOverDataYaesuWarned = false; // log the rig-menu hint once per session
@@ -30833,6 +33686,7 @@ function txLimitTrip(t) {
   try { sstvHaltTxNow(); } catch {}
   try { if (win && !win.isDestroyed()) win.webContents.send('stop-voice-macro'); } catch {}
   try { if (mercuryClient) mercuryClient.abort(); } catch {}
+  try { aprsRfAbort('the stuck-TX limit tripped'); } catch {}
   try { if (typeof freedvEngine !== 'undefined' && freedvEngine) freedvEngine.setTxEnabled(false); } catch {}
   try { if (remoteServer && remoteServer._pttActive) remoteServer.forcePttRelease(); } catch {}
   // PTT: the dispatcher's release, then each route directly.
@@ -31060,6 +33914,7 @@ function handleRemotePtt(state, opts = {}) {
     }
     return false;
   }
+  if (state && _phoneScanRun && _phoneScanRun.scanning) _phoneScanRun.noteTransmit(); // #37: a key-down ends a phone-started scan
   // FreeDV cannot transmit yet: a voice key-down in a FreeDV mode would send
   // analog voice on a FreeDV frequency. Refused from every surface (FDV1 row 4).
   const freedvWhy = state ? FreedvPtt.freedvPttRefusal({ state, freedvRunning: !!freedvEngine, emission: opts.emission, forceDataMode: opts.forceDataMode }) : null;
@@ -31485,13 +34340,17 @@ function _setCwTxLockout(durationMs) {
   }, target - Date.now());
 }
 
+/** The running FreeDV codec for lib/freedv-display-mode.js, null when FreeDV is off. */
+function freedvDisplayCodec() { return freedvEngine ? (freedvEngine.mode || 'RADEV1') : null; }
+
 /** Apply FreeDV audio mute state to ECHOCAT WebRTC — called on state change and audio (re)connect */
 /** Send full radio state to VFO popout */
 function sendVfoState() {
   if (!vfoPopoutWin || vfoPopoutWin.isDestroyed()) return;
   vfoPopoutWin.webContents.send('vfo-radio-state', {
     freq: displayFreqHz() || 0,
-    mode: _currentMode || '',
+    // RADE, not the DIGU/PKTUSB the radio sits in, while FreeDV runs (#716).
+    mode: FreedvDisplayMode.freedvDisplayMode(_currentMode || '', freedvDisplayCodec()),
     filterWidth: _currentFilterWidth || 0,
     nb: _currentNbState,
     atu: _currentAtuState,
@@ -31559,7 +34418,7 @@ function vfoCatCaps() {
 }
 function sendVfoScanState() {
   if (!vfoPopoutWin || vfoPopoutWin.isDestroyed()) return;
-  vfoPopoutWin.webContents.send('vfo-scan-state', { on: !!(desktopScanning || _phoneScanning) });
+  vfoPopoutWin.webContents.send('vfo-scan-state', { on: !!(desktopScanning || _phoneScanning || (_phoneScanRun && _phoneScanRun.scanning)) });
 }
 function vfoRadioLinkUp() {
   if (isRemoteMode() || sdrHoldsDial()) return true; // the dial shown is the shack's or the SDR's
@@ -31628,6 +34487,9 @@ function pushFreedvStatus(force) {
   _freedvStatusSentAt = now;
   remoteServer.sendToClient({ type: 'freedv-status', ...next });
 }
+// FreeDV lines for Report a Bug (#717): first audio, sync on/off, a 30 s summary.
+const _freedvDiag = new FreedvDiag(0);
+let _freedvDiagTimer = null;
 function startFreedvEngine(codecMode, why) {
   if (freedvEngine) {
     if (codecMode && String(freedvEngine.mode || '').toUpperCase() !== String(codecMode).toUpperCase()) {
@@ -31640,7 +34502,11 @@ function startFreedvEngine(codecMode, why) {
   _freedvLastSync = { sync: false, snr: null };
   freedvEngine = new FreedvEngine();
   pushActivityState();
+  _freedvDiag.reset(Date.now());
+  if (_freedvDiagTimer) clearInterval(_freedvDiagTimer);
+  _freedvDiagTimer = setInterval(() => { const l = _freedvDiag.tick(Date.now()); if (l) sendCatLog(l); }, 5000);
   freedvEngine.on('rx-speech', (data) => {
+    _freedvDiag.speech();
     if (win && !win.isDestroyed()) win.webContents.send('freedv-rx-speech', data);
     // The phone hears decoded speech on the same track as the radio audio.
     if (remoteAudioWin && !remoteAudioWin.isDestroyed() && remoteServer && remoteServer.running) {
@@ -31654,6 +34520,8 @@ function startFreedvEngine(codecMode, why) {
     if (win && !win.isDestroyed()) win.webContents.send('freedv-sync', data);
     if (remoteServer && remoteServer.running) remoteServer.sendToClient({ type: 'freedv-sync', ...data }); // ECHOCAT Web
     _freedvLastSync = { sync: !!(data && data.sync), snr: data ? data.snr : null };
+    const syncLine = _freedvDiag.sync(data, Date.now());
+    if (syncLine) sendCatLog(syncLine);
     pushFreedvStatus();
   });
   freedvEngine.on('status', (data) => {
@@ -31682,6 +34550,7 @@ function stopFreedvEngine(why) {
   if (!freedvEngine) return;
   try { freedvEngine.stop(); } catch {}
   freedvEngine = null;
+  if (_freedvDiagTimer) { clearInterval(_freedvDiagTimer); _freedvDiagTimer = null; }
   pushActivityState();
   sendCatLog(`[FreeDV] Stopped${why ? ' (' + why + ')' : ''}`);
   if (win && !win.isDestroyed()) win.webContents.send('freedv-auto-stop');
@@ -31714,10 +34583,9 @@ function broadcastRemoteRadioStatus() {
   const txp = ((typeof _txPowerSuppressBroadcast !== 'undefined' && now < _txPowerSuppressBroadcast) || !txPowerKnown) ? undefined : _currentTxPower;
   // Suppress stale mode during tune transition — phone has optimistic update, don't overwrite with old mode
   let modeVal = (now < _modeSuppressUntil) ? undefined : (displayMode() || '');
-  // When FreeDV engine is active, show the FreeDV codec mode instead of raw USB/LSB
-  if (modeVal && freedvEngine && (modeVal === 'USB' || modeVal === 'LSB')) {
-    modeVal = 'FREEDV-' + (freedvEngine.mode || 'RADEV1').toUpperCase();
-  }
+  // When FreeDV engine is active, show the FreeDV codec mode instead of the
+  // carrier (USB/LSB and the DATA sidebands, lib/freedv-display-mode.js, #716)
+  if (modeVal) modeVal = FreedvDisplayMode.freedvDisplayMode(modeVal, freedvDisplayCodec());
   // Suppress stale freq during a phone tune transition — same rationale as mode
   // above. Omitting it (undefined → dropped from JSON) tells the phone "no change"
   // so its optimistic VFO holds instead of snapping back to the pre-poll freq.
@@ -33014,7 +35882,7 @@ async function processSotaSpots(raw) {
     return !isNaN(f) && f > 0;
   }).map((s) => {
     const freqMHz = parseFloat(s.frequency);
-    const freqKHz = Math.round(freqMHz * 1000); // SOTA gives MHz -> convert to kHz
+    const freqKHz = LogFreqField.exactKhzText(freqMHz * 1000); // SOTA gives MHz: kHz to the hertz, 7.0355 is 7035.5 (#794)
     const ref = s._ref;
     const assoc = s.associationCode;
 
@@ -33357,7 +36225,7 @@ function processLlotaSpots(raw) {
     // Frequency may be kHz (14250) or MHz (14.250) — normalize
     let freqNum = typeof s.frequency === 'string' ? parseFloat(s.frequency) : (s.frequency || 0);
     let freqMHz = freqNum >= 1000 ? freqNum / 1000 : freqNum;
-    let freqKhz = freqNum >= 1000 ? Math.round(freqNum) : Math.round(freqNum * 1000);
+    let freqKhz = LogFreqField.exactKhzText(freqNum >= 1000 ? freqNum : freqNum * 1000); // to the hertz (#794)
 
     const callsign = s.callsign || '';
 
@@ -33429,7 +36297,7 @@ function processWwbotaSpots(raw) {
     const refs = Array.isArray(s.references) ? s.references : [];
     const primary = refs[0] || {};
     const freqMHz = Number(s.freq) || 0;
-    const freqKhz = Math.round(freqMHz * 1000);
+    const freqKhz = LogFreqField.exactKhzText(freqMHz * 1000); // to the hertz (#794)
 
     const callsign = (s.call || '').toUpperCase();
     const lat = primary.lat != null ? Number(primary.lat) : null;
@@ -33714,7 +36582,8 @@ function stampParkEntityZones(spots) {
 function sendMergedSpots() {
   if (!win || win.isDestroyed()) return;
   const netSpots = getActiveNetSpots();
-  const raw = [...netSpots, ...lastPotaSotaSpots, ...clusterSpots, ...cwSpots, ...rbnWatchSpots, ...pskrSpots, ...freedvReporterSpots];
+  // A PSKReporter FreeDV spot folds into the FreeDV Reporter one (#742).
+  const raw = FreedvSpotMerge.mergeFreedvSpots([...netSpots, ...lastPotaSotaSpots, ...clusterSpots, ...cwSpots, ...rbnWatchSpots, ...pskrSpots, ...freedvReporterSpots]);
   // A CW spot with no speed (POTA/SOTA/WWFF) takes the speed a skimmer
   // measured on the same station and frequency in the last 15 minutes.
   const merged = cwSpeeds.fillSpots(dedupeCrossSource(raw));
@@ -34210,12 +37079,17 @@ function repairQsoLogMhzFreqs(logPath) {
 function loadWorkedQsos() {
   repairQsoLogFieldNames(qsoLogPath());
   repairQsoLogMhzFreqs(qsoLogPath());
+  // The log's uuid index (#733): built once here, off the startup path, then
+  // kept in step by every write. Free when it is already current.
+  setTimeout(() => { try { QsoLog.uuidIndex(qsoLogPath()); } catch (err) { console.error('[QSO] uuid index:', err.message); } }, 3000);
   if (!settings.adifLogPath) return;
   try {
     workedQsos = parseWorkedQsos(settings.adifLogPath);
     if (win && !win.isDestroyed()) {
       win.webContents.send('worked-qsos', [...workedQsos.entries()]);
     }
+    // A full-log change (#731): only a 'worked-incremental' client is sent the list again.
+    if (remoteServer && remoteServer.running) remoteServer.sendWorkedQsos([...workedQsos.entries()], { fullLogChange: true });
     checkRemoteQsoMilestone();
   } catch (err) {
     console.error('Failed to parse worked QSOs:', err.message);
@@ -35195,9 +38069,35 @@ function yaesuScopeBroadcastState() {
   stationSetupNotify();
 }
 
+// A scope that starts and then shows nothing used to leave nothing in the log
+// either (K3SBP 2026-11-21: a Flex pan subscribed, "frames flowing" never came,
+// and the bug report could not say whether no frame arrived or every frame was
+// thrown away as misaligned). Now: one line if no usable frame has arrived
+// SCOPE_NO_FRAMES_MS after a start, with what did arrive, and one line on the
+// first misaligned frame of a start (yaesuScopeOnFrame).
+const SCOPE_NO_FRAMES_MS = 6000;
+let _scopeNoFramesTimer = null;
+function yaesuScopeSourceName() {
+  const s = yaesuScopeState.source;
+  return s === 'flex' ? 'Flex panadapter' : s === 'sdr' ? 'SDR' : s === 'icom' ? ((icomScopeEntry && icomScopeEntry.name) || 'Icom') + ' scope over CI-V'
+    : s === 'sculan10' ? 'SCU-LAN10 scope' : s === 'k4' ? 'K4 panadapter' : s === 'kenwood' ? 'TS-890S bandscope' : 'radio scope';
+}
 function yaesuScopeSetStatus(status, diag) {
   yaesuScopeState.status = status;
   yaesuScopeState.diag = diag || null;
+  if (status === 'starting') {
+    if (!_scopeNoFramesTimer) {
+      _scopeNoFramesTimer = setTimeout(() => {
+        _scopeNoFramesTimer = null;
+        if (yaesuScopeState.status !== 'starting') return;
+        const n = yaesuScopeState.frames || 0, bad = yaesuScopeState.misaligned || 0;
+        sendCatLog(`[Scope] no picture from the ${yaesuScopeSourceName()} ${SCOPE_NO_FRAMES_MS / 1000} s after it started: ${n} frame${n === 1 ? '' : 's'} arrived${bad ? `, ${bad} of them misaligned and dropped` : ''}${n ? '' : ' (nothing reached POTACAT from the radio)'}`);
+      }, SCOPE_NO_FRAMES_MS);
+    }
+  } else if (_scopeNoFramesTimer) {
+    clearTimeout(_scopeNoFramesTimer);
+    _scopeNoFramesTimer = null;
+  }
   yaesuScopeBroadcastState();
 }
 
@@ -35314,10 +38214,10 @@ function startYaesuScope() {
     if (yaesuScopeState.status !== 'unavailable') sendCatLog('[Scope] start: the active rig has no USB band scope (rig type ' + detectRigType() + ')');
     yaesuScopeSetStatus('unavailable', onLan ? { key: 'no-rig', severity: 'notice',
       headline: 'Waiting for the radio\'s scope over the LAN',
-      detail: 'The SCU-LAN10 sends the radio\'s band scope once it is connected and streaming. If nothing arrives, check the rig is connected (Settings > My Rigs) and that the radio\'s scope is on.' }
+      detail: 'The SCU-LAN10 sends the radio\'s band scope once it is connected and streaming. If nothing arrives, check the rig is connected (Settings > Radio) and that the radio\'s scope is on.' }
       : { key: 'no-rig', severity: 'blocker',
       headline: 'The active rig has no USB band scope',
-      detail: 'POTACAT reads the scope the FT-710 streams over its USB cable, an SCU-LAN10 over the network, or a separate SDR through rtl_tcp (Settings > My Rigs > Band scope from an SDR). Or try the synthetic signal from the gear menu.' });
+      detail: 'POTACAT reads the scope the FT-710 streams over its USB cable, an SCU-LAN10 over the network, or a separate SDR through rtl_tcp (Settings > Radio, Edit the rig, Band scope from an SDR). Or try the synthetic signal from the gear menu.' });
     return;
   }
   const helperPath = findYaesuScopeHelper();
@@ -35517,7 +38417,11 @@ function stopYaesuScope(why) {
 
 function yaesuScopeOnFrame(f) {
   yaesuScopeState.frames++;
-  if (!f.aligned) { yaesuScopeState.misaligned++; return; }
+  if (!f.aligned) {
+    yaesuScopeState.misaligned++;
+    if (yaesuScopeState.misaligned === 1) sendCatLog(`[Scope] a frame from the ${yaesuScopeSourceName()} arrived misaligned and was dropped (frame ${yaesuScopeState.frames} of this start); later ones are counted, not logged`);
+    return;
+  }
   if (!yaesuScopeWanted()) { stopYaesuScope('nobody is watching'); return; }
   if (yaesuScopeState.status !== 'live') {
     yaesuScopeRestarts = 0;
@@ -36041,7 +38945,8 @@ function flexDigitalViewWanted() {
     const mode = wlSession ? winlinkState.session.mode : WinlinkModes.pickWinlinkMode(winlinkState.snapshot().modes, settings.winlinkDefaultMode || 'telnet');
     if (!WinlinkModes.isRadioMode(mode)) return null;
     return ScopeDigitalView.winlinkView({ band: WinlinkSpectrum.markerBand(mode, winlinkModemBw()), rigMode: _currentMode,
-      digOffsetHz: ScopeDigitalView.flexDigOffsetHz(_currentMode, _flexSliceKv), minSpanHz: g.minSpanHz });
+      digOffsetHz: ScopeDigitalView.flexDigOffsetHz(_currentMode, _flexSliceKv),
+      filterLoHz: parseInt(_flexSliceKv.filter_lo, 10), filterHiHz: parseInt(_flexSliceKv.filter_hi, 10), minSpanHz: g.minSpanHz });
   }
   return ScopeDigitalView.digitalView({ mode: ft8Engine._mode, rigMode: _currentMode, minSpanHz: g.minSpanHz });
 }
@@ -36064,7 +38969,7 @@ function flexDigitalViewSync() {
     smartSdr.setPanBandwidth(v.spanHz);
     yaesuScopeState.spanHz = v.spanHz;   // the pan status confirms (or clamps) it
     if (dial) flexScopeAskCenter(dial + v.offsetHz);
-    sendCatLog(`[Scope] Flex panadapter: ${v.kind === 'winlink' ? 'Winlink' : ft8Engine._mode} view, ${v.spanHz} Hz wide, centred ${v.offsetHz > 0 ? '+' : ''}${v.offsetHz} Hz from the dial (${v.kind === 'winlink' ? `the modem's channel ${v.window.lo} to ${v.window.hi} Hz${ScopeDigitalView.flexDigOffsetHz(_currentMode, _flexSliceKv) ? `, with the slice's ${String(_currentMode).toUpperCase()} offset of ${ScopeDigitalView.flexDigOffsetHz(_currentMode, _flexSliceKv)} Hz` : ''}` : `decode window ${v.window.lo} to ${v.window.hi} Hz`})`);
+    sendCatLog(`[Scope] Flex panadapter: ${v.kind === 'winlink' ? 'Winlink' : ft8Engine._mode} view, ${v.spanHz} Hz wide, centred ${v.offsetHz > 0 ? '+' : ''}${v.offsetHz} Hz from the dial (${v.kind === 'winlink' ? `the modem's channel ${v.window.lo} to ${v.window.hi} Hz${ScopeDigitalView.flexDigOffsetHz(_currentMode, _flexSliceKv) ? `, the slice's ${String(_currentMode).toUpperCase()} offset ${ScopeDigitalView.flexDigOffsetHz(_currentMode, _flexSliceKv)} Hz, filter ${_flexSliceKv.filter_lo} to ${_flexSliceKv.filter_hi}` : ''}` : `decode window ${v.window.lo} to ${v.window.hi} Hz`})`);
   } else if (wasOn) {
     flexScopeWantOffsetHz = 0;
     flexDigitalView = null;
@@ -36598,7 +39503,7 @@ function icomScopeOnSweep(s) {
   const ax = IcomScope.axisFor(s.header);
   if (!icomScopePointsNoted && !s.empty) {
     icomScopePointsNoted = true;
-    sendCatLog(`[Scope] ${icomScopeEntry.name}: sweeps of ${s.levels.length} points` + (s.levels.length !== icomScopeEntry.points ? ` (POTACAT expected ${icomScopeEntry.points}; please send a recording from Settings > My Rigs)` : '')
+    sendCatLog(`[Scope] ${icomScopeEntry.name}: sweeps of ${s.levels.length} points` + (s.levels.length !== icomScopeEntry.points ? ` (POTACAT expected ${icomScopeEntry.points}; please send a recording from Settings > Radio, Edit the rig, Record band scope data)` : '')
       + (icomScopeEntry.unverified ? ' — this model\'s scope format is not yet confirmed by an owner' : ''));
   }
   let changed = false;
@@ -36968,7 +39873,7 @@ function sdrScopeSettingsChanged(before, after) {
 // The Icom scope source (docs/icom-band-scope-plan.md) is written from Icom's
 // CI-V references and Hamlib's parser; no Icom has been in the shack. Before
 // any of it is shown to an operator, an owner records 30 seconds of what
-// their radio sends (Settings > My Rigs > this radio > Record band scope
+// their radio sends (Settings > Radio, Edit the rig, Record band scope
 // data) and the file becomes test/fixtures/icom-scope/. POTACAT turns the
 // radio's scope and scope output on for the recording and puts both back.
 let icomScopeCaptureBusy = false;
@@ -37205,7 +40110,7 @@ function rawQsoToQsoData(raw) {
   const freqMhz = parseFloat(raw.FREQ || '0');
   return {
     callsign: raw.CALL || '',
-    frequency: (freqMhz * 1000).toFixed(1), // MHz -> kHz
+    frequency: LogFreqField.exactKhzText(freqMhz * 1000), // MHz -> kHz, to the hertz (#794)
     // mode is the app mode (MFSK/JS8 -> JS8) for the loggers that take a mode
     // name (WRL, the log line); adifMode + submode carry the record's own pair
     // so buildAdifFields writes it back as it was (#381). SUBMODE used to be
@@ -37655,7 +40560,7 @@ function sendWavelogHttp(qsoData, s = settings) {
             // isn't enough.
             const reason = String(json.reason || json.status || 'unknown').toLowerCase();
             let hint = '';
-            if (reason.includes('wrong key') || reason.includes('key'))    hint = ' — check Settings → Logbook → Wavelog API key.';
+            if (reason.includes('wrong key') || reason.includes('key'))    hint = ' — check the Wavelog API Key in Settings > Logging.';
             else if (reason.includes('station'))                            hint = ` — station_profile_id "${stationId}" not found or no permission. Check Wavelog account → Station Profiles for the correct numeric ID.`;
             else if (reason.includes('duplicate'))                          hint = ' — Wavelog flagged this QSO as a duplicate of an existing log entry.';
             else if (reason === 'abort')                                    hint = ` — usually one of: wrong station_profile_id (currently "${stationId}"), API key lacks permission for that profile, or the ADIF FREQ is out of any known amateur band (check the ADIF preview below).`;
@@ -37776,6 +40681,7 @@ function broadcastAppTheme() {
     + `if(s.theme!=='light'&&s.variant&&s.variant!=='navy'&&!s.ds)e.setAttribute('data-dark-variant',s.variant);else e.removeAttribute('data-dark-variant');`
     + `if(s.ds)e.setAttribute('data-ds',s.ds);else e.removeAttribute('data-ds');})(${JSON.stringify(r)})`;
   for (const w of BrowserWindow.getAllWindows()) {
+    if (w === winlinkFormWin) continue; // Pat's form page is not ours to restyle (#346)
     try { if (!w.isDestroyed()) w.webContents.executeJavaScript(js).catch(() => {}); } catch { /* ignore */ }
   }
 }
@@ -39447,19 +42353,6 @@ function checkEventQso(qsoData) {
 }
 
 // --- Update check (electron-updater for installed, manual fallback for portable) ---
-autoUpdater.autoDownload = false;
-autoUpdater.autoInstallOnAppQuit = false;
-// Route updater activity through sendCatLog, not just the console — a
-// user's "the update didn't apply" report is undiagnosable when the
-// updater's own story never reaches session.log (first Mac field test,
-// 2026-08-14: still on 1.10.3 after Restart, zero evidence in the log).
-autoUpdater.logger = {
-  info: (...args) => sendCatLog('[updater] ' + args.join(' ')),
-  warn: (...args) => sendCatLog('[updater] WARN: ' + args.join(' ')),
-  error: (...args) => sendCatLog('[updater] ERROR: ' + args.join(' ')),
-  debug: (...args) => console.log('[updater:debug]', ...args),
-};
-
 // Squirrel.Mac's ShipIt replaces the .app bundle at quit — and when it
 // can't, it FAILS SILENTLY and relaunches the old version, which reads
 // as "I clicked Restart and I'm still on 1.10.3". Detect the three
@@ -39519,6 +42412,25 @@ function reportManualCheck(outcome, info) {
   return true;
 }
 
+// Loaded on first use (see _autoUpdater). The body keeps its top-level
+// indentation so each handler still reads as it did.
+function getAutoUpdater() {
+if (_autoUpdater) return _autoUpdater;
+const { autoUpdater } = require('electron-updater');
+_autoUpdater = autoUpdater;
+autoUpdater.autoDownload = false;
+autoUpdater.autoInstallOnAppQuit = false;
+// Route updater activity through sendCatLog, not just the console — a
+// user's "the update didn't apply" report is undiagnosable when the
+// updater's own story never reaches session.log (first Mac field test,
+// 2026-08-14: still on 1.10.3 after Restart, zero evidence in the log).
+autoUpdater.logger = {
+  info: (...args) => sendCatLog('[updater] ' + args.join(' ')),
+  warn: (...args) => sendCatLog('[updater] WARN: ' + args.join(' ')),
+  error: (...args) => sendCatLog('[updater] ERROR: ' + args.join(' ')),
+  debug: (...args) => console.log('[updater:debug]', ...args),
+};
+
 autoUpdater.on('update-available', (info) => {
   reportManualCheck('available', { latestVersion: info && info.version });
   if (win && !win.isDestroyed()) {
@@ -39563,8 +42475,10 @@ autoUpdater.on('error', (err) => {
     win.webContents.send('update-error', err?.message || String(err));
   }
 });
+return autoUpdater;
+}
 
-ipcMain.on('start-download', () => { autoUpdater.downloadUpdate(); });
+ipcMain.on('start-download', () => { getAutoUpdater().downloadUpdate(); });
 ipcMain.on('install-update', async () => {
   // Kill cloudflared and WAIT for it to actually exit before the NSIS installer
   // runs. cloudflared.exe ships inside the install tree; a running .exe holds a
@@ -39603,7 +42517,7 @@ ipcMain.on('install-update', async () => {
   }, 20000);
   if (typeof stall.unref === 'function') stall.unref();
   try {
-    autoUpdater.quitAndInstall();
+    getAutoUpdater().quitAndInstall();
   } catch (err) {
     clearTimeout(stall);
     sendCatLog('[update] quitAndInstall threw: ' + (err && err.message || err));
@@ -39717,6 +42631,7 @@ function checkForUpdates(opts) {
   // signed → electron-updater; ad-hoc/unsigned → the manual GitHub-notify
   // fallback, exactly as before. Windows/Linux are unaffected.
   const macOsAutoUpdateUnsupported = process.platform === 'darwin' && !macBuildIsSigned();
+  const autoUpdater = getAutoUpdater();
   if (autoUpdater.isUpdaterActive() && !macOsAutoUpdateUnsupported) {
     // Installed build — use electron-updater
     sendCatLog('[update] checking via electron-updater (installed, Developer ID-signed build)' + (manual ? ' - manual' : ''));
@@ -39873,6 +42788,8 @@ let autoSstvActive = false;
 let autoSstvPrevFreq = null;
 let autoSstvPrevMode = null;
 let autoSstvCurrentFreq = 0;
+let idleRxHome = null; // {freqHz, mode}: where the running idle session (any mode) found the radio
+let idleRxLast = null; // the same for the session that just ended, with endedAt and endedHz
 // Auto-SSTV opened the SSTV window itself (it was not open before), and the
 // operator has not since taken it over. Cancelling Auto-SSTV closes it then,
 // which stops the decoder; otherwise the decoder ran on, reported as
@@ -39887,9 +42804,16 @@ let autoIdleJtcatActive = false;
 let autoIdlePrevJtcatMode = null;
 let autoIdleJtcatOpenedPopout = false;
 let _autoRxDeferLogged = false; // one "Deferred" line per deferral, not per tick
+let _autoRxAprsDeferLogged = false; // the same, for APRS listening
 let autoIdleJs8Active = false;
 let autoIdleJs8OpenedPopout = false;
-let autoIdleRxLabel = null; // 'WSPR' | 'PSK31' | 'JTTY' | 'JS8' — names the stop log line
+let autoIdleRxLabel = null; // 'WSPR' | 'PSK31' | 'JTTY' | 'JS8' | 'APRS' — names the stop log line
+// APRS-on-idle (phase 4): the radio parks on the APRS frequency through the
+// window's listen path (aprsListenStart: 2 m if the rig has it, else 30 m) and
+// decodes; with "Report what I hear to APRS-IS (iGate)" on, it gates. Owns the
+// listening only when it started it (the operator's own switch stays theirs).
+let autoIdleAprsActive = false;
+let autoIdleAprsOwnsListen = false;
 let autoIdleJttyBand = null; // the band an idle JTTY session is on ('20m' day / '40m' night)
 
 // Which idle-RX session is running, or null. `autoSstvActive` is the flag
@@ -39899,6 +42823,7 @@ let autoIdleJttyBand = null; // the band an idle JTTY session is on ('20m' day /
 // phone's SSTV tab (K3SBP 2026-09-27).
 function autoRxKind() {
   if (!autoSstvActive) return null;
+  if (autoIdleAprsActive) return 'aprs';
   if (autoIdleJs8Active) return 'js8';
   if (autoIdleJtcatActive) return autoIdleRxLabel === 'PSK31' ? 'psk31' : autoIdleRxLabel === 'JTTY' ? 'jtty' : 'wspr';
   return 'sstv';
@@ -39912,7 +42837,7 @@ const PSK_IDLE_DIALS = {
 // JTTY-on-idle follows the sun like SSTV: 20 m by day, 40 m at night, on the
 // pop-out's own JTTY dials (JTTY_BAND_FREQS — never 14080, FT4's dial).
 const JTTY_IDLE_DIALS = { '20m': 14090, '40m': 7090 };
-const IDLE_RX_MODES = ['sstv', 'wspr', 'psk31', 'js8', 'jtty'];
+const IDLE_RX_MODES = ['sstv', 'wspr', 'psk31', 'js8', 'jtty', 'aprs'];
 // lib/idle-wspr-band.js: 40 m to 10 m and 2 m, only the bands this radio is used on.
 const { IDLE_WSPR_BANDS } = IdleWsprBand;
 const IDLE_TIMEOUT_MIN = 5, IDLE_TIMEOUT_MAX = 1440;
@@ -40020,7 +42945,11 @@ function sstvSendFailed(text, { log } = {}) {
 function startAutoSstvTimer() {
   stopAutoSstvTimer();
   if (!settings.enableAutoSstv) return;
-  const thresholdMs = (settings.autoSstvInactivityMin || 90) * 60 * 1000;
+  // Dev only (never in a packaged build): POTACAT_DEV_IDLE_SEC=20 makes the
+  // idle countdown 20 s and checks every 5 s, so an idle mode can be watched
+  // starting and stopping in a scratch instance.
+  const devIdleSec = (!app.isPackaged && Number(process.env.POTACAT_DEV_IDLE_SEC)) || 0;
+  const thresholdMs = devIdleSec ? devIdleSec * 1000 : (settings.autoSstvInactivityMin || 90) * 60 * 1000;
   autoSstvTimer = setInterval(() => {
     // An active JTCAT session IS the operator using the radio. The defer
     // guard below only BLOCKS the idle program — without this stamp the
@@ -40029,7 +42958,10 @@ function startAutoSstvTimer() {
     // just at the controls (K3SBP 2026-08-17: JS8 opened 17 s after he
     // shut down a CQ run). Petting the shared clock also keeps the idle
     // CAT-polling pause from starving the VFO poll during a session.
-    if (autoSstvBlockedByJtcat()) lastActivityTime = Date.now();
+    // APRS "Listen on my radio" is the operator using the radio too: on air
+    // 2026-11-18 (FLEX-8600M, 30 m) nothing held Idle Mode off while it
+    // listened, and 90 minutes in it would have retuned the radio away.
+    if (IdleRadioUse.radioInUse({ jtcatDecoding: autoSstvBlockedByJtcat(), aprsListening: aprsListenHoldsRadio() })) lastActivityTime = Date.now();
     // A connected ECHOCAT device is someone at the radio, even one only
     // watching: W0TLP sat in his car with the phone on the rig and Idle Mode
     // QSY'd it to the WSPR dial (2026-11-02). Same rule as the idle CAT-poll
@@ -40046,8 +42978,10 @@ function startAutoSstvTimer() {
     // (WSPR-on-idle manages its own bands via the hop scheduler — skip.
     // JS8-on-idle owns its own day/night QSY too — without the exclusion
     // this branch retuned a JS8 idle session to the SSTV frequency.)
-    if (autoSstvActive && autoIdleJtcatActive && autoIdleRxLabel === 'JTTY') autoIdleJttyFollowSun();
-    if (autoSstvActive && !autoIdleJtcatActive && !autoIdleJs8Active) {
+    // Never while APRS listens: the radio is on the APRS frequency for the operator.
+    const mayRetune = IdleRadioUse.idleMayRetune({ aprsListening: aprsListenHoldsRadio() });
+    if (mayRetune && autoSstvActive && autoIdleJtcatActive && autoIdleRxLabel === 'JTTY') autoIdleJttyFollowSun();
+    if (mayRetune && autoSstvActive && !autoIdleJtcatActive && !autoIdleJs8Active && !autoIdleAprsActive) {
       const newBand = getSstvAutoFreq();
       if (newBand && newBand.freqKhz !== autoSstvCurrentFreq) {
         autoSstvCurrentFreq = newBand.freqKhz;
@@ -40055,7 +42989,7 @@ function startAutoSstvTimer() {
         console.log('[Auto-SSTV] Band switch to ' + newBand.freqKhz + ' kHz');
       }
     }
-  }, 30000);
+  }, devIdleSec ? 5000 : 30000);
   console.log('[Auto-SSTV] Timer started (' + (settings.autoSstvInactivityMin || 90) + ' min threshold)');
 }
 
@@ -40088,11 +43022,32 @@ function triggerAutoSstv() {
   _autoRxDeferLogged = false;
   // Driving a remote shack: idle receive is the shack's own setting.
   if (isRemoteMode()) return;
+  // APRS "Listen on my radio" has the radio: no idle mode starts or tunes.
+  const aprsBlock = IdleRadioUse.idleStartBlocker({ jtcatDecoding: false, aprsListening: aprsListenHoldsRadio() });
+  if (aprsBlock) {
+    if (!_autoRxAprsDeferLogged) { _autoRxAprsDeferLogged = true; sendCatLog(IdleRadioUse.deferLine(aprsBlock)); }
+    return;
+  }
+  _autoRxAprsDeferLogged = false;
+  // Where every idle mode found the radio: APRS listening's return point (Casey 2026-11-19).
+  idleRxHome = { freqHz: Number(_currentFreqHz) || 0, mode: String(_currentMode || '') };
   // WSPR/PSK31-on-idle variant: open the JTCAT popout in that mode (it owns
   // audio capture + the spot list/map) instead of SSTV. The popout auto-starts
   // from settings.jtcatLastMode and tunes to settings.jtcatLastBandFreq, so
   // configure both first.
   const idleMode = settings.idleRxMode || 'sstv';
+  if (idleMode === 'aprs') {
+    // APRS-on-idle: "Listen on my radio" without the window. The radio's place
+    // is saved first and it goes back when the session ends (lib/aprs-radio-return.js).
+    autoSstvActive = true;
+    autoIdleAprsActive = true;
+    autoIdleRxLabel = 'APRS';
+    autoIdleAprsOwnsListen = !aprsListen.on;
+    if (autoIdleAprsOwnsListen) aprsListenSet(true);
+    sendCatLog('[Auto-RX] APRS receive started — ' + (settings.aprsIgate === true ? 'reporting what it hears to APRS-IS (iGate)' : 'decoding only (the iGate setting is off)'));
+    pushActivityState();
+    return;
+  }
   if (idleMode === 'js8') {
     // JS8-on-idle: the JS8 window owns everything — opening it auto-starts
     // the engine and QSYs to the day/night calling frequency (open = start).
@@ -40117,7 +43072,7 @@ function triggerAutoSstv() {
       // 20 m turned off and was sent there anyway).
       const saved = settings.idleWsprBand || '20m';
       const band = IdleWsprBand.pickIdleWsprBand(saved, activeRigBands()) || saved;
-      if (band !== saved) sendCatLog(`[Auto-RX] WSPR: ${saved} is not one of this radio's bands — listening on ${band} instead (Settings > My Rigs sets the bands)`);
+      if (band !== saved) sendCatLog(`[Auto-RX] WSPR: ${saved} is not one of this radio's bands — listening on ${band} instead (tick the bands under Check all bands in Settings > Radio, Edit the rig)`);
       const dialMhz = wsprBands.dialForBand(band) || 14.0956;
       settings.jtcatLastMode = 'WSPR';
       settings.wsprHopEnabled = settings.idleWsprBandHop === true;
@@ -40189,6 +43144,21 @@ function triggerAutoSstv() {
 function cancelAutoSstv() {
   if (!autoSstvActive) return;
   autoSstvActive = false;
+  // Kept a few seconds: the switch that ends an idle session then listens to APRS (lib/idle-radio-use.js).
+  idleRxLast = idleRxHome ? { ...idleRxHome, endedAt: Date.now(), endedHz: Number(_currentFreqHz) || 0 } : null;
+  idleRxHome = null;
+  if (autoIdleAprsActive) {
+    // APRS-on-idle teardown: stop listening (the radio goes back to where it
+    // was) unless the operator's own switch started it.
+    autoIdleAprsActive = false;
+    const owned = autoIdleAprsOwnsListen;
+    autoIdleAprsOwnsListen = false;
+    if (owned) aprsListenStop('the radio was used');
+    sendCatLog('[Auto-RX] APRS receive stopped');
+    autoIdleRxLabel = null;
+    pushActivityState();
+    return;
+  }
   if (autoIdleJs8Active) {
     // JS8-on-idle teardown: close the window only if WE opened it — close =
     // stop frees the radio (and the close handler already spares a session a
@@ -40439,6 +43409,14 @@ function migrateRigSettings(s) {
     setTimeout(() => { try { sendCatLog(rigPlan.log); } catch { /* no log yet */ } }, 0);
     saveSettings(s);
   }
+  // Renamed model rows: a saved 'FTDX101D/MP' is now the FTDX101D (100 W);
+  // an MP owner picks FTDX101MP once (lib/rig-models.js RENAMED_MODELS, #744).
+  const renamedModels = migrateRigModelNames(s);
+  if (renamedModels.length) {
+    for (const line of renamedModels) console.log(line);
+    setTimeout(() => { try { renamedModels.forEach((line) => sendCatLog(line)); } catch { /* no log yet */ } }, 0);
+    saveSettings(s);
+  }
   // Dedup rigs with identical catTarget (could happen from repeated migration)
   if (s.rigs.length > 1) {
     const seen = new Set();
@@ -40567,6 +43545,9 @@ function discoverFlexRadios(timeoutMs = 3000) {
 let _lastTuneFreq = 0;
 let _lastTuneTime = 0;
 let _lastTuneBand = null; // for ATU auto-tune on band change
+let _atuOwedTune = null;   // { band, start }: a receive-only WSPR hop skipped this band's tune (#747)
+let _tuneLinkAtuSkipped = false; // the last potacat://tune link skipped a band-change tune (its notice says so)
+let _wsprOwedTuneHoldUntil = 0; // the beacon draws no slot before this (an owed tune is running)
 let _modeSuppressUntil = 0; // suppress stale mode broadcasts to ECHOCAT during tune transition
 // Suppress stale FREQUENCY echo to ECHOCAT right after a phone-initiated tune.
 // On serial rigs (e.g. IC-7300) _currentFreqHz doesn't update until the next rig
@@ -41151,7 +44132,7 @@ function tuneRadio(freqKhz, mode, brng, { clearXit, origin, purpose } = {}) {
   // names the setting that holds it.
   if (filterWidth > 0) {
     const fwName = m === 'CW' ? 'CW' : (m === 'SSB' || m === 'USB' || m === 'LSB') ? 'SSB' : 'Digital';
-    sendCatLog(`[Tune] ${fwName} width ${filterWidth} Hz from Settings > Filter Width (clear it there to keep the radio's own width)`);
+    sendCatLog(`[Tune] ${fwName} width ${filterWidth} Hz from ${fwName} Filter Width in Settings > Tuning (clear it there to keep the radio's own width)`);
   }
 
   // FreeDV: auto-start/stop engine based on spot mode
@@ -41246,19 +44227,10 @@ function tuneRadio(freqKhz, mode, brng, { clearXit, origin, purpose } = {}) {
         smartSdr.setSliceXit(sliceIndex, false);
       }
       // ATU: auto-tune on band change (SmartSDR-only path)
-      if (settings.enableAtu) {
-        const freqMhzSdr = freqHz / 1e6;
-        const tuneBandSdr = freqToBand(freqMhzSdr);
-        if (tuneBandSdr && tuneBandSdr !== _lastTuneBand) {
-          _lastTuneBand = tuneBandSdr;
-          setTimeout(() => {
-            sendCatLog(`[ATU] Band changed to ${tuneBandSdr} -> starting SmartSDR ATU tune`);
-            smartSdr.setAtu(true);
-          }, 1500);
-        } else if (!_lastTuneBand && tuneBandSdr) {
-          _lastTuneBand = tuneBandSdr;
-        }
-      }
+      bandChangeAtuTune(freqHz / 1e6, { purpose, origin }, (tuneBandSdr) => {
+        sendCatLog(`[ATU] Band changed to ${tuneBandSdr} -> starting SmartSDR ATU tune`);
+        smartSdr.setAtu(true);
+      });
     }
     return;
   }
@@ -41305,18 +44277,10 @@ function tuneRadio(freqKhz, mode, brng, { clearXit, origin, purpose } = {}) {
       smartSdr.setSliceXit(sliceIndex, false);
     }
     // ATU: auto-tune on band change.
-    if (settings.enableAtu) {
-      const tuneBand = freqToBand(freqHz / 1e6);
-      if (tuneBand && tuneBand !== _lastTuneBand) {
-        _lastTuneBand = tuneBand;
-        setTimeout(() => {
-          sendCatLog(`[ATU] Band changed to ${tuneBand} -> starting SmartSDR ATU tune`);
-          smartSdr.setAtu(true);
-        }, 1500);
-      } else if (!_lastTuneBand && tuneBand) {
-        _lastTuneBand = tuneBand;
-      }
-    }
+    bandChangeAtuTune(freqHz / 1e6, { purpose, origin }, (tuneBand) => {
+      sendCatLog(`[ATU] Band changed to ${tuneBand} -> starting SmartSDR ATU tune`);
+      smartSdr.setAtu(true);
+    });
     return;
   }
 
@@ -41416,31 +44380,117 @@ function tuneRadio(freqKhz, mode, brng, { clearXit, origin, purpose } = {}) {
   }
 
   // ATU: auto-tune on band change
-  if (settings.enableAtu) {
-    const freqMhz = freqKhz / 1000;
-    const tuneBand = freqToBand(freqMhz);
-    if (tuneBand && tuneBand !== _lastTuneBand) {
-      _lastTuneBand = tuneBand;
-      // Delay ATU trigger to let the radio settle on the new frequency first
-      setTimeout(() => {
-        if (smartSdr && smartSdr.connected && settings.catTarget && settings.catTarget.type === 'tcp') {
-          sendCatLog(`[ATU] Band changed to ${tuneBand} -> starting SmartSDR ATU tune`);
-          smartSdr.setAtu(true);
-        } else if (cat && cat.connected) {
-          sendCatLog(`[ATU] Band changed to ${tuneBand} -> starting ATU tune`);
-          cat.startTune();
-        }
-      }, 1500);
-    } else if (!_lastTuneBand && tuneBand) {
-      // First tune — just record the band, don't trigger ATU
-      _lastTuneBand = tuneBand;
+  bandChangeAtuTune(freqKhz / 1000, { purpose, origin }, (tuneBand) => {
+    if (smartSdr && smartSdr.connected && settings.catTarget && settings.catTarget.type === 'tcp') {
+      sendCatLog(`[ATU] Band changed to ${tuneBand} -> starting SmartSDR ATU tune`);
+      smartSdr.setAtu(true);
+    } else if (cat && cat.connected) {
+      sendCatLog(`[ATU] Band changed to ${tuneBand} -> starting ATU tune`);
+      cat.startTune();
     }
+  });
+}
+
+// "Auto-tune ATU on band change" for one tune: lib/wspr/bandhop.js
+// bandChangeAtu decides, `start(band)` is the tune path's own ATU command.
+// A WSPR hop while the beacon is not set to transmit skips the tune (#747);
+// the skipped tune is owed to that band and runs if the beacon is set to
+// transmit there (wsprRunOwedAtuTune); otherwise the next hop decides afresh.
+// A potacat://tune link (origin 'link', a web page) never starts the tune: it
+// keys a carrier (lib/tune-link-guard.js tuneLinkAutoAtu). _lastTuneBand stays
+// put, so the operator's next tune on that band runs it as before.
+function bandChangeAtuTune(freqMhz, { purpose, origin } = {}, start) {
+  const d = wsprBandhop.bandChangeAtu({
+    enableAtu: !!settings.enableAtu,
+    band: freqToBand(freqMhz),
+    lastBand: _lastTuneBand,
+    wsprHop: purpose === 'wspr-hop',
+    beaconTx: wsprBeaconWillTransmit(),
+  });
+  if (d.action === 'none') return;
+  const linkAtu = TuneLinkGuard.tuneLinkAutoAtu({ origin, action: d.action });
+  if (linkAtu.linkSkipped) {
+    _atuOwedTune = null; // the radio left any band a WSPR hop owed a tune
+    _tuneLinkAtuSkipped = true;
+    sendCatLog(TuneLinkGuard.tuneLinkAtuLogLine(d.lastBand));
+    return;
   }
+  _lastTuneBand = d.lastBand;
+  _atuOwedTune = d.owedBand ? { band: d.owedBand, start } : null;
+  if (d.action === 'skip') {
+    sendCatLog(`[ATU] WSPR hop to ${d.owedBand}: the beacon is not set to transmit, so no band-change tune (receive only)`);
+    return;
+  }
+  // Delay ATU trigger to let the radio settle on the new frequency first
+  setTimeout(() => start(d.lastBand), 1500);
+}
+
+// The beacon has just been set to transmit (armed, or TX % raised from 0).
+// When a receive-only hop left this band untuned, run that tune now and hold
+// the beacon's next frame until it is done (wsprBeaconTick), so the beacon
+// never transmits on a band whose band-change tune was skipped (#747).
+function wsprRunOwedAtuTune() {
+  const owed = _atuOwedTune;
+  if (!wsprBandhop.owedTuneDue({
+    owedBand: owed && owed.band, currentBand: _lastTuneBand,
+    beaconTx: wsprBeaconWillTransmit(), enableAtu: !!settings.enableAtu,
+  })) return;
+  _atuOwedTune = null;
+  _wsprOwedTuneHoldUntil = Date.now() + wsprBandhop.OWED_TUNE_TX_HOLD_MS;
+  sendCatLog(`[ATU] WSPR beacon set to transmit on ${owed.band}: running the band-change tune the receive-only hop skipped; the next frame waits for it`);
+  setTimeout(() => {
+    try { owed.start(owed.band); } catch (e) { sendCatLog('[ATU] band-change tune failed: ' + (e && e.message || e)); }
+  }, 1500);
 }
 
 // --- potacat:// protocol handler ---
 if (!app.isDefaultProtocolClient('potacat')) {
   app.setAsDefaultProtocolClient('potacat');
+}
+
+/**
+ * A potacat://tune link is about to move the radio (web pages carry these).
+ * Stop every automatic JTCAT transmission first, through the same paths as
+ * the operator's own Halt TX and Spot Target clear, so the JTCAT window, the
+ * main window and ECHOCAT all show it stopped. Receive keeps going (a voice or
+ * CW link stops the engine inside tuneRadio, as before). Nothing is logged to
+ * the logbook. Rules: lib/tune-link-guard.js. Only handleProtocolUrl calls it;
+ * spot clicks and every other tune are unchanged.
+ */
+function tuneLinkStopAutoTx(freqKhz, mode) {
+  const qsoNow = !!(popoutJtcatQso || remoteJtcatQso);
+  const engineTx = (eng) => !!(eng && (eng._txActive || (eng._txEnabled && eng._txMessage)));
+  let tx = engineTx(ft8Engine);
+  if (!tx && jtcatManager) {
+    for (const id of jtcatManager.sliceIds) { if (engineTx(jtcatManager.getEngine(id))) { tx = true; break; } }
+  }
+  const plan = TuneLinkGuard.tuneLinkPlan({
+    run: !!jtcatFullAutoCq,
+    hunt: jtcatAutoCqMode !== 'off' || !!jtcatHuntFallbackMode,
+    wsprBeacon: wsprBeaconArmed() || !!jtcatWsprBeaconTimer,
+    spotTarget: !!jtcatSpotTarget,
+    qso: qsoNow,
+    tx,
+    tune: !!jtcatTuneState.active,
+  });
+  if (!plan.stopped.length) return plan;
+  sendCatLog(TuneLinkGuard.tuneLinkLogLine(freqKhz, mode, plan));
+  // 'qsy' is the Spot Target's existing "the dial left the spot" reason.
+  if (plan.clearSpotTarget) { try { clearSpotTarget('qsy'); } catch (e) { console.error('[tune-link] Spot Target:', e); } }
+  if (plan.halt) { try { jtcatHaltTxNow('Tune link'); } catch (e) { console.error('[tune-link] halt:', e); } }
+  return plan;
+}
+
+/**
+ * The tune link's notice, sent after tuneRadio so it can say the automatic
+ * ATU tune was skipped (bandChangeAtuTune). Shown only when something was
+ * stopped; a skipped tune alone is a CAT log line, nothing more.
+ */
+function tuneLinkNotify(freqKhz, plan, atuSkipped) {
+  const message = TuneLinkGuard.tuneLinkNotice(freqKhz, plan, { atuSkipped });
+  if (!message) return;
+  if (win && !win.isDestroyed()) win.webContents.send('app-notice', { message, warn: true, duration: 12000 });
+  if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) jtcatPopoutWin.webContents.send('jtcat-qso-notice', { message });
 }
 
 function handleProtocolUrl(url) {
@@ -41450,12 +44500,19 @@ function handleProtocolUrl(url) {
     const parsed = new URL(url);
     const action = parsed.hostname || (parsed.pathname.match(/^\/?([^/]+)/) || [])[1] || '';
     if (action === 'tune') {
+      if (tuneLinkHold(url)) return; // a launch link waits until the radio is ready (tune-link-pending)
       const parts = parsed.pathname.replace(/^\/+/, '').split('/');
       const segments = parts.filter(p => p && p.toLowerCase() !== 'tune');
       const freqKhz = segments[0];
       const mode = (segments[1] || '').toUpperCase();
       if (freqKhz && !isNaN(parseFloat(freqKhz))) {
-        tuneRadio(parseFloat(freqKhz), mode);
+        // A web page can carry this link: stop anything JTCAT transmits on its
+        // own first, so it does not carry on at the new frequency.
+        const plan = tuneLinkStopAutoTx(parseFloat(freqKhz), mode);
+        // A link never starts the automatic ATU tune (bandChangeAtuTune).
+        _tuneLinkAtuSkipped = false;
+        tuneRadio(parseFloat(freqKhz), mode, undefined, { origin: 'link' });
+        tuneLinkNotify(parseFloat(freqKhz), plan, _tuneLinkAtuSkipped);
       }
     } else if (action === 'pair') {
       // Async — fire and forget. Result lands in the renderer via the
@@ -41481,6 +44538,57 @@ function handleProtocolUrl(url) {
   } catch (err) {
     console.error('Failed to parse protocol URL:', url, err);
   }
+}
+
+// ─── A tune link that launches POTACAT waits for the radio ───────────────────
+// Cold start used to tune 2 s after launch, before most radios are connected.
+// The link is now held until the radio link is up and a frequency has been read
+// back, then tuned once; 60 s without that drops it with a notice. Only the
+// latest link counts. Rules: lib/tune-link-pending.js.
+const _tuneLinkPending = TuneLinkPending.createPendingTuneLink();
+let _tuneLinkPendingTimer = null;
+
+function tuneLinkRigConfigured() {
+  try {
+    if (isRemoteMode()) return false; // a remote shack keeps today's behaviour
+    const t = settings && settings.catTarget;
+    return !!(t && t.type !== 'none' && !settings.catNone);
+  } catch { return false; }
+}
+
+/** True when the link was held (the caller returns); false = tune it now. */
+function tuneLinkHold(url) {
+  const freqKhz = TuneLinkPending.tuneLinkFreqKhz(url);
+  if (!(freqKhz > 0)) return false; // not a valid tune link: handleProtocolUrl ignores it as before
+  const r = _tuneLinkPending.offer(url, Date.now(), tuneLinkRigConfigured());
+  if (r.action !== 'hold') return false;
+  clearTimeout(_tuneLinkPendingTimer);
+  _tuneLinkPendingTimer = setTimeout(tuneLinkPendingCheck, r.waitMs + 50);
+  sendCatLog(`[tune-link] potacat://tune to ${freqKhz} kHz held until the radio is connected and reads back a frequency (up to ${Math.round(r.waitMs / 1000)} s)`
+    + (r.replaced ? '; it replaces the link held before it' : ''));
+  return true;
+}
+
+function tuneLinkPendingRun(r) {
+  if (!r) return;
+  clearTimeout(_tuneLinkPendingTimer);
+  _tuneLinkPendingTimer = null;
+  if (r.action === 'tune') {
+    sendCatLog('[tune-link] the radio is ready: tuning the held link');
+    // Out of the status / frequency fan-out that noticed it.
+    setImmediate(() => handleProtocolUrl(r.link));
+  } else if (r.action === 'give-up') {
+    sendCatLog(`[tune-link] ${TuneLinkPending.GIVE_UP_NOTICE} within ${Math.round(TuneLinkPending.TUNE_LINK_WAIT_MS / 1000)} s; the held link was dropped`);
+    if (win && !win.isDestroyed()) win.webContents.send('app-notice', { message: TuneLinkPending.GIVE_UP_NOTICE, warn: true, duration: 12000 });
+  }
+}
+function tuneLinkPendingCheck() { tuneLinkPendingRun(_tuneLinkPending.check(Date.now())); }
+// Called from sendCatStatus / sendCatFrequency, hot paths: never throw there.
+function tuneLinkPendingNoteLinkUp(up) {
+  try { tuneLinkPendingRun(_tuneLinkPending.noteLinkUp(up)); } catch (e) { console.error('[tune-link] link note:', e); }
+}
+function tuneLinkPendingNoteFrequency(hz) {
+  try { tuneLinkPendingRun(_tuneLinkPending.noteFrequency(hz)); } catch (e) { console.error('[tune-link] frequency note:', e); }
 }
 
 /**
@@ -42060,6 +45168,13 @@ function kiwiStatusHint() {
 
 app.whenReady().then(() => {
   logStartupStage('app.whenReady fired');
+  // #773: what Chromium got from the graphics driver, for "WebGL2 is not available" reports.
+  {
+    let gpu = null, hw = null;
+    try { gpu = app.getGPUFeatureStatus(); } catch {}
+    try { hw = app.isHardwareAccelerationEnabled(); } catch {}
+    sendCatLog(GpuStatus.formatGpuStatusLine(gpu, hw));
+  }
   macMicLog('at startup', macMicStatus()); // #463: a no-op off macOS
   // Windows app identity. Without it every toast POTACAT raises (watchlist
   // spot alerts, pair requests) is attributed to the launching executable —
@@ -42259,6 +45374,12 @@ app.whenReady().then(() => {
   // Load SOTA association names (async, non-blocking — falls back to codes if it fails)
   loadAssociations().catch(err => console.error('Failed to load SOTA associations:', err.message));
 
+  // The modules this launch needed before its window: next launch's read-ahead
+  // list (lib/startup-prefetch.js). Written later, off the startup path.
+  {
+    const preWindowModules = Object.keys(require.cache);
+    setTimeout(() => StartupPrefetch.record({ appDir: __dirname, userDataDir: app.getPath('userData'), fs, path, moduleKeys: preWindowModules }), 15000);
+  }
   createWindow();
   logStartupStage('createWindow returned (BrowserWindow constructed)');
   if (HEADLESS) {
@@ -42362,7 +45483,7 @@ app.whenReady().then(() => {
       getLocalQsoCount: () => localQsoCount(),
       // A billing state or checkout result also reaches every ECHOCAT
       // client (web + app) so a trial ending or a failed card shows there.
-      onBillingState: (payload) => { if (remoteServer) remoteServer.broadcastCloudBilling(payload); },
+      onBillingState: (payload) => { if (remoteServer) remoteServer.broadcastCloudBilling(payload); pushCloudState(); cloudTunnelOnWithAccess(payload && payload.subscription); },
       onCheckoutState: (payload) => { if (remoteServer) remoteServer.broadcastCloudCheckout(payload); },
       // Owner revoked a Guest Pass here: end the guest riding it NOW.
       // PassEnforcement's 'ended' → broadcastPassEnded() kicks the WS
@@ -42376,6 +45497,13 @@ app.whenReady().then(() => {
       // device heartbeat captured the previous client and its early
       // return would keep the new account unregistered — start over.
       onCloudSessionChanged: (reason) => {
+        pushCloudState(); // signed in or out: the devices' cloud-state follows
+        // A new account (the desktop form or ECHOCAT cloud-register) has its trial now: read it at once,
+        // so the tunnel comes on without waiting for the next status check (cloudTunnelOnWithAccess).
+        if (reason === 'register' && cloudIpc) setTimeout(() => { cloudIpc.refreshSubscription('register').catch(() => {}); }, 1000);
+        if (reason === 'signout' && settings.cloudAccessSeen !== 'none') { settings.cloudAccessSeen = 'none'; saveSettings(settings); }
+        // Remembered so the Cloud form opens on Sign In, not Start a trial, after a sign-out (renderer/cloud-ui.js).
+        if (reason !== 'signout' && settings.cloudAccessToken && !settings.cloudEverSignedIn) { settings.cloudEverSignedIn = true; saveSettings(settings); }
         teardownCloudDeviceHeartbeat();
         setImmediate(() => ensureCloudDeviceRegistered(reason).catch(() => {}));
         // A new account brings its own templates (and takes this machine's).
@@ -42383,6 +45511,8 @@ app.whenReady().then(() => {
       },
     });
     cloudIpc.startBackgroundSync();
+    // Seed the access the tunnel rule compares against before any status arrives (cloudTunnelOnWithAccess).
+    if (settings.cloudAccessSeen === undefined) { settings.cloudAccessSeen = settings.cloudAccessToken ? CloudTunnelAuto.accessOf(settings.cloudSubscriptionCache, CloudBillingUi) : 'none'; saveSettings(settings); }
     // SSTV templates follow the account (GET/PUT /v1/sstv/templates). Any
     // signed-in account, no subscription; a 404 means the route is not
     // deployed yet and templates simply stay local.
@@ -42541,6 +45671,7 @@ function cloudShackNotice(text, kind) {
     cloudTunnel.on('others', (o) => { if (o) cloudShackNotice(TunnelClaim.sharedNotice(o.connectors, o.unclaimed), 'shared'); });
     cloudTunnel.on('change', (state) => {
       if (win && !win.isDestroyed()) win.webContents.send('cloud-tunnel-state', state);
+      pushCloudState(); // tunnel on/off reaches the devices' cloud-state
       refreshCloudTray(state);
       // Mirror the public-exposure state into the WS auth layer.
       // Using `enabled` (not `status === 'live'`) deliberately: even
@@ -42700,6 +45831,7 @@ function cloudShackNotice(text, kind) {
       const typed = opts && typeof opts.shackName === 'string' ? CloudShacks.sanitizeShackName(opts.shackName) : '';
       if (typed && typed !== settings.cloudShackName) { settings.cloudShackName = typed; saveSettings(settings); }
       const state = await cloudTunnel.enable(typed ? { shackName: typed } : {});
+      if (settings.cloudTunnelUserOff) { delete settings.cloudTunnelUserOff; saveSettings(settings); } // turned on again by hand
       return { ok: true, state };
     } catch (err) {
       const msg = err.message || String(err);
@@ -42769,6 +45901,8 @@ function cloudShackNotice(text, kind) {
   ipcMain.handle('cloud-tunnel-disable', async () => {
     if (!cloudTunnel) return { error: 'cloud-tunnel module not initialized' };
     try {
+      // The operator's own choice: a later trial or payment never turns it back on (cloudTunnelOnWithAccess).
+      if (settings.cloudTunnelUserOff !== true) { settings.cloudTunnelUserOff = true; saveSettings(settings); }
       const state = await cloudTunnel.disable();
       return { ok: true, state };
     } catch (err) {
@@ -42816,6 +45950,8 @@ function cloudShackNotice(text, kind) {
     // the guest's next press keys (lib/pass-enforcement.js tx_enable).
     passEnforcement.on('power-over-cap', ({ watts, max }) => passApplyPowerCap(max, `the radio was at ${watts} W`));
     passEnforcement.on('state-change', (state) => {
+      // APRS: a Guest Pass pauses the iGate and the pass ending resumes it (Casey 2026-11-19).
+      try { aprsIgateSync(); aprsIgatePush(); } catch { /* APRS not set up yet */ }
       if (state === 'paused') scopeGuestRestoreOwner('the owner took the radio');
       if (win && !win.isDestroyed()) {
         win.webContents.send('pass-enforcement-state', passEnforcement.getSessionStatus());
@@ -43215,7 +46351,9 @@ function cloudShackNotice(text, kind) {
     }
   }
 
-  // Cold start: check if app was launched via potacat:// URL
+  // Cold start: check if app was launched via potacat:// URL. A tune link is
+  // then held until the radio is ready (tuneLinkHold); pair and pass links
+  // keep the 2 s for the window to load.
   const protocolUrl = process.argv.find(a => a.startsWith('potacat://'));
   if (protocolUrl) {
     setTimeout(() => handleProtocolUrl(protocolUrl), 2000);
@@ -45048,6 +48186,7 @@ function cloudShackNotice(text, kind) {
     winlinkPopoutWin.webContents.on('did-finish-load', () => {
       winlinkPopoutSend('winlink-state', winlinkPayload());
       if (_winlinkPendingCompose) { winlinkPopoutSend('winlink-compose-prefill', _winlinkPendingCompose); _winlinkPendingCompose = null; }
+      if (_winlinkPendingFormResult) { winlinkPopoutSend('winlink-form-result', _winlinkPendingFormResult); _winlinkPendingFormResult = null; }
       for (const box of WinlinkStateLib.FOLDERS) winlinkPopoutSend('winlink-mailbox', { box, messages: winlinkState.list(box) });
       winlinkPopoutSend('winlink-session', winlinkSessionView());
       winlinkPopoutSend('winlink-popout-theme', themeQuery());
@@ -45157,10 +48296,12 @@ function cloudShackNotice(text, kind) {
   // --- JS8 Heartbeat Map (RX-only reachability: heard / heard-by / both) ---
   ipcMain.on('js8-map-popout', () => {
     if (js8MapWin && !js8MapWin.isDestroyed()) { js8MapWin.focus(); return; }
+    const isMac = process.platform === 'darwin'; // #866: main.js has no file-wide isMac (each function declares its own)
     js8MapWin = new BrowserWindow({
       minWidth: 400, minHeight: 300, // never smaller than its own controls (N0KAH 2026-10-24)
       width: 700, height: 500, title: 'JS8 Heartbeat Map',
-      backgroundColor: getThemeWindowBg(), frame: false,
+      backgroundColor: getThemeWindowBg(),
+      ...(isMac ? { titleBarStyle: 'hiddenInset' } : { frame: false }), // #866: the macOS traffic lights, as every other pop-out
       icon: getIconPath(),
       webPreferences: { preload: path.join(__dirname, 'preload-js8-map-popout.js'), contextIsolation: true, nodeIntegration: false },
     });
@@ -45177,6 +48318,199 @@ function cloudShackNotice(text, kind) {
   ipcMain.on('js8-map-minimize', (e) => { const w = BrowserWindow.fromWebContents(e.sender); if (w) w.minimize(); });
   ipcMain.on('js8-map-maximize', (e) => { const w = BrowserWindow.fromWebContents(e.sender); if (w) { w.isMaximized() ? w.unmaximize() : w.maximize(); } });
   ipcMain.on('js8-map-close', (e) => { const w = BrowserWindow.fromWebContents(e.sender); if (w) w.close(); });
+
+  // --- APRS (phase 1): a read-only APRS-IS map and list. The feed runs only
+  // while the window is open; packets are parsed here (lib/aprs-parser.js) and
+  // handed over in 500 ms batches. Nothing is sent to APRS-IS but the login,
+  // and nothing keys the radio.
+  // Home: the best known position (aprsHomePosition: picked point, GPS fix, grid centre), never the ambiguous beacon.
+  function aprsHome() {
+    const p = aprsHomePosition();
+    return p ? { lat: p.lat, lon: p.lon, kind: p.kind, grid: String(settings.grid || '').toUpperCase(), call: settings.myCallsign || '' } : null;
+  }
+  function aprsSend(ch, data) {
+    if (aprsWin && !aprsWin.isDestroyed()) aprsWin.webContents.send(ch, data);
+    try { aprsEcho.tap(ch, data); } catch { /* phase 6: ECHOCAT devices see the feed too */ }
+  }
+  function aprsStopFeed() {
+    if (aprsBatch) { aprsBatch.stop(); aprsBatch = null; }
+    if (aprsFeed) { aprsFeed.removeAllListeners('line'); aprsFeed.stop(); aprsFeed = null; }
+  }
+  function aprsStartFeed() {
+    aprsStopFeed();
+    const home = aprsHome();
+    if (!home) { aprsSend('aprs-status', { state: 'no-grid' }); return; }
+    const Feed = require('./lib/aprs-is-feed');
+    const AprsParser = require('./lib/aprs-parser');
+    const dev = APRS_IS_DEV_SERVER || {}; // dev builds only: a local fake APRS-IS server
+    aprsFeed = new Feed.AprsIsFeed({ call: settings.myCallsign, version: app.getVersion(), lat: home.lat, lon: home.lon, km: settings.aprsRangeKm, follow: aprsEcho.followCalls(), watch: aprsEcho.watchCalls(), host: dev.host, port: dev.port });
+    aprsBatch = Feed.createBatcher((packets) => aprsSend('aprs-packets', packets), 500);
+    aprsFeed.on('line', (line) => {
+      try { aprsMessagesFeedLine(line); } catch (e) { aprsLog('message: ' + e.message); } // A1: messages, acks and rejs for us
+      const p = AprsParser.parse(line);
+      if (p && aprsBatch) aprsBatch.push(p);
+      // Phase 5: our own beacon came back from APRS-IS (it is on the map now).
+      if (p && aprsBeacon.lastAt) {
+        const login = AprsIgate.uplinkLogin(settings.myCallsign);
+        if (login.ok && AprsBeacon.isOwnBeacon(p, login.call)) { aprsBeacon.backAt = Date.now(); aprsBeaconPush(); }
+      }
+    });
+    aprsFeed.on('status', (st) => aprsSend('aprs-status', st));
+    aprsFeed.on('error', () => { /* shown as the window's status mark; reconnects on its own */ });
+    aprsFeed.start();
+  }
+  // Phase 6: an ECHOCAT device runs the feed with the window closed (lib/aprs-echocat.js).
+  aprsFeedHooks = {
+    start: () => aprsStartFeed(),
+    stop: () => aprsStopFeed(),
+    setRange: (km) => { if (aprsFeed) aprsFeed.setRange(null, null, require('./lib/aprs-is-feed').clampRangeKm(km)); },
+    setFollow: (calls) => { if (aprsFeed) aprsFeed.setFollow(calls); },
+    setWatch: (calls) => { if (aprsFeed) aprsFeed.setWatch(calls); },
+  };
+  ipcMain.on('aprs-popout-open', () => {
+    if (aprsWin && !aprsWin.isDestroyed()) { aprsWin.focus(); return; }
+    const isMac = process.platform === 'darwin'; // #866: main.js has no file-wide isMac (each function declares its own)
+    aprsWin = new BrowserWindow({
+      minWidth: 640, minHeight: 400,
+      width: 1280, height: 860, title: 'APRS', // the approved layout's size; a saved place wins (rememberWindowPlace)
+      backgroundColor: getThemeWindowBg(),
+      ...(isMac ? { titleBarStyle: 'hiddenInset' } : { frame: false }), // #866: plain frame:false left a Mac with no way to close it
+      icon: getIconPath(),
+      webPreferences: { preload: path.join(__dirname, 'preload-aprs-popout.js'), contextIsolation: true, nodeIntegration: false },
+    });
+    rememberWindowPlace(aprsWin, 'aprsPopoutBounds', { minWidth: 640, minHeight: 400 });
+    _aprsAutoListenPending = true;    // listen on open, once this window has drawn (aprsAutoListenOnOpen)
+    _aprsListenOffByOperator = false;
+    aprsWin.setMenuBarVisibility(false);
+    aprsWin.loadFile(path.join(__dirname, 'renderer', 'aprs-popout.html'), { query: themeQuery() });
+    aprsWin.on('closed', () => {
+      // APRS-on-idle listens with no window: closing it leaves that session running.
+      aprsRfAbort('the APRS window closed'); // phase 7: a radio beacon unkeys at once, whatever owns listening
+      // Phase 6: listening a watching ECHOCAT device turned on, and the feed it watches, carry on.
+      if (!aprsEcho.keepsListen()) {
+        if (!(autoIdleAprsActive && autoIdleAprsOwnsListen)) aprsListenStop('the APRS window closed');
+      }
+      if (!aprsEcho.keepsFeed()) aprsStopFeed();
+      if (_remoteAprsWanted) remoteAprsWatch(false); // #868: the shack stops listening this desktop started, as closing its own window would
+      aprsWin = null;
+      _aprsMsgViewing = ''; // A1: messages still going out carry on; nothing is being read now
+      aprsBeaconStop(); // phase 5: the beacon timer runs only while the window is open
+      aprsRfTimerStop(); // and the 2 m radio timer
+    });
+    aprsWin.webContents.on('before-input-event', (_e, input) => {
+      if (input.key === 'F12' && input.type === 'keyDown') aprsWin.webContents.toggleDevTools();
+    });
+  });
+  // The window asks once it has drawn: home, units and range, then the feed starts.
+  ipcMain.on('aprs-ready', () => {
+    const Feed = require('./lib/aprs-is-feed');
+    // The "Within" choices are round numbers of the operator's units; a range
+    // saved before them (150 km, shown as "93 mi") becomes the nearest choice, once.
+    const conv = AprsWindowState.convertSavedRange(Feed.clampRangeKm(settings.aprsRangeKm), settings.distUnit === 'km' ? 'km' : 'mi');
+    if (conv.changed) {
+      aprsLog(`range ${Feed.clampRangeKm(settings.aprsRangeKm)} km is now ${conv.km} km, the nearest of the window's choices`);
+      settings.aprsRangeKm = conv.km;
+      saveSettings(settings);
+    }
+    aprsSend('aprs-init', { home: aprsHome(), distUnit: settings.distUnit || 'mi', km: Feed.clampRangeKm(settings.aprsRangeKm), showLastMin: AprsWindowState.normShowLast(settings.aprsShowLastMin), mapView: AprsMap.cleanView(settings.aprsMapView) });
+    aprsStartFeed();
+    if (aprsWin && !aprsWin.isDestroyed()) aprsWin.webContents.send('aprs-heard-you', aprsEcho.heardList()); // the "heard you" marks held now
+    if (isRemoteMode()) remoteAprsWatch(true); // #868: listening and the heard stations are the shack's
+    aprsListenPush();
+    aprsIgatePush();
+    aprsAutoListenOnOpen(); // receive only; once per open, silent when it may not
+    aprsBeaconSchedule({ arm: true }); // phase 5: the timer (if set) starts with the window, one interval on
+    aprsRfTimerStop(); aprsRfTimerSchedule(); // the 2 m radio timer (if set) too: one interval on, never at once
+    aprsBeaconPush();
+    aprsMessagesPush();
+  });
+  // APRS A1: messages over the internet. Send queues one (main checks it again);
+  // view says which conversation the window shows (it is read); stop ends a message's retries.
+  ipcMain.on('aprs-messages-get', () => aprsMessagesPush());
+  ipcMain.handle('aprs-message-send', (_e, d) => aprsMessageSend(d && typeof d === 'object' ? d : {}));
+  ipcMain.on('aprs-messages-view', (_e, call) => {
+    const M = require('./lib/aprs-message');
+    const a = M.checkAddressee(call);
+    _aprsMsgViewing = a.ok ? a.call : '';
+    if (_aprsMsgViewing && aprsMessenger().markRead(_aprsMsgViewing)) aprsMessagesSave();
+    aprsMessagesPush();
+  });
+  ipcMain.on('aprs-message-stop', (_e, lid) => { if (aprsMessenger().stop(String(lid || ''))) { aprsMsgRadioStop(String(lid || '')); aprsMessagesSave(); aprsMessagesRun(); aprsMessagesPush(); } });
+  // A3: Try again on a radio message: one press, one more try on the radio (the gate decides again at the send).
+  ipcMain.handle('aprs-message-retry', (_e, lid) => {
+    const why = aprsMsgRadioRefusal();
+    if (why) return { ok: false, sentence: why };
+    const r = aprsMessenger().tryAgain(String(lid || ''));
+    if (r.ok) { aprsMessagesRun(); aprsMessagesPush(); }
+    return r;
+  });
+  // APRS A2: templates. Save keeps the compose box as one of my templates (checked here again).
+  ipcMain.on('aprs-templates-get', () => aprsTemplatesPush());
+  ipcMain.handle('aprs-templates-save', (_e, t) => aprsTemplatesSave(t && typeof t === 'object' ? { name: t.name, to: t.to, text: t.text } : {}));
+  ipcMain.on('aprs-templates-delete', (_e, id) => {
+    settings.aprsMsgTemplates = AprsTemplates.removeMine(settings.aprsMsgTemplates, String(id || ''));
+    saveSettings(settings);
+    aprsTemplatesPush();
+  });
+  ipcMain.on('aprs-messages-delete', (_e, call) => {
+    if (aprsMessenger().remove(String(call || ''))) { if (String(call || '').toUpperCase() === _aprsMsgViewing) _aprsMsgViewing = ''; aprsMessagesSave(); aprsMessagesPush(); }
+  });
+  // APRS phase 5: the Beacon section.
+  ipcMain.on('aprs-beacon-get', () => aprsBeaconPush());
+  ipcMain.on('aprs-beacon-now', () => { aprsBeaconSend('now').catch((e) => aprsLog('beacon failed: ' + e.message)); });
+  ipcMain.on('aprs-beacon-set', (_e, patch) => aprsBeaconSet(patch && typeof patch === 'object' ? patch : {}));
+  // Phase 7: one manual beacon over the radio. One click sends (no confirmation step); nothing else keys.
+  ipcMain.on('aprs-rf-get', () => aprsRfPush());
+  ipcMain.on('aprs-rf-send', () => { aprsRfSend().catch((e) => aprsLog('beacon over the radio failed: ' + e.message)); });
+  // The on-air banner's "Stop transmitting": the same abort the window close uses (PTT drops at once).
+  ipcMain.on('aprs-rf-stop', () => { aprsRfAbort('you pressed Stop transmitting'); aprsRfPush(); });
+  // The window's TX power control asks once its listener is attached.
+  ipcMain.on('aprs-rig-power-get', () => pushAprsRigPower(true));
+  // The APRS settings panel's iGate switch (the Idle Mode line mirrors it; one setting).
+  ipcMain.on('aprs-igate-set', (_e, on) => aprsIgateSetFromWindow(on === true));
+  // APRS phase 2: the "Listen on my radio" switch (receive only).
+  // The operator at the switch is using the radio: an APRS idle session ends first.
+  ipcMain.on('aprs-listen-set', (_e, on) => { markUserActive(); aprsListenSet(!!on); if (!on) _aprsListenOffByOperator = true; });
+  // The bar asks once its listener is attached: the push after 'aprs-ready' can
+  // arrive while its script is still loading (the 8600M's empty bar, 2026-11-18).
+  // The iGate mark answered 'aprs-ready' the same way, so it comes too.
+  ipcMain.on('aprs-listen-get', () => { aprsListenPush(); aprsIgatePush(); });
+  // APRS phase 3: the band chips (2 m, 30 m).
+  ipcMain.on('aprs-listen-band', (_e, band) => { markUserActive(); aprsListenSetBand(String(band || '')); });
+  // Phase 4: the iGate's marks (Settings asks when it opens).
+  ipcMain.handle('aprs-igate-status', () => aprsIgateStatus());
+  // The APRS-IS card's switch: off stops the window's feed (an ECHOCAT device
+  // watching the feed keeps it running for itself); on connects again.
+  ipcMain.on('aprs-feed-set', (_e, on) => {
+    if (on) { aprsStartFeed(); return; }
+    aprsEcho.heardStop(); // switched off by the operator: the heard-you watch ends too
+    if (aprsEcho.keepsFeed()) { aprsLog('APRS-IS stays connected: an ECHOCAT device is watching it'); return; }
+    aprsStopFeed();
+    aprsSend('aprs-status', { state: 'stopped' });
+  });
+  ipcMain.handle('flex-gps-get', () => flexGpsPayload()); // the radio's GPS for Settings and the APRS window (read only)
+  ipcMain.on('aprs-set-range', (_e, km) => {
+    const Feed = require('./lib/aprs-is-feed');
+    settings.aprsRangeKm = Feed.clampRangeKm(km);
+    saveSettings(settings);
+    if (aprsFeed) aprsFeed.setRange(null, null, settings.aprsRangeKm);
+  });
+  // "Show the last" (15 min to 6 h) for the window's list and map, per profile.
+  // The window filters its own store; APRS-IS and ECHOCAT are not touched.
+  ipcMain.on('aprs-set-show-last', (_e, min) => {
+    settings.aprsShowLastMin = AprsWindowState.normShowLast(min);
+    saveSettings(settings);
+  });
+  // The map's centre and zoom (the window sends it, debounced, after a move); restored on every open.
+  ipcMain.on('aprs-map-view', (_e, v) => {
+    const view = AprsMap.cleanView(v);
+    if (!view || AprsMap.sameView(settings.aprsMapView, view)) return;
+    settings.aprsMapView = view;
+    saveSettings(settings);
+  });
+  ipcMain.on('aprs-popout-minimize', (e) => { const w = BrowserWindow.fromWebContents(e.sender); if (w) w.minimize(); });
+  ipcMain.on('aprs-popout-maximize', (e) => { const w = BrowserWindow.fromWebContents(e.sender); if (w) { w.isMaximized() ? w.unmaximize() : w.maximize(); } });
+  ipcMain.on('aprs-popout-close', (e) => { const w = BrowserWindow.fromWebContents(e.sender); if (w) w.close(); });
   ipcMain.on('js8call-popout-minimize', (e) => { const w = BrowserWindow.fromWebContents(e.sender); if (w) w.minimize(); });
   ipcMain.on('js8call-popout-maximize', (e) => {
     const w = BrowserWindow.fromWebContents(e.sender);
@@ -45456,6 +48790,11 @@ function cloudShackNotice(text, kind) {
     ...m, attachments: (m.attachments || []).map((a) => ({ name: a.name, data: a.dataBase64 })),
   }));
   ipcMain.handle('winlink-cmd-posreport', (_e, o = {}) => winlinkPosReport(o));
+  // Winlink forms (#346): the picker's list, Pat's download of the standard forms, the form window.
+  ipcMain.handle('winlink-forms-catalog', () => winlinkFormsCatalog());
+  ipcMain.handle('winlink-forms-update', () => winlinkFormsUpdate());
+  ipcMain.handle('winlink-form-open', (_e, o = {}) => winlinkFormOpen({ kind: String(o.kind || ''), path: String(o.path || ''), box: String(o.box || ''), mid: String(o.mid || ''), file: String(o.file || '') }));
+  ipcMain.handle('winlink-form-info', (_e, o = {}) => winlinkFormInfo({ box: String(o.box || ''), mid: String(o.mid || ''), file: String(o.file || '') }));
   ipcMain.handle('winlink-cmd-connect', (_e, o = {}) => {
     if (isRemoteMode() && WinlinkModes.isRadioMode(o.mode)) return { ok: false, error: 'Radio sessions key the shack\'s radio — start them on the shack PC' };
     winlinkRetryCancel('connect');
@@ -45659,11 +48998,12 @@ function cloudShackNotice(text, kind) {
       jtcatMapPopoutWin.focus();
       return;
     }
+    const isMac = process.platform === 'darwin'; // #866: main.js has no file-wide isMac (each function declares its own)
     jtcatMapPopoutWin = new BrowserWindow({
       minWidth: 360, minHeight: 300, // never smaller than its own controls (N0KAH 2026-10-24)
       width: 700, height: 500,
       backgroundColor: getThemeWindowBg(),
-      frame: false,
+      ...(isMac ? { titleBarStyle: 'hiddenInset' } : { frame: false }), // #866: same as the APRS window, the Mac had no way to close it
       webPreferences: { preload: path.join(__dirname, 'preload-jtcat-popout.js'), contextIsolation: true, nodeIntegration: false },
     });
     rememberWindowPlace(jtcatMapPopoutWin, 'jtcatMapPopoutBounds', { minWidth: 360, minHeight: 300 });
@@ -46881,6 +50221,7 @@ function cloudShackNotice(text, kind) {
         break;
       }
       case 'check-clock': await runJtcatClockCheck(); break;
+      case 'open-time-settings': await openTimeSettings(); break;
       case 'sync-clock': {
         const { sync: res } = await runClockFix();
         if (res && res.success === false && res.message) message = res.message;
@@ -46982,6 +50323,7 @@ function cloudShackNotice(text, kind) {
     setTimeout(() => { if (yaesuScopeWanted()) startYaesuScope(); }, 400);
   };
   ipcMain.on('scope-restart', () => yaesuScopeRestartLater('restart requested'));
+  ipcMain.on('scope-no-webgl2', () => sendCatLog(GpuStatus.formatNoWebgl2Line('Band Scope')));
   ipcMain.on('scope-set-synth', (_e, on) => {
     yaesuScopeSynth = !!on;
     sendCatLog('[Scope] synthetic signal ' + (on ? 'ON — no radio involved' : 'OFF'));
@@ -47229,8 +50571,8 @@ function cloudShackNotice(text, kind) {
       // sending RR73 (step 5). Use CQ-mode phase 'cq-rr73' so the state machine
       // actually advances it — reply mode has NO 'rr73' handler, so the QSO
       // froze and never logged (WZ1H/W7RTA 2026-06-22: double-clicking a station
-      // answering you didn't log + pathway steps stuck). The log point (their
-      // R-report received) has passed, so log on setup like the send-73 case.
+      // answering you didn't log + pathway steps stuck). Logged when the RR73
+      // goes out (jtcatNoteTxSent, #807), not on the click.
       txMsg = jtcatDirectedMsg(data.call, myCall, 'RR73');
       phase = 'cq-rr73';
       const sameCall = popoutJtcatQso && popoutJtcatQso.call && popoutJtcatQso.call.toUpperCase() === data.call.toUpperCase();
@@ -47241,8 +50583,8 @@ function cloudShackNotice(text, kind) {
         report: data.theirReport || data.report || (sameCall ? popoutJtcatQso.report : null),
         sentReport: (sameCall ? popoutJtcatQso.sentReport : null) || ourRpt,
         myCall, myGrid, txRetries: 0, sliceId: replySliceId,
+        _logged: !!(sameCall && popoutJtcatQso._logged),
       };
-      if (!sameCall) await jtcatAutoLog(popoutJtcatQso, { fromWindow: true });
     } else if (nextStep === 'send-r-report') {
       // Their step 3 (plain signal report) → we send step 4 (R+ourReport).
       txMsg = jtcatDirectedMsg(data.call, myCall, 'R' + ourRpt);
@@ -47314,7 +50656,7 @@ function cloudShackNotice(text, kind) {
       popoutJtcatQso = { mode: 'reply', call: data.call, grid: data.grid || (sameCall ? prev.grid : ''), phase, txMsg,
         report: sameCall ? prev.report : null,
         sentReport: sameCall ? prev.sentReport : null,
-        myCall, myGrid, txRetries: 0, sliceId: replySliceId };
+        myCall, myGrid, txRetries: 0, sliceId: replySliceId, _logged: !!(sameCall && prev._logged) };
       replyEngine._txEnabled = true;
       await replyEngine.setTxMessage(txMsg);
       replyEngine.tryImmediateTx();
@@ -47482,18 +50824,35 @@ function cloudShackNotice(text, kind) {
   ipcMain.on('jtcat-follow-radio', () => { jtcatFollowRadioNow('the JTCAT window'); });
   ipcMain.handle('jtcat-dxpeditions-get', () => _jtcatDxpDials);
 
-  ipcMain.on('jtcat-popout-skip-phase', async () => {
-    if (!popoutJtcatQso || popoutJtcatQso.phase === 'done' || popoutJtcatQso.phase === 'idle') return;
+  ipcMain.on('jtcat-popout-skip-phase', async (_e, opts) => {
+    // The retry cap stopped a QSO whose RR73 never came (#807): the notice's
+    // Send 73 ({ unconfirmed: true }), or Skip with nothing running, sends the
+    // 73 now, and the 73 going out logs it. Send 73 never touches a QSO that
+    // has started since (Hunt may already be calling the next station).
+    const onlyUnconfirmed = !!(opts && opts.unconfirmed);
+    if (!popoutJtcatQso || onlyUnconfirmed) {
+      const u = jtcatTakeUnconfirmed('popout');
+      const ueng = u && ((u.q.sliceId && jtcatManager) ? jtcatManager.getEngine(u.q.sliceId) : ft8Engine);
+      if (u && ueng) {
+        popoutJtcatQso = u.q;
+        jtcatSendStashed73(u, ueng, (m) => { ueng.setTxMessage(m); });
+        popoutBroadcastQso();
+      } else if (onlyUnconfirmed) {
+        sendCatLog('[JTCAT] Send 73: that QSO is no longer waiting (another QSO started, or 5 minutes passed)');
+      }
+      return;
+    }
+    if (popoutJtcatQso.phase === 'done' || popoutJtcatQso.phase === 'idle') return;
     const q = popoutJtcatQso;
     const eng = (q.sliceId && jtcatManager) ? jtcatManager.getEngine(q.sliceId) : ft8Engine;
     if (!eng) return;
     const myCall = q.myCall;
     const validCall = q.call && /^[A-Z0-9/]{2,}$/i.test(q.call);
     if (q.mode === 'cq' && _jtcatStateMachine.canCloseoutQso(q)) {
-      _jtcatStateMachine.closeoutStalledQso(q,
-        (m) => { eng.setTxMessage(m); },
-        async () => { await jtcatAutoLog(q, { fromWindow: true }); },
-        { log: sendCatLog });
+      // Compressed reply with reports both ways: Skip sends the 73, which
+      // logs the QSO as it goes out (#807).
+      _jtcatStateMachine.sendFinal73(q, (m) => { eng.setTxMessage(m); }, { log: sendCatLog });
+      q.txRetries = 0;
       popoutBroadcastQso();
       return;
     }
@@ -47521,18 +50880,14 @@ function cloudShackNotice(text, kind) {
         q.txMsg = jtcatDirectedMsg(q.call, myCall, 'R' + rpt);
         q.phase = 'r+report';
       } else if (q.phase === 'r+report') {
-        // Skip on a reports-both-ways QSO = the operator declaring it done.
+        // Skip on a reports-both-ways QSO = the operator sending the 73.
         // Speed POTA activators often never send RR73 at all (they take the
-        // R-report and CQ the next hunter), so the natural advance-and-log
-        // never fires — and this branch used to move to the 73 phase WITHOUT
-        // calling the logger, so Skip sent 73s but the QSO stayed unlogged
-        // (W8ATE 2026-08-26). Route through the SAME closeout the retry cap
-        // uses: log + one courtesy 73 + normal teardown.
+        // R-report and CQ the next hunter), so the natural advance never
+        // fires (W8ATE 2026-08-26). Skip queues the 73, and the 73 going out
+        // logs the QSO (#807: "we send a 73"), like choosing Tx5 in WSJT-X.
         if (_jtcatStateMachine.canCloseoutQso(q)) {
-          _jtcatStateMachine.closeoutStalledQso(q,
-            (m) => { eng.setTxMessage(m); },
-            async () => { await jtcatAutoLog(q, { fromWindow: true }); },
-            { log: sendCatLog });
+          _jtcatStateMachine.sendFinal73(q, (m) => { eng.setTxMessage(m); }, { log: sendCatLog });
+          q.txRetries = 0;
           popoutBroadcastQso();
           return;
         }
@@ -47751,6 +51106,7 @@ function cloudShackNotice(text, kind) {
           mySigInfo: q.MY_POTA_REF || q.MY_SIG_INFO || q.MY_SOTA_REF || q.MY_WWFF_REF,
           operator: q.OPERATOR, stationCallsign: q.STATION_CALLSIGN,
           myGridsquare: q.MY_GRIDSQUARE, myState: q.MY_STATE, myCounty: q.MY_CNTY,
+          guestPass: q.APP_POTACAT_GUEST_PASS,
         });
         return { MY_GRIDSQUARE: f.myGridsquare, MY_STATE: f.myState, MY_CNTY: f.myCounty };
       },
@@ -48160,14 +51516,14 @@ function cloudShackNotice(text, kind) {
   // so there's no feedback loop with the mutual-exclusion stop. (scan-state-sync-desktop)
   ipcMain.on('scan-state-changed', (_e, scanning) => {
     desktopScanning = !!scanning;
-    if (remoteServer && remoteServer.running) {
-      remoteServer.sendToClient({ type: 'scan-state', scanning: desktopScanning });
-    }
-    sendVfoScanState();
+    // The desktop's own Scan button takes over from a phone-started run (#37).
+    if (desktopScanning && _phoneScanRun && _phoneScanRun.scanning) _phoneScanRun.stop('desktop-scan');
+    broadcastScanState();
   });
   // The Small VFO's Scan button: stops whichever scan is running (this
   // desktop's or the phone's), else starts the main window's spot scan.
   ipcMain.on('vfo-scan-toggle', () => {
+    if (_phoneScanRun && _phoneScanRun.scanning) { _phoneScanRun.stop('stop'); return; }
     if (desktopScanning) {
       if (win && !win.isDestroyed()) win.webContents.send('remote-scan-control', { action: 'stop' });
     } else if (_phoneScanning && remoteServer && remoteServer.running) {
@@ -49345,7 +52701,7 @@ function cloudShackNotice(text, kind) {
   ipcMain.on('app-relaunch', () => { app.relaunch(); app.exit(0); });
   // themeNow: the theme in force (Appearance System decided here), for a
   // window that reads the theme from the settings (#376).
-  ipcMain.handle('get-settings', () => ({ ...settings, appVersion: getAppDisplayVersion(), remoteShack: isRemoteMode(), themeNow: themeQuery() }));
+  ipcMain.handle('get-settings', () => ({ ...settings, appVersion: getAppDisplayVersion(), remoteShack: isRemoteMode(), shackGrid: isRemoteMode() ? remoteShackGrid : '', themeNow: themeQuery() }));
   // The rig editor's Test connection for a Zeus / Thetis TCI server: waits
   // for the server's `ready` and sends nothing (lib/tci-rig.js probeTci).
   ipcMain.handle('probe-tci-rig', async (_e, target) => {
@@ -49404,9 +52760,16 @@ function cloudShackNotice(text, kind) {
   // Rig editor "Packet mode on the radio": what the choice means for the rig being edited (lib/packet-rig-mode.js).
   ipcMain.handle('get-packet-rig-mode', (_e, q) => {
     q = q || {};
-    const info = RIG_MODELS[String(q.model || '').trim()] || null;
+    const info = getModel(String(q.model || '').trim(), null) || null;
     const o = { choice: q.choice, family: RigFamily.familyFromRadioType(q.radioType), brand: info && info.brand, protocol: info && info.protocol };
     return { ...PacketRigMode.resolvePacketRigMode(o), editorNote: PacketRigMode.editorNote(o) };
+  });
+  // Rig editor "Show Power Off for this radio": the default and the line under
+  // the box for the rig being edited (lib/rig-power.js, #768).
+  ipcMain.handle('get-rig-power-off-info', (_e, q) => {
+    q = q || {};
+    const info = RIG_MODELS[String(q.model || '').trim()] || null;
+    return RigPower.powerOffEditorInfo({ caps: info && info.caps, linkType: q.linkType });
   });
   ipcMain.handle('get-sdr-directory', () => require('./lib/sdr-directory').STATIONS);
 
@@ -50363,6 +53726,12 @@ function cloudShackNotice(text, kind) {
     const sync = cloudIpc.getCloudSync();
     if (!sync) return { error: 'Cloud sync unavailable' };
     if (!shackDeviceId) return { error: 'shackDeviceId required' };
+    const pairErrors = require('./lib/cloud-pair-errors');
+
+    // Register (or refresh) this computer first, as cloud-find-shacks does:
+    // a pair never runs on a stale or missing directory row.
+    const reg = await ensureCloudDeviceRegistered('pair').catch((err) => ({ error: err }));
+    if (reg && reg.error) return { error: pairErrors.cloudRegisterErrorText(reg.error) };
 
     // Mint a pairToken from the cloud. The cloud verifies same-account
     // and binds the token to our clientDeviceId.
@@ -50373,7 +53742,8 @@ function cloudShackNotice(text, kind) {
         clientFingerprint: '', // laptops don't have a server cert; left blank
       });
     } catch (err) {
-      return { error: 'cloud authorize failed: ' + (err.message || err) };
+      sendCatLog(`[cloud-pair] authorize failed: ${err.code || ''} ${err.message || err}`);
+      return { error: pairErrors.cloudPairErrorText(err) };
     }
     if (!authz || !authz.pairToken || !authz.shack) {
       return { error: 'cloud authorize returned no token' };
@@ -51326,6 +54696,9 @@ function cloudShackNotice(text, kind) {
     setImmediate(() => afterSstvSettingsSaved(newSettings));
     // #475: the Deleted folder's days reach every Winlink surface (winlink-state.deletedDays).
     if (newSettings && 'winlinkDeletedDays' in newSettings) setImmediate(() => { try { winlinkPush(); } catch {} });
+    // APRS phase 4: the iGate switch and the callsign decide whether the uplink runs, and as whom.
+    if (newSettings && 'aprsIgate' in newSettings) newSettings.aprsIgate = newSettings.aprsIgate === true;
+    if (newSettings && ('aprsIgate' in newSettings || 'myCallsign' in newSettings)) setImmediate(() => { try { aprsUplinkWant(null); aprsIgateSync(); aprsIgatePush(); aprsBeaconPush(); } catch {} });
     if (newSettings && 'jtcatFakeIt' in newSettings) setImmediate(() => { fakeItSyncEngine(); sendCatLog(`[JTCAT] Split operation Fake It: ${fakeItEnabled() ? 'on' : 'off'}`); });
     // An always-on feature has no off: a stale window's false never lands.
     for (const k of InstallDefaults.ALWAYS_ON) if (k in newSettings) newSettings[k] = true;
@@ -51355,6 +54728,10 @@ function cloudShackNotice(text, kind) {
         }
         return out;
       });
+    }
+    // Spot filter presets: sanitised on every write, like the mutes below.
+    if (newSettings.spotFilterPresets !== undefined) {
+      newSettings.spotFilterPresets = normalizeSpotFilterPresets(newSettings.spotFilterPresets);
     }
     // Per-band region mutes: sanitize on every write (never store a payload
     // verbatim) and ship the updated set to connected ECHOCAT clients so a
@@ -51515,7 +54892,7 @@ function cloudShackNotice(text, kind) {
     if (has('n3fjpPull') && newSettings.n3fjpPull && !settings.n3fjpPull) {
       setTimeout(() => { n3fjpPull('turned on').catch(() => {}); }, 3000);
     }
-    // "None" in Settings > My Rigs is a choice too: remembered so connectCat
+    // "None" in Settings > Radio is a choice too: remembered so connectCat
     // never auto-activates the only rig over it; picking a rig clears it.
     if (has('activeRigId')) settings.catNone = !newSettings.activeRigId;
 
@@ -51883,6 +55260,7 @@ function cloudShackNotice(text, kind) {
         connectRemote();
       } else {
         disconnectRemote();
+        releasePhoneDrivenJtcat();
       }
     }
 
@@ -52505,11 +55883,13 @@ function cloudShackNotice(text, kind) {
     const { portPath, baudRate, civAddress } = config;
     const { SerialPort } = require('serialport');
 
-    // Temporarily disconnect live CAT to release the serial port
+    // Temporarily disconnect live CAT + kill rigctld to release the serial port
+    // (a Hamlib rig entry's rigctld holds the COM port: "Access denied", #910)
     if (cat) {
       await restoreIcomNetworkDataMod('Icom CI-V test');
       cat.disconnect();
     }
+    killRigctld();
 
     await new Promise((r) => setTimeout(r, 500));
 
@@ -52678,7 +56058,7 @@ function cloudShackNotice(text, kind) {
         });
         t.connect({ host: String(host).trim(), basePort: Number(port) || 50000, username, password, loginTimeoutMs: 5000 });
       });
-      const radio = { '0670': 'FTDX10', '0681': 'FTDX101D', '0682': 'FTDX101MP', '0800': 'FT-710' }[result.id] || null;
+      const radio = modelFromYaesuId(result.id);
       return { ...result, radio, logs: logs.slice(-30) };
     } finally {
       t.disconnect();
@@ -53492,11 +56872,7 @@ function cloudShackNotice(text, kind) {
   ipcMain.handle('jtcat-get-clock', () => jtcatLastClock);
   ipcMain.handle('jtcat-check-clock', async () => await runJtcatClockCheck());
   ipcMain.handle('jtcat-sync-clock', async () => await runClockFix());
-  ipcMain.handle('jtcat-open-time-settings', async () => {
-    const { shell } = require('electron');
-    if (process.platform === 'win32') return shell.openExternal('ms-settings:dateandtime');
-    return false;
-  });
+  ipcMain.handle('jtcat-open-time-settings', async () => openTimeSettings());
 
   // DAX TX direct chunks from remote-audio.html (iOS phone mic → WebRTC →
   // renderer downsample → IPC chunk → here → VITA-49 to radio). Bypasses
@@ -53790,12 +57166,12 @@ function cloudShackNotice(text, kind) {
               workableCount: runWorkable,
               setTxMsg: popoutJtcatSetTxMsg, onDone: popoutJtcatOnDone(qso),
               clearQso: () => { popoutJtcatQso = null; popoutBroadcastQso(); },
-              notifyAbort: (msg) => {
+              notifyAbort: (msg, extra) => {
                 if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
-                  jtcatPopoutWin.webContents.send('jtcat-qso-state', { phase: 'error', error: msg });
+                  jtcatPopoutWin.webContents.send('jtcat-qso-state', Object.assign({ phase: 'error', error: msg }, extra && extra.send73 ? { send73: true } : {}));
                 }
               },
-              notifyCloseout: (msg) => {
+              notifyNotice: (msg) => {
                 if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
                   jtcatPopoutWin.webContents.send('jtcat-qso-notice', { message: msg });
                 }
@@ -53821,9 +57197,9 @@ function cloudShackNotice(text, kind) {
               workableCount: runWorkable,
               setTxMsg: remoteJtcatSetTxMsg, onDone: remoteJtcatOnDone(qso),
               clearQso: () => { remoteJtcatQso = null; remoteJtcatBroadcastQso(); },
-              notifyAbort: (msg) => {
+              notifyAbort: (msg, extra) => {
                 if (remoteServer.hasClient()) {
-                  remoteServer.broadcastJtcatQsoState({ phase: 'error', error: msg });
+                  remoteServer.broadcastJtcatQsoState(Object.assign({ phase: 'error', error: msg }, extra && extra.send73 ? { send73: true } : {}));
                 }
               },
             });
@@ -53968,6 +57344,8 @@ function cloudShackNotice(text, kind) {
       if (++_freedvRxCount <= 3 || _freedvRxCount % 200 === 0) {
         console.log(`[FreeDV] RX audio #${_freedvRxCount} len=${samples.length} engine=${!!freedvEngine}`);
       }
+      const audioLine = _freedvDiag.audio(samples); // before feedRxAudio hands the buffer to the worker
+      if (audioLine) sendCatLog(audioLine);
       freedvEngine.feedRxAudio(samples);
     }
   });
@@ -54948,6 +58326,10 @@ function gracefulCleanup() {
   try { atuWizardAbort('app quit'); if (smartSdr && smartSdr.connected && _atuWizardSaved) smartSdr.setTxTune(false); } catch {}
   try { if (clublogOutbox) clublogOutbox.stop(); } catch {} // queue is on disk; resumed on next start
   try { stopLoggerCat(); } catch {}
+  // APRS listening: the radio goes back while the CAT link is still open (the
+  // marker stays on disk until a readback confirms it, so a lost command is
+  // finished at the next start).
+  try { aprsListenStop('quit'); } catch {}
   try { stopModemBridge('quit'); } catch {}
   // A WSPR beacon armed at quit must give the radio its power back NOW, while
   // the CAT/SmartSDR links below are still open — stopJtcat() runs after they
@@ -55023,6 +58405,8 @@ function gracefulCleanup() {
 }
 
 let _yaesuLanQuitDone = false;
+let _quitWatchdog = null;
+let _serialQuitDone = false;
 app.on('before-quit', (e) => {
   if (jtcatLogReviews.size) {
     // Written while the log, QRZ and the rig are all still up.
@@ -55031,6 +58415,7 @@ app.on('before-quit', (e) => {
     return;
   }
   winlinkHoldAwake(false); // never leave the Winlink session's App Nap block behind (#187)
+  try { aprsMessagesSaveNow(); } catch { /* APRS A1: the conversations are on disk before the process goes */ }
   // A Winlink return still pending (#187): the radio goes back while CAT is up.
   if (winlinkReturnBeforeQuit(() => app.quit())) { e.preventDefault(); return; }
   // SCU-LAN10: unkey (TX0; read back) and put the radio's monitor back
@@ -55060,8 +58445,19 @@ app.on('before-quit', (e) => {
   // cannot be closed" loop. Nothing in this app prevents quit, so once
   // before-quit fires we are committed; force the exit if it hasn't happened.
   // unref'd so the timer itself never keeps the process alive.
-  const watchdog = setTimeout(() => { try { app.exit(0); } catch {} }, 5000);
-  if (typeof watchdog.unref === 'function') watchdog.unref();
+  if (!_quitWatchdog) {
+    _quitWatchdog = setTimeout(() => { try { app.exit(0); } catch {} }, 5000);
+    if (typeof _quitWatchdog.unref === 'function') _quitWatchdog.unref();
+  }
+  // #657: a serialport call that finishes while Node frees its environment
+  // aborts the process (SIGABRT on macOS). Close every port and let every
+  // native serial call finish first, at most 1.5 s, then quit for real.
+  if (!_serialQuitDone && SerialQuit.busy()) {
+    e.preventDefault();
+    SerialQuit.settle({ timeoutMs: 1500 }).then((clean) => {
+      if (!clean) _appendStartupLog('[quit] serial ports still busy after 1.5 s; quitting anyway');
+    }).finally(() => { _serialQuitDone = true; app.quit(); });
+  }
 });
 process.on('SIGINT', () => { gracefulCleanup(); process.exit(0); });
 process.on('SIGTERM', () => { gracefulCleanup(); process.exit(0); });

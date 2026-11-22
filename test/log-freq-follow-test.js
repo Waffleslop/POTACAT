@@ -22,7 +22,7 @@ const start = app.indexOf('const logFreqFollow = {');
 const end = app.indexOf("logFrequency.addEventListener('input'", start);
 const src = app.slice(start, end);
 function harness(open = true) {
-  const ctx = { logDialog: { open }, logFrequency: { value: '14285.0' } };
+  const ctx = { logDialog: { open }, logFrequency: { value: '14285.0', dataset: {} }, LogFreqField: require('../lib/log-freq-field') };
   vm.createContext(ctx);
   vm.runInContext(src.replace('const logFreqFollow', 'var logFreqFollow') + '\nthis.f = logFreqFollowRadio; this.s = logFreqFollow;', ctx);
   return ctx;

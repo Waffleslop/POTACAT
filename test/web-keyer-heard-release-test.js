@@ -9,13 +9,22 @@
 // before he could hear the element, but which reached the page 40 ms late,
 // kept it.
 //
-// Now: the release counts at the event's own timestamp, and it withdraws the
+// 1.14.5 made the release count at the event's own timestamp and withdraw the
 // element when it happened before the element reached his ear (start + the
-// device's output latency), as long as the shack can still drop it.
+// device's output latency). That withdrew elements whose tone had already
+// started: the page cut its tone into a blip while the shack dropped the
+// element, the extra elements LZ3AW heard on 1.14.6 only in his own sidetone.
+//
+// Casey 2026-11-19: the sidetone and the air always agree. An element may be
+// withdrawn only before its sidetone starts (lib/cw-sidetone-commit.js);
+// once it sounds it is keyed in full, whatever the release's timestamp. These
+// cases now assert that rule; test/cw-sidetone-air-agree-test.js runs the
+// page's own audio and the shack side by side.
 // Run: node test/web-keyer-heard-release-test.js
 const assert = require('assert');
 const path = require('path');
 const { readSrc } = require('./_src');
+const Commit = require('../lib/cw-sidetone-commit');
 
 let pass = 0, fail = 0;
 function test(name, fn) {
@@ -69,13 +78,18 @@ function rig({ wpm = 25, mode = 'iambicB', outputMs = OUTPUT_MS } = {}) {
   const clock = fakeClock();
   const scheduled = [];
   const onKey = (down, ms, info) => {
-    if (ms) { scheduled.push({ el: ms < 2 * Math.round(1200 / wpm) ? '.' : '-' }); return LEAD_MS; }
-    if (info && info.retract) scheduled[scheduled.length - 1].retracted = true;
+    if (ms) { scheduled.push({ soundAt: clock.now() + LEAD_MS, el: ms < 2 * Math.round(1200 / wpm) ? '.' : '-' }); return LEAD_MS; }
+    if (info && info.retract) {
+      const last = scheduled[scheduled.length - 1];
+      if (!Commit.canWithdraw(last, clock.now())) return false;
+      last.retracted = true;
+      return true;
+    }
     return undefined;
   };
   const perf = { now: () => clock.now() };
   // eslint-disable-next-line no-new-func
-  const make = new Function('setTimeout', 'clearTimeout', 'performance', 'Date', 'onKey', 'cwHeardLagMs', `
+  const make = new Function('setTimeout', 'clearTimeout', 'performance', 'Date', 'onKey', `
     var cwDiagNote = function() {};
     ${keyerSrc}
     var k = createLocalCwKeyer(onKey);
@@ -84,11 +98,12 @@ function rig({ wpm = 25, mode = 'iambicB', outputMs = OUTPUT_MS } = {}) {
     function noteCwInputLag() {}
     function ecStopMidiLearn() {}
     function updateMidiNoteDisplays() {}
-    function sendPaddle(contact, state, atMs) { if (contact === 'dit') k.paddleDit(!!state, atMs); else k.paddleDah(!!state, atMs); }
+    function sendPaddle(contact, state) { if (contact === 'dit') k.paddleDit(!!state); else k.paddleDah(!!state); }
     ${midiSrc}
     return { keyer: k, midi: ecHandleMidiMessage };
   `);
-  const { keyer, midi } = make(clock.setTimeout, clock.clearTimeout, perf, perf, onKey, () => outputMs);
+  void outputMs; // the device's output latency no longer moves the commit point
+  const { keyer, midi } = make(clock.setTimeout, clock.clearTimeout, perf, perf, onKey);
   keyer.setWpm(wpm); keyer.setMode(mode);
   const t0 = clock.now();
   return {
@@ -107,39 +122,43 @@ function rig({ wpm = 25, mode = 'iambicB', outputMs = OUTPUT_MS } = {}) {
   };
 }
 
-console.log('web keyer: a release counts when it happened and against what he hears (#244, 1.14.5)');
+console.log('web keyer: a late release never takes back an element that has started to sound (#244, 2026-11-19)');
 
 // 25 wpm: dit 48, space 48. Dit held from 0: dits chosen at 0, 96, 192, 288.
-// The 4th sounds in the page at 305 and reaches his ear at 345.
-test('"S": released at 330 (before he could hear the 4th dit), delivered 30 ms late: "..."', () => {
-  assert.strictEqual(rig().play([[0, 'on', 'dit'], [330, 'off', 'dit', 30]]), '...');
+// The 4th sounds in the page at 305 (it is committed from 300, the guard).
+test('"S": released at 330, delivered 30 ms late (after the 4th dit started): "...." on both sides', () => {
+  assert.strictEqual(rig().play([[0, 'on', 'dit'], [330, 'off', 'dit', 30]]), '....');
 });
 
-test('"S": released at 300, delivered 40 ms late (his worst input lag): "..."', () => {
-  assert.strictEqual(rig().play([[0, 'on', 'dit'], [300, 'off', 'dit', 40]]), '...');
+test('"S": released at 280, delivered 15 ms late (before the 4th dit sounds): "..."', () => {
+  assert.strictEqual(rig().play([[0, 'on', 'dit'], [280, 'off', 'dit', 15]]), '...');
+});
+
+test('released at 300 but delivered 40 ms late: its timestamp does not reach back, "...."', () => {
+  assert.strictEqual(rig().play([[0, 'on', 'dit'], [300, 'off', 'dit', 40]]), '....');
 });
 
 test('released at 350, after the 4th dit reached his ear: "...." (he heard it, it is sent)', () => {
   assert.strictEqual(rig().play([[0, 'on', 'dit'], [350, 'off', 'dit', 2]]), '....');
 });
 
-test('"T": dah held, released at 220 before the 2nd dah could be heard (chosen 192, heard 249): "-"', () => {
-  assert.strictEqual(rig().play([[0, 'on', 'dah'], [220, 'off', 'dah', 25]]), '-');
+test('"T": dah held, released at 220, delivered 25 ms late (the 2nd dah sounds at 209): "--"', () => {
+  assert.strictEqual(rig().play([[0, 'on', 'dah'], [220, 'off', 'dah', 25]]), '--');
 });
 
-test('a release that reaches the page more than 100 ms after the choice is too late for the shack: kept', () => {
+test('"T": dah released at 195, in time (before the 2nd dah sounds): "-"', () => {
+  assert.strictEqual(rig().play([[0, 'on', 'dah'], [195, 'off', 'dah', 2]]), '-');
+});
+
+test('a release that reaches the page long after the choice: kept', () => {
   // chosen 288; the release happened at 300 but the page learns at 395.
   assert.strictEqual(rig().play([[0, 'on', 'dit'], [300, 'off', 'dit', 95]]), '....');
 });
 
-test('no output latency reported: the 1.13.8 window (before it sounds in the page) still applies', () => {
-  assert.strictEqual(rig({ outputMs: 0 }).play([[0, 'on', 'dit'], [300, 'off', 'dit', 0]]), '...');
-  assert.strictEqual(rig({ outputMs: 0 }).play([[0, 'on', 'dit'], [312, 'off', 'dit', 0]]), '....');
-});
-
-test('a timestamp from another clock (epoch ms) is ignored: the release counts when processed', () => {
-  // processed at 340 (< 345 heard): withdrawn on processing time alone
-  assert.strictEqual(rig().play([[0, 'on', 'dit'], [340, 'off', 'dit', 0, Date.now()]]), '...');
+test('the window is the page\'s own sidetone start, whatever the device\'s output latency', () => {
+  assert.strictEqual(rig({ outputMs: 0 }).play([[0, 'on', 'dit'], [295, 'off', 'dit', 0]]), '...');
+  assert.strictEqual(rig({ outputMs: 200 }).play([[0, 'on', 'dit'], [295, 'off', 'dit', 0]]), '...');
+  assert.strictEqual(rig({ outputMs: 200 }).play([[0, 'on', 'dit'], [312, 'off', 'dit', 0]]), '....');
 });
 
 test('held dits still repeat, and a squeeze still makes "C" in iambic B', () => {
@@ -151,14 +170,11 @@ test('a latched element is never withdrawn, however late the release', () => {
   assert.strictEqual(rig().play([[0, 'on', 'dah'], [60, 'on', 'dit'], [90, 'off', 'dit', 30], [150, 'off', 'dah', 30]]), '-.');
 });
 
-test('page wiring: key-up and MIDI note-off pass their timeStamp, and the heard lag is the device output latency', () => {
-  assert.ok(/sendPaddle\('dit', 0, e\.timeStamp\)/.test(src) && /sendPaddle\('dah', 0, e\.timeStamp\)/.test(src), 'keyboard key-up');
-  assert.ok(/sendPaddle\('dit', 0, msg\.timeStamp\)/.test(src) && /sendPaddle\('dah', 0, msg\.timeStamp\)/.test(src), 'MIDI note-off');
-  assert.ok(/localCwKeyer\.paddleDit\(!!state, atMs\)/.test(src), 'sendPaddle hands the time to the keyer');
-  const fn = extract('cwHeardLagMs');
-  assert.ok(/outputLatency/.test(fn) && /baseLatency/.test(fn), 'output latency');
+test('page wiring: no heard-lag window and no timestamps; a tone that started is never faded out', () => {
+  assert.ok(!/cwHeardLagMs|HEARD_LAG_MAX_MS|RETRACT_RF_MAX_MS/.test(src), 'the heard-lag window is gone');
+  assert.ok(/localCwKeyer\.paddleDit\(!!state\);/.test(src), 'sendPaddle hands only the contact state');
   const r = extract('retractPaddleElement');
-  assert.ok(/linearRampToValueAtTime\(0, nowA \+ 0\.003\)/.test(r), 'a tone already rendering fades out');
+  assert.ok(!/cancelAndHoldAtTime|nowA/.test(r), 'no cut of a tone already rendering');
 });
 
 console.log('shack playout: a withdrawal that arrives late');
