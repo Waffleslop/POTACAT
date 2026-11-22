@@ -6355,7 +6355,10 @@ function _applyPopoutTheme(payload) {
     try {
       // Yaesu SCU-LAN10 audio arrives the same way: main forwards it as
       // 'jtcat-vita49-audio' frames at 24 kHz (handleYaesuLanAudioFrame).
-      if (audioSource === 'smartsdr' || audioSource === 'yaesu-lan' || audioSource === 'websdr' || audioSource === 'tci') {
+      // So does Icom network audio (sendIcomNetworkJtcatUiAudio), once this
+      // window declares itself ready below; without it the pop-out opened the
+      // default input, a Mac's webcam microphone (#936).
+      if (window.RxDirectSource.jtcatPopoutUsesMainFeed(audioSource)) {
         _audioStartStage = 'ctx-create';
         // SmartSDR Direct: audio is the VITA-49 dax_rx stream that main
         // forwards as 'jtcat-vita49-audio' frames. A single AudioWorkletNode
@@ -6380,9 +6383,7 @@ function _applyPopoutTheme(payload) {
           numberOfInputs: 0,
           numberOfOutputs: 1,
           outputChannelCount: [1],
-          processorOptions: (audioSource === 'websdr' || audioSource === 'tci')
-            ? { sourceRate: 12000 }
-            : { sourceRate: 24000 },
+          processorOptions: window.RxDirectSource.jtcatPopoutFeedOptions(audioSource),
         });
         popoutVita49Dest = popoutVita49Ctx.createMediaStreamDestination();
         popoutVita49Node.connect(popoutVita49Dest);
@@ -6396,7 +6397,7 @@ function _applyPopoutTheme(payload) {
         // SmartSDR path sends to both windows and was unaffected, which is
         // why this hid for so long. (K3SBP 2026-08-05.)
         if (window.api.setJtcatIpAudioReady) window.api.setJtcatIpAudioReady(true);
-        console.log('[JTCAT popout] Audio source: ' + (audioSource === 'websdr' ? 'WebSDR' : audioSource === 'tci' ? 'TCI (Zeus / Thetis)' : 'SmartSDR Direct (VITA-49 dax_rx)') + ' via AudioWorklet');
+        console.log('[JTCAT popout] Audio source: ' + (audioSource === 'websdr' ? 'WebSDR' : audioSource === 'tci' ? 'TCI (Zeus / Thetis)' : audioSource === 'icom-network' ? 'Icom network' : 'SmartSDR Direct (VITA-49 dax_rx)') + ' via AudioWorklet');
       } else {
         var constraints = {
           channelCount: 1,
@@ -6562,7 +6563,7 @@ function _applyPopoutTheme(payload) {
         // and the label is the only way a bug report shows which one fed the
         // decoder. KB2UXB 2026-08-03.
         var capLabel = '';
-        if (audioSource !== 'smartsdr' && audioSource !== 'yaesu-lan' && audioSource !== 'tci') {
+        if (audioSource !== 'smartsdr' && audioSource !== 'yaesu-lan' && audioSource !== 'tci' && audioSource !== 'icom-network') {
           try {
             var capTrack = popoutAudioStream && popoutAudioStream.getAudioTracks()[0];
             if (capTrack && capTrack.label) capLabel = ' [' + capTrack.label + ']';

@@ -109,7 +109,11 @@ test('main.js routes TCI audio to JTCAT, the VFO monitor and ECHOCAT', () => {
   assert.match(MAIN, /if \(settings\.audioSource === 'tci' && tciRigTarget\(\)\) return;/, 'the window capture does not double-feed');
   assert.match(MAIN, /if \(tciRig && tciRigTarget\(\)\) tciRig\.setAudio\(settings\.audioSource === 'tci'\);/);
   const pop = readSrc(path.join(ROOT, 'renderer', 'jtcat-popout.js'));
-  assert.match(pop, /audioSource === 'websdr' \|\| audioSource === 'tci'\)\s*\? \{ sourceRate: 12000 \}/);
+  // The pop-out's branch and worklet options live in lib/rx-direct-source.js (#936).
+  assert.match(pop, /processorOptions: window\.RxDirectSource\.jtcatPopoutFeedOptions\(audioSource\)/);
+  const RDS = require('../lib/rx-direct-source');
+  assert.equal(RDS.jtcatPopoutUsesMainFeed('tci'), true);
+  assert.deepEqual(RDS.jtcatPopoutFeedOptions('tci'), { sourceRate: 12000 });
   const app = readSrc(path.join(ROOT, 'renderer', 'app.js'));
   assert.match(app, /var jtcatFromTci = !jtcatFromSdr && s\.audioSource === 'tci'/);
   const vfo = readSrc(path.join(ROOT, 'renderer', 'vfo-popout.html'));

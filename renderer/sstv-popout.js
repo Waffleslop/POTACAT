@@ -1937,8 +1937,10 @@ async function startRxAudio() {
       // fallback (2026-07-07): if no VITA frame in 3 s, the local capture
       // resumes feeding decoder + waterfall; the paths stay mutually
       // exclusive by construction. Main mirrors this gate (sstv-feed-gate).
-      if (settings && settings.audioSource === 'smartsdr'
-          && (Date.now() - _lastVitaAudioTs) < 3000) return;
+      // Icom network audio arrives the same way (sstv-vita49-audio) and
+      // yields the same: without it the local input, a Mac's webcam
+      // microphone, painted over the radio on the waterfall (#936).
+      if (window.RxDirectSource.sstvLocalCaptureYields(settings && settings.audioSource, _lastVitaAudioTs, Date.now())) return;
       _markDecoderAudio(e.data, 'mic');
       if (!isTx) sstvMicNote(e.data); // #463
       // Send audio samples to main process for SSTV decoder (skip during TX to avoid self-decode)
@@ -1960,7 +1962,10 @@ async function startRxAudio() {
     // on the laptop microphone.
     const track = sstvStream.getAudioTracks()[0];
     const heard = (track && track.label) || pick.label || 'default device';
-    setStatusDevice(heard, !audioInputSelect.value);
+    // Icom network: the radio's audio is the network stream; the local input
+    // is only its fallback, so naming it "(from the radio)" was wrong (#936).
+    if (settings.audioSource === 'icom-network') setStatusDevice('Icom network audio', true, heard);
+    else setStatusDevice(heard, !audioInputSelect.value);
     statusBar.textContent = (pick.notice && !directStream) ? pick.notice : 'Listening (' + actualRate + ' Hz)';
   } catch (err) {
     console.error('[SSTV] RX audio start error:', err);
@@ -3383,12 +3388,13 @@ function showRigScopedControls() {
   if (redecode) redecode.hidden = !!settings.remoteShack;
 }
 
-function setStatusDevice(label, fromRigs) {
+function setStatusDevice(label, fromRigs, fallback) {
   const el = document.getElementById('status-device');
   el.textContent = '';
   el.append('Listening on ');
   const b = document.createElement('b'); b.textContent = label; el.appendChild(b);
   el.append(fromRigs ? ' (from the radio)' : ' (chosen for SSTV)');
+  if (fallback) el.append('; if it stops, ' + fallback);
 }
 
 // ---- Radio: meters, tuner, SWR trip ----------------------------------------------
