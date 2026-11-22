@@ -80,7 +80,7 @@ check('re-send only on a real change', () => {
   assert.strictEqual(GA.shouldResend({ connected: true }, { connected: true }, true), true);
 });
 check('the protocol registry lists both fields on pass-guest-waiting', () => {
-  const v = protocol.validate({ type: 'pass-guest-waiting', callsign: 'K3SBP', connected: false, lastActiveAt: Date.now() }, protocol.Dir.S2C);
+  const v = protocol.validate({ type: 'pass-guest-waiting', callsign: 'K3SBP', passCode: 'abcd1234', connected: false, lastActiveAt: Date.now() }, protocol.Dir.S2C);
   assert.ok(v.ok, JSON.stringify(v));
   const bad = protocol.validate({ type: 'pass-guest-waiting', connected: 'yes' }, protocol.Dir.S2C);
   assert.ok(!bad.ok, 'connected is a boolean');
@@ -180,7 +180,9 @@ async function owner(port) {
       const o = await owner(PORT);
       const pg = o.find('auth-ok').passGuest;
       assert.ok(pg, 'auth-ok carries passGuest');
-      assert.deepStrictEqual(Object.keys(pg).sort(), ['callsign', 'connected', 'endsAt', 'lastActiveAt']);
+      assert.deepStrictEqual(Object.keys(pg).sort(), ['callsign', 'connected', 'endsAt', 'lastActiveAt', 'passCode']);
+      assert.strictEqual(pg.passCode, CODE, 'the owner device learns which pass');
+      assert.ok(!g.find('auth-ok').passGuest, 'the guest never gets passGuest');
       assert.strictEqual(pg.connected, true);
       assert.strictEqual(pg.lastActiveAt, 1_000_000, 'the clock started with the session: idle 10 minutes');
 
@@ -196,7 +198,9 @@ async function owner(port) {
       const w1 = o.all('pass-guest-waiting')[0];
       assert.strictEqual(w1.connected, true);
       assert.strictEqual(w1.lastActiveAt, clock.now);
-      assert.deepStrictEqual(Object.keys(w1).sort(), ['callsign', 'connected', 'endsAt', 'lastActiveAt', 'type'], 'nothing about what the guest did');
+      assert.deepStrictEqual(Object.keys(w1).sort(), ['callsign', 'connected', 'endsAt', 'lastActiveAt', 'passCode', 'type'], 'nothing about what the guest did');
+      assert.strictEqual(w1.passCode, CODE);
+      assert.ok(!g.find('pass-guest-waiting'), 'the guest never gets pass-guest-waiting');
 
       // Active again a minute later: not news.
       clock.now += 1 * MIN;
@@ -247,6 +251,7 @@ async function owner(port) {
       assert.strictEqual(w.length, 1, 'one message, not a second for the same news');
       assert.strictEqual(w[0].connected, true);
       assert.strictEqual(w[0].lastActiveAt, 5_000_000);
+      assert.strictEqual(w[0].passCode, CODE);
       o.ws.close(); g.ws.close();
     } finally { rs.stop(); await sleep(200); }
   });
