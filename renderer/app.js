@@ -2370,7 +2370,8 @@ async function loadPrefs() {
   updateRbnButton();
   clusterTerminalBtn.classList.toggle('hidden', !settings.enableClusterTerminal);
   var mercuryBtn = document.getElementById('view-mercury-btn');
-  if (mercuryBtn) mercuryBtn.classList.toggle('hidden', !settings.enableMercury);
+  // Hidden until Mercury has been used on the air (Casey 2026-11-22): lib/mercury-offer.js.
+  if (mercuryBtn) mercuryBtn.classList.toggle('hidden', !window.MercuryOffer.chatWindowOffered(settings));
   var winlinkBtn = document.getElementById('view-winlink-btn');
   if (winlinkBtn) winlinkBtn.classList.remove('hidden'); // Winlink is always available
   // Spot by Winlink: offered once the operator has used Winlink (notice accepted).
@@ -4302,12 +4303,14 @@ function updateBandButtonsVisibility() {
   if (show) updateBandButtonActive();
 }
 
-bandButtonsEl.addEventListener('click', (e) => {
+bandButtonsEl.addEventListener('click', async (e) => {
   const btn = e.target.closest('button');
   if (!btn) return;
   const band = btn.dataset.band;
-  const freq = getBandQsyFreq(band);
+  let freq = getBandQsyFreq(band);
   if (freq) {
+    // Back to where this radio last was on the band, or the preset (#680).
+    try { const t = await window.api.bandJumpTarget(freq); if (Number(t) > 0) freq = Number(t); } catch {}
     const curMode = (radioMode || '').toUpperCase();
     // Voice SSB (or a mode not read yet): main decides, from the radio's own
     // mode and DATA state, whether the band's sideband goes with it (#445,
@@ -7777,6 +7780,7 @@ function _shareRigOpen() {
   // Reset to form view, pre-fill callsigns from current settings.
   _shareRigShowFormView();
   _shareRigUpdateClassDetail();
+  _shareRigUpdateSignedOut();
   _shareRigUpdateReachNotice();
   _shareRigResetWhenSection();
   _shareRigRefreshList();
@@ -7838,6 +7842,25 @@ function _shareRigSelectedWhen() {
 // network reach state. Goal: never let an operator generate a pass
 // expecting "share anywhere" when they're actually on LAN-only and
 // the recipient won't be able to reach them.
+// Signed out of POTACAT Cloud (by hand, or because this computer was removed
+// from the account): one line saying passes cannot be created, cancelled or
+// notified from here. Passes already sent keep working; nothing is revoked.
+async function _shareRigUpdateSignedOut() {
+  const box = document.getElementById('share-rig-signed-out');
+  if (!box || !window.api.cloudSessionGet) return;
+  let st = null;
+  try { st = await window.api.cloudSessionGet(); } catch {}
+  const text = st && !st.loggedIn ? (st.guestPassNotice || '') : '';
+  box.textContent = text;
+  box.classList.toggle('hidden', !text);
+}
+if (window.api && window.api.onCloudSignedOut) {
+  window.api.onCloudSignedOut(() => {
+    const dlg = document.getElementById('share-rig-dialog');
+    if (dlg && dlg.open) _shareRigUpdateSignedOut();
+  });
+}
+
 async function _shareRigUpdateReachNotice() {
   const box = document.getElementById('share-rig-reach-notice');
   if (!box) return;
@@ -18758,7 +18781,7 @@ async function openSettingsDialog(tab) {
     setMercurySound.value = s.mercurySoundSystem || 'auto';
     setMercuryIn.value = s.mercuryInputDevice || '';
     setMercuryOut.value = s.mercuryOutputDevice || '';
-    setMercuryBw.value = String(s.mercuryBw || 2300);
+    setMercuryBw.value = String(window.MercuryOffer.bandwidthChoice(s.mercuryBw));
     setMercuryTxGain.value = (s.mercuryTxGainDb != null ? s.mercuryTxGainDb : 0);
     setMercuryListen.checked = s.mercuryListen === true;
     mercuryConfig.classList.toggle('hidden', !s.enableMercury);
@@ -19652,7 +19675,7 @@ settingsSave.addEventListener('click', async () => {
       mercurySoundSystem: setMercurySound.value,
       mercuryInputDevice: setMercuryIn.value.trim(),
       mercuryOutputDevice: setMercuryOut.value.trim(),
-      mercuryBw: parseInt(setMercuryBw.value, 10) || 2300,
+      mercuryBw: window.MercuryOffer.bandwidthChoice(setMercuryBw.value),
       mercuryTxGainDb: parseFloat(setMercuryTxGain.value) || 0,
       mercuryListen: setMercuryListen.checked,
     } : {}),
@@ -19699,7 +19722,8 @@ settingsSave.addEventListener('click', async () => {
   });
   // Reflect the Mercury enable state in the More ▾ menu without a reload.
   var mercuryViewBtn = document.getElementById('view-mercury-btn');
-  if (mercuryViewBtn && setMercuryEnable) mercuryViewBtn.classList.toggle('hidden', !setMercuryEnable.checked);
+  // mercuryChatWindow has no switch in Settings: read it back from main.
+  if (mercuryViewBtn && setMercuryEnable) mercuryViewBtn.classList.toggle('hidden', !window.MercuryOffer.chatWindowOffered(await window.api.getSettings()));
   var winlinkViewBtn = document.getElementById('view-winlink-btn');
   if (winlinkViewBtn) winlinkViewBtn.classList.remove('hidden');
   grid = setGrid.value.trim();

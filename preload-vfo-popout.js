@@ -12,6 +12,8 @@ contextBridge.exposeInMainWorld('api', {
   tune: (frequency, mode, bearing) => ipcRenderer.send('tune', { frequency, mode, bearing }),
   // A band button or typed frequency: in voice SSB main picks the band's sideband (#445).
   tuneByBand: (frequency) => ipcRenderer.send('tune', { frequency, pickSideband: true }),
+  // A band button's destination: the radio's last frequency on that band, or the preset (#680).
+  bandJumpTarget: (frequency) => ipcRenderer.invoke('band-jump-target', frequency),
   // Favourites (#329): starred Landmarks and Channels, as one tune list.
   favoritesGet: () => ipcRenderer.invoke('favorites-get'),
   onFavorites: (cb) => ipcRenderer.on('favorites', (_e, st) => cb(st)),

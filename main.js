@@ -92,6 +92,7 @@ const CleanExitMarker = require('./lib/clean-exit-marker');
 const FreqDots = require('./lib/freq-dots'); // display only: 14.074.00 MHz, the VFO way
 const RemoteBridge = require('./lib/remote-bridge');
 const AprsRemoteShack = require('./lib/aprs-remote-shack'); // #868: APRS listening on the shack from this desktop
+const WinlinkRemoteShack = require('./lib/winlink-remote-shack'); // #299: the Winlink window drives the shack's Winlink
 const WaterfallPalettes = require('./lib/waterfall-palettes');
 const GpuStatus = require('./lib/gpu-status'); // #773: the GPU line in the session log
 const ShackGrid = require('./lib/shack-grid'); // #774: the JTCAT map on the shack's grid
@@ -102,7 +103,7 @@ const ShackGrid = require('./lib/shack-grid'); // #774: the JTCAT map on the sha
     : fn);
   // Invokes that answer from the shack (the JS8 window): undefined = run locally.
   const _ipcHandle = ipcMain.handle.bind(ipcMain);
-  ipcMain.handle = (channel, fn) => _ipcHandle(channel, (RemoteBridge.JS8_INVOKES.includes(channel) || RemoteBridge.SSTV_INVOKES.includes(channel))
+  ipcMain.handle = (channel, fn) => _ipcHandle(channel, (RemoteBridge.JS8_INVOKES.includes(channel) || RemoteBridge.SSTV_INVOKES.includes(channel) || RemoteBridge.WINLINK_INVOKES.includes(channel))
     ? async (e, ...args) => { const r = await bridgeInvokeToShack(channel, args, e); return r !== undefined ? r : fn(e, ...args); }
     : fn);
 }
@@ -387,6 +388,7 @@ const SstvStartBand = require('./lib/sstv-start-band');
 const AwardTables = require('./lib/award-tables');
 const { activationStationFill } = require('./lib/activation-station'); // N7VBN: station side of activation records
 const { freqToBand, BANDS } = require('./lib/bands');
+const BandLastFreq = require('./lib/band-last-freq'); // a band button returns to the rig's last frequency there (#680)
 const { splitHostPort } = require('./lib/host-port');
 const activationProgram = require('./lib/activation-program');
 const { applyQsoEdit, modeEditFields, activationSigOf } = require('./lib/qso-edit'); // Logbook cell edits (#509)
@@ -463,6 +465,7 @@ const { DxClusterClient, looksLikeCallsign: clusterCallsignOk } = require('./lib
 const { RbnClient } = require('./lib/rbn');
 const mercuryProcess = require('./lib/mercury-process');
 const { MercuryClient } = require('./lib/mercury-client');
+const MercuryOffer = require('./lib/mercury-offer');
 const { Js8Threads } = require('./lib/js8call-threads');
 const js8Addr = require('./lib/js8call-threads');   // composeDirected / isAddressed
 const { Js8RxAssembler } = require('./lib/js8-rx-assembler');
@@ -527,6 +530,7 @@ const AprsMap = require('./lib/aprs-map');                 // APRS window: the m
 const AprsEchocat = require('./lib/aprs-echocat');         // APRS phase 6: APRS on ECHOCAT devices through this desktop
 const VaraProcess = require('./lib/vara-process');
 const VaraSetup = require('./lib/vara-setup');
+const VaraVersion = require('./lib/vara-version');
 const WinlinkModes = require('./lib/winlink-modes');
 const WinlinkReturn = require('./lib/winlink-return');
 const WinlinkMailViews = require('./lib/winlink-mail-views');
@@ -909,6 +913,7 @@ const GLOBAL_KEYS = new Set([
   'profiles',          // (reserved — currently unused but reserved against name collision)
   'rigs',              // rig hardware definitions
   'activeRigId',       // last-selected rig (global default)
+  'bandLastFreq',      // { rigId: { band: kHz } } the last dial on each band, per rig: band buttons go back there (#680)
   'rigPresets',        // named TX power / RF gain / AF gain sets, per rig (lib/rig-presets.js)
   'rigPresetByMode',   // { rigId|'*': { ssb|cw|digital|fm|am: presetId } } — applied on a mode-family change
   'rigPresetRules',    // { rigId|'*': [{ bands, families, presetId }] } — band + mode rules, first match wins; byMode is the fallback
@@ -4598,7 +4603,27 @@ function catFrequencyHandler(hz) {
   // frequency (kg6odijohn, IC-7100 repeater memory: POTACAT acted on the
   // offset). The controller drops them too; this is the net for every path.
   if (_remoteTxState || (cat && cat._transmitting)) return;
+  noteBandLastFreq(hz);
   sendCatFrequency(hz);
+}
+
+// The radio's last dial on each band, per rig (lib/band-last-freq.js, #680).
+// Kept in memory on every read; written to settings when the band changes, so
+// the frequency left behind on a band is saved without a write per poll.
+let _bandLastFreqBand = null;
+let _bandLastFreqSaveTimer = null;
+let _bandLastFreqSavedAtQuit = false;
+function noteBandLastFreq(hz) {
+  try {
+    if (!settings.bandLastFreq || typeof settings.bandLastFreq !== 'object') settings.bandLastFreq = {};
+    const band = BandLastFreq.noteDial(settings.bandLastFreq, settings.activeRigId, hz);
+    if (!band || band === _bandLastFreqBand) return;
+    const first = _bandLastFreqBand === null;
+    _bandLastFreqBand = band;
+    if (first) return;
+    clearTimeout(_bandLastFreqSaveTimer);
+    _bandLastFreqSaveTimer = setTimeout(() => { try { saveSettings(settings); } catch {} }, 2000);
+  } catch {}
 }
 function catModeHandler(md) {
   if (smartSdr && smartSdr.mode === 'self') return;
@@ -4653,11 +4678,12 @@ function js8FollowBand(dialHz, band) {
 // is where they mean to transmit, whatever the frequency.
 function jtcatFollowRadioNow(who) {
   const dialLive = !!((cat && cat.connected) || (smartSdr && smartSdr.canTune && smartSdr.connected));
-  if (!dialLive || !(_currentFreqHz > 0) || !ft8Engine || !ft8Engine._running) {
+  const dialHz = tciRigLinked() ? tciRigDial : (dialLive ? _currentFreqHz : 0);
+  if (!(dialHz > 0) || !ft8Engine || !ft8Engine._running) {
     sendCatLog('[JTCAT] Follow the radio: no live dial from the radio, nothing to follow');
     return false;
   }
-  jtcatFollowBand(_currentFreqHz, freqToBand(_currentFreqHz / 1e6) || '', `${who} pressed Follow the radio`);
+  jtcatFollowBand(dialHz, freqToBand(dialHz / 1e6) || '', `${who} pressed Follow the radio`);
   return true;
 }
 
@@ -6743,7 +6769,7 @@ async function runStationSetupTxTest(rigId, opts) {
   }
   _stationSetupTxBusy = true;
   try { return await _runStationSetupTxTest(rigId, opts); }
-  finally { _stationSetupTxBusy = false; }
+  finally { _stationSetupTxBusy = false; releaseRadio('setup-test'); }
 }
 
 async function _runStationSetupTxTest(rigId, { keepPower = false, voice = false } = {}) {
@@ -6759,7 +6785,17 @@ async function _runStationSetupTxTest(rigId, { keepPower = false, voice = false 
   const live = stationSetupLive(rig);
   if (!live.catConnected) return done({ result: 'error', message: 'Radio control is not working yet.' });
   if (_swrTripped) return done({ result: 'error', message: 'Transmit is blocked by the SWR guard. Run the antenna tuner or change bands, then test again.' });
-  if (jtcatTuneState.active || radioOwner !== 'none') return done({ result: 'error', message: 'Something else is transmitting right now (FT8, JS8 or a data mode). Stop it, then test again.' });
+  // Name whoever holds the radio, on screen and in session.log (#919): a bare
+  // "something else is transmitting" with no log line looked like broken CAT.
+  const heldBy = radioOwnerLib.txTestRefusal(radioOwner, { tuneActive: jtcatTuneState.active });
+  if (heldBy) { sendCatLog(heldBy.log); return done({ result: 'error', message: heldBy.message }); }
+  // Hold the radio for the whole test (released by runStationSetupTxTest), so
+  // an inbound Mercury call cannot key in the middle of it.
+  if (!acquireRadio('setup-test')) {
+    const late = radioOwnerLib.txTestRefusal(radioOwner);
+    if (late) sendCatLog(late.log);
+    return done({ result: 'error', message: late ? late.message : 'The radio is busy. Try again in a moment.' });
+  }
   // The test sends an AUDIO tone. In CW the radio keys but ignores audio, so
   // it transmits nothing — 0.0 W, SWR 1.0 — and the result blamed the audio
   // (K3SBP's 8600, 2026-09-25). Say so instead of keying. Never switch the
@@ -7768,6 +7804,15 @@ let remoteShackCw = { enabled: false, paddle: false, paddleReason: '' };
 // The driven shack's grid (auth-ok / settings-update settings.grid), so the
 // JTCAT map centres where the decodes are heard (#774). '' = not known.
 let remoteShackGrid = '';
+// The driven shack's station location (auth-ok / settings-update
+// settings.stationLocation, #909): { grid, state, county }, or null when the
+// shack sends none. A contact logged here on a Guest Pass carries it.
+let remoteShackLocation = null;
+/** The lending station's location while this PC is on a Guest Pass; null otherwise. */
+function guestPassShackLocation() {
+  const t = remoteClient && remoteClient._target;
+  return isRemoteMode() && t && t.kind === 'pass' ? remoteShackLocation : null;
+}
 let remoteShackVoice = { labels: [], filled: [] };
 const REMOTE_CW_OFF_MSG = 'Remote CW is off on the shack. Turn on Settings > ECHOCAT > Remote CW Keyer on the shack PC.';
 function remoteCwRefusal(paddle) {
@@ -7892,6 +7937,7 @@ function bridgeIpcToShack(channel, args, e) {
   const rule = RemoteBridge.OUT[channel];
   if (!rule) return false;
   const r = rule(args || [], _remoteBridgeState) || { drop: true };
+  if (r.local) return false; // this PC's own preference (the Winlink window's waterfall speed)
   if (r.drop) return true;
   const fromSstv = !!(sstvPopoutWin && !sstvPopoutWin.isDestroyed() && e && e.sender === sstvPopoutWin.webContents);
   const fromAprs = !!(aprsWin && !aprsWin.isDestroyed() && e && e.sender === aprsWin.webContents);
@@ -7937,6 +7983,7 @@ function bridgeIpcToShack(channel, args, e) {
   return true;
 }
 function bridgeInboundFromShack(msg) {
+  if (remoteWinlinkInbound(msg)) return true;
   if (remoteJs8Inbound(msg)) return true;
   if (remoteSstvInbound(msg)) return true;
   const rule = RemoteBridge.IN[msg.type];
@@ -7944,6 +7991,7 @@ function bridgeInboundFromShack(msg) {
   RemoteBridge.trackState(_remoteBridgeState, msg);
   const out = rule(msg, _remoteBridgeState) || [];
   for (const [ch, payload] of out) {
+    if (ch.startsWith('winlink-')) { remoteWinlinkToWindow(ch, payload); continue; }
     if (ch.startsWith('aprs-')) {
       if (ch === 'aprs-listen') _remoteAprsListen = payload;
       if (aprsWin && !aprsWin.isDestroyed()) aprsWin.webContents.send(ch, payload);
@@ -8056,8 +8104,73 @@ function remoteJs8Inbound(msg) {
     default: return false;
   }
 }
+// Winlink on the shack (#299). The Winlink Mail window shows the SHACK's
+// Winlink while this desktop drives one: its state, folders and session
+// arrive as the winlink-* frames every owner device gets (kept here, so a
+// window opened later is filled at once), and its requests go out as the
+// wire's winlink-* messages, answered by reqId. The mapping is
+// lib/winlink-remote-shack.js; this PC's own Pat is not started.
+const _remoteWinlink = { state: null, mailboxes: {}, session: null, pending: new Map(), wanted: false };
+let _remoteWinlinkSeq = 0;
+function remoteWinlinkReset() {
+  for (const p of _remoteWinlink.pending.values()) p(null);
+  Object.assign(_remoteWinlink, { state: null, mailboxes: {}, session: null, pending: new Map() });
+}
+/** A shack frame for the Winlink window: kept, and shown when the window is open. */
+function remoteWinlinkToWindow(ch, payload) {
+  if (ch === 'winlink-state') _remoteWinlink.state = payload;
+  else if (ch === 'winlink-mailbox' && payload && payload.box) _remoteWinlink.mailboxes[payload.box] = payload;
+  else if (ch === 'winlink-session') _remoteWinlink.session = payload;
+  if (winlinkPopoutWin && !winlinkPopoutWin.isDestroyed()) winlinkPopoutWin.webContents.send(ch, payload);
+}
+/** A reply by reqId wakes the request that asked; a reply-only frame stops here. */
+function remoteWinlinkInbound(msg) {
+  if (!msg || typeof msg.type !== 'string' || !msg.type.startsWith('winlink-')) return false;
+  const p = msg.reqId && _remoteWinlink.pending.get(msg.reqId);
+  if (p) p(msg);
+  return !RemoteBridge.IN[msg.type];
+}
+/** The window opened (true) or closed (false): the shack counts it as a Mail view, as a phone's tab. */
+function remoteWinlinkView(on) {
+  _remoteWinlink.wanted = !!on;
+  if (!isRemoteLinked()) return;
+  remoteClient.sendRaw({ type: 'winlink-mail-view', open: !!on });
+  if (on) remoteClient.sendRaw({ type: 'winlink-list', box: 'in' }); // starts the shack's Pat, refreshes the Inbox
+  else { remoteClient.sendRaw({ type: 'winlink-watch', on: false }); remoteClient.sendRaw({ type: 'winlink-qsy-restore' }); }
+}
+/** Fill a freshly loaded window from what the shack last sent. */
+function remoteWinlinkHydrateWindow() {
+  if (!winlinkPopoutWin || winlinkPopoutWin.isDestroyed()) return;
+  const send = (ch, p) => winlinkPopoutWin.webContents.send(ch, p);
+  send('winlink-state', _remoteWinlink.state || { ...WinlinkRemoteShack.waitingState(), ...(isRemoteLinked() ? {} : { patError: REMOTE_NOT_LINKED_MSG }) });
+  for (const m of Object.values(_remoteWinlink.mailboxes)) send('winlink-mailbox', m);
+  if (_remoteWinlink.session) send('winlink-session', _remoteWinlink.session);
+}
+async function remoteWinlinkInvoke(channel, args) {
+  const r = WinlinkRemoteShack.INVOKES[channel](args) || {};
+  if (r.answer !== undefined) return r.answer;
+  if (r.cached === 'state') return _remoteWinlink.state || { ...WinlinkRemoteShack.waitingState(), ...(isRemoteLinked() ? {} : { patError: REMOTE_NOT_LINKED_MSG }) };
+  if (!isRemoteLinked()) return { ok: false, error: REMOTE_NOT_LINKED_MSG };
+  const wire = r.send || r.save;
+  if (!wire) return { ok: false, error: WinlinkRemoteShack.NO_ANSWER };
+  const reqId = 'd2d-wl-' + (++_remoteWinlinkSeq);
+  const frame = await new Promise((resolve) => {
+    const t = setTimeout(() => { _remoteWinlink.pending.delete(reqId); resolve(null); }, r.ms || WinlinkRemoteShack.MS.default);
+    _remoteWinlink.pending.set(reqId, (m) => { clearTimeout(t); _remoteWinlink.pending.delete(reqId); resolve(m); });
+    remoteClient.sendRaw({ ...wire, reqId });
+  });
+  const out = WinlinkRemoteShack.reply(channel, frame, args);
+  if (!r.save || !out.ok) return out;
+  // An attachment from the shack is saved on this PC, as a local one is.
+  const safe = path.basename(String(out.name)).replace(/[<>:"/\\|?*\x00-\x1f]/g, '_') || 'attachment';
+  const pick = await dialog.showSaveDialog(winlinkPopoutWin || win, { title: 'Save attachment', defaultPath: path.join(app.getPath('downloads'), safe) });
+  if (pick.canceled || !pick.filePath) return { ok: false, canceled: true };
+  fs.writeFileSync(pick.filePath, Buffer.from(out.dataBase64, 'base64'));
+  return { ok: true, path: pick.filePath };
+}
 async function bridgeInvokeToShack(channel, args, e) {
   if (!isRemoteMode()) return undefined;
+  if (WinlinkRemoteShack.INVOKES[channel]) return remoteWinlinkInvoke(channel, args || []);
   if (!isRemoteLinked()) return { ok: false, error: REMOTE_NOT_LINKED_MSG };
   const reqId = 'd2d-' + (++_remoteJs8Seq);
   const st = _remoteJs8.state || {};
@@ -8262,6 +8375,7 @@ function ensureRemoteClient() {
     if (target.kind === 'pass') { delete target.passSessionClosed; delete target.passEndReason; }
     remoteShackCw = { enabled: !!info.cwAvailable, paddle: !!info.cwPaddleAvailable, paddleReason: String(info.cwPaddleReason || '') };
     remoteShackGrid = ShackGrid.shackGridFrom(info.settings);
+    remoteShackLocation = ShackGrid.shackLocationFrom(info.settings);
     remoteShackVoice = { labels: [], filled: [] };
     remoteJs8Reset();
     _vfoLocked = !!info.vfoLocked;
@@ -8277,6 +8391,9 @@ function ensureRemoteClient() {
     // APRS (#868): this shack's aprs-state follows (an older shack sends none); watch again while the window is open.
     _remoteBridgeState.aprs = false; _remoteBridgeState.aprsListenOn = false; _remoteAprsListen = null;
     if (aprsWin && !aprsWin.isDestroyed()) remoteAprsWatch(true);
+    // Winlink (#299): the shack hydrates this session; a stale shack's folders go first.
+    remoteWinlinkReset();
+    if (winlinkPopoutWin && !winlinkPopoutWin.isDestroyed()) { remoteWinlinkHydrateWindow(); remoteWinlinkView(true); }
     if (sstvPopoutWin && !sstvPopoutWin.isDestroyed()) { _remoteSstvWindowOpen = false; remoteClient.sendRaw({ type: 'sstv-open' }); }
     if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed() && _remoteJtcatMode) {
       remoteClient.sendRaw({ type: 'jtcat-start', mode: _remoteJtcatMode });
@@ -8387,6 +8504,7 @@ function ensureRemoteClient() {
   remoteClient.on('message', (msg) => {
     if (bridgeInboundFromShack(msg)) return;
     if (msg.type === 'settings-update' && msg.settings && typeof msg.settings.grid === 'string') remoteShackGrid = ShackGrid.shackGridFrom(msg.settings);
+    if (msg.type === 'settings-update' && msg.settings && msg.settings.stationLocation) remoteShackLocation = ShackGrid.shackLocationFrom(msg.settings);
     // Skip Grid / Hound ride the shack's settings blob, not a JTCAT frame.
     if (msg.type === 'settings-update' && msg.settings && jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
       for (const key of ['jtcatSkipTx1', 'jtcatHoundMode']) {
@@ -8653,11 +8771,22 @@ function tearDownRemoteClient() {
   pushRemoteShackInfo();
   remoteShackCw = { enabled: false, paddle: false, paddleReason: '' };
   remoteShackVoice = { labels: [], filled: [] };
+  remoteShackLocation = null;
   // A scope window left open goes back to this PC's own source (or says why not).
   if (_remoteScopeWanted) { _remoteScopeWanted = false; if (yaesuScopeWanted()) startYaesuScope(); }
   // APRS (#868): the listening card goes back to this PC's own radio.
   _remoteAprsWanted = false; _remoteBridgeState.aprs = false; _remoteBridgeState.aprsListenOn = false; _remoteAprsListen = null;
   try { aprsListenPush(); } catch { /* the APRS state is declared further down; nothing to show yet */ }
+  // Winlink (#299): an open Mail window goes back to this PC's own Pat.
+  remoteWinlinkReset(); _remoteWinlink.wanted = false;
+  if (!isRemoteMode() && winlinkPopoutWin && !winlinkPopoutWin.isDestroyed()) {
+    try {
+      winlinkPopoutSend('winlink-state', winlinkPayload());
+      for (const box of WinlinkStateLib.FOLDERS) winlinkPopoutSend('winlink-mailbox', { box, messages: winlinkState.list(box) });
+      winlinkPopoutSend('winlink-session', winlinkSessionView());
+      winlinkEnsureStarted();
+    } catch { /* Winlink is declared further down; nothing to show yet */ }
+  }
   if (_remotePaddleHoldTimer) { clearInterval(_remotePaddleHoldTimer); _remotePaddleHoldTimer = null; }
   // The shack's VFO lock was mirrored here; this PC's radio starts unlocked.
   if (_vfoLocked) {
@@ -11117,7 +11246,12 @@ function openMercuryClient() {
   // state so disconnectMercury / the failsafe timer can see it.
   attachMercuryRadioBridge(mercuryClient, {
     keyPtt: (on) => { mercuryTxActive = on; handleRemotePtt(on, on ? { audio: true, emission: 'DATA', txKind: 'winlink' } : {}); },
-    acquire: () => acquireRadio('mercury'),
+    // A tune (the Tune button, the Transmit Test's tone) keys the radio
+    // without owning it; Mercury yields to it like to any owner (#919).
+    acquire: () => {
+      if (jtcatTuneState.active) { sendCatLog('[radio] mercury could not take the radio — a tune is in progress'); return false; }
+      return acquireRadio('mercury');
+    },
     release: () => releaseRadio('mercury'),
     abort: () => { try { mercuryClient.abort(); } catch {} },
     armFailsafe: armMercuryTxFailsafe,
@@ -11149,24 +11283,21 @@ function openMercuryClient() {
 }
 
 // Register the callsign + bandwidth, and (opt-in) put Mercury in LISTEN so it
-// answers inbound calls. LISTEN claims the radio up-front because an inbound
-// CALL will key PTT — Part 97 wants that attended, so it's default-OFF and the
-// operator opts in. Runs on every control (re)connect and after a session ends.
+// answers inbound calls. An inbound CALL will key PTT — Part 97 wants that
+// attended, so it's default-OFF and the operator opts in. LISTEN takes no radio
+// lock (#919): an idle listener held it for hours and refused FT8 and the
+// Transmit Test. The bridge takes the radio when a session actually starts
+// (CONNECTED or Mercury's PTT ON) and yields — ABORT, no PTT — when FT8, a tune
+// or the Transmit Test has it. Runs on every control (re)connect and after a
+// session ends.
 function onMercuryReady() {
   if (!mercuryClient || !mercuryClient.connected) return;
   const call = (settings.myCallsign || '').trim();
   if (call) mercuryClient.myCall(call);
-  const bw = parseInt(settings.mercuryBw, 10);
-  if (bw === 500 || bw === 2300 || bw === 2750) mercuryClient.setBandwidth(bw);
+  mercuryClient.setBandwidth(MercuryOffer.bandwidthChoice(settings.mercuryBw));
   if (settings.mercuryListen && call) {
-    if (acquireRadio('mercury')) {
-      mercuryClient.listen('ON');
-      sendCatLog(`[Mercury] LISTEN ON as ${call}`);
-    } else {
-      // Radio busy (JTCAT) — don't listen; we'd only collide on an inbound call.
-      mercuryClient.listen('OFF');
-      sendCatLog(`[Mercury] LISTEN deferred — radio in use by ${radioOwner}`);
-    }
+    mercuryClient.listen('ON');
+    sendCatLog(`[Mercury] LISTEN ON as ${call}`);
   }
 }
 
@@ -11553,6 +11684,23 @@ const _varaLaunch = { hf: null, fm: null }; // { child, at } for a VARA POTACAT 
 // answering" until VARA was restarted (W7RTA IC-7300, 2026-10-24).
 const _patHoldsVara = { hf: null, fm: null };
 let _patVaraKind = null; // the VARA this session hands Pat: the one to clear above if Pat could not open it
+// VARA's 1 January 2027 cut-off (Casey 2026-11-22): VARA HF before 4.9.1 and
+// VARA FM before 4.4.1 stop working that day. The version is the one VARA gave
+// on its command port (probe.version); a silent VARA gives no notice. Said once
+// per app run per modem in the log and as an app notice; the Winlink window
+// and ECHOCAT Web show it beside the mode while that VARA is picked. Never blocks.
+const _varaNoticeOnce = VaraVersion.createVaraNoticeOnce();
+function winlinkVaraVersionNotice(kind, version) {
+  if (!version) return;
+  let text = null;
+  try { text = VaraVersion.varaUpdateNotice(version, { kind }); } catch { text = null; }
+  const had = _varaNoticeOnce.current()[kind];
+  if (_varaNoticeOnce.take(kind, text)) {
+    winlinkLog(text);
+    if (win && !win.isDestroyed()) win.webContents.send('app-notice', { message: text, warn: true, duration: 20000 });
+  }
+  if (had !== _varaNoticeOnce.current()[kind]) winlinkPush();
+}
 // ── closing the VARA POTACAT opened for an ECHOCAT session (#697) ──────────
 // Casey 2026-11-21: "close VARA we opened". The rule is
 // VaraProcess.shouldCloseVara; this is the glue. Looked at after a session
@@ -11718,6 +11866,7 @@ async function winlinkVaraReady(mode, { configured } = {}) {
   _patVaraKind = kind;
   _patHoldsVara[kind] = patProc; // Pat opens it this session and keeps it (cleared if Pat says it could not)
   winlinkLog(`${name} ready on ${where}${probe.version ? ' — ' + probe.version : probe.silent ? ' (answered the connection, no VERSION reply)' : ''}`);
+  winlinkVaraVersionNotice(kind, probe.version);
 }
 
 /**
@@ -11774,6 +11923,8 @@ function winlinkPayload() {
     lastSession: settings.winlinkLastSession || null,
     noticeAccepted: !!settings.winlinkNoticeAcceptedAt,
     noticeText: WINLINK_NOTICE_TEXT,
+    // VARA too old for 1 January 2027, per modem ({ hf, fm }: text or null).
+    varaNotice: _varaNoticeOnce.current(),
     // The Deleted folder empties itself after this many days (0 = never, #475).
     deletedDays: WinlinkMailActions.deletedDays(settings.winlinkDeletedDays),
     mode: WinlinkModes.pickWinlinkMode(winlinkState.snapshot().modes, settings.winlinkDefaultMode || 'telnet'),
@@ -11834,6 +11985,8 @@ function winlinkPayload() {
 }
 
 function winlinkPopoutSend(channel, payload) {
+  // Driving a remote shack (#299): the window shows the shack's Winlink, fed by the bridge.
+  if (isRemoteMode() && WinlinkRemoteShack.SHACK_CHANNELS.includes(channel)) return;
   if (winlinkPopoutWin && !winlinkPopoutWin.isDestroyed()) winlinkPopoutWin.webContents.send(channel, payload);
 }
 
@@ -13001,7 +13154,7 @@ function winlinkModemBw() {
   return {
     ardop: pick(settings.winlinkArdopBw, [200, 500, 1000, 2000], 500),
     vara: pick(settings.winlinkVaraBw, [500, 2300, 2750], 2300),
-    mercury: pick(settings.mercuryBw, [500, 2300, 2750], 2300),
+    mercury: MercuryOffer.bandwidthChoice(settings.mercuryBw), // 2750 hidden: same speed as 2300 today
   };
 }
 
@@ -15137,7 +15290,12 @@ async function aprsMsgRadioTransmit(job) {
   aprsLog(`${what} over the radio: ${f.packet} on ${mhz} MHz, about ${(cap.airMs / 1000).toFixed(1)} s on air, cap ${(cap.capMs / 1000).toFixed(1)} s`);
   const res = await aprsRfRunner().send({ packet: f, capMs: cap.capMs });
   if (_aprsRfPeak.active()) aprsRfUi.lastPeak = _aprsRfPeak.end();
-  if (res.ok && res.confirmed) sendCatLog(`[APRS ${what}] sent over the radio (${AprsRfBeacon.BAND_LABEL[band]}, ${mhz} MHz; the radio reported transmit): ${f.packet}`);
+  if (res.ok && res.confirmed) {
+    sendCatLog(`[APRS ${what}] sent over the radio (${AprsRfBeacon.BAND_LABEL[band]}, ${mhz} MHz; the radio reported transmit): ${f.packet}`);
+    // A confirmed radio message also starts the 15-minute "heard you" watch, as a beacon does
+    // (Casey 2026-11-22: "yes, messages too"). Read only: who carried it to APRS-IS.
+    try { aprsEcho.beaconSent(f.source); } catch (e) { aprsLog('heard you: ' + e.message); }
+  }
   else if (res.ok) sendCatLog(`[APRS ${what}] keyed but not confirmed (${AprsRfBeacon.BAND_LABEL[band]}, ${mhz} MHz)`);
   else aprsLog(`${what} over the radio not sent: ${res.sentence}`);
   return res;
@@ -15178,6 +15336,7 @@ const aprsEcho = AprsEchocat.createController({
   setFollow: (calls) => { if (aprsFeedHooks) aprsFeedHooks.setFollow(calls); }, // aprs-find: calls passed beyond the range
   sendTo: (id, m) => { if (remoteServer && remoteServer.sendAprsTo) remoteServer.sendAprsTo(id, m); },
   setWatch: (calls) => { if (aprsFeedHooks) aprsFeedHooks.setWatch(calls); }, // heard you: my beacon's call and who heard it
+  setArea: (area) => { if (aprsFeedHooks) aprsFeedHooks.setArea(area); }, // Map view: the devices' map areas
   ownLogin: () => { const l = AprsIgate.uplinkLogin(settings.myCallsign); return l.ok ? l.call : ''; },
   heardChanged: (map) => { if (aprsWin && !aprsWin.isDestroyed()) aprsWin.webContents.send('aprs-heard-you', map); },
   windowOpen: () => !!(aprsWin && !aprsWin.isDestroyed()),
@@ -18895,6 +19054,7 @@ function liveActivationMyRefs() {
 // The clock lives in its own file in userData, not in settings.
 let _activationClock = null; // { startedAt, lastContactAt, refs }
 let _activationAutoEnding = false;
+let _activationLaunchNotice = null; // #700: an activation ended at launch; shown once the main window has loaded
 function activationClockFile() { return path.join(app.getPath('userData'), 'activation-clock.json'); }
 function activationClockLoad() {
   try { _activationClock = JSON.parse(fs.readFileSync(activationClockFile(), 'utf8')); } catch { _activationClock = null; }
@@ -19436,6 +19596,13 @@ async function saveQsoRecord(qsoData, opts) {
   if (logAs) {
     qsoData.operator = logAs.call;
     qsoData.stationCallsign = logAs.call;
+  }
+  // On a Guest Pass to another station, a contact logged from this PC's own
+  // forms was made at that station: its grid, state and county, and the
+  // Guest Pass mark, as the station stamps the contacts it logs for a guest
+  // (#909, #822). Nothing changes off a pass or with a station that sends none.
+  if (origin !== 'forwarded-from-host') {
+    Object.assign(qsoData, StationCounty.guestDeskStationFor(qsoData, { shack: guestPassShackLocation(), fill: (r) => stationLocationFillFor(r, ops) }));
   }
   // Activation record: MY_GRIDSQUARE / MY_STATE from the park when the
   // logging path did not supply them (lib/activation-station.js).
@@ -23967,8 +24134,9 @@ function startJtcat(mode) {
     // Mercury holds the radio, refuse this transmission and unwind the engine
     // cleanly. tx-end is guarded to NOT drop Mercury's PTT in this case.
     if (radioOwner === 'mercury') {
-      sendCatLog('[JTCAT] TX blocked — Mercury (HF data) owns the radio. Stop Mercury to transmit FT8.');
-      jtcatRefuseTx('Mercury (HF data) owns the radio');
+      const held = radioOwnerLib.describeRadioHolder(radioOwner);
+      sendCatLog(`[JTCAT] TX blocked — ${held.busy} ${held.fix} to transmit FT8.`);
+      jtcatRefuseTx(held.busy.replace(/\.$/, ''));
       return;
     }
     // Receiving from the WebSDR (#243): it cannot hear us and is not on the
@@ -27271,7 +27439,7 @@ function tciRigTxMeter(kind, value) {
 function tciRigJtcatTx(data, mode) {
   const refuse = (why) => {
     sendCatLog(`[TCI TX] Refused: ${why}`);
-    if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) jtcatPopoutWin.webContents.send('jtcat-qso-state', { phase: 'error', error: why });
+    if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) jtcatPopoutWin.webContents.send('jtcat-qso-state', { phase: 'error', error: why, txRefused: true });
     if (remoteServer && remoteServer.hasClient()) remoteServer.broadcastJtcatQsoState({ phase: 'error', error: why });
     setTimeout(() => jtcatRefuseTx(why), 0);
     return false;
@@ -27844,6 +28012,9 @@ function updateRemoteSettings() {
   remoteServer.setRemoteSettings({
     myCallsign: settings.myCallsign || '',
     grid: settings.grid || '',
+    // Where this station is, as it stamps a Guest Pass contact (#909): a
+    // guest desktop's own log forms put it on what they save. Additive.
+    stationLocation: StationCounty.stationLocationForGuests(settings.grid, (r) => stationLocationFillFor(r, settings)),
     clusterConnected: anyCluster,
     respotDefault: settings.respotDefault !== false,
     logCommentTags: settings.logCommentTags !== false,
@@ -40849,6 +41020,7 @@ function createWindow() {
   win.webContents.on('did-finish-load', () => {
     setTimeout(kiwiStatusHint, 500);   // the Landmarks tab learns what the SDR can hear
     logStartupStage('main window did-finish-load (renderer ready)');
+    if (_activationLaunchNotice) { win.webContents.send('activation-auto-ended', _activationLaunchNotice); _activationLaunchNotice = null; } // #700
     // Replay the pre-load log history: everything sendCatLog'd before this
     // point never reached the renderer (no window to send to), so without
     // this the log panel — and any bug report built from it — starts blind
@@ -43590,6 +43762,8 @@ let _ownTxRefusedLogAt = 0;
 let _ownTxRefusedLast = '';
 let _ownTxRefused = null; // { why, at } of the latest refusal, logged or not
 function ownTxPrivilegeRefused(emission, freqHz) {
+  // A live Guest Pass judges by the guest's class at every gate (#913).
+  if (passEnforcement && passEnforcement.getState && PassEnforcementLib.passJudgesTx(passEnforcement.getState())) return false;
   const why = Privileges.txPrivilegeRefusal({
     freqHz: freqHz != null ? freqHz : _currentFreqHz,
     mode: emission || _currentMode,
@@ -44718,6 +44892,11 @@ async function redeemGuestPass(rawInput) {
   try {
     if (settings.cloudAccessToken) {
       r = await post('/redeem', settings.cloudAccessToken);
+      // This computer was removed from its Cloud account: signed out here
+      // too (lib/cloud-revoked.js), and the pass is tried anonymously.
+      if (require('./lib/cloud-revoked').classifyCloudResponse(r.status, r.body) === 'device_revoked' && cloudIpc) {
+        cloudIpc.signOutRevoked(r.body);
+      }
       if (r.status === 401 || r.status === 403) {
         sendCatLog(`[guest-pass] authed redeem refused (HTTP ${r.status}) — retrying anonymously`);
         r = await post('/redeem-anonymous', null);
@@ -45505,7 +45684,22 @@ app.whenReady().then(() => {
         teardownCloudDeviceHeartbeat();
         setImmediate(() => ensureCloudDeviceRegistered(reason).catch(() => {}));
         // A new account brings its own templates (and takes this machine's).
-        if (reason !== 'signout' && sstvTemplateSync) setTimeout(() => sstvTemplateSync.sync('signin').catch(() => {}), 2000);
+        if (!require('./lib/cloud-ipc').isSignOutReason(reason) && sstvTemplateSync) setTimeout(() => sstvTemplateSync.sync('signin').catch(() => {}), 2000);
+      },
+      // Cloud answered device_revoked: this computer was removed from the
+      // account and is signed out (lib/cloud-revoked.js). cloud-ipc has
+      // cleared the tokens and stopped sync; these are main's loops.
+      deviceRevokedSteps: {
+        stopDevice: () => teardownCloudDeviceHeartbeat(),
+        stopTunnel: () => { if (cloudTunnel && typeof cloudTunnel.stopSignedOut === 'function') cloudTunnel.stopSignedOut(); },
+        stopOther: () => { _stopTurnRemint(); _turnIceServers = null; _turnExpiresAt = 0; },
+        notify: (text) => {
+          sendCatLog('[Cloud] ' + text);
+          // ECHOCAT clients (web + app) repaint their Cloud section signed out.
+          if (remoteServer && typeof remoteServer.broadcastCloudStatus === 'function') {
+            try { remoteServer.broadcastCloudStatus({ loggedIn: false }); } catch {}
+          }
+        },
       },
     });
     cloudIpc.startBackgroundSync();
@@ -48180,7 +48374,10 @@ function cloudShackNotice(text, kind) {
         settings.winlinkPopoutBounds = winlinkPopoutWin.getBounds(); saveSettings(settings);
       }
     });
-    winlinkPopoutWin.on('closed', () => { winlinkPopoutWin = null; _winlinkWatchAudio = false; winlinkMailViewClosed('window closed'); winlinkSyncModemBridge(); });
+    winlinkPopoutWin.on('closed', () => {
+      winlinkPopoutWin = null; _winlinkWatchAudio = false; winlinkMailViewClosed('window closed'); winlinkSyncModemBridge();
+      if (_remoteWinlink.wanted) remoteWinlinkView(false); // #299: the shack's dial goes back, as when a phone leaves its Mail tab
+    });
     winlinkPopoutWin.webContents.on('did-finish-load', () => {
       winlinkPopoutSend('winlink-state', winlinkPayload());
       if (_winlinkPendingCompose) { winlinkPopoutSend('winlink-compose-prefill', _winlinkPendingCompose); _winlinkPendingCompose = null; }
@@ -48192,6 +48389,7 @@ function cloudShackNotice(text, kind) {
       pushWinlinkRigPower(true);
       winlinkPopoutSend('winlink-remote-watch', _winlinkRemoteWatchers > 0);
       winlinkSyncModemBridge();
+      if (isRemoteMode()) remoteWinlinkHydrateWindow(); // #299: the shack's state, folders and session
     });
     winlinkPopoutWin.webContents.on('before-input-event', (_e, input) => {
       if (input.key === 'F12' && input.type === 'keyDown') winlinkPopoutWin.webContents.toggleDevTools();
@@ -48341,7 +48539,7 @@ function cloudShackNotice(text, kind) {
     const Feed = require('./lib/aprs-is-feed');
     const AprsParser = require('./lib/aprs-parser');
     const dev = APRS_IS_DEV_SERVER || {}; // dev builds only: a local fake APRS-IS server
-    aprsFeed = new Feed.AprsIsFeed({ call: settings.myCallsign, version: app.getVersion(), lat: home.lat, lon: home.lon, km: settings.aprsRangeKm, follow: aprsEcho.followCalls(), watch: aprsEcho.watchCalls(), host: dev.host, port: dev.port });
+    aprsFeed = new Feed.AprsIsFeed({ call: settings.myCallsign, version: app.getVersion(), lat: home.lat, lon: home.lon, km: settings.aprsRangeKm, follow: aprsEcho.followCalls(), watch: aprsEcho.watchCalls(), area: aprsEcho.feedArea(), host: dev.host, port: dev.port });
     aprsBatch = Feed.createBatcher((packets) => aprsSend('aprs-packets', packets), 500);
     aprsFeed.on('line', (line) => {
       try { aprsMessagesFeedLine(line); } catch (e) { aprsLog('message: ' + e.message); } // A1: messages, acks and rejs for us
@@ -48364,6 +48562,7 @@ function cloudShackNotice(text, kind) {
     setRange: (km) => { if (aprsFeed) aprsFeed.setRange(null, null, require('./lib/aprs-is-feed').clampRangeKm(km)); },
     setFollow: (calls) => { if (aprsFeed) aprsFeed.setFollow(calls); },
     setWatch: (calls) => { if (aprsFeed) aprsFeed.setWatch(calls); },
+    setArea: (area) => { if (aprsFeed) aprsFeed.setArea(area); },
   };
   ipcMain.on('aprs-popout-open', () => {
     if (aprsWin && !aprsWin.isDestroyed()) { aprsWin.focus(); return; }
@@ -48391,6 +48590,7 @@ function cloudShackNotice(text, kind) {
       if (!aprsEcho.keepsFeed()) aprsStopFeed();
       if (_remoteAprsWanted) remoteAprsWatch(false); // #868: the shack stops listening this desktop started, as closing its own window would
       aprsWin = null;
+      aprsEcho.windowChanged(); // Map view: with the window gone, a device's map area may take the range term's place
       _aprsMsgViewing = ''; // A1: messages still going out carry on; nothing is being read now
       aprsBeaconStop(); // phase 5: the beacon timer runs only while the window is open
       aprsRfTimerStop(); // and the 2 m radio timer
@@ -48709,18 +48909,18 @@ function cloudShackNotice(text, kind) {
   ipcMain.on('mercury-cmd-listen', (_e, on) => {
     settings.mercuryListen = !!on; saveSettings(settings);
     if (!mercuryClient) return mercuryNotReady();
+    // LISTEN takes no radio lock (#919); a session takes it in the bridge.
     if (on) {
-      const got = acquireRadio('mercury');
-      if (got) { mercuryClient.myCall(onAirCall()); mercuryClient.listen('ON'); sendCatLog('[Mercury] LISTEN ON'); }
-      mercuryPopoutSend('mercury-link', { listening: got });
+      mercuryClient.myCall(onAirCall()); mercuryClient.listen('ON'); sendCatLog('[Mercury] LISTEN ON');
+      mercuryPopoutSend('mercury-link', { listening: true });
     } else {
-      mercuryClient.listen('OFF'); releaseRadio('mercury'); sendCatLog('[Mercury] LISTEN OFF');
+      mercuryClient.listen('OFF'); sendCatLog('[Mercury] LISTEN OFF');
       mercuryPopoutSend('mercury-link', { listening: false });
     }
   });
   ipcMain.on('mercury-cmd-bw', (_e, bw) => {
     const n = parseInt(bw, 10);
-    if (n === 500 || n === 2300 || n === 2750) { settings.mercuryBw = n; saveSettings(settings); if (mercuryClient) mercuryClient.setBandwidth(n); }
+    if (MercuryOffer.BANDWIDTHS.includes(n)) { settings.mercuryBw = n; saveSettings(settings); if (mercuryClient) mercuryClient.setBandwidth(n); }
   });
   ipcMain.on('mercury-cmd-send-text', (_e, text) => {
     const t = String(text || '');
@@ -48736,14 +48936,15 @@ function cloudShackNotice(text, kind) {
   });
   // ─── Winlink IPC (the mail window + Settings). Every surface goes through
   // the same winlink* functions; a radio session starts only from Connect.
-  ipcMain.on('winlink-popout-open', () => { openWinlinkPopout(); winlinkEnsureStarted(); });
+  // Driving a remote shack (#299): the window is the shack's; this PC's Pat is not started.
+  ipcMain.on('winlink-popout-open', () => { openWinlinkPopout(); if (isRemoteMode()) remoteWinlinkView(true); else winlinkEnsureStarted(); });
   ipcMain.handle('winlink-pota-spot-template', (_e, o = {}) => winlinkPotaSpotTemplate(o));
   // Activation's "Winlink" spot button: the Mail window opens on the spot,
   // filled in; the operator reads it, queues it and starts the session.
   ipcMain.on('winlink-pota-spot-open', (_e, o = {}) => {
     _winlinkPendingCompose = winlinkPotaSpotTemplate(o);
     const wasOpen = !!(winlinkPopoutWin && !winlinkPopoutWin.isDestroyed());
-    openWinlinkPopout(); winlinkEnsureStarted();
+    openWinlinkPopout(); if (isRemoteMode()) remoteWinlinkView(true); else winlinkEnsureStarted();
     if (wasOpen && !winlinkPopoutWin.webContents.isLoading()) { winlinkPopoutSend('winlink-compose-prefill', _winlinkPendingCompose); _winlinkPendingCompose = null; }
   });
   // The renderer's answer to a sound-card PTT edge (cm108-ptt): one log line.
@@ -48793,8 +48994,8 @@ function cloudShackNotice(text, kind) {
   ipcMain.handle('winlink-forms-update', () => winlinkFormsUpdate());
   ipcMain.handle('winlink-form-open', (_e, o = {}) => winlinkFormOpen({ kind: String(o.kind || ''), path: String(o.path || ''), box: String(o.box || ''), mid: String(o.mid || ''), file: String(o.file || '') }));
   ipcMain.handle('winlink-form-info', (_e, o = {}) => winlinkFormInfo({ box: String(o.box || ''), mid: String(o.mid || ''), file: String(o.file || '') }));
+  // Driving a remote shack, the bridge sends this to the shack (#299) and this handler never runs.
   ipcMain.handle('winlink-cmd-connect', (_e, o = {}) => {
-    if (isRemoteMode() && WinlinkModes.isRadioMode(o.mode)) return { ok: false, error: 'Radio sessions key the shack\'s radio — start them on the shack PC' };
     winlinkRetryCancel('connect');
     return winlinkStartSession({ mode: o.mode, gateway: o.gateway, dialKhz: o.dialKhz, url: o.url, origin: 'mail window' });
   });
@@ -48920,9 +49121,11 @@ function cloudShackNotice(text, kind) {
     const launches = VaraProcess.canLaunchVara({ platform: process.platform, host });
     const bin = launches ? findVara(kind) : { found: false, path: '' };
     const probe = await VaraProcess.probeVaraPort(port, { host, timeoutMs: 1500 });
-    const text = launches
+    const said = launches
       ? VaraProcess.describeVara(kind, { enabled: true, found: bin.found, path: bin.found ? bin.path : '', probe, host, port, launches })
       : VaraProcess.varaTestText(kind, { probe, host, port });
+    const old = probe.version ? VaraVersion.varaUpdateNotice(probe.version, { kind }) : null;
+    const text = old ? `${said}${/[.!?]$/.test(said) ? '' : '.'} ${old}` : said;
     return { kind, found: bin.found, path: bin.found ? bin.path : '', host, port, launches, running: probe.ok, version: probe.version || '', text };
   });
   ipcMain.handle('winlink-vara-setup', (_e, o = {}) => winlinkVaraSetup({ kind: o.kind, devices: Array.isArray(o.devices) ? o.devices.slice(0, 200) : [], inputLabel: String(o.inputLabel || ''), outputLabel: String(o.outputLabel || '') }));
@@ -50123,6 +50326,16 @@ function cloudShackNotice(text, kind) {
   setInterval(reviewAskTick, 5 * 60 * 1000);
   // #147: a forgotten activation ends by itself, even with no new contact.
   activationClockLoad();
+  // #700: a saved clock that ran out while POTACAT was closed ends the
+  // activation now, before a window or phone shows it as live.
+  if (activationRunning()) {
+    const refs = activationParkRefList();
+    const atLaunch = ActivationClock.atLaunch(_activationClock, refs.join(','), Date.now());
+    if (atLaunch.action === 'end') {
+      autoEndActivation(atLaunch.reason);
+      _activationLaunchNotice = { refs, reason: atLaunch.reason, text: ActivationClock.noticeText(refs, atLaunch.reason) };
+    }
+  }
   activationClockFollow(false);
   setInterval(activationClockTick, 30 * 1000);
   setTimeout(reviewAskTick, 2 * 60 * 1000 + 5000);
@@ -51820,6 +52033,16 @@ function cloudShackNotice(text, kind) {
   // harmful and is removed. External rig tunes (knob, SmartSDR app) no
   // longer auto-follow the kiwi — acceptable; that path needs a real
   // race-protection design before re-introducing.)
+
+  // A band button (VFO window, main window): where to go on that band. The
+  // radio's last frequency there, or the button's own preset (#680). A remote
+  // client gets the preset; the shack's radio is not this PC's to remember.
+  ipcMain.handle('band-jump-target', (_e, presetKhz) => {
+    const preset = parseFloat(presetKhz);
+    if (!Number.isFinite(preset) || preset <= 0) return presetKhz;
+    if (isRemoteMode()) return preset;
+    return BandLastFreq.jumpTarget(settings.bandLastFreq, settings.activeRigId, preset);
+  });
 
   ipcMain.on('tune', (_e, { frequency, mode, bearing, slicePort, origin, pickSideband }) => {
     // The idle-RX session's own QSY (including WSPR band hops) must not read
@@ -58401,6 +58624,13 @@ app.on('before-quit', (e) => {
     e.preventDefault();
     Promise.race([jtcatFlushLogReviews(), new Promise((r) => setTimeout(r, 4000))]).finally(() => app.quit());
     return;
+  }
+  // The last frequency on the band the radio is on now (#680): written once,
+  // since a band change is the only other time it is.
+  if (_bandLastFreqBand && !_bandLastFreqSavedAtQuit) {
+    _bandLastFreqSavedAtQuit = true;
+    clearTimeout(_bandLastFreqSaveTimer);
+    try { saveSettings(settings); } catch {}
   }
   winlinkHoldAwake(false); // never leave the Winlink session's App Nap block behind (#187)
   try { aprsMessagesSaveNow(); } catch { /* APRS A1: the conversations are on disk before the process goes */ }

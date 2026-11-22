@@ -170,7 +170,8 @@
   // ---- init ----
   window.api.getSettings().then(function (s) {
     myCallEl.textContent = (s.myCallsign || 'NOCALL').toUpperCase();
-    if (s.mercuryBw) bwSel.value = String(s.mercuryBw);
+    // 500 or 2300 only: a 2750 saved before it was hidden reads as 2300.
+    bwSel.value = String(s.mercuryBw) === '500' ? '500' : '2300';
     listenCb.checked = !!s.mercuryListen;
     listening = !!s.mercuryListen;
     deriveState();

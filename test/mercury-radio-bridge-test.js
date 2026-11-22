@@ -29,22 +29,63 @@ function makeHooks({ acquireReturns = true } = {}) {
 }
 const names = (calls) => calls.map((c) => c[0]);
 
-test('PTT ON keys the rig and arms the failsafe', () => {
+test('PTT ON takes the radio, keys the rig and arms the failsafe', () => {
   const c = new EventEmitter();
   const { hooks, calls } = makeHooks();
   attachMercuryRadioBridge(c, hooks);
   c.emit('ptt', { on: true });
-  assert.deepStrictEqual(calls, [['keyPtt', true], ['armFailsafe']]);
+  assert.deepStrictEqual(calls, [['acquire'], ['keyPtt', true], ['armFailsafe']]);
 });
 
-test('PTT OFF clears the failsafe then unkeys', () => {
+test('PTT OFF outside a session clears the failsafe, unkeys, and hands the radio back (#919)', () => {
   const c = new EventEmitter();
   const { hooks, calls } = makeHooks();
   attachMercuryRadioBridge(c, hooks);
   c.emit('ptt', { on: true });
   calls.length = 0;
   c.emit('ptt', { on: false });
-  assert.deepStrictEqual(calls, [['clearFailsafe'], ['keyPtt', false]]);
+  assert.deepStrictEqual(calls, [['clearFailsafe'], ['keyPtt', false], ['release']]);
+});
+
+// #919: Mercury in LISTEN must never key over FT8, a tune or the Transmit
+// Test. A PTT ON while another feature owns the radio keys nothing and yields.
+test('PTT ON while another feature holds the radio does not key; aborts to yield (#919)', () => {
+  const c = new EventEmitter();
+  const { hooks, calls } = makeHooks({ acquireReturns: false });
+  const b = attachMercuryRadioBridge(c, hooks);
+  c.emit('ptt', { on: true });
+  assert.ok(!calls.some((x) => x[0] === 'keyPtt'), 'must not key a radio it does not own');
+  assert.ok(!calls.some((x) => x[0] === 'armFailsafe'));
+  assert.deepStrictEqual(names(calls), ['acquire', 'log', 'abort']);
+  assert.strictEqual(b.isTxActive(), false);
+  // ...and the PTT OFF that follows must not unkey the owner's transmission.
+  calls.length = 0;
+  c.emit('ptt', { on: false });
+  assert.ok(!calls.some((x) => x[0] === 'keyPtt'), 'must not unkey FT8 / the test');
+});
+
+test('inside a session, PTT OFF keeps the radio; DISCONNECTED releases it (#919)', () => {
+  const c = new EventEmitter();
+  const { hooks, calls } = makeHooks();
+  const b = attachMercuryRadioBridge(c, hooks);
+  c.emit('connected', { source: 'A', dest: 'B', bandwidth: 500 });
+  assert.strictEqual(b.isInSession(), true);
+  c.emit('ptt', { on: true });
+  c.emit('ptt', { on: false });
+  assert.ok(!calls.some((x) => x[0] === 'release'), 'a session holds the radio between overs');
+  c.emit('disconnected');
+  assert.strictEqual(names(calls).filter((n) => n === 'release').length, 1);
+  assert.strictEqual(b.isInSession(), false);
+});
+
+test('a repeated PTT ON while keyed only re-arms the failsafe', () => {
+  const c = new EventEmitter();
+  const { hooks, calls } = makeHooks();
+  attachMercuryRadioBridge(c, hooks);
+  c.emit('ptt', { on: true });
+  calls.length = 0;
+  c.emit('ptt', { on: true });
+  assert.deepStrictEqual(names(calls), ['armFailsafe']);
 });
 
 test('BUFFER>0 while keyed re-arms the failsafe; ignored when idle', () => {

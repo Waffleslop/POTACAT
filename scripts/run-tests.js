@@ -176,6 +176,7 @@ const TESTS = [
   'test/halt-tx-test.js',
   'test/refused-key-audio-test.js', // #214: a refused key-down plays no radio audio (Tune, SSTV, voice macro); a Tune stop during start-up wins
   'test/own-licence-tx-test.js',
+  'test/guest-pass-owner-class-test.js',
   'test/privileges-one-source-test.js', // #250: lib/privileges.js is the one table (renderer loads it); unverified classes never refuse TX; no change vs master
   'test/privileges-verified-gate-test.js', // #250: the ATU wizard and Guest Pass never refuse for an unverified licence class
   'test/rigctld-power-scale-test.js',
@@ -203,9 +204,11 @@ const TESTS = [
   'test/kenwood-filter-width-test.js',
   'test/cw-key-port-race-test.js',
   'test/guest-pass-emission-test.js',
+  'test/guest-pass-sstv-phone-test.js',
   'test/jtcat-worked-update-test.js',
   'test/g90-tx-poll-test.js',
   'test/g90-fake-rigctld-test.js', // #109: a fake rigctld that dies on CAT in TX; the G90 keeps the link through an over, a generic model's reconnect unkeys first
+  'test/g90-mode-on-spot-test.js', // #916: a spot click sets the G90's mode with a CI-V 06 frame through rigctld (Hamlib's G90 backend only tries CI-V 26)
   'test/wfm-mode-test.js',
   'test/jtcat-dial-follow-test.js',
   'test/js8-dial-follow-test.js',
@@ -287,6 +290,7 @@ const TESTS = [
   'test/direwolf-aprs-tx-offline-test.js', // APRS phase 7: the bundled Dire Wolf keys a fake shim once and its audio decodes back (skips without the build)
   'test/aprs-echocat-test.js', // APRS phase 6: ECHOCAT devices: snapshot, 1.5 s deltas, feed and listen ownership, Guest Pass, aprs-state
   'test/aprs-heard-you-test.js', // ECHOCAT 2026-11-22: who heard my radio beacon (q construct, digis, 15-min feed watch, heardMe rows, beacon.rf.heard, window mark)
+  'test/aprs-view-test.js', // ECHOCAT 2026-11-22: Map view (aprs-view area filter, antimeridian, 4000 km cap, per-device areas, feed.area)
   'test/aprs-find-band-test.js', // ECHOCAT 2026-11-21: rf.band on aprs-stations rows, aprs-find (follow one call beyond range, budlist, validated, guest allowed)
   'test/aprs-echocat-wire-test.js', // APRS phase 6: the 'aprs' capability on the wire (old clients untouched), guest refusals, main.js glue, ECHOCAT Web
   'test/aprs-message-test.js', // APRS A1: message, ack, rej and reply-ack formats (APRS 1.0.1 ch. 14), the 67-character limit, ours by SSID, the g/ filter
@@ -381,12 +385,14 @@ const TESTS = [
   'test/adif-mode-test.js', // #381: MFSK submodes (JS8, JTTY, FT4, FT2) read by name everywhere; FT4/FT2 still written bare
   'test/qso-edit-test.js', // #509: My Park edit sets MY_SIG so Past Activations finds the QSO
   'test/activation-auto-end-test.js', // #147: a forgotten activation ends at the UTC day change or after 6 h with no contacts
+  'test/activation-relaunch-700-test.js', // #700: a saved activation clock that ran out while POTACAT was closed ends the activation at launch, not 33 s later
   'test/activation-device-ref-00z-test.js', // #734: the phone's own park is kept on a QSO that arrives after the desktop's activation ended (00Z)
   'test/activation-logging-388-test.js', // #388: a habit Tab after the RST jump is absorbed; a corrected park grid is kept per park
   'test/activation-announce-508-test.js', // #508: QSOs from the Log window (and ECHOCAT) join the live activation list, once
   'test/state-backfill-test.js', // #389: QRZ state fill counts only tracked entities (never VK) and names the QSOs left
   'test/diagnostic-snapshot-test.js',
   'test/mercury-process-test.js',
+  'test/mercury-offer-test.js', // Mercury experimental: no 2750 bandwidth; the chat window hidden until on-air use (Casey 2026-11-22)
   'test/winlink-pat-test.js',
   'test/winlink-reach-test.js',      // a radio session goes only where this radio can transmit
   'test/winlink-units-test.js',
@@ -395,6 +401,7 @@ const TESTS = [
   'test/winlink-main-wiring-test.js',
   'test/winlink-vara-test.js',
   'test/winlink-vara-anywhere-test.js', // #287: VARA HF and VARA FM on Linux, macOS and Windows, at a host and port; a fake VARA TNC (real Pat when its binary is present)
+  'test/vara-version-test.js', // VARA HF before 4.9.1 / FM before 4.4.1 stop on 1 January 2027: the notice, from VARA's own VERSION reply
   'test/winlink-connect-test.js', // #128: /api/connect over http.request with no headers timeout; VARA and ARDOP send the same request
   'test/direwolf-agw-monitor-test.js', // #128: what Dire Wolf heard, over its AGW port's monitor mode
   'test/packet-link-close-test.js', // #300: a packet link is closed (DISC answered) before Dire Wolf stops; a call on a link the gateway still holds is ended, not retried
@@ -420,7 +427,9 @@ const TESTS = [
   'test/winlink-contacts-test.js', // the Winlink address book, and the Position report and POTA spot forms
   'test/winlink-sent-routes-test.js', // #442: how each sent message went out (gateway, dial, mode or internet, time), kept by message id
   'test/winlink-summary-store-test.js', // #425: the session summary lines survive a restart, so Report a Bug still holds the session that dropped
+  'test/winlink-mail-select-test.js', // #346: select several Winlink messages and delete them with one confirm
   'test/winlink-folders-test.js', // #462 #475: Archive and back, the Deleted folder (copies, Restore, purge after N days), Reply all; a real Pat when present
+  'test/winlink-mode-note-test.js',
   'test/winlink-mail-views-test.js', // 2026-11-15 ECHOCAT ask: the dial stays on the gateway while a phone's Mail tab is open; two devices, the window and a phone, a closed socket
   'test/winlink-tx-level-test.js', // #300: Winlink's own TX level; the summary says the RX peak and what our overs sent; the pause between overs is not a gap
   'test/rigctld-shim-hamlib-test.js',
@@ -476,11 +485,13 @@ const TESTS = [
   'test/mercury-client-test.js',
   'test/radio-owner-test.js',
   'test/mercury-radio-bridge-test.js',
+  'test/mercury-listen-no-idle-lock-test.js',
   'test/mercury-audio-bridge-test.js',
   'test/mercury-app-protocol-test.js',
   'test/echocat-web-gate-test.js',
   'test/tunnel-webui-gate-test.js',
   'test/cloud-session-change-test.js',
+  'test/cloud-device-revoked-test.js', // a computer removed from the Cloud account is signed out: tokens cleared, loops and tunnel stopped
   'test/cloud-log-sync-test.js',
   'test/cloud-sync-log-test.js', // B10: Cloud sync writes its pulls, errors and "not started" reason to the session log
   'test/cloud-pair-errors-test.js', // a second desktop registers before Cloud pairing; Cloud answers in plain words; its device id never leaves in an export
@@ -624,6 +635,7 @@ const TESTS = [
   'test/lotw-split-test.js',
   'test/station-county-test.js', // the operator's own state and county: per park on activations, home only from the home grid
   'test/guest-pass-station-location-test.js', // a Guest Pass contact carries the lending station's grid, state and county (#822)
+  'test/guest-log-station-location-test.js', // #909: a guest desktop's own log forms on a pass stamp the station's location (settings.stationLocation)
   'test/sdr-scope-test.js',
   'test/sdr-scope-if-tap-test.js', // #394: an SDR on a radio's IF output stays on the IF
   'test/rtltcp-audio-test.js',
@@ -643,6 +655,7 @@ const TESTS = [
   'test/log-tx-power-test.js',
   'test/station-clock-test.js', // ECHOCAT device sets the FT8 slot clock
   'test/rig-bands-test.js',
+  'test/band-last-freq-test.js',
   'test/spot-band-filter-test.js',
   'test/award-tables-test.js',
   'test/dxcc-progress-test.js',
@@ -675,6 +688,7 @@ const TESTS = [
   'test/remote-multi-client-test.js',
   'test/remote-bridge-test.js',
   'test/aprs-remote-shack-test.js', // #868: a desktop driving a remote shack starts APRS listening there (aprs-listen), shows the shack's aprs-state and the stations its radio heard
+  'test/winlink-remote-shack-test.js', // #299: a desktop driving a remote shack uses the shack's Winlink (mailbox, gateways, radio sessions) over the winlink-* wire
   'test/sstv-context-test.js',
   'test/tailscale-detect-test.js',
   'test/yaesu-legacy-codec-test.js',

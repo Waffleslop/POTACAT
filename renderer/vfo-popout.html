@@ -682,8 +682,8 @@
       <div class="card tool-card widget-section" id="widget-voice">
         <div class="macro-row"><span class="macro-label">Voice</span><div id="voice-macro-row" style="display:contents"></div></div>
       </div>
-      <!-- Radio power: always the last block, below the ordered ones, for a
-           radio whose model can be switched over CAT (vfo-radio-state.power). -->
+      <!-- Radio power: an ordered block (VfoLayout.LARGE_BLOCKS, last by default),
+           shown for a radio whose model can be switched over CAT (vfo-radio-state.power). -->
       <div class="card tool-card" id="sec-power" style="display:none">
         <div class="ptt-log-row">
           <span class="macro-label">Radio</span>
@@ -1313,9 +1313,12 @@ function buildBandGrid(container) {
     btn.className = 'tog band-btn';
     btn.textContent = b.label;
     btn.dataset.freq = b.freq;
-    btn.addEventListener('click', () => {
+    btn.addEventListener('click', async () => {
       if (vfoLocked) return;
-      tuneJumpFromPopout(b.freq);
+      // Back to where this radio last was on the band, or the preset (#680).
+      let khz = b.freq;
+      try { const t = await window.api.bandJumpTarget(b.freq); if (Number(t) > 0) khz = Number(t); } catch {}
+      tuneJumpFromPopout(khz);
     });
     container.appendChild(btn);
   }
@@ -2545,12 +2548,13 @@ const LARGE_EL = {
   knob: 'blk-knob', kiwi: 'widget-kiwi', band: 'sec-band', favorites: 'sec-favorites', filter: 'sec-filter',
   'filter-slider': 'sec-filter-slider', txpower: 'sec-txpower', controls: 'blk-controls', solar: 'blk-solar',
   profiles: 'sec-profiles-inline', 'cw-controls': 'widget-cw-controls', cw: 'widget-cw', voice: 'widget-voice',
+  power: 'sec-power',
 };
 // The switch each block's row drives (null: shown when the radio supports it).
 const LARGE_SWITCH = {
   knob: 's-dial', kiwi: 'w-kiwi', band: 's-band', favorites: 's-favorites', filter: 's-filter',
   'filter-slider': 's-filter-slider', txpower: null, controls: 's-controls', solar: 's-solar',
-  profiles: 's-profiles-inline', 'cw-controls': 'w-cw-controls', cw: 'w-cw', voice: 'w-voice',
+  profiles: 's-profiles-inline', 'cw-controls': 'w-cw-controls', cw: 'w-cw', voice: 'w-voice', power: null,
 };
 const ORDER_BLOCKS = VfoLayout.LARGE_BLOCKS.map(b => ({ key: b.key, el: LARGE_EL[b.key], name: b.name }));
 const DEFAULT_ORDER = VfoLayout.LARGE_KEYS.slice();
@@ -2566,7 +2570,7 @@ const LARGE_BOTTOM = [
   { name: 'Log', sw: 'w-log' },
 ];
 
-function normalizeOrder(saved) { return VfoLayout.normalizeOrder(saved, DEFAULT_ORDER); }
+function normalizeOrder(saved) { return VfoLayout.normalizeLarge(saved); }
 
 function applyOrder() {
   const pane = document.getElementById('tab-dial');
@@ -2575,9 +2579,6 @@ function applyOrder() {
     const el = b && document.getElementById(b.el);
     if (el) pane.appendChild(el);
   }
-  // Radio power stays below every ordered block.
-  const power = document.getElementById('sec-power');
-  if (power) pane.appendChild(power);
 }
 
 function moveOrder(key, toIndex) {

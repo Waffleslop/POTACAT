@@ -301,6 +301,14 @@ test('a confirmed radio beacon starts the watch with the source call that went o
   const hook = fn.indexOf('aprsEcho.beaconSent(b.source)');
   assert.ok(ok > 0 && hook > ok && hook < fn.indexOf('} else if (res.ok)'), 'only in the confirmed branch');
 });
+// Casey 2026-11-22: "yes, messages too": a confirmed radio message starts the watch as well.
+test('a confirmed radio message starts the watch too, only in its confirmed branch', () => {
+  const at = main.indexOf('async function aprsMsgRadioTransmit(');
+  const fn = main.slice(at, main.indexOf('\n}\n', at));
+  const ok = fn.indexOf('if (res.ok && res.confirmed) {');
+  const hook = fn.indexOf('aprsEcho.beaconSent(f.source)');
+  assert.ok(at > 0 && ok > 0 && hook > ok && hook < fn.indexOf('else if (res.ok)'), 'only after the radio reported transmit');
+});
 test('the feed gets the exact calls; refusals of nothing; the operator\'s off switch ends the watch', () => {
   const at = main.indexOf('AprsEchocat.createController(');
   const block = main.slice(at, at + 3000);

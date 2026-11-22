@@ -183,7 +183,7 @@ for the history.
 | `vfo-profiles` | ↔ | VFO Profile list (S→C push, C→S request after edit). |
 | `vfo-profiles-update` | C→S | Save/edit/delete a VFO profile. |
 | `apply-vfo-profile` | C→S | Apply a stored VFO profile to the rig. |
-| `settings-update` | S→C | One or more server-side settings changed; client refreshes UI. |
+| `settings-update` | S→C | One or more server-side settings changed; client refreshes UI. The settings blob (here, in `auth-ok` and in `pass-resumed`) carries `stationLocation` (object, 2026-11-22, #909): `{grid, state, county}`, the station's grid square, state and county exactly as the shack stamps them on a Guest Pass contact that is not an activation (`county` is `ST,County`, e.g. `PA,Bucks`; any of them `''` when the shack does not know it). A POTACAT desktop on a Guest Pass stamps them, and `APP_POTACAT_GUEST_PASS`, on a contact logged from its own log forms (lib/station-county.js `guestDeskStationFor`); with no `stationLocation` (an older shack) it changes nothing. Additive: ECHOCAT needs nothing, because the shack stamps the contacts a phone logs itself (`log-qso`). |
 | `save-settings` | C→S | Persist a settings delta. |
 
 ### PTT / audio signaling (WebRTC)
@@ -396,6 +396,14 @@ call, how a session's end is worded) is decided on the shack and sent as data. G
 `winlink-account`. Registry: `lib/echocat-protocol.js` (feature `winlink`). Server:
 `lib/remote-server.js` (`case 'winlink-list'` onward). Handlers: `winlinkHandleRemote` in
 `main.js`.
+
+A POTACAT desktop driving a remote shack (More > Remote Radios) is one of these devices
+too, from #299 (2026-11-22): its Winlink Mail window sends the same `winlink-*` messages
+and shows the shack's `winlink-state`, `winlink-mailbox`, `winlink-session` and
+`winlink-spectrum`, so radio sessions run on the shack's radio. Its hello adds
+`mail-folders-v2`. Winlink forms are not on the wire, so that window offers them only on
+the shack PC. No new message or field; `lib/remote-bridge.js` and
+`lib/winlink-remote-shack.js` hold the mapping.
 
 **Who may send.** The owner's devices only. A Guest Pass session gets
 `winlink-refused {reason: 'guest-pass', reqId}` for every C→S message below, is never sent
@@ -662,6 +670,7 @@ the shack's radio heard). No new message or field; `lib/remote-bridge.js` and
 | `aprs-beacon-is` | C→S | `{}`. The window's "Beacon now": one position beacon over **APRS-IS only** (CALL-10, the desktop's beacon settings, approximate position by default). Nothing is transmitted on the air. Same refusals as the window (no callsign, placeholder callsign, no position, APRS-IS not verified), shown in `aprs-state.beacon.sentence`. The beacon timer stays a desktop-window feature. **Refused to a Guest Pass** with the same `refused` text as `aprs-igate`. |
 | `aprs-beacon-rf` | C→S | `{band?}` (2026-11-21, Casey's go). ONE position beacon **over the radio**: the window's "Beacon now (radio)" run, with the same gate (lib/aprs-rf-gate.js), config swap and transmit cap; the press counts as the APRS window being open. With Listen on, it goes out on the listening band. With Listen off, the desktop sets the radio up for the beacon (it starts listening on `band`, or the chosen band, which tunes, sets the mode and filter), sends, then stops listening so the radio goes back where it was. Nothing repeats and there is no timer. Refusals: `refused {of: 'aprs-beacon-rf', reason, text}` to that device only (`busy`, `not-ready`, `setup`, `not-sent`, with the gate's own sentence). **Refused to a Guest Pass.** |
 | `aprs-find` | C→S | `{call: string}` (2026-11-21, Casey's go). Follow ONE call on APRS-IS **beyond** `rangeKm`: the desktop adds a budlist term (`b/CALL`) to its read-only APRS-IS filter, next to the range filter, and sends `#filter` on the live connection. `K5ABC` (no SSID) follows K5ABC and every SSID of it (`b/K5ABC/K5ABC-*`); `K5ABC-9` follows that station only. Rows for the call arrive in `aprs-stations` like any other (whatever the distance) and are not aged out while the find is on; a row already held goes out again in the next delta so the phone can centre on it. APRS-IS does not replay history, so a call silent since the desktop connected appears when it next sends. One call per device: a new `aprs-find` replaces that device's old one. `{call: ''}` stops; unsubscribing (`aprs-subscribe {on: false}`) or disconnecting stops it too. The callsign must be 3 to 7 letters and digits (at least one of each) with an optional `-SSID` of 1 or 2 characters; nothing else reaches the filter. At most 10 calls across every device. Refusals, to that device only: `refused {of: 'aprs-find', reason, text}` with `reason` `bad-call`, `not-subscribed` (send `aprs-subscribe {on: true}` first) or `full`. Read only: nothing transmits and nothing goes out under the owner's callsign, so **a Guest Pass may find**, as it may subscribe. |
+| `aprs-view` | C→S | `{n, s, e, w}` (2026-11-22, Casey's go; `lib/aprs-view.js`). **Map view**: the internet stations follow the phone's map. Degrees of the map's visible area, sent once per settled pan or zoom; `w > e` means the box crosses the antimeridian. `{}` (no fields) stops; unsubscribing (`aprs-subscribe {on: false}`) or disconnecting stops it too. The same box again is ignored. The desktop adds an area term `a/latN/lonW/latS/lonE` to its read-only APRS-IS filter (two terms across the antimeridian) and sends `#filter` on the live connection. The box is capped to about 4000 km on its longest side (width measured on the box's widest parallel), centre kept; `aprs-state.feed.area` says what this device got. **Several devices**: one area per device, each capped on its own (a union of two phones far apart would be one huge box the cap would centre over neither), at most 4 devices. **The range term**: it stays beside the areas while the desktop's APRS window is open or any subscribed device has no view, so the window's range and a phone on miles keep working; when every subscribed device is on Map view and the window is closed, the areas take its place. Budlist terms (`aprs-find`, heard you) and the message filter stay either way. Every row the desktop holds goes to every subscribed device, so stations inside the box arrive whatever `rangeKm` is; rows that leave the box age out as usual. Checked strictly: all four must be finite JSON numbers, latitude within ±90, longitude within ±180, `n > s`, some width; nothing else reaches the filter. Refusals, to that device only: `refused {of: 'aprs-view', reason, text}` with `reason` `bad-view`, `not-subscribed` (send `aprs-subscribe {on: true}` first) or `full` (4 other devices are on Map view). Read only, nothing transmits: **a Guest Pass may send it**, as it may subscribe. |
 | `aprs-state` | S→C | Coalesced to at most one every 500 ms. Fields below. |
 | `aprs-state.beacon.rf` | (field) | The radio beacon for the phone's confirm (2026-11-21): `{ready, setup, sentence, band, mhz, modeLabel, powerW, airSeconds, sending, lastAt, lastResult, lastSentence}`. `setup: true` = Listen is off and the desktop will set the radio up for the press. `sentence` says why `ready` is false. `lastResult` is `confirmed` (the radio reported transmit), `unconfirmed` (keyed, no readback from this radio) or `not-sent`. `airSeconds` is known only while listening. The top-level `mayBeaconRf` is true for an owner device when `rf.ready`. Heard you (2026-11-22): `rf.heard: {until, count, lastAt}`. `until` is the epoch ms the internet watch after the last confirmed radio beacon ends (0 when closed); `count` is how many stations heard the last beacon; `lastAt` is the newest report (0 = none). "Not heard yet" while `until` is in the future and `count` is 0. |
 | `aprs-stations` | S→C | Station rows; only to a subscribed `aprs` client. `op: 'snapshot'`: `{stations: Row[], chunk, totalChunks, total}`, byte-bounded chunks (200 KB, like `worked-qsos`), always at least one (an empty store sends one empty chunk); replace the list once the last chunk (`chunk + 1 === totalChunks`) is in. `op: 'delta'`: `{add: Row[], update: Row[], gone: key[], total}`, batched every 1.5 s, never empty. Treat `add` and `update` as upserts by `key`. `gone`: not heard for 60 minutes, or a killed object or item. |
@@ -671,7 +680,8 @@ the shack's radio heard). No new message or field; `lib/remote-bridge.js` and
 ```
 {
   type: 'aprs-state',
-  feed:   { state: 'off'|'stopped'|'connecting'|'connected'|'waiting'|'refused'|'no-grid', server, km, anonymous, subscribers },
+  feed:   { state: 'off'|'stopped'|'connecting'|'connected'|'waiting'|'refused'|'no-grid', server, km, anonymous, subscribers,
+            area: { n, s, e, w, capped } | null },   // Map view (2026-11-22): this device's own area as asked of APRS-IS; capped: cut to 4000 km a side ("Zoom in for more")
   listen: { on, state: 'off'|'starting'|'listening'|'paused'|'refused', band, bands: ['2m','30m'],
             modeLabel, mhz, heard, lastAt, sentence, note },
   igate:  { on, active, call, link: 'stopped'|'connecting'|'connected'|'verified'|'unverified'|'waiting',
@@ -766,7 +776,7 @@ boat and aircraft turned to `course`). Idle Mode's `aprs` choice stays on
 | `cloud-tunnel-result` | S→C | `{ok, error?, message?}`: `ok:true` when the tunnel is on (or already was); `error` is `guest_pass`, `signed_out`, `no_access` or `not_ready`, with `message` in plain words. The tunnel's new state also arrives as `cloud-state` where that is supported. |
 | `cloud-logout-result` | S→C | Logout confirmation. |
 | `cloud-get-status` | C→S | Sync status query. |
-| `cloud-status` | S→C | Status response. |
+| `cloud-status` | S→C | Status response. Also pushed unasked, as `{ loggedIn: false }`, to owner clients (never Guest Pass clients) when POTACAT Cloud signs the shack out because it was removed from the account (`device_revoked`, 2026-11-20). |
 | `cloud-sync-now` | C→S | Force a sync. |
 | `cloud-sync-result` | S→C | Sync result. |
 | `cloud-bulk-upload` | C→S | Push all local QSOs to cloud. |

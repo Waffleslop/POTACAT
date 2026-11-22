@@ -16351,7 +16351,11 @@ var _paddleHoldTimer = { dit: null, dah: null };
     // A mode that runs with a caveat (no CAT control: the operator sets the dial).
     var cav = mailEl('mail-mode-caveat');
     var curMode = ((mailState && mailState.modes) || []).filter(function (m) { return m.id === cur; })[0];
-    if (cav) { cav.textContent = (curMode && curMode.note) || ''; cav.classList.toggle('hidden', !(curMode && curMode.note)); }
+    // VARA too old for 1 January 2027 (the shack read its version), before any caveat.
+    var vn = (mailState && mailState.varaNotice) || {};
+    var varaOld = cur === 'vara' ? vn.hf : cur === 'varafm' ? vn.fm : '';
+    var cavText = [varaOld, curMode && curMode.note].filter(Boolean).join(' ');
+    if (cav) { cav.textContent = cavText; cav.classList.toggle('hidden', !cavText); }
     mailShow('mail-radio', cur !== 'telnet');
     mailRenderBands();
     mailRenderBar();
