@@ -213,6 +213,7 @@ const TESTS = [
   'test/ptt-cat-line-test.js',
   'test/rigctld-link-hints-test.js',
   'test/serial-cat-test-connection-test.js',
+  'test/cat-test-kills-rigctld-test.js', // every serial Test Connection stops rigctld and waits before opening the port (#910)
   'test/voice-recorder-test.js',
   'test/hf-net-row-test.js',
   'test/log-freq-follow-test.js',
