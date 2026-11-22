@@ -13532,7 +13532,7 @@ function aprsOnMonitorFrame(f) {
   // Phase 4: the iGate takes every UI frame heard (its own rules decide), parsed or not.
   const heard = AprsRfFrames.fromMonitorFrame(f);
   if (heard) aprsIgateOfferRf(heard.line);
-  const p = AprsRfFrames.packet(f, AprsParser.parse);
+  const p = AprsRfFrames.packet(f, AprsParser.parse, aprsListen.band); // rf.band: the band listened on (ECHOCAT 2026-11-21)
   if (!p) return;
   aprsListen.heard++;
   aprsListen.lastAt = Date.now();
@@ -14942,6 +14942,8 @@ const aprsEcho = AprsEchocat.createController({
   stopFeed: () => { if (aprsFeedHooks) aprsFeedHooks.stop(); },
   feedRunning: () => !!aprsFeed,
   setFeedRange: (km) => { if (aprsFeedHooks) aprsFeedHooks.setRange(km); },
+  setFollow: (calls) => { if (aprsFeedHooks) aprsFeedHooks.setFollow(calls); }, // aprs-find: calls passed beyond the range
+  sendTo: (id, m) => { if (remoteServer && remoteServer.sendAprsTo) remoteServer.sendAprsTo(id, m); },
   windowOpen: () => !!(aprsWin && !aprsWin.isDestroyed()),
   listenSet: (on) => aprsListenSet(on),
   listenSetBand: (b) => aprsListenSetBand(b),
@@ -48076,7 +48078,7 @@ function cloudShackNotice(text, kind) {
     const Feed = require('./lib/aprs-is-feed');
     const AprsParser = require('./lib/aprs-parser');
     const dev = APRS_IS_DEV_SERVER || {}; // dev builds only: a local fake APRS-IS server
-    aprsFeed = new Feed.AprsIsFeed({ call: settings.myCallsign, version: app.getVersion(), lat: home.lat, lon: home.lon, km: settings.aprsRangeKm, host: dev.host, port: dev.port });
+    aprsFeed = new Feed.AprsIsFeed({ call: settings.myCallsign, version: app.getVersion(), lat: home.lat, lon: home.lon, km: settings.aprsRangeKm, follow: aprsEcho.followCalls(), host: dev.host, port: dev.port });
     aprsBatch = Feed.createBatcher((packets) => aprsSend('aprs-packets', packets), 500);
     aprsFeed.on('line', (line) => {
       try { aprsMessagesFeedLine(line); } catch (e) { aprsLog('message: ' + e.message); } // A1: messages, acks and rejs for us
@@ -48097,6 +48099,7 @@ function cloudShackNotice(text, kind) {
     start: () => aprsStartFeed(),
     stop: () => aprsStopFeed(),
     setRange: (km) => { if (aprsFeed) aprsFeed.setRange(null, null, require('./lib/aprs-is-feed').clampRangeKm(km)); },
+    setFollow: (calls) => { if (aprsFeed) aprsFeed.setFollow(calls); },
   };
   ipcMain.on('aprs-popout-open', () => {
     if (aprsWin && !aprsWin.isDestroyed()) { aprsWin.focus(); return; }
