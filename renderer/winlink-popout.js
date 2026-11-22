@@ -909,6 +909,15 @@
     wfNoteFrame(pcm);
     wfPush(pcm, d.sampleRate || 24000);
   });
+  // Driving a remote shack (#299): no radio audio reaches this PC; the shack
+  // sends its waterfall as frames (lib/winlink-remote-shack.js magsFromWireBins).
+  if (window.api.onRemoteSpectrum) window.api.onRemoteSpectrum(function (d) {
+    if (wfMode !== 'frames' || !d || !Array.isArray(d.mags)) return;
+    wfLastFrameAt = wfLastSoundAt = Date.now();
+    var m = new Float32Array(d.mags);
+    busyUpdate(m);
+    if (wf && $('wl-wf').classList.contains('show')) wf.pushFrame(m);
+  });
   function wfSync() {
     wfApplyPrefs();
     var m = currentMode();

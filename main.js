@@ -92,6 +92,7 @@ const CleanExitMarker = require('./lib/clean-exit-marker');
 const FreqDots = require('./lib/freq-dots'); // display only: 14.074.00 MHz, the VFO way
 const RemoteBridge = require('./lib/remote-bridge');
 const AprsRemoteShack = require('./lib/aprs-remote-shack'); // #868: APRS listening on the shack from this desktop
+const WinlinkRemoteShack = require('./lib/winlink-remote-shack'); // #299: the Winlink window drives the shack's Winlink
 const WaterfallPalettes = require('./lib/waterfall-palettes');
 const GpuStatus = require('./lib/gpu-status'); // #773: the GPU line in the session log
 const ShackGrid = require('./lib/shack-grid'); // #774: the JTCAT map on the shack's grid
@@ -102,7 +103,7 @@ const ShackGrid = require('./lib/shack-grid'); // #774: the JTCAT map on the sha
     : fn);
   // Invokes that answer from the shack (the JS8 window): undefined = run locally.
   const _ipcHandle = ipcMain.handle.bind(ipcMain);
-  ipcMain.handle = (channel, fn) => _ipcHandle(channel, (RemoteBridge.JS8_INVOKES.includes(channel) || RemoteBridge.SSTV_INVOKES.includes(channel))
+  ipcMain.handle = (channel, fn) => _ipcHandle(channel, (RemoteBridge.JS8_INVOKES.includes(channel) || RemoteBridge.SSTV_INVOKES.includes(channel) || RemoteBridge.WINLINK_INVOKES.includes(channel))
     ? async (e, ...args) => { const r = await bridgeInvokeToShack(channel, args, e); return r !== undefined ? r : fn(e, ...args); }
     : fn);
 }
@@ -7889,6 +7890,7 @@ function bridgeIpcToShack(channel, args, e) {
   const rule = RemoteBridge.OUT[channel];
   if (!rule) return false;
   const r = rule(args || [], _remoteBridgeState) || { drop: true };
+  if (r.local) return false; // this PC's own preference (the Winlink window's waterfall speed)
   if (r.drop) return true;
   const fromSstv = !!(sstvPopoutWin && !sstvPopoutWin.isDestroyed() && e && e.sender === sstvPopoutWin.webContents);
   const fromAprs = !!(aprsWin && !aprsWin.isDestroyed() && e && e.sender === aprsWin.webContents);
@@ -7934,6 +7936,7 @@ function bridgeIpcToShack(channel, args, e) {
   return true;
 }
 function bridgeInboundFromShack(msg) {
+  if (remoteWinlinkInbound(msg)) return true;
   if (remoteJs8Inbound(msg)) return true;
   if (remoteSstvInbound(msg)) return true;
   const rule = RemoteBridge.IN[msg.type];
@@ -7941,6 +7944,7 @@ function bridgeInboundFromShack(msg) {
   RemoteBridge.trackState(_remoteBridgeState, msg);
   const out = rule(msg, _remoteBridgeState) || [];
   for (const [ch, payload] of out) {
+    if (ch.startsWith('winlink-')) { remoteWinlinkToWindow(ch, payload); continue; }
     if (ch.startsWith('aprs-')) {
       if (ch === 'aprs-listen') _remoteAprsListen = payload;
       if (aprsWin && !aprsWin.isDestroyed()) aprsWin.webContents.send(ch, payload);
@@ -8053,8 +8057,73 @@ function remoteJs8Inbound(msg) {
     default: return false;
   }
 }
+// Winlink on the shack (#299). The Winlink Mail window shows the SHACK's
+// Winlink while this desktop drives one: its state, folders and session
+// arrive as the winlink-* frames every owner device gets (kept here, so a
+// window opened later is filled at once), and its requests go out as the
+// wire's winlink-* messages, answered by reqId. The mapping is
+// lib/winlink-remote-shack.js; this PC's own Pat is not started.
+const _remoteWinlink = { state: null, mailboxes: {}, session: null, pending: new Map(), wanted: false };
+let _remoteWinlinkSeq = 0;
+function remoteWinlinkReset() {
+  for (const p of _remoteWinlink.pending.values()) p(null);
+  Object.assign(_remoteWinlink, { state: null, mailboxes: {}, session: null, pending: new Map() });
+}
+/** A shack frame for the Winlink window: kept, and shown when the window is open. */
+function remoteWinlinkToWindow(ch, payload) {
+  if (ch === 'winlink-state') _remoteWinlink.state = payload;
+  else if (ch === 'winlink-mailbox' && payload && payload.box) _remoteWinlink.mailboxes[payload.box] = payload;
+  else if (ch === 'winlink-session') _remoteWinlink.session = payload;
+  if (winlinkPopoutWin && !winlinkPopoutWin.isDestroyed()) winlinkPopoutWin.webContents.send(ch, payload);
+}
+/** A reply by reqId wakes the request that asked; a reply-only frame stops here. */
+function remoteWinlinkInbound(msg) {
+  if (!msg || typeof msg.type !== 'string' || !msg.type.startsWith('winlink-')) return false;
+  const p = msg.reqId && _remoteWinlink.pending.get(msg.reqId);
+  if (p) p(msg);
+  return !RemoteBridge.IN[msg.type];
+}
+/** The window opened (true) or closed (false): the shack counts it as a Mail view, as a phone's tab. */
+function remoteWinlinkView(on) {
+  _remoteWinlink.wanted = !!on;
+  if (!isRemoteLinked()) return;
+  remoteClient.sendRaw({ type: 'winlink-mail-view', open: !!on });
+  if (on) remoteClient.sendRaw({ type: 'winlink-list', box: 'in' }); // starts the shack's Pat, refreshes the Inbox
+  else { remoteClient.sendRaw({ type: 'winlink-watch', on: false }); remoteClient.sendRaw({ type: 'winlink-qsy-restore' }); }
+}
+/** Fill a freshly loaded window from what the shack last sent. */
+function remoteWinlinkHydrateWindow() {
+  if (!winlinkPopoutWin || winlinkPopoutWin.isDestroyed()) return;
+  const send = (ch, p) => winlinkPopoutWin.webContents.send(ch, p);
+  send('winlink-state', _remoteWinlink.state || { ...WinlinkRemoteShack.waitingState(), ...(isRemoteLinked() ? {} : { patError: REMOTE_NOT_LINKED_MSG }) });
+  for (const m of Object.values(_remoteWinlink.mailboxes)) send('winlink-mailbox', m);
+  if (_remoteWinlink.session) send('winlink-session', _remoteWinlink.session);
+}
+async function remoteWinlinkInvoke(channel, args) {
+  const r = WinlinkRemoteShack.INVOKES[channel](args) || {};
+  if (r.answer !== undefined) return r.answer;
+  if (r.cached === 'state') return _remoteWinlink.state || { ...WinlinkRemoteShack.waitingState(), ...(isRemoteLinked() ? {} : { patError: REMOTE_NOT_LINKED_MSG }) };
+  if (!isRemoteLinked()) return { ok: false, error: REMOTE_NOT_LINKED_MSG };
+  const wire = r.send || r.save;
+  if (!wire) return { ok: false, error: WinlinkRemoteShack.NO_ANSWER };
+  const reqId = 'd2d-wl-' + (++_remoteWinlinkSeq);
+  const frame = await new Promise((resolve) => {
+    const t = setTimeout(() => { _remoteWinlink.pending.delete(reqId); resolve(null); }, r.ms || WinlinkRemoteShack.MS.default);
+    _remoteWinlink.pending.set(reqId, (m) => { clearTimeout(t); _remoteWinlink.pending.delete(reqId); resolve(m); });
+    remoteClient.sendRaw({ ...wire, reqId });
+  });
+  const out = WinlinkRemoteShack.reply(channel, frame, args);
+  if (!r.save || !out.ok) return out;
+  // An attachment from the shack is saved on this PC, as a local one is.
+  const safe = path.basename(String(out.name)).replace(/[<>:"/\\|?*\x00-\x1f]/g, '_') || 'attachment';
+  const pick = await dialog.showSaveDialog(winlinkPopoutWin || win, { title: 'Save attachment', defaultPath: path.join(app.getPath('downloads'), safe) });
+  if (pick.canceled || !pick.filePath) return { ok: false, canceled: true };
+  fs.writeFileSync(pick.filePath, Buffer.from(out.dataBase64, 'base64'));
+  return { ok: true, path: pick.filePath };
+}
 async function bridgeInvokeToShack(channel, args, e) {
   if (!isRemoteMode()) return undefined;
+  if (WinlinkRemoteShack.INVOKES[channel]) return remoteWinlinkInvoke(channel, args || []);
   if (!isRemoteLinked()) return { ok: false, error: REMOTE_NOT_LINKED_MSG };
   const reqId = 'd2d-' + (++_remoteJs8Seq);
   const st = _remoteJs8.state || {};
@@ -8274,6 +8343,9 @@ function ensureRemoteClient() {
     // APRS (#868): this shack's aprs-state follows (an older shack sends none); watch again while the window is open.
     _remoteBridgeState.aprs = false; _remoteBridgeState.aprsListenOn = false; _remoteAprsListen = null;
     if (aprsWin && !aprsWin.isDestroyed()) remoteAprsWatch(true);
+    // Winlink (#299): the shack hydrates this session; a stale shack's folders go first.
+    remoteWinlinkReset();
+    if (winlinkPopoutWin && !winlinkPopoutWin.isDestroyed()) { remoteWinlinkHydrateWindow(); remoteWinlinkView(true); }
     if (sstvPopoutWin && !sstvPopoutWin.isDestroyed()) { _remoteSstvWindowOpen = false; remoteClient.sendRaw({ type: 'sstv-open' }); }
     if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed() && _remoteJtcatMode) {
       remoteClient.sendRaw({ type: 'jtcat-start', mode: _remoteJtcatMode });
@@ -8655,6 +8727,16 @@ function tearDownRemoteClient() {
   // APRS (#868): the listening card goes back to this PC's own radio.
   _remoteAprsWanted = false; _remoteBridgeState.aprs = false; _remoteBridgeState.aprsListenOn = false; _remoteAprsListen = null;
   try { aprsListenPush(); } catch { /* the APRS state is declared further down; nothing to show yet */ }
+  // Winlink (#299): an open Mail window goes back to this PC's own Pat.
+  remoteWinlinkReset(); _remoteWinlink.wanted = false;
+  if (!isRemoteMode() && winlinkPopoutWin && !winlinkPopoutWin.isDestroyed()) {
+    try {
+      winlinkPopoutSend('winlink-state', winlinkPayload());
+      for (const box of WinlinkStateLib.FOLDERS) winlinkPopoutSend('winlink-mailbox', { box, messages: winlinkState.list(box) });
+      winlinkPopoutSend('winlink-session', winlinkSessionView());
+      winlinkEnsureStarted();
+    } catch { /* Winlink is declared further down; nothing to show yet */ }
+  }
   if (_remotePaddleHoldTimer) { clearInterval(_remotePaddleHoldTimer); _remotePaddleHoldTimer = null; }
   // The shack's VFO lock was mirrored here; this PC's radio starts unlocked.
   if (_vfoLocked) {
@@ -11775,6 +11857,8 @@ function winlinkPayload() {
 }
 
 function winlinkPopoutSend(channel, payload) {
+  // Driving a remote shack (#299): the window shows the shack's Winlink, fed by the bridge.
+  if (isRemoteMode() && WinlinkRemoteShack.SHACK_CHANNELS.includes(channel)) return;
   if (winlinkPopoutWin && !winlinkPopoutWin.isDestroyed()) winlinkPopoutWin.webContents.send(channel, payload);
 }
 
@@ -48090,7 +48174,10 @@ function cloudShackNotice(text, kind) {
         settings.winlinkPopoutBounds = winlinkPopoutWin.getBounds(); saveSettings(settings);
       }
     });
-    winlinkPopoutWin.on('closed', () => { winlinkPopoutWin = null; _winlinkWatchAudio = false; winlinkMailViewClosed('window closed'); winlinkSyncModemBridge(); });
+    winlinkPopoutWin.on('closed', () => {
+      winlinkPopoutWin = null; _winlinkWatchAudio = false; winlinkMailViewClosed('window closed'); winlinkSyncModemBridge();
+      if (_remoteWinlink.wanted) remoteWinlinkView(false); // #299: the shack's dial goes back, as when a phone leaves its Mail tab
+    });
     winlinkPopoutWin.webContents.on('did-finish-load', () => {
       winlinkPopoutSend('winlink-state', winlinkPayload());
       if (_winlinkPendingCompose) { winlinkPopoutSend('winlink-compose-prefill', _winlinkPendingCompose); _winlinkPendingCompose = null; }
@@ -48102,6 +48189,7 @@ function cloudShackNotice(text, kind) {
       pushWinlinkRigPower(true);
       winlinkPopoutSend('winlink-remote-watch', _winlinkRemoteWatchers > 0);
       winlinkSyncModemBridge();
+      if (isRemoteMode()) remoteWinlinkHydrateWindow(); // #299: the shack's state, folders and session
     });
     winlinkPopoutWin.webContents.on('before-input-event', (_e, input) => {
       if (input.key === 'F12' && input.type === 'keyDown') winlinkPopoutWin.webContents.toggleDevTools();
@@ -48643,14 +48731,15 @@ function cloudShackNotice(text, kind) {
   });
   // ─── Winlink IPC (the mail window + Settings). Every surface goes through
   // the same winlink* functions; a radio session starts only from Connect.
-  ipcMain.on('winlink-popout-open', () => { openWinlinkPopout(); winlinkEnsureStarted(); });
+  // Driving a remote shack (#299): the window is the shack's; this PC's Pat is not started.
+  ipcMain.on('winlink-popout-open', () => { openWinlinkPopout(); if (isRemoteMode()) remoteWinlinkView(true); else winlinkEnsureStarted(); });
   ipcMain.handle('winlink-pota-spot-template', (_e, o = {}) => winlinkPotaSpotTemplate(o));
   // Activation's "Winlink" spot button: the Mail window opens on the spot,
   // filled in; the operator reads it, queues it and starts the session.
   ipcMain.on('winlink-pota-spot-open', (_e, o = {}) => {
     _winlinkPendingCompose = winlinkPotaSpotTemplate(o);
     const wasOpen = !!(winlinkPopoutWin && !winlinkPopoutWin.isDestroyed());
-    openWinlinkPopout(); winlinkEnsureStarted();
+    openWinlinkPopout(); if (isRemoteMode()) remoteWinlinkView(true); else winlinkEnsureStarted();
     if (wasOpen && !winlinkPopoutWin.webContents.isLoading()) { winlinkPopoutSend('winlink-compose-prefill', _winlinkPendingCompose); _winlinkPendingCompose = null; }
   });
   // The renderer's answer to a sound-card PTT edge (cm108-ptt): one log line.
@@ -48700,8 +48789,8 @@ function cloudShackNotice(text, kind) {
   ipcMain.handle('winlink-forms-update', () => winlinkFormsUpdate());
   ipcMain.handle('winlink-form-open', (_e, o = {}) => winlinkFormOpen({ kind: String(o.kind || ''), path: String(o.path || ''), box: String(o.box || ''), mid: String(o.mid || ''), file: String(o.file || '') }));
   ipcMain.handle('winlink-form-info', (_e, o = {}) => winlinkFormInfo({ box: String(o.box || ''), mid: String(o.mid || ''), file: String(o.file || '') }));
+  // Driving a remote shack, the bridge sends this to the shack (#299) and this handler never runs.
   ipcMain.handle('winlink-cmd-connect', (_e, o = {}) => {
-    if (isRemoteMode() && WinlinkModes.isRadioMode(o.mode)) return { ok: false, error: 'Radio sessions key the shack\'s radio — start them on the shack PC' };
     winlinkRetryCancel('connect');
     return winlinkStartSession({ mode: o.mode, gateway: o.gateway, dialKhz: o.dialKhz, url: o.url, origin: 'mail window' });
   });

@@ -33,6 +33,10 @@ for (const m of sstvPreload.matchAll(/ipcRenderer\.on\('([a-z0-9:-]+)'/g)) incom
 const aprsPreload = R('preload-aprs-popout.js');
 const aprsOut = [...new Set([...aprsPreload.matchAll(/ipcRenderer\.(?:send|invoke)\('([a-z0-9:-]+)'/g)].map(m => m[1]))];
 for (const m of aprsPreload.matchAll(/ipcRenderer\.on\('([a-z0-9:-]+)'/g)) incoming.add(m[1]);
+// The Winlink Mail window (#299): it drives the shack's Winlink.
+const wlPreload = R('preload-winlink-popout.js');
+const wlOut = [...new Set([...wlPreload.matchAll(/ipcRenderer\.(?:send|invoke)\('([a-z0-9:-]+)'/g)].map(m => m[1]))];
+for (const m of wlPreload.matchAll(/ipcRenderer\.on\('([a-z0-9:-]+)'/g)) incoming.add(m[1]);
 
 console.log('JTCAT remote bridge');
 
@@ -42,7 +46,7 @@ test('every channel the pop-out sends is bridged or deliberately local', () => {
 });
 
 test('every bridged channel is one the pop-out really sends', () => {
-  const stale = Object.keys(B.OUT).filter(ch => !outgoing.includes(ch) && !js8Out.includes(ch) && !sstvOut.includes(ch) && !aprsOut.includes(ch));
+  const stale = Object.keys(B.OUT).filter(ch => !outgoing.includes(ch) && !js8Out.includes(ch) && !sstvOut.includes(ch) && !aprsOut.includes(ch) && !wlOut.includes(ch));
   assert.deepStrictEqual(stale, []);
 });
 
@@ -83,7 +87,7 @@ test('every channel the JS8 window sends or invokes is bridged, answered, or del
   for (const ch of B.JS8_INVOKES) assert.ok(js8Out.includes(ch), ch + ' is a real JS8 invoke');
   const inv = main.slice(main.indexOf('async function bridgeInvokeToShack('), main.indexOf('async function bridgeInvokeToShack(') + 7000);
   for (const ch of B.JS8_INVOKES) assert.ok(inv.includes(`case '${ch}':`), ch + ' answered');
-  assert.ok(/ipcMain\.handle = \(channel, fn\) => _ipcHandle\(channel, \(RemoteBridge\.JS8_INVOKES\.includes\(channel\) \|\| RemoteBridge\.SSTV_INVOKES\.includes\(channel\)\)/.test(main), 'invokes are wrapped');
+  assert.ok(/ipcMain\.handle = \(channel, fn\) => _ipcHandle\(channel, \(RemoteBridge\.JS8_INVOKES\.includes\(channel\) \|\| RemoteBridge\.SSTV_INVOKES\.includes\(channel\) \|\| RemoteBridge\.WINLINK_INVOKES\.includes\(channel\)\)/.test(main), 'invokes are wrapped');
   for (const m of inv.matchAll(/type: '(js8-[a-z-]+)'/g)) assert.ok(MESSAGES[m[1]], m[1] + ' is registered');
 });
 
@@ -215,6 +219,40 @@ test('the shack side: jtcat-set-pref and jtcat-relay, Guest Pass held off', () =
   assert.ok(/case 'jtcat-relay':\n\s+if \(ws\._passSession && msg\.channel !== 'jtcat-set-tx-msg'\) break;/.test(srv));
   assert.ok(/RemoteBridge\.acceptPref\(key, value\)/.test(main));
   assert.ok(/if \(!RemoteBridge\.RELAY_CHANNELS\.includes\(channel\)\) return;/.test(main));
+});
+
+test('Winlink (#299): every channel the Winlink window sends or invokes is bridged, answered, or deliberately local', () => {
+  const missing = wlOut.filter(ch => !B.WINLINK_OUT[ch] && !B.WINLINK_INVOKES.includes(ch) && !B.WINLINK_LOCAL_ONLY[ch]);
+  assert.deepStrictEqual(missing, [], 'add a row to WINLINK_OUT, lib/winlink-remote-shack.js INVOKES, or WINLINK_LOCAL_ONLY (with the reason)');
+  for (const ch of B.WINLINK_INVOKES) assert.ok(wlOut.includes(ch), ch + ' is a real Winlink window invoke');
+  for (const ch of Object.keys(B.WINLINK_OUT)) assert.ok(wlOut.includes(ch), ch + ' is a real Winlink window send');
+  // The wrappers catch only their own kind: an invoke row needs an ipcMain.handle, a send row an ipcMain.on.
+  for (const ch of B.WINLINK_INVOKES) assert.ok(main.includes(`ipcMain.handle('${ch}'`), ch + ' is an ipcMain.handle');
+  for (const ch of Object.keys(B.WINLINK_OUT)) assert.ok(main.includes(`ipcMain.on('${ch}'`), ch + ' is an ipcMain.on');
+});
+
+test('Winlink (#299): the window shows the shack\'s Winlink; this PC\'s Pat stays off', () => {
+  const inv = main.slice(main.indexOf('async function bridgeInvokeToShack('), main.indexOf('async function bridgeInvokeToShack(') + 400);
+  assert.ok(/if \(WinlinkRemoteShack\.INVOKES\[channel\]\) return remoteWinlinkInvoke\(channel, args \|\| \[\]\);/.test(inv), 'the window\'s invokes go to the shack');
+  assert.ok(/if \(remoteWinlinkInbound\(msg\)\) return true;/.test(main), 'replies wake the request by reqId');
+  assert.ok(/if \(ch\.startsWith\('winlink-'\)\) \{ remoteWinlinkToWindow\(ch, payload\); continue; \}/.test(main), 'shack frames reach the Winlink window');
+  assert.ok(/if \(isRemoteMode\(\) && WinlinkRemoteShack\.SHACK_CHANNELS\.includes\(channel\)\) return;/.test(main), 'this PC\'s pushes are held back');
+  assert.ok(/openWinlinkPopout\(\); if \(isRemoteMode\(\)\) remoteWinlinkView\(true\); else winlinkEnsureStarted\(\);/.test(main), 'opening starts no local Pat');
+  assert.ok(/if \(r\.local\) return false;/.test(main), 'a local preference still runs here');
+  const conn = main.slice(main.indexOf("ipcMain.handle('winlink-cmd-connect'"), main.indexOf("ipcMain.handle('winlink-cmd-connect'") + 300);
+  assert.ok(!/isRemoteMode()/.test(conn), 'Connect no longer refuses a radio mode in remote mode');
+  assert.ok(/'mail-folders-v2'/.test(R('lib/remote-client.js')), 'the hello asks for the Deleted folder');
+  assert.ok(/onRemoteSpectrum\(function \(d\)/.test(R('renderer/winlink-popout.js')), 'the waterfall draws the shack\'s frames');
+});
+
+test('Winlink (#299): the OUT rows', () => {
+  assert.deepStrictEqual(B.OUT['winlink-cmd-abort']([], {}), { send: [{ type: 'winlink-abort' }] });
+  assert.deepStrictEqual(B.OUT['winlink-cmd-prompt']([{ id: 'p1', value: 'abort' }], {}).send[0], { type: 'winlink-prompt', id: 'p1', value: 'abort' });
+  assert.deepStrictEqual(B.OUT['winlink-cmd-set-mode'](['ardop'], {}).send[0], { type: 'winlink-set-mode', mode: 'ardop' });
+  assert.deepStrictEqual(B.OUT['winlink-watch-audio']([true], {}).send[0], { type: 'winlink-watch', on: true });
+  assert.deepStrictEqual(B.OUT['winlink-cmd-pref']([{ key: 'winlinkWaterfallSpeed', value: 20 }], {}), { local: true });
+  assert.ok(B.OUT['winlink-cmd-pref']([{ key: 'winlinkTxGain', value: 0.5 }], {}).refuse);
+  assert.deepStrictEqual(B.OUT['winlink-spectrum-mags']([], {}), { drop: true });
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);

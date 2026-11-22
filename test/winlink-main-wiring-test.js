@@ -352,7 +352,8 @@ test('What\'s New carries the Winlink card once per profile, with a working opt-
 test('Winlink is always available and Pat starts on first use', () => {
   assert.ok(!/settings\.enableWinlink/.test(main), 'no code path in main is gated on enableWinlink');
   assert.ok(/enabled: true,\n\s*patStarted: !!patClient,/.test(fnBody(main, 'winlinkPayload')));
-  assert.ok(/ipcMain\.on\('winlink-popout-open', \(\) => \{ openWinlinkPopout\(\); winlinkEnsureStarted\(\); \}\);/.test(main), 'the mail window starts it');
+  // Driving a remote shack (#299) the window is the shack's, and the shack's Pat starts instead.
+  assert.ok(/ipcMain\.on\('winlink-popout-open', \(\) => \{ openWinlinkPopout\(\); if \(isRemoteMode\(\)\) remoteWinlinkView\(true\); else winlinkEnsureStarted\(\); \}\);/.test(main), 'the mail window starts it');
   assert.ok(/if \(type !== 'winlink-watch'\) winlinkEnsureStarted\(\);/.test(fnBody(main, 'winlinkHandleRemote')), 'a device request starts it');
   assert.ok(/if \(settings\.winlinkPassword\) connectWinlink\(\);/.test(main), 'an account holder has it running from launch');
   for (const f of ['winlinkAccountCheck', 'winlinkSetPassword', 'winlinkRegister', 'winlinkStartSession']) {
