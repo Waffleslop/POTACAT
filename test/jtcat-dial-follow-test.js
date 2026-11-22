@@ -68,7 +68,15 @@ test('wire, bridge and window', () => {
   assert.ok(/onJtcatBandFollow\(function\(d\) \{[\s\S]*?bandSelectFollowActive\(\)/.test(pop), 'the window marks the band');
   const follow = pop.slice(pop.indexOf('onJtcatBandFollow(function(d)'), pop.indexOf('// Band buttons'));
   assert.ok(!/window\.api\.tune\(/.test(follow), 'and never retunes the radio');
-  assert.ok(/data\.followRadio && window\.api\.jtcatFollowRadio/.test(pop), 'the refusal toast has the button');
+  assert.ok(/txErrorFollow.hidden = !data\.followRadio \|\| !window\.api\.jtcatFollowRadio/.test(pop));
+  assert.ok(pop.includes("txErrorFollow.addEventListener('click', function() { window.api.jtcatFollowRadio(); })"));
+  assert.ok(read('renderer/jtcat-popout.html').includes('id="jp-tx-error-dismiss"'), 'the refusal stays visible until dismissed');
+});
+
+test('startup builds the engine before tuning the selected band', () => {
+  const pop = read('renderer/jtcat-popout.js');
+  const restore = pop.slice(pop.indexOf('var lastFreq = s.jtcatLastBandFreq'));
+  assert.ok(/jtcatStart\(modeSelect.value\);[^]*?if \(bandBtn\) selectBand\(bandBtn, false\);/.test(restore));
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);

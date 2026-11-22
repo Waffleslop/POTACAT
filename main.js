@@ -4678,11 +4678,12 @@ function js8FollowBand(dialHz, band) {
 // is where they mean to transmit, whatever the frequency.
 function jtcatFollowRadioNow(who) {
   const dialLive = !!((cat && cat.connected) || (smartSdr && smartSdr.canTune && smartSdr.connected));
-  if (!dialLive || !(_currentFreqHz > 0) || !ft8Engine || !ft8Engine._running) {
+  const dialHz = tciRigLinked() ? tciRigDial : (dialLive ? _currentFreqHz : 0);
+  if (!(dialHz > 0) || !ft8Engine || !ft8Engine._running) {
     sendCatLog('[JTCAT] Follow the radio: no live dial from the radio, nothing to follow');
     return false;
   }
-  jtcatFollowBand(_currentFreqHz, freqToBand(_currentFreqHz / 1e6) || '', `${who} pressed Follow the radio`);
+  jtcatFollowBand(dialHz, freqToBand(dialHz / 1e6) || '', `${who} pressed Follow the radio`);
   return true;
 }
 
@@ -27438,7 +27439,7 @@ function tciRigTxMeter(kind, value) {
 function tciRigJtcatTx(data, mode) {
   const refuse = (why) => {
     sendCatLog(`[TCI TX] Refused: ${why}`);
-    if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) jtcatPopoutWin.webContents.send('jtcat-qso-state', { phase: 'error', error: why });
+    if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) jtcatPopoutWin.webContents.send('jtcat-qso-state', { phase: 'error', error: why, txRefused: true });
     if (remoteServer && remoteServer.hasClient()) remoteServer.broadcastJtcatQsoState({ phase: 'error', error: why });
     setTimeout(() => jtcatRefuseTx(why), 0);
     return false;
