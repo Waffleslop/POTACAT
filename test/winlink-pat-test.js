@@ -155,6 +155,14 @@ test('each row carries Pat\'s service code; only a code other than PUBLIC is a t
   assert.deepStrictEqual(rows.map((r) => r.serviceCode), ['MERCURY', 'PUBLIC', 'EMCOMM', '', '']);
   assert.deepStrictEqual(rows.map((r) => r.serviceTag), ['MERCURY', '', 'EMCOMM', '', '']);
 });
+// Mercury phase 0 (docs/mercury-phase0-tester-guide.md): a tester runs
+// Mercury in VARA HF's place and must be able to pick a MERCURY gateway.
+// Pat downloads only the codes in service_codes, so MERCURY is asked for too;
+// the tag above marks those rows in every list.
+test('Pat downloads PUBLIC and MERCURY gateways', () => {
+  assert.deepStrictEqual(W.buildPatConfig({ mycall: 'N0CALL', httpPort: 8591 }).service_codes, ['PUBLIC', 'MERCURY']);
+  assert.deepStrictEqual(W.buildPatConfig({ mycall: 'N0CALL', httpPort: 8591, shimPort: 4532 }).service_codes, ['PUBLIC', 'MERCURY']);
+});
 test('the mail window shows the tag after the call', () => {
   const src = readSrc(require('path').join(__dirname, '..', 'renderer', 'winlink-popout.js'));
   const at = src.indexOf('function gatewayLabel(g)');
