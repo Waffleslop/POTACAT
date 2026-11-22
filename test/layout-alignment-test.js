@@ -17,6 +17,7 @@ const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
 const { spawnSync } = require('child_process');
+const SpotRow = require('../lib/spot-row');
 
 const ROOT = path.join(__dirname, '..');
 const required = process.env.LAYOUT_REQUIRED === '1';
@@ -69,6 +70,11 @@ test('the server serves the page with both modules inlined (no placeholder left)
   assert.ok(!/<!-- ((spot|decode)-row|freq-dots)-js -->/.test(html));
   assert.ok(html.indexOf('root.FreqDots = factory()') < html.indexOf('root.SpotRow = factory('), 'the frequency formatter loads before the spot rows that use it');
   assert.ok(html.indexOf('root.SpotRow = factory(') < html.indexOf('src="remote.js"') || !/src="remote\.js"/.test(html), 'modules load before remote.js');
+});
+
+test('the mode column keeps enough room for SSB and CW speed badges', () => {
+  assert.ok(SpotRow.SPOT_COL_WIDTHS.mode >= 56,
+    `mode track is ${SpotRow.SPOT_COL_WIDTHS.mode}px; SSB and CW speed need at least 56px`);
 });
 
 // ---------------------------------------------------------------------------
@@ -149,6 +155,15 @@ function spotNumbers(rows, label) {
     }
   }
 }
+function spotModesFit(rows, label) {
+  for (const r of rows) {
+    const c = cellByPrefix(r, 'spot', 'mode');
+    if (!c) continue;
+    const available = c.cw - c.paddingX;
+    assert.ok(c.textWidth <= available + PX,
+      `${label}: mode label "${c.text}" on "${r.id}" is clipped (${c.textWidth}px of text in ${available}px)`);
+  }
+}
 
 if (!data) {
   const msg = 'rendered checks not run: ' + skipReason;
@@ -161,7 +176,7 @@ if (!data) {
   });
   for (const k of keys.filter(k => k.endsWith('-spots'))) {
     test(`${k}: one cell per column, same x on every row, one line, formatted numbers`, () => {
-      columnsAligned(data[k], k); oneLine(data[k], k); spotNumbers(data[k], k);
+      columnsAligned(data[k], k); oneLine(data[k], k); spotNumbers(data[k], k); spotModesFit(data[k], k);
     });
   }
   for (const k of keys.filter(k => k.endsWith('-decodes'))) {
