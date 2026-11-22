@@ -189,6 +189,7 @@ const TESTS = [
   'test/ts590-atu-ac111-test.js', // TS-590S/SG starts a tune with AC111; per its PC command guide (VA2PSL #635); other Kenwoods keep AC011;
   'test/freedv-spot-merge-test.js', // #742: one row per FreeDV station across PSKReporter + FreeDV Reporter; departed stations leave; rows keyed by mode too
   'test/freedv-display-mode-test.js', // #716: RADE, not DIGU/PKTUSB, on every surface while FreeDV runs
+  'test/vfo-ptt-row-test.js', // #190: ECHOCAT Web VFO-tab PTT row shows while the mode is unknown; hidden in CW/data
   'test/ws-liveness-test.js', // ECHOCAT Web: reconnect when no pong comes back or the screen wakes on a dead socket
   'test/error-banner-text-test.js', // #806: ECHOCAT Web error banner shows the message on iPhone Safari (stack has no message there)
   'test/freedv-diag-test.js', // #717: FreeDV audio in, sync on/off and capture failures in the session log, rate-limited
