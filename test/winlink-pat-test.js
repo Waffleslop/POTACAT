@@ -212,7 +212,8 @@ test('wiring: Pat config, every gateway list and Settings follow the choice', ()
   const filt = gw.indexOf('WinlinkPat.gatewaysForChoice(');
   assert.ok(filt > 0, 'winlinkGateways filters by the choice');
   assert.ok(filt < gw.indexOf('winlinkState.setGateways('), 'before the list reaches ECHOCAT (winlinkState) and the mail window');
-  assert.ok(gw.includes('WinlinkPat.listNeedsDownload('), 'a changed choice downloads the list again');
+  // listDownloadReason (the code change, plus Refresh and the daily rule; test/winlink-list-refresh-test.js).
+  assert.ok(gw.includes('WinlinkPat.listDownloadReason('), 'a changed choice downloads the list again');
   const save = main.slice(main.indexOf('const winlinkChanged ='), main.indexOf('const winlinkAutoCheckChanged'));
   assert.ok(save.includes('WinlinkPat.mercuryChosen('), 'changing the choice relaunches Pat with its new config');
   const ready = main.slice(main.indexOf('async function winlinkVaraReady('), main.indexOf('const bin = findVara(kind);', main.indexOf('async function winlinkVaraReady(')));
@@ -367,7 +368,7 @@ test('a gateway list Pat cannot parse is recognised; other failures are not (Mer
 test('#254: the gateway reply carries how many were left out', () => {
   const main = readSrc(require('path').join(__dirname, '..', 'main.js'));
   const fn = main.slice(main.indexOf('async function winlinkGateways('), main.indexOf('let _winlinkGatewaysLogged'));
-  assert.ok(fn.includes('const leftOut = onBands.dropped || 0;') && fn.includes('list, predicted, note, leftOut };'));
+  assert.ok(fn.includes('const leftOut = onBands.dropped || 0;') && fn.includes('list, predicted, note, leftOut, ...(listNote ? { listNote } : {}) };'));
   assert.ok(!fn.slice(fn.indexOf('const note ='), fn.indexOf('const tell =')).includes('left out ('), 'the note is the ranking only');
 });
 

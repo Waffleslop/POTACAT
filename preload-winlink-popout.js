@@ -70,7 +70,8 @@ contextBridge.exposeInMainWorld('api', {
     setInterval(flush, 100);
   },
   answerPrompt: (id, value) => ipcRenderer.send('winlink-cmd-prompt', { id, value }),
-  gateways: (mode, band) => ipcRenderer.invoke('winlink-cmd-gateways', { mode, band }),
+  // refresh: the round-arrow button, a fresh download from Winlink (plan docs/winlink-custom-gateways-plan.md 2.1).
+  gateways: (mode, band, refresh) => ipcRenderer.invoke('winlink-cmd-gateways', { mode, band, refresh: refresh === true }),
   history: () => ipcRenderer.invoke('winlink-cmd-history'),
   template: (op, t) => ipcRenderer.invoke('winlink-cmd-template', { op, t }),
   contact: (op, c) => ipcRenderer.invoke('winlink-cmd-contact', { op, c }),
