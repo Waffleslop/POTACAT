@@ -9560,7 +9560,7 @@ async function connectCat() {
     cat.on('power', sendCatPower);
     cat.on('powerMeter', sendCatFwdPower);
     cat.on('ptt', (on) => _radioTxWatch.cat(on)); // the radio's TX status: owner use during a hold (#200)
-    sendCatLog(`Connecting to rigctld on ${RIGCTLD_HOST}:${rigctldPort}`);
+    sendCatLog(`Connecting to rigctld on 127.0.0.1:${rigctldPort}`);
     transport.connect({ host: RIGCTLD_HOST, port: rigctldPort });
 
   } else if (target.type === 'rigctldnet') {
