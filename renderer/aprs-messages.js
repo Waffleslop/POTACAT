@@ -4,9 +4,15 @@
 // APRS window, A1: the Messages view. Conversations, the thread with each
 // message's status (Waiting for APRS-IS, Sending try n of 5, Delivered,
 // Rejected, No reply), and the compose box: To, the text with its 67-character
-// counter, Send. Messages go over the internet only (APRS-IS). Main
+// counter, Send over Internet or Radio (A3), Send. Main
 // (main.js aprsMessage*, lib/aprs-messenger.js) sends, retries and acks, and
 // checks every send again; this shows its state. No pop-ups.
+//
+// A3: "Send over: Internet | Radio". Radio is enabled only while Listen on my
+// radio is on and the radio gate allows it (main's aprs-rf state, the same as
+// the radio beacon's button). A radio message's later tries are a press of
+// Try again unless the operator turned on automatic retries; messages heard
+// on the radio say "heard on radio".
 //
 // A view of its own (Map | Messages): the window's map, list and beacon hide
 // while it shows. window.AprsMessagesView lets other parts (templates, A2)
@@ -20,6 +26,10 @@
   var view = 'map';
   var search = '';
   var lastThreadKey = '';
+  var RM = window.AprsRfMessage;
+  var rf = null;         // main's radio beacon state (preload onRf): the gate's answer for the Radio choice
+  var over = 'internet'; // Send over
+  try { if (localStorage.getItem('aprsSendOver') === 'radio') over = 'radio'; } catch (e) { /* no storage */ }
 
   function esc(v) {
     return String(v == null ? '' : v).replace(/[&<>"']/g, function (c) {
@@ -97,9 +107,11 @@
     body.innerHTML = t.map(function (m) {
       var meta;
       if (m.dir === 'in') {
-        meta = esc(m.from) + ' · ' + esc(clock(m.at)) + ' · ' + (m.via === 'radio' ? 'on the radio' : 'internet');
+        meta = esc(m.from) + ' · ' + esc(clock(m.at)) + ' · ' + (m.via === 'radio' ? '<span class="aprs-heard-rf">heard on radio</span>' : 'internet');
       } else {
         meta = esc(clock(m.at)) + ' · <span class="' + stateClass(m.state) + '">' + esc(m.status) + '</span>';
+        // A3: a radio message between tries: one press, one more try on the radio.
+        if (m.over === 'radio' && m.state === 'sending' && !m.radioBusy && m.tries < 5 && (m.waitingPress || !(s.radio && s.radio.autoRetry))) meta += ' <button type="button" data-retry="' + esc(m.lid) + '">Try again</button>';
         if (m.state === 'queued' || m.state === 'sending') meta += ' <button type="button" data-stop="' + esc(m.lid) + '">Stop</button>';
         if (m.state === 'failed' || m.state === 'stopped') meta += ' <button type="button" data-again="' + esc(m.lid) + '">Send again</button>';
       }
@@ -121,6 +133,15 @@
     var callOk = !!(s && s.call);
     // A2: a template field still in the text (<GROUP>, <TEXT>) is for the operator to replace first.
     var left = window.AprsTemplates ? window.AprsTemplates.unfilled($('aprs-msgs-text').value) : [];
+    // A3: Radio only while the gate allows it; when it stops allowing it, the choice goes back to Internet.
+    var rc = RM.radioChoice(rf);
+    if (over === 'radio' && !rc.enabled) over = 'internet';
+    var radioBtn = $('aprs-msgs-over-radio');
+    radioBtn.disabled = !rc.enabled;
+    radioBtn.title = rc.enabled ? 'Send on your radio' : rc.why;
+    radioBtn.setAttribute('aria-checked', String(over === 'radio'));
+    $('aprs-msgs-over-net').setAttribute('aria-checked', String(over !== 'radio'));
+    $('aprs-msgs-send').textContent = over === 'radio' ? 'Send on radio' : 'Send';
     $('aprs-msgs-send').disabled = !(to.ok && c.n > 0 && !c.over && callOk && s.link !== 'test-build' && !left.length);
     var n = $('aprs-msgs-note');
     var text = note.text;
@@ -131,10 +152,30 @@
       else if (s.link === 'test-build') { text = 'This test build plays recorded packets and sends nothing to APRS-IS.'; bad = true; }
       else if (c.over) { text = 'The message is ' + c.n + ' characters; APRS takes at most ' + c.max + '.'; bad = true; }
       else if (left.length) { text = 'Replace ' + left.join(' and ') + ' before sending.'; bad = true; }
-      else text = 'Goes out over APRS-IS as ' + s.call + '. Retries at 30 s, 1, 2 and 5 min until ' + (to.ok ? to.call : 'the station') + ' acknowledges.';
+      else if (over === 'radio') text = radioNote(to);
+      else text = 'Goes out over APRS-IS as ' + s.call + '. Retries at 30 s, 1, 2 and 5 min until ' + (to.ok ? to.call : 'the station') + ' acknowledges.' + (rc.enabled ? '' : ' Radio: ' + rc.why);
     }
     n.textContent = text;
     n.classList.toggle('bad', !!bad);
+  }
+
+  /** What a radio send does, before the press: band, frequency, the call, and who sends the retries. */
+  function radioNote(to) {
+    var r = (s && s.radio) || {};
+    var who = to.ok ? to.call : 'the station';
+    var where = r.bandLabel ? ' on ' + r.bandLabel + (r.mhz ? ', ' + r.mhz + ' MHz' : '') : '';
+    var as = r.call ? ' as ' + r.call : '';
+    var retries = r.autoRetry
+      ? 'Tries again by itself at 30 s, 1, 2 and 5 min until ' + who + ' acknowledges.'
+      : 'Each press sends it once. If ' + who + ' does not acknowledge, press Try again.';
+    return 'Goes out on your radio' + where + as + '. ' + retries;
+  }
+
+  function setOver(v) {
+    over = v === 'radio' ? 'radio' : 'internet';
+    try { localStorage.setItem('aprsSendOver', over); } catch (e) { /* no storage */ }
+    note = { text: '', bad: false };
+    renderCompose();
   }
 
   function render() {
@@ -152,7 +193,7 @@
   function send() {
     var to = $('aprs-msgs-to').value, text = $('aprs-msgs-text').value;
     $('aprs-msgs-send').disabled = true;
-    window.api.messageSend(to, text).then(function (r) {
+    window.api.messageSend(to, text, over).then(function (r) {
       if (r && r.ok) { $('aprs-msgs-text').value = ''; note = { text: '', bad: false }; }
       else note = { text: (r && r.sentence) || 'Not sent.', bad: true };
       renderCompose();
@@ -182,6 +223,14 @@
   $('aprs-msgs-thread').addEventListener('click', function (e) {
     var stop = e.target.closest('[data-stop]');
     if (stop) { window.api.messageStop(stop.getAttribute('data-stop')); return; }
+    var retry = e.target.closest('[data-retry]');
+    if (retry) {
+      retry.disabled = true;
+      window.api.messageRetry(retry.getAttribute('data-retry')).then(function (r) {
+        if (!r || !r.ok) { note = { text: (r && r.sentence) || 'Not sent.', bad: true }; retry.disabled = false; renderCompose(); }
+      }, function () { note = { text: 'Not sent.', bad: true }; retry.disabled = false; renderCompose(); });
+      return;
+    }
     var again = e.target.closest('[data-again]');
     if (again && s) {
       var m = (s.thread || []).filter(function (x) { return x.lid === again.getAttribute('data-again'); })[0];
@@ -199,6 +248,19 @@
   $('aprs-msgs-compose').addEventListener('submit', function (e) { e.preventDefault(); if (!$('aprs-msgs-send').disabled) send(); });
 
   window.api.onMessages(function (st) { s = st; render(); });
+  $('aprs-msgs-over-net').addEventListener('click', function () { setOver('internet'); });
+  $('aprs-msgs-over-radio').addEventListener('click', function () { if (RM.radioChoice(rf).enabled) setOver('radio'); });
+  window.api.onRf(function (d) { rf = d; if (s) renderCompose(); });
+
+  // A3: the two radio message settings in APRS settings (both off by default).
+  window.api.onBeacon(function (d) {
+    var st = d && d.settings;
+    if (!st) return;
+    $('aprs-rfmsg-retry').checked = st.radioMsgAutoRetry === true;
+    $('aprs-rfmsg-ack').checked = st.radioMsgAutoAck === true;
+  });
+  $('aprs-rfmsg-retry').addEventListener('change', function (e) { window.api.beaconSet({ radioMsgAutoRetry: e.target.checked }); });
+  $('aprs-rfmsg-ack').addEventListener('change', function (e) { window.api.beaconSet({ radioMsgAutoAck: e.target.checked }); });
 
   // For A2 (templates) and anything else that fills the box. Nothing here sends.
   window.AprsMessagesView = {
