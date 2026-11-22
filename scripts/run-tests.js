@@ -65,6 +65,7 @@ const TESTS = [
   'test/clock-platform-test.js', // NJ2DX 2026-11-21: each OS gets only the clock buttons it can honour; Time settings opens on a Mac
   'test/main-ismac-scope-test.js', // K3SBP 2026-11-21: isMac is not defined (opening APRS crashed); every isMac in main.js is declared in its own function
   'test/aprs-rf-phone-test.js', // ECHOCAT ask 2026-11-21: one radio beacon per press from the owner's phone; the window's gate and caps; Listen off is set up and put back
+  'test/vfo-popout-70cm-test.js', // #891 NJ2DX: the VFO pop-out 70cm button sends 432 MHz, inside every 70 cm radio range (IC-9700 starts at 430)
   'test/smartsdr-meter-test.js',
   'test/smartsdr-udpport-reconnect-test.js', // K3SBP 2026-11-21: after a network drop the new Flex connection is told client udpport again (pan FFT, meters)
   'test/flex-slice-filter-test.js',
