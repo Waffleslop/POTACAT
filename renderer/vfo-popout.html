@@ -1262,7 +1262,7 @@ const BANDS = [
   { label: '4m', freq: 70000 },
   { label: '2m', freq: 144000 },
   { label: '1.25m', freq: 222000 },
-  { label: '70cm', freq: 420000 },
+  { label: '70cm', freq: 432000 }, // #891: 432 MHz, inside every region's 70 cm band and the IC-9700's range (420 is only the US edge)
   { label: '33cm', freq: 902000 },
   { label: '23cm', freq: 1240000 },
   { label: '13cm', freq: 2304000 },
@@ -4028,7 +4028,7 @@ async function playVoiceMacro(idx, btn, outputDeviceId) {
   if (!outputDeviceId) {
     const ok = confirm('Voice macros play audio through the system audio output and need that ' +
       'output routed to the radio (FLEX DAX-IN, a virtual audio cable, etc.). No output device is ' +
-      'currently selected in Settings → Remote Audio Output, so the macro will play through your ' +
+      'currently selected in Settings > Radio, Edit the rig, Audio Devices, TX audio out, so the macro will play through your ' +
       'default speakers and not reach the radio.\n\nPlay anyway?');
     if (!ok) return;
   }

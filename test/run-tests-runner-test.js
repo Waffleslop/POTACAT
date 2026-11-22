@@ -19,8 +19,8 @@ const bad = fx('b-fail.js', "console.log('b ran'); process.exit(3);");
 const okC = fx('c-pass.js', "console.log('c ran');");
 const bad2 = fx('d-fail.js', "throw new Error('d threw');");
 
-function run(list) {
-  const code = `require(${JSON.stringify(path.join(root, 'scripts', 'run-tests.js'))}).runAll(${JSON.stringify(list)})`;
+function run(list, opts) {
+  const code = `require(${JSON.stringify(path.join(root, 'scripts', 'run-tests.js'))}).runAll(${JSON.stringify(list)}, ${JSON.stringify(opts || {})})`;
   const r = spawnSync(process.execPath, ['-e', code], { cwd: root, encoding: 'utf8' });
   return { status: r.status, out: (r.stdout || '') + (r.stderr || '') };
 }
@@ -57,6 +57,59 @@ try {
   check('an all-pass run exits 0 with the old "all N passed" line', () => {
     assert.strictEqual(clean.status, 0, clean.out);
     assert.ok(/\[run-tests\] all 2 test files passed/.test(clean.out), clean.out);
+  });
+
+  // 2026-11-21: files run in parallel, each its own process; output is buffered
+  // per file and printed whole, so two files never interleave.
+  const slow = (tag) => fx(`${tag}-slow.js`, `let i = 0; const t = setInterval(() => { console.log('${tag} line ' + i); console.error('${tag} err ' + i); if (++i === 5) { clearInterval(t); ${tag === 'q' ? 'process.exit(2);' : ''} } }, 20);`);
+  const par = [slow('p'), slow('q'), slow('r'), slow('s')];
+  const pr = run(par, { jobs: 4 });
+  check('parallel: every file runs, a failure is named, the summary is unchanged', () => {
+    assert.notStrictEqual(pr.status, 0, pr.out);
+    assert.ok(/\[run-tests\] 3 of 4 test files passed, 1 failed/.test(pr.out), pr.out);
+    assert.ok(pr.out.includes(`[run-tests] FAILED: ${par[1]} (exit 2)`), pr.out);
+  });
+  check("parallel: each file's output is printed whole, never interleaved", () => {
+    for (const tag of ['p', 'q', 'r', 's']) {
+      const lines = pr.out.split(/\r?\n/).map((l, i) => [l, i]).filter(([l]) => l.startsWith(tag + ' '));
+      assert.strictEqual(lines.length, 10, tag + ': ' + pr.out);
+      assert.strictEqual(lines[9][1] - lines[0][1], 9, tag + ' lines are contiguous');
+    }
+  });
+  const ser = run([okA, bad, okC], { jobs: 1 });
+  check('--jobs 1 runs one file at a time, in order, with the same summary', () => {
+    assert.ok(ser.out.indexOf('a ran') < ser.out.indexOf('b ran') && ser.out.indexOf('b ran') < ser.out.indexOf('c ran'), ser.out);
+    assert.ok(/\[run-tests\] 2 of 3 test files passed, 1 failed/.test(ser.out), ser.out);
+    assert.notStrictEqual(ser.status, 0);
+  });
+  check('options: --jobs N, --jobs=N, -j N, --changed [base] and substring filters', () => {
+    const { parseArgs, defaultJobs, SERIAL } = require('../scripts/run-tests.js');
+    assert.strictEqual(parseArgs(['--jobs', '3']).jobs, 3);
+    assert.strictEqual(parseArgs(['--jobs=5']).jobs, 5);
+    assert.strictEqual(parseArgs(['-j', '1']).jobs, 1);
+    assert.deepStrictEqual(parseArgs(['sstv', 'jtcat']).filters, ['sstv', 'jtcat']);
+    const c = parseArgs(['--changed']);
+    assert.ok(c.changed && c.base === 'origin/master');
+    assert.strictEqual(parseArgs(['--changed', 'HEAD~3']).base, 'HEAD~3');
+    assert.ok(defaultJobs() >= 2 || Number(process.env.POTACAT_TEST_JOBS) > 0);
+    assert.ok(SERIAL instanceof Set);
+    const { TESTS } = require('../scripts/run-tests.js');
+    for (const f of SERIAL) assert.ok(TESTS.includes(f), f + ' in SERIAL is in TESTS');
+    for (const f of require('../scripts/run-tests.js').SLOW_FIRST) assert.ok(TESTS.includes(f), f + ' in SLOW_FIRST is in TESTS');
+  });
+  // Casey 2026-11-22 "Retry timing tests": one more try, only for the SERIAL
+  // timing files, only in the run-alone loop; a pass on the retry says FLAKY.
+  check('a SERIAL timing test that fails gets exactly one retry; nothing else is retried', () => {
+    const { SERIAL, RETRY_ONCE } = require('../scripts/run-tests.js');
+    assert.ok(RETRY_ONCE instanceof Set && RETRY_ONCE.size > 0);
+    for (const f of RETRY_ONCE) assert.ok(SERIAL.has(f), f + ' retried but not SERIAL');
+    const src = require('fs').readFileSync(require('path').join(__dirname, '..', 'scripts', 'run-tests.js'), 'utf8');
+    assert.strictEqual((src.match(/RETRY_ONCE\.has\(/g) || []).length, 1, 'one retry site');
+    const alone = src.slice(src.indexOf('for (const f of alone) {'), src.indexOf('failed.sort('));
+    assert.ok(/if \(r\.code !== 0 && RETRY_ONCE\.has\(f\)\) \{[\s\S]*r = await runFile\(f, true\);[\s\S]*FLAKY:/.test(alone), 'the retry is in the alone loop and prints FLAKY');
+    const pool = src.slice(src.indexOf('const worker = async'), src.indexOf('for (const f of alone) {'));
+    assert.ok(!/RETRY_ONCE/.test(pool), 'the parallel pool never retries');
+    assert.ok(!/RETRY_ONCE/.test(src.slice(src.indexOf('async function runSerial('), src.indexOf('async function runParallel('))), '--jobs 1 stays exactly as before');
   });
 } finally {
   fs.rmSync(dir, { recursive: true, force: true });

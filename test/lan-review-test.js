@@ -56,7 +56,9 @@ test('a port that opened again is no longer "still closing" from POTACAT\'s side
 });
 
 test('Test Connection names an FT-710 (ID0800)', () => {
-  assert.ok(/'0800': 'FT-710'/.test(main));
+  // The ID table lives in lib/rig-models.js since #744 (FTDX101D 0681, MP 0682).
+  assert.ok(/const radio = modelFromYaesuId\(result\.id\);/.test(main));
+  assert.strictEqual(require('../lib/rig-models').modelFromYaesuId('0800'), 'FT-710');
 });
 
 test('the scope window and the Band Scope tooltip know the LAN', () => {

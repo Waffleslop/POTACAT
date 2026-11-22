@@ -25,6 +25,8 @@ contextBridge.exposeInMainWorld('api', {
   // Asks
   enableOnRadio: () => ipcRenderer.send('scope-enable-on-radio'),
   restart: () => ipcRenderer.send('scope-restart'),
+  // #773: "WebGL2 is not available" goes in the session log too.
+  reportNoWebgl2: () => ipcRenderer.send('scope-no-webgl2'),
   setSynth: (on) => ipcRenderer.send('scope-set-synth', !!on),
   setFps: (fps) => ipcRenderer.send('scope-set-fps', Number(fps)),
   setSpan: (hz) => ipcRenderer.send('scope-span', Number(hz)),

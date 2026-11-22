@@ -2,11 +2,11 @@
 'use strict';
 const { readSrc } = require('./_src');
 // GitHub #293: a radio POTACAT cannot switch back on is not offered Power Off
-// unless the operator allows it for that rig. Most radios carry CAT on their
-// own USB, so once off the port is gone (IC-7100 over USB, FT-710, FTDX10).
-// Only the SCU-LAN10 keeps a link that wakes the radio (SCU-LAN10 Operation
-// Manual rev 2311-D, p. 17). The rule lives in lib/rig-power.js; main refuses
-// a Power Off from every surface, and every client hides the button.
+// unless the operator allows it for that rig. #768 (Casey, 2026-11-19): a
+// direct serial port and an SCU-LAN10 count as "can switch back on"; Hamlib
+// and every link that is not classified do not (the matrix is in
+// test/rig-power-off-defaults-test.js). The rule lives in lib/rig-power.js;
+// main refuses a Power Off from every surface, and every client hides the button.
 // Run: node test/rig-power-off-guard-test.js
 const assert = require('assert');
 const path = require('path');
@@ -28,11 +28,11 @@ const remote = readSrc(path.join(root, 'renderer', 'remote.js'));
 
 console.log('Power Off guard (#293)');
 
-test('over USB or serial, no radio is offered Power Off by default', () => {
+test('off a direct serial port or an SCU-LAN10, no radio is offered Power Off by default', () => {
   for (const name of ['IC-7100', 'IC-7300', 'IC-7610', 'FT-710', 'FTDX10', 'FT-891', 'TS-590S/SG', 'K3/K3S']) {
     const m = RIG_MODELS[name];
     assert.ok(m && m.caps.power, name + ' is a power-capable model');
-    for (const link of ['serial', 'icom', 'civ-tcp', 'icom-network', 'rigctld', 'tcp', undefined]) {
+    for (const link of ['civ-tcp', 'icom-network', 'rigctld', 'rigctldnet', 'tcp', 'k4-network', 'tci', 'flrig', 'dxlab-commander', undefined]) {
       assert.strictEqual(RigPower.canWakeAfterOff(m.caps, link), false, name + ' ' + link);
       assert.strictEqual(RigPower.powerOffAvailable(m.caps, { linkType: link }), false, name + ' ' + link);
     }
@@ -40,7 +40,7 @@ test('over USB or serial, no radio is offered Power Off by default', () => {
 });
 
 test('a radio on an SCU-LAN10 keeps Power Off', () => {
-  for (const name of ['FT-710', 'FTDX10', 'FTDX101D/MP']) {
+  for (const name of ['FT-710', 'FTDX10', 'FTDX101D', 'FTDX101MP']) {
     const caps = RIG_MODELS[name].caps;
     assert.strictEqual(RigPower.canWakeAfterOff(caps, 'yaesu-lan'), true, name);
     assert.strictEqual(RigPower.powerOffAvailable(caps, { linkType: 'yaesu-lan' }), true, name);
@@ -49,8 +49,10 @@ test('a radio on an SCU-LAN10 keeps Power Off', () => {
 
 test('the operator can allow it for one rig', () => {
   const caps = RIG_MODELS['IC-7100'].caps;
-  assert.strictEqual(RigPower.powerOffAvailable(caps, { linkType: 'serial', allowOffNoWake: true }), true);
-  assert.strictEqual(RigPower.powerOffAvailable(caps, { linkType: 'serial', allowOffNoWake: false }), false);
+  assert.strictEqual(RigPower.powerOffAvailable(caps, { linkType: 'icom-network', allowOffNoWake: true }), true);
+  assert.strictEqual(RigPower.powerOffAvailable(caps, { linkType: 'icom-network', allowOffNoWake: false }), false);
+  // #768: and switch it off for a rig that would show it.
+  assert.strictEqual(RigPower.powerOffAvailable(caps, { linkType: 'icom', allowOffNoWake: false }), false);
 });
 
 test('the FTX-1 (no CAT power-on at all) is not offered Power Off, even on a LAN link', () => {
@@ -76,7 +78,7 @@ test('powerOffRefusal: offAllowed false refuses every source, the shack window t
   assert.strictEqual(RigPower.powerOffRefusal({ source: 'desktop', transmitting: true, offAllowed: true }), null);
   assert.strictEqual(RigPower.powerOffRefusal({ source: 'echocat', transmitting: true, offAllowed: true }), RigPower.POWER_OFF_WHILE_TX);
   assert.strictEqual(RigPower.powerOffRefusal({ source: 'echocat', transmitting: false }), null);
-  assert.ok(/Allow Power Off for a radio POTACAT cannot turn back on/.test(RigPower.POWER_OFF_NO_WAKE));
+  assert.ok(/Show Power Off for this radio/.test(RigPower.POWER_OFF_NO_WAKE));
 });
 
 test('RemoteRigState.canPowerOff follows the shack capability', () => {
@@ -91,7 +93,7 @@ test('RemoteRigState.canPowerOff follows the shack capability', () => {
 
 test('main: caps.powerOff set from the rule, and power-off refused from every surface', () => {
   assert.ok(/caps\.powerOff = RigPower\.powerOffAvailable\(caps,/.test(main), 'getRigCapabilities sets powerOff');
-  assert.ok(/allowOffNoWake: !!\(activeRig && activeRig\.allowPowerOffNoWake\)/.test(main), 'the rig setting feeds it');
+  assert.ok(/allowOffNoWake: activeRig \? activeRig\.allowPowerOffNoWake : undefined/.test(main), 'the rig setting feeds it');
   const i = main.indexOf("case 'power-off': {");
   assert.ok(i > 0);
   const body = main.slice(i, i + 1500);
@@ -112,10 +114,10 @@ test('every surface hides Power Off on powerOff false', () => {
 
 test('the rig editor has the setting and saves it', () => {
   assert.ok(/id="set-allow-power-off"/.test(html));
-  assert.ok(/Allow Power Off for a radio POTACAT cannot turn back on/.test(html));
-  assert.ok(/rig\.allowPowerOffNoWake = true/.test(app), 'edit saves');
-  assert.ok(/allowPowerOffNoWake: true/.test(app), 'add saves');
-  assert.ok(/allowPowerOffEl\.checked = !!rig\.allowPowerOffNoWake/.test(app), 'edit restores');
+  assert.ok(/Show Power Off for this radio/.test(html));
+  assert.ok(/rig\.allowPowerOffNoWake = rigPowerOffStored/.test(app), 'edit saves');
+  assert.ok(/allowPowerOffNoWake: rigPowerOffStored/.test(app), 'add saves');
+  assert.ok(/editing\.allowPowerOffNoWake : undefined/.test(app), 'edit restores');
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);

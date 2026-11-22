@@ -47,7 +47,8 @@ for (const page of [...pages].sort()) {
     assert.ok(html.includes('popout-theme-boot.js'), 'does not load popout-theme-boot.js');
     // Shared classes from styles.css (.titlebar-controls is hidden there) or
     // a page-local .platform-darwin rule for its own button class.
-    const sharedControls = /class="titlebar-controls"/.test(html) && /styles\.css/.test(html);
+    // #866: a title bar may also carry titlebar-keep-on-mac (styles.css then hides only #tb-min/#tb-max/#tb-close).
+    const sharedControls = /class="titlebar-controls( titlebar-keep-on-mac)?"/.test(html) && /styles\.css/.test(html);
     const ownRule = /\.platform-darwin [^{]*\{[^}]*display:\s*none/.test(html);
     const jsRule = fs.existsSync(path.join(root, 'renderer', page + '.css'))
       && /\.platform-darwin [^{]*\{[^}]*display:\s*none/.test(R(`renderer/${page}.css`));

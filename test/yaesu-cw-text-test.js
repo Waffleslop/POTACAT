@@ -40,7 +40,7 @@ function rig(modelId, Codec = KenwoodCodec) {
   return { rig: r, codec, writes, logs };
 }
 
-for (const id of ['FTX-1 Field', 'FTX-1 Optima', 'FTDX101D/MP', 'FT-710', 'FTDX10', 'FT-991/991A']) {
+for (const id of ['FTX-1 Field', 'FTX-1 Optima', 'FTDX101D', 'FTDX101MP', 'FT-710', 'FTDX10', 'FT-991/991A']) {
   test(`${id}: CW text never sends TX1; and holds TX for the message`, async () => {
     const { rig: r, writes } = rig(id);
     r.sendCwText('CQ POTA DE W2XYZ K');
@@ -404,7 +404,7 @@ for (const id of ['FT-710', 'FTX-1 Field', 'FTX-1 Optima']) {
     r.disconnect();
   });
 }
-for (const id of ['FTDX10', 'FTDX101D/MP', 'FT-991/991A', 'FT-891']) {
+for (const id of ['FTDX10', 'FTDX101D', 'FTDX101MP', 'FT-991/991A', 'FT-891']) {
   test(`${id}: no stop in its CAT manual, Stop sends TX0; only (#582)`, async () => {
     const { rig: r, writes } = rig(id);
     r.sendCwText('TEST');

@@ -22,7 +22,7 @@ const main = R('main.js'), bridge = R('renderer/remote-audio.html');
 test('bridge: when the device track arrives it names the output it plays to (label, default, missing, or dax_tx)', () => {
   const on = bridge.slice(bridge.indexOf('pc.ontrack = async (event) => {'), bridge.indexOf('pc.ontrack = async (event) => {') + 1400);
   assert.ok(/sendAudioStatus\(\{ txOutputLabel: label \}\)/.test(on));
-  assert.ok(/the system default output \(set the rig\\?'s audio Output in Settings > My Rigs\)/.test(on), 'unset id = default output, named as such');
+  assert.ok(/the system default output \(set it in Settings > Radio, Edit the rig, Audio Devices, TX audio out\)/.test(on), 'unset id = default output, named as such');
   assert.ok(/x\.kind === 'audiooutput' && x\.deviceId === config\.outputDeviceId/.test(on), 'label resolved by id');
   assert.ok(/an output device that is not present/.test(on), 'a stale id says so');
   assert.ok(/SmartSDR direct \(dax_tx stream\)/.test(on));

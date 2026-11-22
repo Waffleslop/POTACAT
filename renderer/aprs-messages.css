@@ -1,0 +1,93 @@
+/* APRS window, A1: the Messages view (renderer/aprs-messages.js). One view of
+   the window under the status cards and banners: conversations on the left,
+   the thread and the compose box on the right. The Map | Messages switch sits
+   in the title bar beside APRS settings. Colours are the theme variables only. */
+.aprs-views { -webkit-app-region: no-drag; align-self: center; display: inline-flex; gap: 2px; margin-right: 8px; padding: 2px;
+  border-radius: 8px; border: 1px solid var(--border-primary); }
+.aprs-view-btn { font: inherit; font-size: 14px; font-weight: 600; padding: 2px 12px; border-radius: 6px; cursor: pointer;
+  background: none; color: var(--text-secondary); border: 1px solid transparent; display: inline-flex; align-items: center; gap: 6px; }
+.aprs-view-btn:hover { color: var(--text-primary); border-color: var(--border-primary); }
+.aprs-view-btn[aria-pressed="true"] { color: var(--text-primary); background: var(--bg-tertiary); font-weight: 700; }
+.aprs-view-btn:focus-visible { outline: 2px solid var(--accent-blue); outline-offset: 2px; }
+.aprs-badge { min-width: 20px; padding: 1px 7px; border-radius: 10px; font-size: 13px; font-weight: 700; text-align: center;
+  background: var(--accent-red); color: var(--on-accent-red, #fff); box-sizing: border-box; }
+.aprs-sr { position: absolute; left: -9999px; width: 1px; height: 1px; overflow: hidden; }
+
+/* The Messages view takes the place of the map, the beacon and the stations;
+   the cards and the banners (the timer, a radio beacon on the air) stay. */
+body.aprs-view-messages .aprs-main { display: none !important; }
+.aprs-msgs { flex: 1; display: flex; min-height: 0; border-top: 1px solid var(--border-primary); }
+.aprs-msgs-btn { font: inherit; font-size: 15px; font-weight: 700; padding: 7px 16px; border-radius: 8px; cursor: pointer;
+  background: var(--accent-blue); color: var(--on-accent-blue, var(--bg-primary)); border: 1px solid var(--accent-blue); }
+.aprs-msgs-btn:hover:not(:disabled) { filter: brightness(1.08); }
+.aprs-msgs-btn:disabled { opacity: 0.5; cursor: default; }
+.aprs-msgs-btn:focus-visible { outline: 2px solid var(--accent-blue); outline-offset: 2px; }
+.aprs-msgs-delete { margin-left: auto; }
+.aprs-msgs-over { margin-left: auto; font-size: 14px; color: var(--text-secondary); display: inline-flex; align-items: center; gap: 2px; }
+.aprs-msgs-over > span { margin-right: 6px; }
+/* A3: Send over Internet | Radio, the window's segmented look (the Map | Messages switch). */
+.aprs-over-btn { font: inherit; font-size: 14px; font-weight: 600; padding: 4px 12px; cursor: pointer; background: none;
+  color: var(--text-secondary); border: 1px solid var(--border-primary); }
+.aprs-over-btn:first-of-type { border-radius: 6px 0 0 6px; }
+.aprs-over-btn:last-of-type { border-radius: 0 6px 6px 0; border-left: 0; }
+.aprs-over-btn[aria-checked="true"] { color: var(--text-primary); background: var(--bg-tertiary); font-weight: 700; }
+.aprs-over-btn:hover:not(:disabled) { color: var(--text-primary); }
+.aprs-over-btn:disabled { opacity: 0.5; cursor: default; }
+.aprs-over-btn:focus-visible { outline: 2px solid var(--accent-blue); outline-offset: 2px; }
+.aprs-bubble-meta .aprs-heard-rf { color: var(--accent-green); font-weight: 600; }
+.aprs-msgs-list { width: 300px; min-width: 220px; display: flex; flex-direction: column; min-height: 0;
+  background: var(--bg-secondary); border-right: 1px solid var(--border-primary); }
+.aprs-msgs-tools { display: flex; gap: 8px; padding: 10px 12px; align-items: center; }
+#aprs-msgs-search { flex: 1; min-width: 0; font-size: 15px; padding: 6px 9px; border-radius: 6px;
+  background: var(--bg-input); color: var(--text-primary); border: 1px solid var(--border-primary); }
+.aprs-msgs-convos { flex: 1; overflow: auto; }
+.aprs-convo { display: flex; flex-direction: column; gap: 3px; width: 100%; text-align: left; padding: 10px 12px;
+  font: inherit; color: var(--text-primary); background: none; border: 0; border-top: 1px solid var(--border-primary); cursor: pointer; }
+.aprs-convo:hover { background: var(--bg-hover); }
+.aprs-convo.sel { background: var(--bg-tertiary); box-shadow: inset 3px 0 0 var(--accent-red); }
+.aprs-convo:focus-visible { outline: 2px solid var(--accent-blue); outline-offset: -2px; }
+.aprs-convo-top { display: flex; justify-content: space-between; gap: 8px; font-weight: 700; }
+.aprs-convo-when { font-weight: 400; font-size: 13px; color: var(--text-secondary); white-space: nowrap; }
+.aprs-convo-last { font-size: 14px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.aprs-convo-unread .aprs-convo-last { color: var(--text-primary); }
+.aprs-msgs-empty { padding: 14px 12px; color: var(--text-secondary); }
+
+.aprs-msgs-thread { flex: 1; min-width: 0; display: flex; flex-direction: column; min-height: 0; }
+.aprs-msgs-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; padding: 10px 16px; border-bottom: 1px solid var(--border-primary); }
+.aprs-msgs-head h2 { margin: 0; font-size: 18px; font-weight: 800; }
+.aprs-msgs-sub { font-size: 14px; color: var(--text-secondary); }
+.aprs-msgs-thread-body { flex: 1; overflow: auto; padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; }
+.aprs-bubble { max-width: 72%; display: flex; flex-direction: column; gap: 3px; }
+.aprs-bubble.in { align-self: flex-start; }
+.aprs-bubble.out { align-self: flex-end; text-align: right; }
+.aprs-bubble-text { padding: 8px 12px; border-radius: 10px; font-size: 15px; line-height: 1.4; word-break: break-word; text-align: left; }
+.aprs-bubble.in .aprs-bubble-text { background: var(--bg-tertiary); color: var(--text-primary); }
+.aprs-bubble.out .aprs-bubble-text { background: var(--accent-blue); color: var(--on-accent-blue, #10131a); }
+.aprs-bubble-meta { font-size: 13px; color: var(--text-secondary); display: inline-flex; gap: 8px; align-items: center; justify-content: flex-end; flex-wrap: wrap; }
+.aprs-bubble.in .aprs-bubble-meta { justify-content: flex-start; }
+.aprs-bubble-meta .st-ok { color: var(--accent-green); }
+.aprs-bubble-meta .st-bad { color: var(--accent-red-text, var(--accent-red)); }
+.aprs-bubble-meta .st-wait { color: var(--text-primary); font-weight: 600; }
+.aprs-bubble-meta button { font: inherit; font-size: 13px; padding: 1px 8px; border-radius: 5px; cursor: pointer;
+  background: none; color: var(--text-primary); border: 1px solid var(--border-primary); }
+.aprs-bubble-meta button:hover { border-color: var(--accent-blue); }
+
+.aprs-msgs-compose { border-top: 1px solid var(--border-primary); background: var(--bg-secondary); padding: 10px 16px; display: flex; flex-direction: column; gap: 8px; }
+.aprs-msgs-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.aprs-msgs-row label { color: var(--text-secondary); }
+#aprs-msgs-to, #aprs-msgs-text { font: inherit; font-size: 15px; padding: 7px 10px; border-radius: 6px;
+  background: var(--bg-input); color: var(--text-primary); border: 1px solid var(--border-primary); }
+#aprs-msgs-to { width: 130px; text-transform: uppercase; }
+#aprs-msgs-text { flex: 1; min-width: 180px; }
+#aprs-msgs-to:focus-visible, #aprs-msgs-text:focus-visible, #aprs-msgs-search:focus-visible { outline: 2px solid var(--accent-blue); outline-offset: 1px; }
+.aprs-msgs-count { min-width: 60px; text-align: right; font-size: 14px; color: var(--text-secondary); }
+.aprs-msgs-count.over { color: var(--accent-red-text, var(--accent-red)); font-weight: 700; }
+.aprs-msgs-send { padding: 8px 22px; }
+.aprs-msgs-note { margin: 0; font-size: 14px; color: var(--text-secondary); }
+.aprs-msgs-note.bad { color: var(--accent-red-text, var(--accent-red)); }
+.aprs-msgs-tools-slot { display: inline-flex; gap: 8px; align-items: center; }
+@media (max-width: 900px) {
+  .aprs-msgs { flex-direction: column; flex: none; }
+  .aprs-msgs-list { width: auto; max-height: 240px; border-right: 0; border-bottom: 1px solid var(--border-primary); }
+  .aprs-msgs-thread-body { min-height: 260px; }
+}

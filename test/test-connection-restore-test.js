@@ -2,7 +2,7 @@
 'use strict';
 const { readSrc } = require('./_src');
 // KF0TDB 2026-10-02 (FT-991A): Test Connection passed, then every click said
-// "Radio not connected - check the USB/serial link (Settings > My Rigs)".
+// "Radio not connected - check the USB/serial link (Settings > Radio)".
 // Each test disconnects the live link to free the port and never put it back.
 // Run: node test/test-connection-restore-test.js
 const assert = require('assert');

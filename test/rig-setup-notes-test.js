@@ -111,6 +111,7 @@ test('USB data audio: DATA MOD = USB on the Icoms, per the manual of each (FM_12
     ['IC-7100', 'ic7100-data-mod-usb', 'Connectors → DATA MOD → USB', 'required'],
     ['IC-7610', 'ic7610-data1-mod-usb', 'MENU → SET → Connectors → MOD Input → DATA1 MOD → USB', 'required'],
     ['IC-7300 MK II', 'ic7300mk2-data-mod-usb', 'MENU → SET → Connectors → MOD Input → DATA MOD → USB', 'recommended'],
+    ['IC-9700', 'ic9700-data-mod-usb', 'MENU → SET → Connectors → MOD Input → DATA MOD → USB', 'recommended'], // #892: AM_3 p.4-4, CI-V rev 4 p.7
   ];
   for (const [model, id, path, level] of cases) {
     for (const radioType of ['icom', 'hamlib']) {
@@ -128,6 +129,7 @@ test('USB data audio: DATA MOD = USB on the Icoms, per the manual of each (FM_12
   assert.ok(/factory it is ACC/.test(note(resolve({ model: 'IC-7300', radioType: 'icom' }), 'ic7300-data-mod-usb').steps[0]));
   assert.ok(/factory it is ACC/.test(note(resolve({ model: 'IC-7100', radioType: 'icom' }), 'ic7100-data-mod-usb').steps[0]));
   assert.ok(!/factory/i.test(note(resolve({ model: 'IC-7300 MK II', radioType: 'icom' }), 'ic7300mk2-data-mod-usb').steps.join(' ')));
+  assert.ok(!/factory/i.test(note(resolve({ model: 'IC-9700', radioType: 'icom' }), 'ic9700-data-mod-usb').steps.join(' ')));
   // The original IC-7300 has no MOD Input level (FM_12b p.126, BM_12 p.64).
   assert.ok(!/MOD Input/.test(note(resolve({ model: 'IC-7300', radioType: 'icom' }), 'ic7300-data-mod-usb').steps.join(' ')));
   // The IC-7100's 9600 bps is DATA2 pin 3 only (FM_5 p.344).
@@ -257,6 +259,19 @@ test('IC-7610 band scope: unlink CI-V USB Port from REMOTE before setting 115200
   const main = readSrc(path.join(__dirname, '..', 'main.js'));
   assert.ok(!main.includes('ICOM_SCOPE_BAUD_ACTION'), 'main has no copy of its own');
   assert.strictEqual(main.split('action: icomScopeBaudAction(icomScopeEntry && icomScopeEntry.name),').length - 1, 2, 'baud and refused both use it');
+});
+
+test('#821 IC-7300 MK II band scope: nothing to set on the radio over USB; only POTACAT at 115200 (CI-V Reference Guide rev 0 p.3, p.9)', () => {
+  const { icomScopeBaudAction } = require('../lib/rig-setup-notes');
+  const mk2 = icomScopeBaudAction('IC-7300 MK II');
+  assert.ok(!/CI-V USB Baud Rate/.test(mk2), 'the MK II has no CI-V USB Baud Rate item: ' + mk2);
+  assert.ok(/Settings > Radio, Edit the rig, Baud Rate 115200/.test(mk2), 'names POTACAT\'s own CI-V speed: ' + mk2);
+  assert.ok(/nothing to set on the radio/i.test(mk2), 'says the radio needs nothing over USB: ' + mk2);
+  assert.ok(/\[REMOTE\] jack/.test(mk2), 'says the radio\'s baud item is only for the REMOTE jack: ' + mk2);
+  assert.ok(!/My Rigs/.test(mk2), 'names a Settings path that exists: ' + mk2);
+  // Other models keep their text.
+  assert.ok(/CI-V USB Baud Rate, choose 115200/.test(icomScopeBaudAction('IC-7300')));
+  assert.ok(/Unlink from \[REMOTE\]/.test(icomScopeBaudAction('IC-7610')));
 });
 
 console.log(`\nRig setup notes: ${pass} passed, ${fail} failed`);

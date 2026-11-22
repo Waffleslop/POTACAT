@@ -93,6 +93,13 @@
     } catch (_) { /* don't recurse */ }
   }
 
+  function pageHref() {
+    try { return (location && location.href) || ''; } catch (_) { return ''; }
+  }
+  function warnIgnored(txt) {
+    try { console.warn('[ECHOCAT banner] ignored, not our script:', txt); } catch (_) { /* no console */ }
+  }
+
   window.addEventListener('error', (e) => {
     // Suppress Safari's "Script error." cross-origin mask. When an async
     // error fires from a script Safari can't fully introspect (CORS-less
@@ -107,12 +114,31 @@
     const filename = e.filename || '';
     const msg = e.message || '';
     if (!filename && !e.lineno && msg === 'Script error.') return;
-    show((e.error && (e.error.stack || e.error.message)) || msg || 'unknown',
+    // Name and message first, then the stack: Safari's stack has no
+    // message in it (#806). lib/error-banner-text.js, inlined above.
+    const EBT = window.ErrorBannerText;
+    if (EBT) {
+      const r = EBT.formatErrorEvent(e);
+      // Line 1 of the page is "<!doctype html>": an error there is a
+      // browser-injected script (Brave for iOS), not ours. Log, no banner.
+      if (EBT.isForeignErrorEvent(e, pageHref())) { warnIgnored(r.src + ' ' + r.text); return; }
+      show(r.text, r.src);
+      return;
+    }
+    const err = e.error;
+    show((err && (String(err) + '\n' + (err.stack || ''))) || msg || 'unknown',
          filename + ':' + (e.lineno || '?'));
   });
   window.addEventListener('unhandledrejection', (e) => {
+    const EBT = window.ErrorBannerText;
+    if (EBT) {
+      const r = EBT.formatRejection(e.reason);
+      if (EBT.isForeignRejection(e.reason, pageHref())) { warnIgnored(r.src + ' ' + r.text); return; }
+      show(r.text, r.src);
+      return;
+    }
     const r = e.reason || {};
-    show(r.stack || r.message || String(r), 'unhandledrejection');
+    show(String(r) + '\n' + (r.stack || ''), 'unhandledrejection');
   });
 })();
 
@@ -358,7 +384,7 @@
       logFreqPinnedKhz = 0;
     }
     if (!logFreqDirty && currentFreqKhz) {
-      logFreq.value = String(Math.round(currentFreqKhz * 10) / 10);
+      LogFreqField.fill(logFreq, currentFreqKhz); // shows 100 Hz, logs the hertz (#794)
     }
     if (!logTimeDirty) logStampNow();
   }
@@ -1867,7 +1893,11 @@
           // pass-state: on a Guest Pass, the shack sends pass-state {state,
           // reason, ...} and lets a second device of the same guest wait
           // instead of taking the radio (#541 step 2).
-          capabilities: ['chunked-all-qsos', 'qso-delta', 'chunked-worked-qsos', 'local-cw-sidetone', 'jtcat-qso-logged', 'mail-folders-v2', 'pass-state'],
+          // worked-incremental: the full worked list comes once per connection;
+          // each logged QSO arrives in worked-today, merged below (#731).
+          // aprs: the shack sends aprs-state and, while the APRS tab (or the
+          // Map's APRS layer) is open, aprs-stations (APRS phase 6).
+          capabilities: ['chunked-all-qsos', 'qso-delta', 'chunked-worked-qsos', 'local-cw-sidetone', 'jtcat-qso-logged', 'mail-folders-v2', 'pass-state', 'worked-incremental', 'aprs'],
         }));
       } catch {}
       onOpen();
@@ -1885,6 +1915,9 @@
   function onWsClosed() {
     clearInterval(pingInterval);
     pingInterval = null;
+    // The shack stops keying when it loses this page; the page's own keyer
+    // and sidetone stop too, so neither goes on without the other (#244).
+    if (cwKeyStreamOk && window.__echocatReleasePaddles) { try { window.__echocatReleasePaddles(false); } catch (e) {} }
     if (bc) { try { bc.postMessage({ kind: 'connection', online: false, reason: wasKicked ? 'kicked' : 'closed' }); } catch {} }
     if (wasKicked) return;
     if (mainUI.classList.contains('hidden')) {
@@ -2014,6 +2047,7 @@
         break;
 
       case 'auth-ok':
+        try { aprsOnReconnect(); } catch { /* pre-init */ }
         connectScreen.classList.add('hidden');
         mainUI.classList.remove('hidden');
         tabBar.classList.remove('hidden');
@@ -2628,6 +2662,13 @@
         break;
 
       case 'log-ok':
+        // A follow-up (#732): the QSO was confirmed and counted already; this
+        // only says how the re-spot went. It never touches the form, the
+        // contact list or the counts, and only a failure is shown.
+        if (msg.followUp) {
+          if (msg.respotError) showLogToast((msg.callsign || '') + ': re-spot failed', true);
+          break;
+        }
         logSaveBtn.disabled = false;
         ltSave.disabled = false;
         if (msg.success) {
@@ -2906,6 +2947,14 @@
           logbookQsos.push(msg.data);
           lbTotal = msg.total || logbookQsos.length;
           renderLogbook();
+          // worked-incremental (#731): the full worked list is not re-sent per
+          // QSO, so merge this one (back-dated ones too) with the same entry
+          // rule as the full list; a same-QSO last entry is replaced, not doubled.
+          if (typeof WorkedEntry !== 'undefined' && WorkedEntry.mergeRecord(workedQsos, msg.data)) {
+            ddPanel(spotsDropdown).querySelector('.rc-hide-worked-row').style.display = '';
+            renderSpots();
+            if (activeTab === 'map') renderMapSpots();
+          }
         }
         break;
 
@@ -3080,8 +3129,20 @@
           const toast = document.createElement('div');
           toast.className = 'ft8-error-toast';
           toast.textContent = msg.error || 'Error';
+          // The retry cap stopped a QSO whose RR73 never came: not logged
+          // (#807). Send 73 puts the 73 on the air, which logs it.
+          if (msg.send73) {
+            toast.classList.add('ft8-error-toast-action');
+            const b = document.createElement('button');
+            b.type = 'button';
+            b.className = 'ft8-qso-skip-btn';
+            b.textContent = 'Send 73';
+            b.addEventListener('click', () => { ft8Send({ type: 'jtcat-skip-phase', unconfirmed: true }); toast.remove(); });
+            toast.appendChild(document.createTextNode(' '));
+            toast.appendChild(b);
+          }
           ft8View.appendChild(toast);
-          setTimeout(() => toast.remove(), 4000);
+          setTimeout(() => toast.remove(), msg.send73 ? 60000 : 4000);
           break;
         }
         ft8QsoState = (msg.phase && msg.phase !== 'idle') ? msg : null;
@@ -3104,6 +3165,13 @@
         break;
       case 'scope-state':
         scopeApplyState(msg);
+        break;
+      // APRS phase 6 (capability 'aprs'): the shack's APRS window on this page.
+      case 'aprs-state':
+        aprsApplyState(msg);
+        break;
+      case 'aprs-stations':
+        aprsApplyStations(msg);
         break;
 
       case 'jtcat-auto-cq-state':
@@ -6775,7 +6843,7 @@
   function refreshLogTabFields() {
     // Pre-fill freq/mode from radio state
     if (currentFreqKhz && !ltFreq.value) {
-      ltFreq.value = String(Math.round(currentFreqKhz * 10) / 10);
+      LogFreqField.fill(ltFreq, currentFreqKhz); // shows 100 Hz, logs the hertz (#794)
     }
     if (currentMode && ltMode.value === 'SSB') {
       ltMode.value = currentMode;
@@ -6860,7 +6928,7 @@
 
   function submitLogTab() {
     const raw = ltCall.value.trim().toUpperCase();
-    const freq = ltFreq.value.trim();
+    const freq = LogFreqField.value(ltFreq);
     if (!raw) { ltCall.focus(); return; }
     if (!freq || isNaN(parseFloat(freq))) { ltFreq.focus(); return; }
 
@@ -7022,7 +7090,7 @@
     logCall.value = p.callsign || '';
     reportTypedCall('log', logCall.value); // a value set in code counts too
     webRenderWorkedMatrix(logCall, 'log-worked-matrix');
-    logFreq.value = p.freqKhz || (currentFreqKhz ? String(Math.round(currentFreqKhz * 10) / 10) : '');
+    LogFreqField.fill(logFreq, p.freqKhz ? parseFloat(p.freqKhz) : (currentFreqKhz || 0)); // shows 100 Hz, logs the hertz (#794)
     // INVARIANT: passing freqKhz means "this frequency is NOT the dial's" —
     // a spot's, a decode's — so it is treated as the operator's choice and
     // frozen. A caller whose frequency IS just the current dial must pass
@@ -7105,7 +7173,7 @@
   logForm.addEventListener('submit', (e) => {
     e.preventDefault();
     const rawCall = logCall.value.trim().toUpperCase();
-    const freq = logFreq.value.trim();
+    const freq = LogFreqField.value(logFreq);
     if (!rawCall) { logCall.focus(); return; }
     if (!freq || isNaN(parseFloat(freq))) { logFreq.focus(); return; }
 
@@ -7208,6 +7276,174 @@
   }
 
   // =============================================
+  // APRS (phase 6): the shack's APRS window on this page. Only with a shack
+  // that lists the 'aprs' capability (the tab appears with the first
+  // aprs-state). Rows come parsed from the desktop (lib/aprs-echocat.js); the
+  // icons are the APRS window's own (renderer/aprs-icons.js) and the ages and
+  // compass points are lib/aprs-stations.js, both inlined. The internet beacon
+  // only: the radio beacon is not reachable from here.
+  // =============================================
+  const aprsView = document.getElementById('aprs-view');
+  const aprsTabBtn = document.getElementById('aprs-tab-btn');
+  const aprsRows = new Map();          // key -> row
+  let aprsState = null;
+  let aprsSubscribedSent = false;
+  let aprsSnapshotParts = null;        // rows of a snapshot still arriving
+  let aprsMapOn = false;
+  try { aprsMapOn = localStorage.getItem('echocat-aprs-map') === '1'; } catch { /* private window */ }
+  let aprsMapLayer = null;
+  const aprsMarkers = new Map();       // key -> L.marker
+  let aprsMapFitted = false;           // the layer's first stations bring the map to them, once
+  let aprsListTimer = null;
+
+  function aprsSendMsg(m) {
+    try { if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(m)); } catch { /* not connected */ }
+  }
+  /** Watching while the APRS tab is open, or the Map tab with its APRS layer on. */
+  function aprsSyncSubscription(tab) {
+    const want = !!aprsState && (tab === 'aprs' || (tab === 'map' && aprsMapOn));
+    if (want === aprsSubscribedSent) return;
+    aprsSubscribedSent = want;
+    if (!want) { aprsRows.clear(); aprsSnapshotParts = null; aprsMapClear(); }
+    aprsSendMsg({ type: 'aprs-subscribe', on: want });
+  }
+  /** A new connection: the shack starts from nothing, so ask again if watching. */
+  function aprsOnReconnect() { aprsSubscribedSent = false; aprsRows.clear(); aprsMapClear(); }
+
+  function aprsApplyState(st) {
+    aprsState = st;
+    if (aprsTabBtn) aprsTabBtn.classList.remove('hidden');
+    aprsSyncSubscription(activeTab); // the first state, or the first after a reconnect
+    aprsRenderControls();
+  }
+
+  function aprsApplyStations(m) {
+    if (m.op === 'snapshot') {
+      if (m.chunk === 0) aprsSnapshotParts = [];
+      if (!aprsSnapshotParts) return;
+      for (const r of m.stations || []) aprsSnapshotParts.push(r);
+      if (m.chunk + 1 < m.totalChunks) return;
+      aprsRows.clear();
+      for (const r of aprsSnapshotParts) aprsRows.set(r.key, r);
+      aprsSnapshotParts = null;
+      aprsMapClear();
+    } else if (m.op === 'delta') {
+      for (const r of (m.add || []).concat(m.update || [])) aprsRows.set(r.key, r);
+      for (const k of m.gone || []) aprsRows.delete(k);
+    }
+    aprsScheduleRender();
+  }
+
+  function aprsScheduleRender() {
+    if (aprsListTimer) return;
+    aprsListTimer = setTimeout(() => { aprsListTimer = null; if (activeTab === 'aprs') aprsRenderList(); aprsMapSync(); }, 120);
+  }
+
+  function aprsAge(ms) { return window.AprsStations ? window.AprsStations.formatAge(Date.now() - ms) : ''; }
+  function aprsIcon(r, px) { return window.AprsIcons ? window.AprsIcons.svg(r.cls, px, r.course) : ''; }
+  function aprsDist(r) {
+    if (r.distanceKm == null) return '';
+    const mi = distUnit === 'km' ? false : true;
+    const d = mi ? r.distanceKm * 0.621371 : r.distanceKm;
+    const pt = window.AprsStations ? window.AprsStations.compass(r.bearing) : '';
+    return Math.round(d) + (mi ? ' mi' : ' km') + (pt ? ' ' + pt : '');
+  }
+
+  function aprsRenderControls() {
+    const st = aprsState;
+    if (!st || !aprsView) return;
+    const l = st.listen || {}, ig = st.igate || {}, b = st.beacon || {}, f = st.feed || {};
+    const feedWords = { connected: 'Internet: connected', connecting: 'Internet: connecting', waiting: 'Internet: reconnecting', refused: 'Internet: APRS-IS refused the connection', off: 'Internet: off', stopped: 'Internet: off', 'no-grid': 'Set your grid in Settings to see stations near you.' };
+    document.getElementById('aprs-feed').textContent = feedWords[f.state] || ('Internet: ' + (f.state || 'off'));
+    const sw = document.getElementById('aprs-listen');
+    sw.checked = !!l.on;
+    const chips = document.getElementById('aprs-bands');
+    chips.innerHTML = (l.bands || []).map((bd) => '<button type="button" class="aprs-chip' + (bd === l.band ? ' active' : '') + '" data-band="' + esc(bd) + '">' + esc(bd.replace('m', ' m')) + '</button>').join('');
+    let line = '';
+    if (l.on && l.state === 'listening') line = 'Listening on ' + (l.mhz ? l.mhz + ' MHz' : l.band) + (l.modeLabel ? ' ' + l.modeLabel : '') + ' · ' + (l.heard || 0) + ' heard' + (l.lastAt ? ', last ' + aprsAge(l.lastAt) : '');
+    else if (l.on && l.state === 'starting') line = 'Setting up the radio...';
+    document.getElementById('aprs-listen-line').textContent = line;
+    const igRow = document.getElementById('aprs-igate-row');
+    igRow.classList.toggle('hidden', st.mayIgate === false);
+    document.getElementById('aprs-igate').checked = !!ig.on;
+    document.getElementById('aprs-igate-line').textContent = ig.on ? (ig.paused ? ig.paused : (ig.active ? 'Reporting as ' + (ig.call || '') : 'On when the radio listens') + ' · ' + (ig.gated || 0) + ' sent') : '';
+    const bRow = document.getElementById('aprs-beacon-row');
+    bRow.classList.toggle('hidden', st.mayBeacon === false);
+    const bb = document.getElementById('aprs-beacon');
+    bb.disabled = !!b.sending;
+    bb.textContent = b.sending ? 'Sending...' : 'Beacon now (internet)';
+    document.getElementById('aprs-beacon-line').textContent = b.lastAt ? 'Last beacon ' + aprsAge(b.lastAt) + ' ago' + (b.backAt >= b.lastAt ? ', seen on APRS-IS' : '') : '';
+    document.getElementById('aprs-map-on').checked = aprsMapOn;
+    const ref = document.getElementById('aprs-refusal');
+    ref.textContent = st.refusal || '';
+    ref.classList.toggle('hidden', !st.refusal);
+  }
+
+  function aprsRenderList() {
+    const el = document.getElementById('aprs-list');
+    if (!el) return;
+    const q = (document.getElementById('aprs-search').value || '').trim().toUpperCase();
+    const mine = document.getElementById('aprs-mine').checked;
+    let rows = [...aprsRows.values()];
+    if (mine) rows = rows.filter((r) => r.heardByMe);
+    if (q) rows = rows.filter((r) => (r.label || '').toUpperCase().includes(q) || (r.comment || '').toUpperCase().includes(q));
+    rows.sort((a, b) => (a.distanceKm == null ? 1e9 : a.distanceKm) - (b.distanceKm == null ? 1e9 : b.distanceKm));
+    document.getElementById('aprs-count').textContent = rows.length + (rows.length === 1 ? ' station' : ' stations');
+    if (!rows.length) { el.innerHTML = '<div class="dir-empty">' + (aprsRows.size ? 'No station matches.' : 'No stations yet.') + '</div>'; return; }
+    el.innerHTML = rows.slice(0, 300).map((r) => {
+      const heard = r.heardByMe ? '<span class="aprs-heard">' + (r.rf && r.rf.kind === 'digi' ? 'Heard via ' + esc(r.rf.digi || 'digi') : 'Heard direct') + '</span>' : '';
+      const sp = r.speed ? ' · ' + Math.round(r.speed * (distUnit === 'km' ? 1.852 : 1.15078)) + (distUnit === 'km' ? ' km/h' : ' mph') : '';
+      return '<div class="aprs-row' + (r.heardByMe ? ' mine' : '') + '">' + aprsIcon(r, 26)
+        + '<div class="aprs-row-main"><div class="aprs-row-top"><span class="aprs-call">' + esc(r.label) + '</span>' + heard + '<span class="aprs-age">' + esc(aprsAge(r.lastHeard)) + '</span></div>'
+        + '<div class="aprs-row-sub">' + esc(aprsDist(r)) + esc(sp) + (r.comment || r.status ? ' · ' + esc(r.comment || r.status) : '') + '</div></div></div>';
+    }).join('');
+  }
+
+  // The Map tab's APRS layer: one marker per station, the window's icons.
+  function aprsMapClear() {
+    if (aprsMapLayer) aprsMapLayer.clearLayers();
+    aprsMarkers.clear();
+  }
+  function aprsMapSync() {
+    if (!spotMap || typeof L === 'undefined') return;
+    if (!aprsMapOn) { aprsMapFitted = false; if (aprsMapLayer) { spotMap.removeLayer(aprsMapLayer); aprsMapLayer = null; aprsMarkers.clear(); } return; }
+    if (!aprsMapLayer) aprsMapLayer = L.layerGroup().addTo(spotMap);
+    for (const [k, mk] of aprsMarkers) if (!aprsRows.has(k)) { aprsMapLayer.removeLayer(mk); aprsMarkers.delete(k); }
+    const pts = [];
+    for (const r of aprsRows.values()) {
+      if (r.lat == null || r.lon == null) continue;
+      pts.push([r.lat, r.lon]);
+      const icon = L.divIcon({ className: 'aprs-pin' + (r.heardByMe ? ' mine' : ''), html: aprsIcon(r, 22), iconSize: [22, 22], iconAnchor: [11, 11] });
+      let mk = aprsMarkers.get(r.key);
+      if (!mk) {
+        mk = L.marker([r.lat, r.lon], { icon, keyboard: false });
+        mk.addTo(aprsMapLayer);
+        aprsMarkers.set(r.key, mk);
+      } else { mk.setLatLng([r.lat, r.lon]); mk.setIcon(icon); }
+      mk.bindPopup('<b>' + esc(r.label) + '</b><br>' + esc(aprsDist(r)) + (r.comment ? '<br>' + esc(r.comment) : '') + '<br>' + esc(aprsAge(r.lastHeard)) + (r.heardByMe ? ' · heard on my radio' : ''));
+    }
+    if (!aprsMapFitted && pts.length) { aprsMapFitted = true; try { spotMap.fitBounds(pts, { maxZoom: 9, padding: [20, 20] }); } catch { /* map not sized yet */ } }
+  }
+
+  if (aprsView) {
+    document.getElementById('aprs-listen').addEventListener('change', (e) => aprsSendMsg({ type: 'aprs-listen', on: !!e.target.checked }));
+    document.getElementById('aprs-bands').addEventListener('click', (e) => {
+      const b = e.target.closest('.aprs-chip');
+      if (!b) return;
+      aprsSendMsg({ type: 'aprs-listen', on: !!(aprsState && aprsState.listen && aprsState.listen.on), band: b.dataset.band });
+    });
+    document.getElementById('aprs-igate').addEventListener('change', (e) => aprsSendMsg({ type: 'aprs-igate', on: !!e.target.checked }));
+    document.getElementById('aprs-beacon').addEventListener('click', () => aprsSendMsg({ type: 'aprs-beacon-is' }));
+    document.getElementById('aprs-map-on').addEventListener('change', (e) => {
+      aprsMapOn = !!e.target.checked;
+      try { localStorage.setItem('echocat-aprs-map', aprsMapOn ? '1' : '0'); } catch { /* private window */ }
+      aprsMapSync();
+    });
+    document.getElementById('aprs-search').addEventListener('input', () => aprsRenderList());
+    document.getElementById('aprs-mine').addEventListener('change', () => aprsRenderList());
+  }
+
+  // =============================================
   // ACTIVATOR MODE
   // =============================================
 
@@ -7249,6 +7485,7 @@
       }
     } catch { /* pre-init switch — nothing subscribed yet */ }
     try { scopeSyncSubscription(tab); } catch { /* pre-init */ }
+    try { aprsSyncSubscription(tab); } catch { /* pre-init */ }
     // Leaving Mail: a radio moved to a gateway for a look goes back (W1).
     try { if (activeTab === 'mail' && tab !== 'mail') mailOnLeave(); } catch { /* pre-init */ }
     // Leaving FT8: remember where it was, to come back to it (item 15).
@@ -7272,15 +7509,16 @@
     if (sstvView) { sstvView.classList.add('hidden'); sstvView.style.display = 'none'; }
     if (scopeView) { scopeView.classList.add('hidden'); scopeView.style.display = 'none'; }
     if (mailView) { mailView.classList.add('hidden'); mailView.style.display = 'none'; }
+    try { if (aprsView) { aprsView.classList.add('hidden'); aprsView.style.display = 'none'; } } catch { /* pre-init */ }
     // Popout trigger: visible only on the Map tab, and only in non-popout windows
     if (mapPopoutBtn) mapPopoutBtn.classList.toggle('hidden', isPopout || tab !== 'map');
     if (scanning) stopScan();
     // Show/hide PTT button — hide when FT8/SSTV tab is active
-    pttBtn.style.display = (tab === 'ft8' || tab === 'sstv' || tab === 'scope' || tab === 'mail') ? 'none' : '';
+    pttBtn.style.display = (tab === 'ft8' || tab === 'sstv' || tab === 'scope' || tab === 'mail' || tab === 'aprs') ? 'none' : '';
     // Hide entire bottom bar on FT8/SSTV tab
-    bottomBar.style.display = (tab === 'ft8' || tab === 'sstv' || tab === 'scope' || tab === 'mail') ? 'none' : '';
+    bottomBar.style.display = (tab === 'ft8' || tab === 'sstv' || tab === 'scope' || tab === 'mail' || tab === 'aprs') ? 'none' : '';
     // Hide Scan button and freq step arrows on FT8/SSTV tab
-    scanBtn.style.display = (tab === 'ft8' || tab === 'sstv' || tab === 'scope' || tab === 'mail') ? 'none' : '';
+    scanBtn.style.display = (tab === 'ft8' || tab === 'sstv' || tab === 'scope' || tab === 'mail' || tab === 'aprs') ? 'none' : '';
     var freqStepBtns = document.getElementById('freq-step-btns');
     if (freqStepBtns) freqStepBtns.style.display = tab === 'ft8' ? 'none' : '';
     // Hide CW/SSB panels on tabs where they're not relevant
@@ -7308,6 +7546,11 @@
       }
       setTimeout(() => spotMap.invalidateSize(), 100);
       renderMapSpots();
+      try { aprsMapSync(); } catch { /* pre-init */ } // the APRS layer, when it is on (APRS tab)
+    } else if (tab === 'aprs') {
+      if (aprsView) { aprsView.classList.remove('hidden'); aprsView.style.display = 'flex'; }
+      aprsRenderControls();
+      aprsRenderList();
     } else if (tab === 'log') {
       logTabView.classList.remove('hidden');
       refreshLogTabFields();
@@ -10407,48 +10650,21 @@
     // a new press; 15 ms is a whole dot at 80 WPM. Same rule in lib/keyer.js.
     var BOUNCE_MS = 15;
     var ditReleaseAt = -1e9, dahReleaseAt = -1e9;
-    // A held paddle's next element is chosen when the space ends, but it is
-    // only HEARD a scheduling lead later (schedulePaddleElement, 20 ms) plus
-    // the device's output latency, and the release reaches this page after
-    // the contact opens (MIDI and keyboard events arrive late). The operator
-    // releases on what he hears, so at 25 wpm (48 ms dit and space) his
-    // release could miss the choice and the keyer sent one more element:
-    // LZ3AW (#244, 1.13.8) measured 54 ms from choice to speaker and paddle
-    // input up to 24 ms late. A release of the contact whose HOLD chose the
-    // element now withdraws it while it has not begun to sound. A latched
-    // element (a real press during the element) is never withdrawn.
+    // A held paddle's next element is chosen when the space ends, a lead
+    // before it sounds (schedulePaddleElement), and the operator releases on
+    // what he hears, so at 25 wpm a release can come after that choice
+    // (LZ3AW, #244). A release of the contact whose HOLD chose the element
+    // asks to withdraw it (a latched element, a real press during the
+    // element, is never withdrawn). The page grants it only while the
+    // element's sidetone has not started (lib/cw-sidetone-commit.js, Casey
+    // 2026-11-19): once it sounds, it is committed and keyed on the air in
+    // full, so the sidetone and the air always agree. Until 1.14.6 a release
+    // could withdraw an element after its tone had started (judged by when
+    // the release happened and what he could have heard): the page cut its
+    // tone into a blip while the shack dropped the element, the extra
+    // elements LZ3AW heard only in his own sidetone.
     var heldBy = null;   // 'dit' | 'dah': the held contact that chose this element
     var undoState = null; // the keyer before that choice
-    var soundAt = 0;     // performance.now() when this element starts to sound
-    var chosenAt = 0;    // performance.now() when the keyer chose it
-    var RETRACT_MARGIN_MS = 2;
-    // 1.14.5 retest (#244): the window above ended where the element began
-    // to sound in the PAGE, and it was measured when the release was
-    // PROCESSED. Neither is when the operator acts. His cw-diag on 1.14.5:
-    // 57 ms from choice to speaker, 40 ms of it the device's output, and
-    // paddle input up to 40 ms late, at 25 wpm (48 ms dit and space). So a
-    // release he made before he could hear the element still arrived after
-    // the page had started it, and the element was kept: one more dot or
-    // dash. Now the release counts at the time it HAPPENED (the event's own
-    // timestamp), and it withdraws the element if it happened before the
-    // element reached his ear (start + the device's output latency, at most
-    // HEARD_LAG_MAX_MS). The shack replays the stream at least 120 ms behind
-    // its arrival, so a cancel sent within RETRACT_RF_MAX_MS of the choice
-    // reaches it first; later than that the element is kept, never cut.
-    var RETRACT_RF_MAX_MS = 100;
-    var HEARD_LAG_MAX_MS = 60;
-    function heardLagMs() {
-      var v = (typeof cwHeardLagMs === 'function') ? Number(cwHeardLagMs()) : 0;
-      return (v > 0) ? Math.min(HEARD_LAG_MAX_MS, v) : 0;
-    }
-    // When the contact really opened: the event's timestamp (same origin as
-    // performance.now()) when it is sane, else now.
-    function releaseTime(atMs) {
-      var now = performance.now();
-      var t = Number(atMs);
-      if (!(t > 0) || t > now + 5 || t < now - 200) return now;
-      return Math.min(t, now);
-    }
     function ditMs() { return Math.round(1200 / wpm); }
     function dahMs() { return ditMs() * 3; }
     function clearTimers() {
@@ -10461,9 +10677,7 @@
       bothAtStart = ditPressed && dahPressed;
       ditLatch = false; dahLatch = false;
       heldBy = null; undoState = null;
-      chosenAt = performance.now();
-      var lead = onKey(true, isDit ? ditMs() : dahMs(), { continued: !!continued, spaceMs: ditMs() });
-      soundAt = chosenAt + (Number(lead) > 0 ? Number(lead) : 0);
+      onKey(true, isDit ? ditMs() : dahMs(), { continued: !!continued, spaceMs: ditMs() });
       clearTimers();
       timerDue = performance.now() + (isDit ? ditMs() : dahMs());
       toneTimer = setTimeout(onToneEnd, isDit ? ditMs() : dahMs());
@@ -10510,20 +10724,18 @@
       }
       state = IDLE;
     }
-    // The contact whose hold chose the element now sounding-soon opened: take
-    // the element back and choose again as if the release had come in time.
-    function retractHeldBy(contact, atMs) {
-      // TONE or the space after it: a dit is over in the keyer's own time
-      // before the operator has heard it (#244), so a late release can land
-      // in the space; heldBy is cleared when the next element starts.
+    // The contact whose hold chose the element about to sound opened: ask for
+    // the element back and, if it has not started to sound, choose again as
+    // if the release had come in time.
+    function retractHeldBy(contact) {
+      // TONE or the space after it (a dit can be over in the keyer's own time
+      // before its tone starts); heldBy is cleared when the next element starts.
       if ((state !== TONE && state !== IES) || heldBy !== contact || !undoState) return;
-      var now = performance.now();
-      if (releaseTime(atMs) >= soundAt + heardLagMs() - RETRACT_MARGIN_MS) return; // he could hear it
-      if (now - chosenAt > RETRACT_RF_MAX_MS) return; // the shack may already be keying it
       var u = undoState;
-      clearTimers();
       heldBy = null; undoState = null;
-      onKey(false, undefined, { cancel: true, retract: true });
+      // true only while its sidetone has not started (lib/cw-sidetone-commit.js)
+      if (onKey(false, undefined, { cancel: true, retract: true }) !== true) return;
+      clearTimers();
       currentIsDit = u.isDit;
       ditLatch = ditLatch || u.ditLatch;
       dahLatch = dahLatch || u.dahLatch;
@@ -10531,7 +10743,7 @@
       state = IES;
       chooseNext();
     }
-    function handleDit(pressed, atMs) {
+    function handleDit(pressed) {
       ditPressed = pressed;
       if (mode === 'straight') { onKey(pressed); return; }
       if (pressed) {
@@ -10544,10 +10756,10 @@
         // Ghost-press cleanup (Android BT MIDI etc. — matches server keyer)
         var held = Date.now() - ditPressStart;
         if (ditLatch && held < GHOST_MS && state !== IDLE) ditLatch = false;
-        retractHeldBy('dit', atMs);
+        retractHeldBy('dit');
       }
     }
-    function handleDah(pressed, atMs) {
+    function handleDah(pressed) {
       dahPressed = pressed;
       if (mode === 'straight') return;
       if (pressed) {
@@ -10559,13 +10771,12 @@
         dahReleaseAt = Date.now();
         var held = Date.now() - dahPressStart;
         if (dahLatch && held < GHOST_MS && state !== IDLE) dahLatch = false;
-        retractHeldBy('dah', atMs);
+        retractHeldBy('dah');
       }
     }
     return {
-      // atMs: when the contact changed (the input event's timeStamp), optional.
-      paddleDit: function(pressed, atMs) { swap ? handleDah(pressed, atMs) : handleDit(pressed, atMs); },
-      paddleDah: function(pressed, atMs) { swap ? handleDit(pressed, atMs) : handleDah(pressed, atMs); },
+      paddleDit: function(pressed) { swap ? handleDah(pressed) : handleDit(pressed); },
+      paddleDah: function(pressed) { swap ? handleDit(pressed) : handleDah(pressed); },
       setWpm: function(v) { wpm = Math.max(5, Math.min(50, v | 0)); },
       setMode: function(m) {
         if (m === 'iambicA' || m === 'iambicB' || m === 'straight') {
@@ -10635,11 +10846,6 @@
   // he releases late and the keyer honestly sends one more. One line per
   // over in the desktop log says which: cw-diag, sent after 1.5 s of quiet.
   var cwDiag = null, cwDiagTimer = null;
-  // How long after a tone starts on the audio clock the operator hears it:
-  // the device's output latency (the keyer's withdraw window, #244).
-  function cwHeardLagMs() {
-    return cwAudioCtx ? ((cwAudioCtx.baseLatency || 0) + (cwAudioCtx.outputLatency || 0)) * 1000 : 0;
-  }
   function cwDiagNote(kind, ms) {
     ms = Math.max(0, Number(ms) || 0);
     if (!cwDiag) cwDiag = { elements: 0, timerMax: 0, timerSum: 0, timerN: 0, inputMax: 0, aheadMax: 0, aheadSum: 0 };
@@ -10686,57 +10892,82 @@
   // second keyer at the shack meant network jitter decided the elements:
   // a dit release that arrived late became two dits (LZ3AW, 400 km from his
   // TS-480, 2026-09-29: "errors ... especially with the dots").
+  //
+  // An iambic element goes to the shack when its sidetone STARTS (#244,
+  // lib/cw-sidetone-commit.js), not when the keyer chooses it: before that
+  // the keyer may still withdraw it, after it nothing is withdrawn, so a
+  // withdrawal never goes on the wire and the air keys exactly what was heard.
   var cwStreamNextAt = 0, cwStreamLastAt = 0;
-  function sendCwKeyStream(down, durMs, info) {
+  // The stream time (`at`) of an iambic element, fixed when it is chosen.
+  function cwStreamElementAt(durMs, info) {
+    // A continued element starts exactly one space after the previous
+    // one, whatever this page's timers did; a new streak starts now.
+    var at = (info && info.continued && cwStreamNextAt) ? cwStreamNextAt : performance.now();
+    cwStreamNextAt = at + durMs + ((info && info.spaceMs) || 0);
+    cwStreamLastAt = at;
+    return at;
+  }
+  // Straight-key edges, and the cancelling key-up of a stop (atMs: where it cuts).
+  function sendCwKeyStream(down, info, atMs) {
     if (!cwKeyStreamOk || !ws || ws.readyState !== WebSocket.OPEN) return;
     var now = performance.now();
     var msg;
-    if (down && durMs) {
-      // A continued element starts exactly one space after the previous
-      // one, whatever this page's timers did; a new streak starts now.
-      var at = (info && info.continued && cwStreamNextAt) ? cwStreamNextAt : now;
-      cwStreamNextAt = at + durMs + ((info && info.spaceMs) || 0);
-      cwStreamLastAt = at;
-      msg = { type: 'cw-key', at: at, down: true, ms: durMs };
-    } else if (down) {
+    if (down) {
       cwStreamNextAt = 0;
       msg = { type: 'cw-key', at: now, down: true };
     } else {
       cwStreamNextAt = 0;
-      msg = { type: 'cw-key', at: now, down: false };
+      msg = { type: 'cw-key', at: (atMs != null ? atMs : now), down: false };
       if (info && info.cancel) msg.cancel = true;
     }
     ws.send(JSON.stringify(msg));
   }
-  // The keyer withdrew an element that has not begun to sound (its held
-  // contact opened in time, #244): drop its tone and, in stream mode, its
-  // keying at the shack (a cancelling key-up just before its start; the
-  // playout drops what is scheduled after that), and give its slot back.
+  // The gate between this keyer and the shack: an element is committed, and
+  // sent, when its sidetone starts on the audio clock.
+  var cwCommit = window.CwSidetoneCommit.createGate({
+    now: function() { return cwAudioCtx ? cwAudioCtx.currentTime * 1000 : 0; },
+    send: function(msg) {
+      if (!cwKeyStreamOk) return true; // an older shack keys from the contacts
+      if (!ws || ws.readyState !== WebSocket.OPEN) return false;
+      ws.send(JSON.stringify(msg));
+      return true;
+    },
+    setTimer: function(fn, ms) { return setTimeout(fn, ms); },
+    clearTimer: function(h) { clearTimeout(h); },
+    // It could not reach the shack (the socket is gone): its tone has not
+    // started, so silence it and stop the keyer; nothing more sounds.
+    onLost: function() { try { localCwKeyer.stop(); } catch (e) { cancelPaddleTones(); } },
+  });
+  // The keyer asks for an element back (its held contact opened). Granted
+  // only while its sidetone has not started: drop its tone and give its slot
+  // back; it was never sent. Once it sounds it is keyed in full (#244).
   function retractPaddleElement() {
-    if (paddleGain && cwAudioCtx && paddleLastAt) {
-      var g = paddleGain.gain, nowA = cwAudioCtx.currentTime;
-      if (nowA > paddleLastAt) {
-        // The page had already started rendering this tone (the release came
-        // in late, #244): hold where it is and fade out in 3 ms, no click.
-        if (typeof g.cancelAndHoldAtTime === 'function') g.cancelAndHoldAtTime(nowA);
-        else { var v = g.value; g.cancelScheduledValues(nowA); g.setValueAtTime(v, nowA); }
-        g.linearRampToValueAtTime(0, nowA + 0.003);
-      } else {
-        g.cancelScheduledValues(paddleLastAt);
-      }
-      paddleNextAt = Math.max(paddleLastAt, nowA);
-    } else paddleNextAt = paddleLastAt;
-    if (cwKeyStreamOk && cwStreamLastAt && ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ type: 'cw-key', at: cwStreamLastAt - 1, down: false, cancel: true }));
-      cwStreamNextAt = cwStreamLastAt;
-    }
+    if (!cwCommit.withdraw()) return false;
+    if (paddleGain && cwAudioCtx && paddleLastAt) paddleGain.gain.cancelScheduledValues(paddleLastAt);
+    paddleNextAt = paddleLastAt;
+    cwStreamNextAt = cwStreamLastAt;
+    return true;
+  }
+  // A stop (STOP, mode change, paddle keying lost, the socket closed): the
+  // tone stops now, an element not yet sounding is dropped on both sides, and
+  // the shack cuts the element now sounding at the same point (cutAt).
+  function stopPaddleElements(info) {
+    var cut = cwCommit.stop();
+    cancelPaddleTones();
+    sendCwKeyStream(false, info, cut);
   }
   var localCwKeyer = createLocalCwKeyer(function(down, durMs, info) {
-    if (durMs) { sendCwKeyStream(true, durMs, info); var lead = schedulePaddleElement(durMs); cwDiagNote('ahead', lead); return lead; } // iambic element
+    if (durMs) { // iambic element: sounds `lead` ms from now, is sent when it does
+      var at = cwStreamElementAt(durMs, info);
+      var lead = schedulePaddleElement(durMs); cwDiagNote('ahead', lead);
+      cwCommit.element(at, durMs, paddleLastAt * 1000);
+      return lead;
+    }
     if (durMs === 0) return;                              // its end is already scheduled
-    if (info && info.retract) { retractPaddleElement(); return; }
-    // Straight key, or a keyer stop/mode change.
-    sendCwKeyStream(down, 0, info);
+    if (info && info.retract) return retractPaddleElement(); // true: withdrawn before it sounded
+    if (!down && info && info.cancel) { stopPaddleElements(info); handleCwSidetone(false); return; }
+    // Straight key.
+    sendCwKeyStream(down, info);
     if (!down) cancelPaddleTones();
     handleCwSidetone(down);
   });
@@ -11508,7 +11739,7 @@
         'kernel driver rejects DTR control; (b) connecting via Hamlib / rigctld, which has ' +
         'no per-element CW command in its protocol — only mic PTT. ' +
         'Workaround for either case: wire an external USB-UART adapter (FTDI / CH340) to the ' +
-        'radio’s CW KEY jack and set it as <i>CW Key Port</i> in Settings → Rig. ' +
+        'radio’s CW KEY jack and set it as <i>CW Key Port</i> in Settings &gt; ECHOCAT. ' +
         'CW macros and text-send still work without it — only paddle is affected.'
       );
       helpEl.innerHTML = bits.join('<br>');
@@ -11614,7 +11845,7 @@ var _paddleHoldTimer = { dit: null, dah: null };
   // they sit in (a silent `typeof` miss would bring the stuck key back).
   window.__echocatReleasePaddles = releaseAllPaddles;
 
-  function sendPaddle(contact, state, atMs) {
+  function sendPaddle(contact, state) {
     // Drive the local iambic keyer first (zero-latency sidetone) then forward
     // to the server over WS (which does the real radio keying). Skip both
     // sides when desktop has reported paddle keying can't reach the radio
@@ -11623,9 +11854,8 @@ var _paddleHoldTimer = { dit: null, dah: null };
     // Presses only: a release always goes out (see releaseAllPaddles).
     if (!cwPaddleAvailable && state) return;
     ensureCwAudioCtx();
-    // atMs: the input event's timeStamp (a late release counts when it happened, #244)
-    if (contact === 'dit') localCwKeyer.paddleDit(!!state, atMs);
-    else if (contact === 'dah') localCwKeyer.paddleDah(!!state, atMs);
+    if (contact === 'dit') localCwKeyer.paddleDit(!!state);
+    else if (contact === 'dah') localCwKeyer.paddleDah(!!state);
     if (ws && ws.readyState === WebSocket.OPEN && !cwKeyStreamOk) {
       if (state && !_paddleRttSentAt) _paddleRttSentAt = performance.now();
       ws.send(JSON.stringify({ type: 'paddle', contact: contact, state: state }));
@@ -11710,11 +11940,11 @@ var _paddleHoldTimer = { dit: null, dah: null };
     if (contact === 'dit') {
       e.preventDefault();
       ditDown = false;
-      sendPaddle('dit', 0, e.timeStamp);
+      sendPaddle('dit', 0);
     } else if (contact === 'dah') {
       e.preventDefault();
       dahDown = false;
-      sendPaddle('dah', 0, e.timeStamp);
+      sendPaddle('dah', 0);
     }
   });
 
@@ -11786,10 +12016,10 @@ var _paddleHoldTimer = { dit: null, dah: null };
     // Normal operation — map notes to paddle contacts
     if (note === ecMidiDitNote) {
       if (isNoteOn) { if (!ditDown) { ditDown = true; sendPaddle('dit', 1); } }
-      else if (isNoteOff) { ditDown = false; sendPaddle('dit', 0, msg.timeStamp); }
+      else if (isNoteOff) { ditDown = false; sendPaddle('dit', 0); }
     } else if (note === ecMidiDahNote) {
       if (isNoteOn) { if (!dahDown) { dahDown = true; sendPaddle('dah', 1); } }
-      else if (isNoteOff) { dahDown = false; sendPaddle('dah', 0, msg.timeStamp); }
+      else if (isNoteOff) { dahDown = false; sendPaddle('dah', 0); }
     }
   }
 
@@ -15063,12 +15293,10 @@ var _paddleHoldTimer = { dit: null, dah: null };
           vfOpCard.classList.add('vf-op-empty');
         }
       }
-      // Hide PTT in non-voice modes (CW/digital) — same logic as main pttBtn.
+      // Hide PTT in non-voice modes (CW/digital); show it while the mode is
+      // unknown, like the main PTT (#190). lib/vfo-ptt-row.js.
       if (vfPttRow) {
-        const mUp = (currentMode || '').toUpperCase();
-        const isVoice = (mUp === 'SSB' || mUp === 'USB' || mUp === 'LSB' ||
-                         mUp === 'FM' || mUp === 'AM' || mUp.startsWith('FREEDV'));
-        vfPttRow.classList.toggle('hidden', !isVoice);
+        vfPttRow.classList.toggle('hidden', !VfoPttRow.showVfoPttRow(currentMode));
       }
     }
 

@@ -293,6 +293,7 @@ contextBridge.exposeInMainWorld('api', {
   getRigModels: () => ipcRenderer.invoke('get-rig-models'),
   getRigSetupNotes: (q) => ipcRenderer.invoke('get-rig-setup-notes', q),
   getPacketRigMode: (q) => ipcRenderer.invoke('get-packet-rig-mode', q),
+  getRigPowerOffInfo: (q) => ipcRenderer.invoke('get-rig-power-off-info', q),
   icomScopeCapture: () => ipcRenderer.invoke('icom-scope-capture'),
   stationSetupGet: (rigId) => ipcRenderer.invoke('station-setup-get', rigId),
   stationSetupReport: (q) => ipcRenderer.invoke('station-setup-report', q),
@@ -545,6 +546,13 @@ contextBridge.exposeInMainWorld('api', {
   mercuryListDevices: () => ipcRenderer.invoke('mercury-list-devices'),
   // Winlink (Pat) — the mail window, Settings helpers, the bug-report line.
   winlinkPopoutOpen: () => ipcRenderer.send('winlink-popout-open'),
+  aprsPopoutOpen: () => ipcRenderer.send('aprs-popout-open'),
+  // APRS phase 4: the iGate's marks { on, active, call, sentence, link, gated, lastAt, lastFrom }
+  aprsIgateStatus: () => ipcRenderer.invoke('aprs-igate-status'),
+  onAprsIgateStatus: (cb) => ipcRenderer.on('aprs-igate-status', (_e, s) => cb(s)),
+  // The radio's GPS, read only (lib/flex-gps.js): Settings offers its grid, never sets it.
+  getFlexGps: () => ipcRenderer.invoke('flex-gps-get'),
+  onFlexGps: (cb) => ipcRenderer.on('flex-gps', (_e, s) => cb(s)),
   winlinkPotaSpotOpen: (o) => ipcRenderer.send('winlink-pota-spot-open', o || {}),
   winlinkDiag: () => ipcRenderer.invoke('winlink-diag'),
   settingsSaveStatus: () => ipcRenderer.invoke('settings-save-status'),
