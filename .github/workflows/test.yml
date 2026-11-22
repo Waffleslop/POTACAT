@@ -1,8 +1,10 @@
 name: Test
 
-# Runs on every push to master + every PR. The jtcat-tests job runs the
-# SAME suite as `npm test` (scripts/run-tests.js: every test file, in order,
-# continuing past failures, exit non-zero if any failed). Until 2026-11-07
+# Runs on every push to master + every PR. The tests job runs the
+# SAME suite as `npm test` (scripts/run-tests.js: every test file, continuing
+# past failures, exit non-zero if any failed). It ran as "jtcat-tests" until
+# 2026-11-21; since then it runs the files in parallel (4 workers on
+# ubuntu-latest's 4 vCPUs; files in the runner's SERIAL set run alone after). Until 2026-11-07
 # this job ran a hand-picked list of ~90 files that had to be edited by hand
 # for every new test, and none of the tests added for #136/#142/#143/#174/
 # #179/#186 were on it, so "CI green" did not cover them (GitHub #205).
@@ -14,7 +16,7 @@ name: Test
 #
 # To gate merges on this passing, enable branch protection in
 # GitHub Settings → Branches → master → "Require status checks
-# to pass before merging" and tick the "jtcat-tests" job below.
+# to pass before merging" and tick the "tests" job below.
 
 on:
   push:
@@ -23,7 +25,8 @@ on:
     branches: [master]
 
 jobs:
-  jtcat-tests:
+  tests:
+    name: tests
     runs-on: ubuntu-latest
     # Bumped 5 → 12 (2026-07-09): the SSTV e2e + quality suites pushed the
     # battery past 5 minutes and runs were being CANCELLED at the timeout —
@@ -38,8 +41,8 @@ jobs:
           node-version: '22' # same as release.yml; the suite needs ws and serialport from the lockfile
       - name: npm ci (the suite requires ws, serialport and the other runtime deps)
         run: npm ci --no-audit --no-fund
-      - name: Run the whole npm test suite (scripts/run-tests.js)
-        run: node scripts/run-tests.js
+      - name: Run the whole npm test suite in parallel (scripts/run-tests.js)
+        run: node scripts/run-tests.js --jobs 4
       - name: Validate SSTV style packs in data/sstv-packs
         run: node scripts/validate-sstv-packs.js
       - name: Compile the FT-710 scope helper and round-trip one synthetic frame through the parser
