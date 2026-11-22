@@ -137,9 +137,9 @@ test('the position: the point picked on the map when saved, else the centre of t
 
 test('settings: aprsBeaconSymbol, aprsBeaconComment, aprsBeaconApprox (on by default), aprsBeaconIntervalMin (off by default), aprsBeaconLat, aprsBeaconLon', () => {
   const d = B.beaconSettings({});
-  assert.deepStrictEqual(d, { symbol: 'house', comment: 'POTACAT', approx: true, intervalMin: 0, activation: false, rfSsid: null, precision: null, source: 'settings', radioMsgAutoRetry: false, radioMsgAutoAck: false, lat: null, lon: null }); // radioMsg*: A3, off by default; rfSsid: My APRS SSID, null = as before; precision null = today's position rule
+  assert.deepStrictEqual(d, { symbol: 'house', comment: 'POTACAT', approx: true, intervalMin: 0, activation: false, rfSsid: null, precision: null, source: 'settings', radioMsgAutoRetry: false, radioMsgAutoAck: false, rfIntervalMin: 0, lat: null, lon: null }); // radioMsg*: A3, off by default; rfSsid: My APRS SSID, null = as before; precision null = today's position rule
   const s = B.beaconSettings({ aprsBeaconSymbol: 'boat', aprsBeaconComment: 'Hi', aprsBeaconApprox: false, aprsBeaconIntervalMin: 5, aprsBeaconLat: 41.5, aprsBeaconLon: -72.1 });
-  assert.deepStrictEqual(s, { symbol: 'boat', comment: 'Hi', approx: false, intervalMin: 10, activation: false, rfSsid: null, precision: null, source: 'settings', radioMsgAutoRetry: false, radioMsgAutoAck: false, lat: 41.5, lon: -72.1 });
+  assert.deepStrictEqual(s, { symbol: 'boat', comment: 'Hi', approx: false, intervalMin: 10, activation: false, rfSsid: null, precision: null, source: 'settings', radioMsgAutoRetry: false, radioMsgAutoAck: false, rfIntervalMin: 0, lat: 41.5, lon: -72.1 });
   // A3: the two automatic radio transmissions are on only when the saved value is exactly true.
   assert.strictEqual(B.beaconSettings({ aprsRadioMsgAutoRetry: 'yes', aprsRadioMsgAutoAck: 1 }).radioMsgAutoRetry, false);
   assert.strictEqual(B.beaconSettings({ aprsRadioMsgAutoAck: 1 }).radioMsgAutoAck, false);
