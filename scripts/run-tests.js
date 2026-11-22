@@ -37,6 +37,7 @@ const TESTS = [
   'test/guest-pass-owner-controls-test.js', // #200 / #541 step 3: Take the radio (Now / In 5 minutes), Give it back, Cancel pass
   'test/guest-pass-handback-test.js', // #200 / #541 step 4: after 5 idle owner minutes the guest may take the radio back; no automatic hand-back
   'test/rigctld-spawn-test.js',
+  'test/rigctld-bind-test.js', // Casey 2026-11-22: POTACAT's own rigctld binds 127.0.0.1 (-T), dialled on 127.0.0.1
   'test/echocat-connect-diet-test.js',
   'test/cw-live-watchdog-test.js',
   'test/yaesu-cw-text-test.js',
