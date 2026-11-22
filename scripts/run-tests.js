@@ -768,6 +768,8 @@ const TESTS = [
 // A file goes here with the reason; better to fix the test and take it out.
 const SERIAL = new Set([
   'test/atu-wizard-test.js', // runs the wizard on a 40x clock over real timers; under load a point times out (K3SBP run 1 case)
+  'test/tci-audio-test.js', // 2 s budgets for a loopback TCI server to answer; missed in 2 of 9 parallel runs on a loaded machine, never alone
+  'test/paddle-bounce-test.js', // web keyer element timing in real milliseconds; a dash was cut short once under load
 ]);
 
 // The longest files, started first so the pool does not wait on one that began
