@@ -2370,7 +2370,8 @@ async function loadPrefs() {
   updateRbnButton();
   clusterTerminalBtn.classList.toggle('hidden', !settings.enableClusterTerminal);
   var mercuryBtn = document.getElementById('view-mercury-btn');
-  if (mercuryBtn) mercuryBtn.classList.toggle('hidden', !settings.enableMercury);
+  // Hidden until Mercury has been used on the air (Casey 2026-11-22): lib/mercury-offer.js.
+  if (mercuryBtn) mercuryBtn.classList.toggle('hidden', !window.MercuryOffer.chatWindowOffered(settings));
   var winlinkBtn = document.getElementById('view-winlink-btn');
   if (winlinkBtn) winlinkBtn.classList.remove('hidden'); // Winlink is always available
   // Spot by Winlink: offered once the operator has used Winlink (notice accepted).
@@ -18780,7 +18781,7 @@ async function openSettingsDialog(tab) {
     setMercurySound.value = s.mercurySoundSystem || 'auto';
     setMercuryIn.value = s.mercuryInputDevice || '';
     setMercuryOut.value = s.mercuryOutputDevice || '';
-    setMercuryBw.value = String(s.mercuryBw || 2300);
+    setMercuryBw.value = String(window.MercuryOffer.bandwidthChoice(s.mercuryBw));
     setMercuryTxGain.value = (s.mercuryTxGainDb != null ? s.mercuryTxGainDb : 0);
     setMercuryListen.checked = s.mercuryListen === true;
     mercuryConfig.classList.toggle('hidden', !s.enableMercury);
@@ -19674,7 +19675,7 @@ settingsSave.addEventListener('click', async () => {
       mercurySoundSystem: setMercurySound.value,
       mercuryInputDevice: setMercuryIn.value.trim(),
       mercuryOutputDevice: setMercuryOut.value.trim(),
-      mercuryBw: parseInt(setMercuryBw.value, 10) || 2300,
+      mercuryBw: window.MercuryOffer.bandwidthChoice(setMercuryBw.value),
       mercuryTxGainDb: parseFloat(setMercuryTxGain.value) || 0,
       mercuryListen: setMercuryListen.checked,
     } : {}),
@@ -19721,7 +19722,8 @@ settingsSave.addEventListener('click', async () => {
   });
   // Reflect the Mercury enable state in the More ▾ menu without a reload.
   var mercuryViewBtn = document.getElementById('view-mercury-btn');
-  if (mercuryViewBtn && setMercuryEnable) mercuryViewBtn.classList.toggle('hidden', !setMercuryEnable.checked);
+  // mercuryChatWindow has no switch in Settings: read it back from main.
+  if (mercuryViewBtn && setMercuryEnable) mercuryViewBtn.classList.toggle('hidden', !window.MercuryOffer.chatWindowOffered(await window.api.getSettings()));
   var winlinkViewBtn = document.getElementById('view-winlink-btn');
   if (winlinkViewBtn) winlinkViewBtn.classList.remove('hidden');
   grid = setGrid.value.trim();
