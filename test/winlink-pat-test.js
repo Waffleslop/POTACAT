@@ -141,6 +141,29 @@ test('rows keep Pat\'s order and carry the dial', () => {
 test('band filter is by the dial\'s band', () => {
   assert.deepStrictEqual(W.normalizeRmslist(RMS, { band: '20m' }).map((x) => x.call), ['N0XYZ-10']);
 });
+// Our Pat patch puts the channel's Winlink service code on each row
+// (third_party/pat/potacat-arq-timeout.patch, app/rmslist.go; la5nta/pat#564).
+// Winlink lists Mercury gateways as VARA with service code MERCURY.
+test('each row carries Pat\'s service code; only a code other than PUBLIC is a tag', () => {
+  const rows = W.normalizeRmslist([
+    { callsign: 'KU0HN-10', modes: 'VARA', freq: { hz: 7102800 }, dial: { hz: 7101300 }, service_code: 'MERCURY' },
+    { callsign: 'W1AW-10', modes: 'VARA', freq: { hz: 7103000 }, dial: { hz: 7101500 }, service_code: 'PUBLIC' },
+    { callsign: 'N0XYZ-10', modes: 'VARA', freq: { hz: 7104000 }, dial: { hz: 7102500 }, service_code: ' emcomm ' },
+    { callsign: 'K1ABC-10', modes: 'VARA', freq: { hz: 7105000 }, dial: { hz: 7103500 } }, // an unpatched Pat
+    { callsign: 'K2ABC-10', modes: 'VARA', freq: { hz: 7106000 }, dial: { hz: 7104500 }, service_code: '<b>X</b>' },
+  ]);
+  assert.deepStrictEqual(rows.map((r) => r.serviceCode), ['MERCURY', 'PUBLIC', 'EMCOMM', '', '']);
+  assert.deepStrictEqual(rows.map((r) => r.serviceTag), ['MERCURY', '', 'EMCOMM', '', '']);
+});
+test('the mail window shows the tag after the call', () => {
+  const src = readSrc(require('path').join(__dirname, '..', 'renderer', 'winlink-popout.js'));
+  const at = src.indexOf('function gatewayLabel(g)');
+  const fn = src.slice(at, src.indexOf('\n  }\n', at));
+  assert.ok(fn.includes('if (g.serviceTag) parts.push(g.serviceTag);'), 'gatewayLabel pushes g.serviceTag');
+  const web = readSrc(require('path').join(__dirname, '..', 'renderer', 'remote.js'));
+  const wat = web.indexOf('function mailGatewayLabel(g)');
+  assert.ok(web.slice(wat, web.indexOf('\n  }\n', wat)).includes('if (g.serviceTag) parts.push(g.serviceTag);'), 'ECHOCAT Web shows it too');
+});
 
 console.log('password rule');
 test('Winlink\'s rule: 6 to 12 of letters, digits and . ! @ # $ % ^ & * ( ) _ — a dash is named, not just "6 to 12" (N0KAH)', () => {

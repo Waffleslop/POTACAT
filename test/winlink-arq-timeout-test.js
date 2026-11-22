@@ -151,7 +151,12 @@ test('the Pat build applies the patch, fails loudly without it, and leaves wl2k-
   // The patch itself: Pat's own source only, LF, and the two files it is described as touching.
   const patchRaw = require('fs').readFileSync(path.join(root, 'third_party', 'pat', 'potacat-arq-timeout.patch'), 'utf8');
   const files = [...patchRaw.matchAll(/^diff --git a\/(\S+) b\/\S+$/gm)].map((m) => m[1]);
-  assert.deepStrictEqual(files, ['app/connect.go', 'app/potacat_arq_timeout.go']);
+  assert.deepStrictEqual(files, ['app/connect.go', 'app/potacat_arq_timeout.go', 'app/rmslist.go']);
+  // The second half (la5nta/pat#564): the channel's service code on each rmslist row, checked in the tree and the binary.
+  assert.ok(patchRaw.includes('+\tServiceCode string `json:"service_code"`') && patchRaw.includes('+\t\t\t\tServiceCode: channel.ServiceCode,'), 'the patch adds the field and fills it');
+  assert.ok(pat.includes('grep -q \'ServiceCode: channel.ServiceCode,\' "$WORK/pat/app/rmslist.go" ||') && pat.indexOf('ServiceCode: channel.ServiceCode') < build, 'checked in the tree before the build');
+  assert.ok(pat.includes('grep -a -q \'json:"service_code"\' "$ROOT/assets/pat/pat$EXE" ||'), 'and in the binary');
+  assert.ok(!/\r/.test(patchRaw), 'LF only');
   assert.ok(patchRaw.includes('potacatARQTimeoutEnv = "POTACAT_ARDOP_ARQ_TIMEOUT"') && patchRaw.includes('potacatARQTimeoutMin = 30') && patchRaw.includes('potacatARQTimeoutMax = 240'));
   assert.ok(patchRaw.includes(`"${W.ARDOP_ARQ_TIMEOUT.env}"`), 'the same variable name on both sides');
   assert.ok(read('.gitattributes').includes('third_party/pat/potacat-arq-timeout.patch -text'), 'never rewritten by a checkout');

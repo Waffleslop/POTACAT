@@ -80,3 +80,27 @@ index 0000000..19f6553
 +	log.Printf("POTACAT: ARQ timeout set to %d s (%s)", int(d/time.Second), potacatARQTimeoutEnv)
 +	return nil
 +}
+diff --git a/app/rmslist.go b/app/rmslist.go
+index b2cab6b..f5f44f9 100644
+--- a/app/rmslist.go
++++ b/app/rmslist.go
+@@ -57,6 +57,10 @@ type RMS struct {
+ 	Dial       Frequency   `json:"dial"`
+ 	URL        *JSONURL    `json:"url"`
+ 	Prediction *Prediction `json:"prediction"`
++
++	// POTACAT: the channel's Winlink service code (PUBLIC, MERCURY, ...), so a
++	// client can tell a Mercury gateway listed as VARA from a VARA one (la5nta/pat#564).
++	ServiceCode string `json:"service_code"`
+ }
+ 
+ func (r RMS) IsMode(mode string) bool {
+@@ -138,6 +142,8 @@ func (a *App) ReadRMSList(ctx context.Context, forceDownload bool, filterFn func
+ 				Modes:      channel.SupportedModes,
+ 				Freq:       Frequency(channel.Frequency),
+ 				Dial:       Frequency(channel.Frequency).Dial(channel.SupportedModes),
++				// POTACAT: carried through from the gateway status (see the RMS type).
++				ServiceCode: channel.ServiceCode,
+ 			}
+ 			if chURL := toURL(channel, gw.Callsign); chURL != nil {
+ 				r.URL = &JSONURL{*chURL}
