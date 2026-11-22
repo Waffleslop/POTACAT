@@ -347,6 +347,7 @@ const { RigController } = require('./lib/rig-controller');
 const { RIG_CONTROLS } = require('./lib/rig-controls');
 const _rigGainSteps = require('./lib/rig-gain-steps'); // preamp/ATT ladders (KB2UXB)
 const { normalizeMuteRules } = require('./lib/spot-mute-rules'); // per-band region mutes (N7BBQ)
+const { normalizePresets: normalizeSpotFilterPresets } = require('./lib/spot-filter-presets'); // named spot filter sets
 const ScanRun = require('./lib/scan-run'); // #37: a phone-started scan the desktop runs in main (phone locked or not)
 const SpotAge = require('./lib/spot-age'); // Max Spot Age, shared with the table (#239)
 const SpotHides = require('./lib/spot-hides'); // hidden spots, one list for every surface (K8IKO)
@@ -405,6 +406,7 @@ const jtcatModehop = require('./lib/jtcat-modehop');
 const { operatorModeChange: jtcatModeChangeRule } = require('./lib/jtcat-mode-change');
 const TuneLinkGuard = require('./lib/tune-link-guard'); // a potacat://tune link stops automatic JTCAT TX before it tunes
 const FakeIt = require('./lib/jtcat-fake-it'); // split operation "Fake It" (fakeItShiftForTx / fakeItRestoreDial)
+const JtcatCaptureGate = require('./lib/jtcat-capture-gate'); // #746: ECHOCAT off releases a phone-driven capture
 const { WsprScheduler } = require('./lib/wspr/scheduler');
 const WsprPowerMemory = require('./lib/wspr-power-memory'); // pre-beacon RF power remember/restore decisions
 const WsprDbm = require('./lib/wspr/dbm'); // the dBm the beacon reports: follows its RF power, or the operator's fixed pick (#268)
@@ -30016,6 +30018,7 @@ function connectRemote() {
   // Local network and Cloud is the always-on 0.0.0.0 of before.
   const remoteAccess = RemoteAccess.normalizeRemoteAccess(settings).access;
   if (!settings.enableRemote || remoteAccess === 'off') {
+    releasePhoneDrivenJtcat();
     sendCatLog('[Echo CAT] Access: ' + RemoteAccess.describeRemoteAccess('off'));
     return;
   }
@@ -33380,6 +33383,24 @@ function disconnectRemote() {
     remoteServer = null;
   }
   destroyRemoteAudioWindow();
+}
+
+// ECHOCAT access turned off (#746). FT8/JS8 the phone started is captured by
+// the main window; disconnectRemote() drops the server's listeners, so the
+// disconnect grace that would release it never runs and the radio's input
+// stayed busy until POTACAT quit. Not called on a restart of the server.
+function releasePhoneDrivenJtcat() {
+  const d = JtcatCaptureGate.remoteOffRelease({
+    engineRunning: !!ft8Engine,
+    desktopWindowOpen: !!((jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) || (js8PopoutWin && !js8PopoutWin.isDestroyed())),
+  });
+  if (d.stopEngine) {
+    try { if (js8Engine()) js8SetHeartbeat(false); } catch { /* no JS8 */ }
+    stopJtcat();
+    remoteJtcatQso = null;
+    sendCatLog('[JTCAT] ECHOCAT turned off: stopped the engine the phone started and released the radio audio input');
+  }
+  if (d.releaseCapture && win && !win.isDestroyed()) win.webContents.send('jtcat-stop-for-remote');
 }
 
 let _ssbModeBeforePtt = null; // original mode saved during DATA-mode PTT workaround
@@ -38855,7 +38876,8 @@ function flexDigitalViewWanted() {
     const mode = wlSession ? winlinkState.session.mode : WinlinkModes.pickWinlinkMode(winlinkState.snapshot().modes, settings.winlinkDefaultMode || 'telnet');
     if (!WinlinkModes.isRadioMode(mode)) return null;
     return ScopeDigitalView.winlinkView({ band: WinlinkSpectrum.markerBand(mode, winlinkModemBw()), rigMode: _currentMode,
-      digOffsetHz: ScopeDigitalView.flexDigOffsetHz(_currentMode, _flexSliceKv), minSpanHz: g.minSpanHz });
+      digOffsetHz: ScopeDigitalView.flexDigOffsetHz(_currentMode, _flexSliceKv),
+      filterLoHz: parseInt(_flexSliceKv.filter_lo, 10), filterHiHz: parseInt(_flexSliceKv.filter_hi, 10), minSpanHz: g.minSpanHz });
   }
   return ScopeDigitalView.digitalView({ mode: ft8Engine._mode, rigMode: _currentMode, minSpanHz: g.minSpanHz });
 }
@@ -38878,7 +38900,7 @@ function flexDigitalViewSync() {
     smartSdr.setPanBandwidth(v.spanHz);
     yaesuScopeState.spanHz = v.spanHz;   // the pan status confirms (or clamps) it
     if (dial) flexScopeAskCenter(dial + v.offsetHz);
-    sendCatLog(`[Scope] Flex panadapter: ${v.kind === 'winlink' ? 'Winlink' : ft8Engine._mode} view, ${v.spanHz} Hz wide, centred ${v.offsetHz > 0 ? '+' : ''}${v.offsetHz} Hz from the dial (${v.kind === 'winlink' ? `the modem's channel ${v.window.lo} to ${v.window.hi} Hz${ScopeDigitalView.flexDigOffsetHz(_currentMode, _flexSliceKv) ? `, with the slice's ${String(_currentMode).toUpperCase()} offset of ${ScopeDigitalView.flexDigOffsetHz(_currentMode, _flexSliceKv)} Hz` : ''}` : `decode window ${v.window.lo} to ${v.window.hi} Hz`})`);
+    sendCatLog(`[Scope] Flex panadapter: ${v.kind === 'winlink' ? 'Winlink' : ft8Engine._mode} view, ${v.spanHz} Hz wide, centred ${v.offsetHz > 0 ? '+' : ''}${v.offsetHz} Hz from the dial (${v.kind === 'winlink' ? `the modem's channel ${v.window.lo} to ${v.window.hi} Hz${ScopeDigitalView.flexDigOffsetHz(_currentMode, _flexSliceKv) ? `, the slice's ${String(_currentMode).toUpperCase()} offset ${ScopeDigitalView.flexDigOffsetHz(_currentMode, _flexSliceKv)} Hz, filter ${_flexSliceKv.filter_lo} to ${_flexSliceKv.filter_hi}` : ''}` : `decode window ${v.window.lo} to ${v.window.hi} Hz`})`);
   } else if (wasOn) {
     flexScopeWantOffsetHz = 0;
     flexDigitalView = null;
@@ -54624,6 +54646,10 @@ function cloudShackNotice(text, kind) {
         return out;
       });
     }
+    // Spot filter presets: sanitised on every write, like the mutes below.
+    if (newSettings.spotFilterPresets !== undefined) {
+      newSettings.spotFilterPresets = normalizeSpotFilterPresets(newSettings.spotFilterPresets);
+    }
     // Per-band region mutes: sanitize on every write (never store a payload
     // verbatim) and ship the updated set to connected ECHOCAT clients so a
     // rule added on the desktop hides the spots on the mobile device too.
@@ -55151,6 +55177,7 @@ function cloudShackNotice(text, kind) {
         connectRemote();
       } else {
         disconnectRemote();
+        releasePhoneDrivenJtcat();
       }
     }
 
