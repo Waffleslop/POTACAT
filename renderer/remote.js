@@ -15293,12 +15293,10 @@ var _paddleHoldTimer = { dit: null, dah: null };
           vfOpCard.classList.add('vf-op-empty');
         }
       }
-      // Hide PTT in non-voice modes (CW/digital) — same logic as main pttBtn.
+      // Hide PTT in non-voice modes (CW/digital); show it while the mode is
+      // unknown, like the main PTT (#190). lib/vfo-ptt-row.js.
       if (vfPttRow) {
-        const mUp = (currentMode || '').toUpperCase();
-        const isVoice = (mUp === 'SSB' || mUp === 'USB' || mUp === 'LSB' ||
-                         mUp === 'FM' || mUp === 'AM' || mUp.startsWith('FREEDV'));
-        vfPttRow.classList.toggle('hidden', !isVoice);
+        vfPttRow.classList.toggle('hidden', !VfoPttRow.showVfoPttRow(currentMode));
       }
     }
 
