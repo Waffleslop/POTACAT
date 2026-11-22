@@ -385,6 +385,7 @@ const TESTS = [
   'test/adif-mode-test.js', // #381: MFSK submodes (JS8, JTTY, FT4, FT2) read by name everywhere; FT4/FT2 still written bare
   'test/qso-edit-test.js', // #509: My Park edit sets MY_SIG so Past Activations finds the QSO
   'test/activation-auto-end-test.js', // #147: a forgotten activation ends at the UTC day change or after 6 h with no contacts
+  'test/activation-relaunch-700-test.js', // #700: a saved activation clock that ran out while POTACAT was closed ends the activation at launch, not 33 s later
   'test/activation-device-ref-00z-test.js', // #734: the phone's own park is kept on a QSO that arrives after the desktop's activation ended (00Z)
   'test/activation-logging-388-test.js', // #388: a habit Tab after the RST jump is absorbed; a corrected park grid is kept per park
   'test/activation-announce-508-test.js', // #508: QSOs from the Log window (and ECHOCAT) join the live activation list, once
