@@ -661,7 +661,7 @@ the shack's radio heard). No new message or field; `lib/remote-bridge.js` and
 | `aprs-beacon-rf` | C→S | `{band?}` (2026-11-21, Casey's go). ONE position beacon **over the radio**: the window's "Beacon now (radio)" run, with the same gate (lib/aprs-rf-gate.js), config swap and transmit cap; the press counts as the APRS window being open. With Listen on, it goes out on the listening band. With Listen off, the desktop sets the radio up for the beacon (it starts listening on `band`, or the chosen band, which tunes, sets the mode and filter), sends, then stops listening so the radio goes back where it was. Nothing repeats and there is no timer. Refusals: `refused {of: 'aprs-beacon-rf', reason, text}` to that device only (`busy`, `not-ready`, `setup`, `not-sent`, with the gate's own sentence). **Refused to a Guest Pass.** |
 | `aprs-find` | C→S | `{call: string}` (2026-11-21, Casey's go). Follow ONE call on APRS-IS **beyond** `rangeKm`: the desktop adds a budlist term (`b/CALL`) to its read-only APRS-IS filter, next to the range filter, and sends `#filter` on the live connection. `K5ABC` (no SSID) follows K5ABC and every SSID of it (`b/K5ABC/K5ABC-*`); `K5ABC-9` follows that station only. Rows for the call arrive in `aprs-stations` like any other (whatever the distance) and are not aged out while the find is on; a row already held goes out again in the next delta so the phone can centre on it. APRS-IS does not replay history, so a call silent since the desktop connected appears when it next sends. One call per device: a new `aprs-find` replaces that device's old one. `{call: ''}` stops; unsubscribing (`aprs-subscribe {on: false}`) or disconnecting stops it too. The callsign must be 3 to 7 letters and digits (at least one of each) with an optional `-SSID` of 1 or 2 characters; nothing else reaches the filter. At most 10 calls across every device. Refusals, to that device only: `refused {of: 'aprs-find', reason, text}` with `reason` `bad-call`, `not-subscribed` (send `aprs-subscribe {on: true}` first) or `full`. Read only: nothing transmits and nothing goes out under the owner's callsign, so **a Guest Pass may find**, as it may subscribe. |
 | `aprs-state` | S→C | Coalesced to at most one every 500 ms. Fields below. |
-| `aprs-state.beacon.rf` | (field) | The radio beacon for the phone's confirm (2026-11-21): `{ready, setup, sentence, band, mhz, modeLabel, powerW, airSeconds, sending, lastAt, lastResult, lastSentence}`. `setup: true` = Listen is off and the desktop will set the radio up for the press. `sentence` says why `ready` is false. `lastResult` is `confirmed` (the radio reported transmit), `unconfirmed` (keyed, no readback from this radio) or `not-sent`. `airSeconds` is known only while listening. The top-level `mayBeaconRf` is true for an owner device when `rf.ready`. |
+| `aprs-state.beacon.rf` | (field) | The radio beacon for the phone's confirm (2026-11-21): `{ready, setup, sentence, band, mhz, modeLabel, powerW, airSeconds, sending, lastAt, lastResult, lastSentence}`. `setup: true` = Listen is off and the desktop will set the radio up for the press. `sentence` says why `ready` is false. `lastResult` is `confirmed` (the radio reported transmit), `unconfirmed` (keyed, no readback from this radio) or `not-sent`. `airSeconds` is known only while listening. The top-level `mayBeaconRf` is true for an owner device when `rf.ready`. Heard you (2026-11-22): `rf.heard: {until, count, lastAt}`. `until` is the epoch ms the internet watch after the last confirmed radio beacon ends (0 when closed); `count` is how many stations heard the last beacon; `lastAt` is the newest report (0 = none). "Not heard yet" while `until` is in the future and `count` is 0. |
 | `aprs-stations` | S→C | Station rows; only to a subscribed `aprs` client. `op: 'snapshot'`: `{stations: Row[], chunk, totalChunks, total}`, byte-bounded chunks (200 KB, like `worked-qsos`), always at least one (an empty store sends one empty chunk); replace the list once the last chunk (`chunk + 1 === totalChunks`) is in. `op: 'delta'`: `{add: Row[], update: Row[], gone: key[], total}`, batched every 1.5 s, never empty. Treat `add` and `update` as upserts by `key`. `gone`: not heard for 60 minutes, or a killed object or item. |
 
 `aprs-state`:
@@ -703,8 +703,32 @@ Row (one station or object):
   isHeard,         // epoch ms APRS-IS last reported it, or null
   heardByMe,       // the shack's radio heard it
   rf: { kind: 'direct'|'digi', digi, lastHeard, packets, band, bands } | null,
-  distanceKm, bearing }   // from the shack's grid, or null
+  distanceKm, bearing,    // from the shack's grid, or null
+  heardMe: { at, by: 'igate'|'digi', beacons, lastBeaconAt } | null }
 ```
+
+**Heard you** (2026-11-22, `lib/aprs-heard-you.js`). After every radio beacon the
+radio reported transmitting (the window's button, `aprs-beacon-rf`, a timer), the
+desktop keeps its read-only APRS-IS feed up for 15 minutes from that beacon, even
+with the APRS window closed and no device subscribed (each new beacon restarts
+the 15 minutes; switching APRS-IS off in the window ends it). It adds the
+beacon's source call (with SSID, exactly as sent, e.g. `b/K3SBP-1`) to the feed's
+budlist. When the beacon comes back from APRS-IS, the call after `qAR`, `qAO`,
+`qAr` or `qAo` is an iGate that heard it (`by: 'igate'`; `qAC`/`qAS`/`qAX`/`qAI`/`qAZ`
+do not count, nor does this shack's own login), and each path call marked `*`
+before the q construct is a digipeater that heard it (`by: 'digi'`; aliases such
+as WIDE1 and calls with no digit are skipped). A packet from the beacon call that
+the shack's own radio heard via a digipeater names that digipeater too. Each such
+station is budlisted (exact call) so its next position beacon arrives; until then
+its row has `lat`/`lon` null. `heardMe.at` is the last time it heard a beacon of
+mine, `beacons` how many of my beacons it heard, `lastBeaconAt` the beacon it heard
+last. A row with `heardMe` goes to every subscribed device whatever its `rangeKm`
+(the feed asks for it by call) and is kept 60 minutes after `heardMe.at`; then
+`heardMe` goes back to null (sent as an update) and the row follows the normal
+rules. APRS-IS drops duplicates, so each beacon names the first iGate in plus any
+digipeaters; several beacons collect more. Budlist terms for this are capped at 10
+(the beacon call plus the 9 most recent reporters), **alongside** the 10 `aprs-find`
+calls, not inside them. Owner and guest alike; read only, nothing transmits.
 
 `rf.band` (2026-11-21): the band the shack's radio was listening on when it last
 heard this station, `'2m'` or `'30m'`; `''` when not known (a packet the desktop

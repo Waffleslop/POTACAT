@@ -281,6 +281,7 @@ const TESTS = [
   'test/direwolf-aprs-tx-config-test.js', // APRS phase 7: the transmit config (PTT via the shim, channel access per band); listen and Winlink configs byte-identical
   'test/direwolf-aprs-tx-offline-test.js', // APRS phase 7: the bundled Dire Wolf keys a fake shim once and its audio decodes back (skips without the build)
   'test/aprs-echocat-test.js', // APRS phase 6: ECHOCAT devices: snapshot, 1.5 s deltas, feed and listen ownership, Guest Pass, aprs-state
+  'test/aprs-heard-you-test.js', // ECHOCAT 2026-11-22: who heard my radio beacon (q construct, digis, 15-min feed watch, heardMe rows, beacon.rf.heard, window mark)
   'test/aprs-find-band-test.js', // ECHOCAT 2026-11-21: rf.band on aprs-stations rows, aprs-find (follow one call beyond range, budlist, validated, guest allowed)
   'test/aprs-echocat-wire-test.js', // APRS phase 6: the 'aprs' capability on the wire (old clients untouched), guest refusals, main.js glue, ECHOCAT Web
   'test/aprs-message-test.js', // APRS A1: message, ack, rej and reply-ack formats (APRS 1.0.1 ch. 14), the 67-character limit, ours by SSID, the g/ filter
