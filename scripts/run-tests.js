@@ -279,6 +279,7 @@ const TESTS = [
   'test/aprs-templates-test.js', // APRS A2: message templates: each built-in's fill and 67-character fit, activation/radio fields, the held-back gateways, my templates' round trip
   'test/aprs-templates-wiring-test.js', // APRS A2: templates as wired in main.js (context, per-profile list), the preload and the Messages view (nothing sends until Send)
   'test/aprs-messages-wiring-test.js', // APRS A1: messages end to end against a fake APRS-IS server, and the main.js/preload/window wiring (internet only)
+  'test/aprs-rf-message-test.js', // APRS A3: messages over the radio: one press per try (automatic retries and radio acks only with their default-off settings, 2 m only), refusals in plain words, heard on radio, the frame and cap, end to end through the radio run and gate on a fake shim
   'test/log-comment-test.js',
   'test/raw-cat-command-test.js',
   'test/rigctld-stderr-test.js',

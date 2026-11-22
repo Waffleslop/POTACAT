@@ -205,7 +205,12 @@
           <label for="aprs-msgs-to">To</label>
           <input type="text" id="aprs-msgs-to" maxlength="9" spellcheck="false" placeholder="Call">
           <span class="aprs-msgs-tools-slot" id="aprs-msgs-tools-slot"></span>
-          <span class="aprs-msgs-over">Send over <strong>Internet</strong></span>
+          <!-- A3: Internet or Radio. Radio is enabled only while Listen on my radio is on and the radio gate allows it. -->
+          <span class="aprs-msgs-over" role="radiogroup" aria-labelledby="aprs-msgs-over-label">
+            <span id="aprs-msgs-over-label">Send over</span>
+            <button type="button" class="aprs-over-btn" id="aprs-msgs-over-net" role="radio" aria-checked="true">Internet</button>
+            <button type="button" class="aprs-over-btn" id="aprs-msgs-over-radio" role="radio" aria-checked="false" disabled aria-describedby="aprs-msgs-note">Radio</button>
+          </span>
         </div>
         <div class="aprs-msgs-row">
           <label for="aprs-msgs-text" class="aprs-sr">Message</label>
@@ -261,6 +266,12 @@
         </label>
         <label class="aprs-check" title="While an activation runs, the beacon comment starts with your park, frequency and mode, on the internet and radio beacons alike"><input type="checkbox" id="aprs-beacon-activation">Add my activation to the beacon comment</label>
       </section>
+      <section class="aprs-set" aria-labelledby="set-rfmsg-h">
+        <h3 id="set-rfmsg-h">Messages over the radio</h3>
+        <label class="aprs-check"><input type="checkbox" id="aprs-rfmsg-retry">Send my radio messages again by themselves until they are answered (up to 5 times)</label>
+        <label class="aprs-check"><input type="checkbox" id="aprs-rfmsg-ack">Answer messages heard on the radio with an automatic receipt on the radio</label>
+        <div class="aprs-note">Both are off unless you turn them on. With them off, nothing goes out on your radio unless you press Send or Try again. Sending again works on 2 m and 30 m; the automatic receipt works on 2 m only.</div>
+      </section>
       <div class="aprs-note" id="aprs-rf-power-note">5 W is fine to start. APRS on 2 m commonly runs 5 to 50 W; on 30 m, a few watts to 50 W can reach an iGate, depending on conditions.</div>
     </div>
   </section>
@@ -278,6 +289,7 @@
   <script src="aprs-popout.js"></script>
   <script src="aprs-window.js"></script>
   <script src="../lib/aprs-message.js"></script>
+  <script src="../lib/aprs-rf-message.js"></script>
   <script src="aprs-messages.js"></script>
   <script src="../lib/aprs-templates.js"></script>
   <script src="aprs-templates-panel.js"></script>
