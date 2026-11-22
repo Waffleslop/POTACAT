@@ -29,7 +29,7 @@ function codec(id) {
 
 console.log('\n=== Yaesu SD (CW break-in delay) ===');
 
-for (const id of ['FT-710', 'FTDX10', 'FTDX101D/MP']) {
+for (const id of ['FT-710', 'FTDX10', 'FTDX101D', 'FTDX101MP']) {
   test(`${id}: set sends the two-digit index from the manual`, () => {
     for (const [ms, want] of [[30, 'SD00;'], [50, 'SD01;'], [100, 'SD02;'], [250, 'SD05;'], [300, 'SD06;'], [400, 'SD07;'], [2900, 'SD32;'], [3000, 'SD33;'], [9000, 'SD33;'], [0, 'SD00;']]) {
       const { c, writes } = codec(id);

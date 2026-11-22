@@ -1,0 +1,367 @@
+{
+  "generatedFrom": "echocat src/utils/spotsFilter.ts applyFilters (scan criteria: no isNewPark, no eventRank, no isPinned, no search)",
+  "spots": [
+    {
+      "callsign": "K1AAA",
+      "source": "pota",
+      "reference": "US-0001",
+      "band": "20m",
+      "mode": "CW",
+      "frequency": "14062.5",
+      "spotTime": "2026-11-21T18:00:00Z",
+      "continent": "NA",
+      "distance": "1200"
+    },
+    {
+      "callsign": "W2BBB",
+      "source": "POTA",
+      "reference": "US-0002",
+      "band": "20m",
+      "mode": "USB",
+      "frequency": "14285",
+      "spotTime": "2026-11-21T18:05:00Z",
+      "continent": "NA",
+      "distance": "300"
+    },
+    {
+      "callsign": "G3CCC",
+      "source": "wwff",
+      "reference": "GFF-0003",
+      "band": "40m",
+      "mode": "LSB",
+      "frequency": "7144",
+      "spotTime": "2026-11-21T17:50:00Z",
+      "continent": "EU",
+      "distance": "5500"
+    },
+    {
+      "callsign": "JA4DDD",
+      "source": "sota",
+      "reference": "JA/KN-001",
+      "band": "40m",
+      "mode": "CW",
+      "frequency": "7032",
+      "spotTime": "2026-11-21T18:10:00Z",
+      "continent": "AS",
+      "distance": "10500"
+    },
+    {
+      "callsign": "VK5EEE",
+      "source": "dxc",
+      "reference": "",
+      "band": "20m",
+      "mode": "FT8",
+      "frequency": "14074",
+      "spotTime": "2026-11-21T18:01:00Z",
+      "continent": "",
+      "locationDesc": "VK-0042",
+      "distance": ""
+    },
+    {
+      "callsign": "N6FFF",
+      "source": "pota",
+      "reference": "US-0006",
+      "band": "20m",
+      "mode": "",
+      "frequency": "14230",
+      "spotTime": "2026-11-21T18:03:00Z",
+      "continent": "NA",
+      "distance": "3900",
+      "comment": ""
+    },
+    {
+      "callsign": "PY7GGG",
+      "source": "rbn",
+      "reference": "",
+      "band": "15m",
+      "mode": "CW-R",
+      "frequency": "21025",
+      "spotTime": "2026-11-21T17:59:00Z",
+      "continent": "SA",
+      "distance": "7000",
+      "isAtno": true
+    },
+    {
+      "callsign": "K8HHH",
+      "source": "pota",
+      "reference": "US-0008",
+      "band": "20m",
+      "mode": "FT4",
+      "frequency": "14080",
+      "spotTime": "2026-11-21T18:02:00Z",
+      "continent": "NA",
+      "distance": "900",
+      "newPark": true
+    }
+  ],
+  "cases": [
+    {
+      "name": "no filters, age (newest first)",
+      "criteria": {
+        "bands": [],
+        "modes": [],
+        "regions": [],
+        "sources": [],
+        "newOnly": false,
+        "hideWorked": false,
+        "sort": "age"
+      },
+      "expect": [
+        "JA4DDD",
+        "W2BBB",
+        "N6FFF",
+        "K8HHH",
+        "VK5EEE",
+        "K1AAA",
+        "PY7GGG",
+        "G3CCC"
+      ]
+    },
+    {
+      "name": "sources pota (case-insensitive on the spot side)",
+      "criteria": {
+        "bands": [],
+        "modes": [],
+        "regions": [],
+        "sources": [
+          "pota"
+        ],
+        "newOnly": false,
+        "hideWorked": false,
+        "sort": "age"
+      },
+      "expect": [
+        "W2BBB",
+        "N6FFF",
+        "K8HHH",
+        "K1AAA"
+      ]
+    },
+    {
+      "name": "bands 20m",
+      "criteria": {
+        "bands": [
+          "20m"
+        ],
+        "modes": [],
+        "regions": [],
+        "sources": [],
+        "newOnly": false,
+        "hideWorked": false,
+        "sort": "age"
+      },
+      "expect": [
+        "W2BBB",
+        "N6FFF",
+        "K8HHH",
+        "VK5EEE",
+        "K1AAA"
+      ]
+    },
+    {
+      "name": "modes SSB (USB/LSB/SSB) and CW (CW/CW-R)",
+      "criteria": {
+        "bands": [],
+        "modes": [
+          "SSB",
+          "CW"
+        ],
+        "regions": [],
+        "sources": [],
+        "newOnly": false,
+        "hideWorked": false,
+        "sort": "age"
+      },
+      "expect": [
+        "JA4DDD",
+        "W2BBB",
+        "K1AAA",
+        "PY7GGG",
+        "G3CCC"
+      ]
+    },
+    {
+      "name": "modes SSTV (blank mode on 14230)",
+      "criteria": {
+        "bands": [],
+        "modes": [
+          "SSTV"
+        ],
+        "regions": [],
+        "sources": [],
+        "newOnly": false,
+        "hideWorked": false,
+        "sort": "age"
+      },
+      "expect": [
+        "N6FFF"
+      ]
+    },
+    {
+      "name": "regions OC (from locationDesc VK- when continent is empty)",
+      "criteria": {
+        "bands": [],
+        "modes": [],
+        "regions": [
+          "OC"
+        ],
+        "sources": [],
+        "newOnly": false,
+        "hideWorked": false,
+        "sort": "age"
+      },
+      "expect": [
+        "VK5EEE"
+      ]
+    },
+    {
+      "name": "regions NA and EU",
+      "criteria": {
+        "bands": [],
+        "modes": [],
+        "regions": [
+          "NA",
+          "EU"
+        ],
+        "sources": [],
+        "newOnly": false,
+        "hideWorked": false,
+        "sort": "age"
+      },
+      "expect": [
+        "W2BBB",
+        "N6FFF",
+        "K8HHH",
+        "K1AAA",
+        "G3CCC"
+      ]
+    },
+    {
+      "name": "newOnly (scan: isAtno or newPark flags)",
+      "criteria": {
+        "bands": [],
+        "modes": [],
+        "regions": [],
+        "sources": [],
+        "newOnly": true,
+        "hideWorked": false,
+        "sort": "age"
+      },
+      "expect": [
+        "K8HHH",
+        "PY7GGG"
+      ]
+    },
+    {
+      "name": "sort freq (ascending kHz)",
+      "criteria": {
+        "bands": [],
+        "modes": [],
+        "regions": [],
+        "sources": [],
+        "newOnly": false,
+        "hideWorked": false,
+        "sort": "freq"
+      },
+      "expect": [
+        "JA4DDD",
+        "G3CCC",
+        "K1AAA",
+        "VK5EEE",
+        "K8HHH",
+        "N6FFF",
+        "W2BBB",
+        "PY7GGG"
+      ]
+    },
+    {
+      "name": "sort dist (ascending km, missing last)",
+      "criteria": {
+        "bands": [],
+        "modes": [],
+        "regions": [],
+        "sources": [],
+        "newOnly": false,
+        "hideWorked": false,
+        "sort": "dist"
+      },
+      "expect": [
+        "W2BBB",
+        "K8HHH",
+        "K1AAA",
+        "N6FFF",
+        "G3CCC",
+        "PY7GGG",
+        "JA4DDD",
+        "VK5EEE"
+      ]
+    },
+    {
+      "name": "sort source (A to Z, as sent)",
+      "criteria": {
+        "bands": [],
+        "modes": [],
+        "regions": [],
+        "sources": [],
+        "newOnly": false,
+        "hideWorked": false,
+        "sort": "source"
+      },
+      "expect": [
+        "VK5EEE",
+        "K1AAA",
+        "N6FFF",
+        "K8HHH",
+        "W2BBB",
+        "PY7GGG",
+        "JA4DDD",
+        "G3CCC"
+      ]
+    },
+    {
+      "name": "sort event (scan has no event rank: age)",
+      "criteria": {
+        "bands": [],
+        "modes": [],
+        "regions": [],
+        "sources": [],
+        "newOnly": false,
+        "hideWorked": false,
+        "sort": "event"
+      },
+      "expect": [
+        "JA4DDD",
+        "W2BBB",
+        "N6FFF",
+        "K8HHH",
+        "VK5EEE",
+        "K1AAA",
+        "PY7GGG",
+        "G3CCC"
+      ]
+    },
+    {
+      "name": "pota on 20m, CW or FT4, by frequency",
+      "criteria": {
+        "bands": [
+          "20m"
+        ],
+        "modes": [
+          "CW",
+          "FT4"
+        ],
+        "regions": [],
+        "sources": [
+          "pota"
+        ],
+        "newOnly": false,
+        "hideWorked": false,
+        "sort": "freq"
+      },
+      "expect": [
+        "K1AAA",
+        "K8HHH"
+      ]
+    }
+  ]
+}

@@ -263,5 +263,37 @@ check('#268: re-arming in the same slot as a frame does not key it again', () =>
   assert.strictEqual(sch.tick(9 * SLOT + 300), null);
 });
 
+// ---- #766: isTxSlot, read by the band hop (never draws) -----------------
+check('#766 isTxSlot: true from the TX decision through the keyed slot', () => {
+  const sch = new S.WsprScheduler({ txPct: 100, rng: () => 0 });
+  assert.strictEqual(sch.isTxSlot(20 * SLOT + 100), false); // not armed
+  sch.setEnabled(true);
+  // Decided TX, not yet keyed: a TX slot coming up.
+  assert.strictEqual(sch.decideSlot(20 * SLOT + 100), true);
+  assert.strictEqual(sch.isTxSlot(20 * SLOT + 200), true);
+  assert.ok(sch.tick(20 * SLOT + 300));
+  // Keyed: the whole slot is ours, including 15 s in when wsprd finishes.
+  assert.strictEqual(sch.isTxSlot(20 * SLOT + 15000), true);
+  assert.strictEqual(sch.isTxSlot(20 * SLOT + 119000), true);
+});
+
+check('#766 isTxSlot: a listen slot is not a TX slot, and asking does not draw', () => {
+  let draws = 0;
+  const sch = new S.WsprScheduler({ txPct: 20, rng: () => { draws++; return 0.99; } });
+  sch.setEnabled(true);
+  sch._firstTxPending = false;
+  assert.strictEqual(sch.isTxSlot(30 * SLOT + 15000), false); // undecided slot
+  assert.strictEqual(draws, 0);
+  assert.strictEqual(sch.decideSlot(31 * SLOT + 100), false);
+  assert.strictEqual(sch.isTxSlot(31 * SLOT + 15000), false);
+});
+
+check('#766 isTxSlot: a TX decision whose start was missed is not a TX slot', () => {
+  const sch = new S.WsprScheduler({ txPct: 100, rng: () => 0 });
+  sch.setEnabled(true);
+  sch.decideSlot(40 * SLOT + 100);
+  assert.strictEqual(sch.isTxSlot(40 * SLOT + S.TX_LATEST_START_MS + 1), false); // never keyed
+});
+
 console.log(`\nWSPR scheduler: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

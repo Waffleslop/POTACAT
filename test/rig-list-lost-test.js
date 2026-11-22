@@ -85,7 +85,7 @@ t('settings from before My Rigs (single file, no rig list): the catTarget become
   const s = { myCallsign: 'K1ABC', catTarget: FT710.catTarget };
   const plan = planRigMigration(s, { now: 42, describe: (tg) => `Serial CAT on ${tg.path}` });
   assert.strictEqual(plan.action, 'legacy');
-  assert.ok(/before My Rigs/.test(plan.log));
+  assert.ok(/before the rig list/.test(plan.log));
   assert.strictEqual(applyRigMigration(s, plan), true);
   assert.strictEqual(s.rigs.length, 1);
   assert.strictEqual(s.rigs[0].name, 'Serial CAT on COM4');

@@ -35,7 +35,7 @@ t('a bridge that is off says so after the grace period', () => {
 
 t('frames that stop are counted in seconds and point at the input', () => {
   const s = W.noAudioText({ ...base, now: T0 + 20000, lastFrameAt: T0 + 12000, lastSoundAt: T0 + 12000 });
-  assert.match(s, /nothing has arrived for 8 s; check the rig.s audio Input in Settings > My Rigs$/);
+  assert.match(s, /nothing has arrived for 8 s; check Settings > Radio, Edit the rig, Audio Devices, RX audio in$/);
 });
 
 t('only exact zeros = silence, named as such', () => {

@@ -5,3 +5,5 @@ data/sstv-packs/** -text
 third_party/ardopcf/potacat-socket-audio.patch -text
 third_party/pat/potacat-arq-timeout.patch -text
 third_party/ardopcf/src/** -text
+# Git hooks run under sh on every OS; a CRLF checkout would break them.
+scripts/git-hooks/* text eol=lf

@@ -58,7 +58,7 @@ const savedColormap = (() => { try { return localStorage.getItem('scope-colormap
 // full-height window is never short of rows.
 const WF_HISTORY_ROWS = Math.min(2160, Math.max(512, Math.ceil((window.screen && window.screen.height) || 1080)));
 const wf = new Waterfall(wfCanvas, { bins: BINS, historyRows: WF_HISTORY_ROWS, colormap: savedColormap, gamma: 0.6, crop: true });
-if (!wf.supported) $('sc-unsupported').style.display = 'flex';
+if (!wf.supported) { $('sc-unsupported').style.display = 'flex'; if (window.api.reportNoWebgl2) window.api.reportNoWebgl2(); }
 // Colours: the machine's waterfall palette (lib/waterfall-palettes.js).
 // 'Standard' keeps this window's own map (Turbo, or the Classic picked here
 // before palettes existed); a palette also colours the trace.

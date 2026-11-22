@@ -1,5 +1,5 @@
 'use strict';
-// Yaesu CAT audit (Casey, 2026-11-15): the FTDX101D/MP row against its CAT
+// Yaesu CAT audit (Casey, 2026-11-15): the FTDX101D and FTDX101MP rows against their CAT
 // reference, rev 2308-L. Every byte here is from that manual; none of it has
 // been seen on an FTDX101 yet. The FT-710, which shares this CAT generation, does
 // each of these on the air (test/rig-test.js, W3MDT 2026-10-22/23).
@@ -21,14 +21,14 @@ function test(name, fn) {
   catch (err) { failed++; console.log('  FAIL ' + name + '\n       ' + (err.stack || err.message)); }
 }
 
-function codec(mode) {
+function codec(mode, name = 'FTDX101D') {
   const writes = [];
-  const c = new KenwoodCodec(RIG_MODELS['FTDX101D/MP'], (d) => writes.push(String(d)));
+  const c = new KenwoodCodec(RIG_MODELS[name], (d) => writes.push(String(d)));
   if (mode) c._lastParsedMode = mode;
   return { c, writes };
 }
 
-console.log('\n=== FTDX101D/MP against CAT reference 2308-L ===');
+console.log('\n=== FTDX101D and FTDX101MP against CAT reference 2308-L ===');
 
 test('width is SH00nn (main receiver), never the SH01nn the Yaesu default sends', () => {
   const { c, writes } = codec('USB');
@@ -81,9 +81,17 @@ test('mode replies: MD09 is RTTY, MD0E is PSK, MD0F is FM, MD0C stays DATA-U', (
   }
 });
 
-test('power is clamped to 5-200 W: PC005 at the bottom, never PC004', () => {
+test('FTDX101MP power is clamped to 5-200 W: PC005 at the bottom, never PC004', () => {
   for (const [w, want] of [[1, 'PC005;'], [5, 'PC005;'], [150, 'PC150;'], [250, 'PC200;']]) {
-    const { c, writes } = codec();
+    const { c, writes } = codec(null, 'FTDX101MP');
+    c.setTxPower(w);
+    assert.deepStrictEqual(writes, [want], w + ' W');
+  }
+});
+
+test('FTDX101D power is clamped to 5-100 W: never above PC100 (#744)', () => {
+  for (const [w, want] of [[1, 'PC005;'], [50, 'PC050;'], [100, 'PC100;'], [150, 'PC100;'], [200, 'PC100;']]) {
+    const { c, writes } = codec(null, 'FTDX101D');
     c.setTxPower(w);
     assert.deepStrictEqual(writes, [want], w + ' W');
   }

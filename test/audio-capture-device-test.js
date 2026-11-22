@@ -55,7 +55,7 @@ test('the refusal explains itself and says the mic was NOT used', () => {
   const block = captureBlock();
   assert.ok(/microphone was NOT used/i.test(block),
     'the error does not reassure the operator about the microphone');
-  assert.ok(/Settings > My Rigs > Audio/.test(block),
+  assert.ok(/Settings > Radio, Edit the rig, Audio Devices, RX audio in/.test(block),
     'the error does not say where to fix it');
 });
 
@@ -165,10 +165,10 @@ test('JTCAT TX: the message names the cause, the consequence and the fix', () =>
   assert.ok(stale.startsWith('TX refused'), 'does not lead with what happened');
   assert.ok(stale.includes('not present') && stale.includes('re-enumerated'), 'stale-id cause not explained');
   assert.ok(stale.includes('will not key the radio with no audio'), 'consequence not stated');
-  assert.ok(stale.includes('Settings > My Rigs > Audio'), 'does not say where to fix it');
+  assert.ok(stale.includes('Settings > Radio, Edit the rig, Audio Devices, TX audio out'), 'does not say where to fix it');
   const other = describeJtcatTxAudioFault({ name: 'NotAllowedError', reason: 'busy' });
   assert.ok(other.includes('could not be opened (busy)'), 'non-stale failure loses its reason');
-  assert.ok(other.includes('Settings > My Rigs > Audio'), 'non-stale failure does not say where to fix it');
+  assert.ok(other.includes('Settings > Radio, Edit the rig, Audio Devices, TX audio out'), 'non-stale failure does not say where to fix it');
   assert.ok(describeJtcatTxAudioFault().includes('could not be opened (unknown error)'), 'no-payload call throws or is blank');
 });
 

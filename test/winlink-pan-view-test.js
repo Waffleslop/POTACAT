@@ -59,10 +59,29 @@ test('a DIGU or DIGL offset on the slice moves the centre to where the signal re
   assert.strictEqual(V.flexDigOffsetHz('USB', kv), 0, 'USB has no data offset');
   assert.strictEqual(V.flexDigOffsetHz('DIGU', {}), 0, 'the slice has not said');
   assert.strictEqual(V.flexDigOffsetHz('DIGU', { digu_offset: 'x' }), 0);
-  const u = V.winlinkView({ band: vara, rigMode: 'DIGU', digOffsetHz: 1500 });
-  assert.deepStrictEqual([u.offsetHz, u.window], [0, { lo: -1150, hi: 1150 }], 'DIGU offset 1500: the channel sits on the slice frequency');
-  const l = V.winlinkView({ band: vara, rigMode: 'DIGL', digOffsetHz: 2210 });
-  assert.deepStrictEqual([l.offsetHz, l.window], [710, { lo: -440, hi: 1860 }], 'DIGL offset 2210: carrier 2210 Hz up, audio below it');
+  // Only when the slice's passband straddles the dial has the dial been moved
+  // off the carrier: filter -1500..+1500 with digu_offset 1500 is audio 0..3000.
+  const u = V.winlinkView({ band: vara, rigMode: 'DIGU', digOffsetHz: 1500, filterLoHz: -1500, filterHiHz: 1500 });
+  assert.deepStrictEqual([u.offsetHz, u.window], [0, { lo: -1150, hi: 1150 }], 'DIGU offset 1500, filter across the dial: the channel sits on the slice frequency');
+  const l = V.winlinkView({ band: vara, rigMode: 'DIGL', digOffsetHz: 2210, filterLoHz: -790, filterHiHz: 2210 });
+  assert.deepStrictEqual([l.offsetHz, l.window], [710, { lo: -440, hi: 1860 }], 'DIGL offset 2210, filter across the dial: carrier 2210 Hz up, audio below it');
+});
+test('the 8600 in the 2026-11-22 handoff: DIGU, digu_offset 1500, filter 0 to 3000: the VARA channel is +350 to +2650', () => {
+  const v = V.winlinkView({ band: vara, rigMode: 'DIGU', digOffsetHz: 1500, filterLoHz: 0, filterHiHz: 3000 });
+  assert.deepStrictEqual([v.offsetHz, v.window], [1500, { lo: 350, hi: 2650 }], 'the passband is above the dial, so the carrier is on the dial');
+  assert.strictEqual(V.carrierOffsetHz({ rigMode: 'DIGU', digOffsetHz: 1500, filterLoHz: 0, filterHiHz: 3000 }), 0);
+  const l = V.winlinkView({ band: vara, rigMode: 'DIGL', digOffsetHz: 2210, filterLoHz: -3000, filterHiHz: 0 });
+  assert.deepStrictEqual([l.offsetHz, l.window], [-1500, { lo: -2650, hi: -350 }], 'DIGL, passband below the dial');
+  const n = V.winlinkView({ band: vara, rigMode: 'DIGU', digOffsetHz: 1500 });
+  assert.deepStrictEqual(n.window, { lo: 350, hi: 2650 }, 'no filter reported yet: the carrier is taken as on the dial');
+});
+test('a radio with no data offset (Icom / Yaesu / Kenwood USB-D) is not moved', () => {
+  for (const rigMode of ['USB-D', 'PKTUSB', 'DATA-U', 'USB']) {
+    const v = V.winlinkView({ band: vara, rigMode, digOffsetHz: 0, filterLoHz: 300, filterHiHz: 2700 });
+    assert.deepStrictEqual([v.offsetHz, v.window], [1500, { lo: 350, hi: 2650 }], rigMode);
+  }
+  const l = V.winlinkView({ band: vara, rigMode: 'LSB-D', digOffsetHz: 0 });
+  assert.deepStrictEqual(l.window, { lo: -2650, hi: -350 }, 'LSB-D');
 });
 test('the whole channel fits with the margin, and the width never drops below the radio\'s minimum', () => {
   for (const rigMode of ['DIGU', 'DIGL']) {
@@ -121,6 +140,7 @@ test('wanted while a Winlink radio session runs, or while a device asks', () => 
   assert.ok(/ScopeDigitalView\.pickView\(\{ winlinkSession: wlSession, jtcatWanted: strip \|\| device, winlinkAsked: wlAsked \}\)/.test(fn));
   assert.ok(/WinlinkSpectrum\.markerBand\(mode, winlinkModemBw\(\)\)/.test(fn), 'the channel from markerBand');
   assert.ok(/digOffsetHz: ScopeDigitalView\.flexDigOffsetHz\(_currentMode, _flexSliceKv\)/.test(fn), 'the slice offset');
+  assert.ok(/filterLoHz: parseInt\(_flexSliceKv\.filter_lo, 10\), filterHiHz: parseInt\(_flexSliceKv\.filter_hi, 10\)/.test(fn), 'the real passband of the slice');
   assert.ok(/yaesuScopeRemoteDigital && yaesuScopeRemoteWants && ft8Engine\._running/.test(fn), 'the JTCAT conditions as before');
 });
 test('the view sends centerOffsetHz and the channel as decodeWindow; the end restores the operator\'s zoom and the dial centre', () => {
