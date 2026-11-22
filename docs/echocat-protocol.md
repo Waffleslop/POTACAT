@@ -183,7 +183,7 @@ for the history.
 | `vfo-profiles` | ↔ | VFO Profile list (S→C push, C→S request after edit). |
 | `vfo-profiles-update` | C→S | Save/edit/delete a VFO profile. |
 | `apply-vfo-profile` | C→S | Apply a stored VFO profile to the rig. |
-| `settings-update` | S→C | One or more server-side settings changed; client refreshes UI. |
+| `settings-update` | S→C | One or more server-side settings changed; client refreshes UI. The settings blob (here, in `auth-ok` and in `pass-resumed`) carries `stationLocation` (object, 2026-11-22, #909): `{grid, state, county}`, the station's grid square, state and county exactly as the shack stamps them on a Guest Pass contact that is not an activation (`county` is `ST,County`, e.g. `PA,Bucks`; any of them `''` when the shack does not know it). A POTACAT desktop on a Guest Pass stamps them, and `APP_POTACAT_GUEST_PASS`, on a contact logged from its own log forms (lib/station-county.js `guestDeskStationFor`); with no `stationLocation` (an older shack) it changes nothing. Additive: ECHOCAT needs nothing, because the shack stamps the contacts a phone logs itself (`log-qso`). |
 | `save-settings` | C→S | Persist a settings delta. |
 
 ### PTT / audio signaling (WebRTC)

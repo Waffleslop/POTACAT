@@ -7768,6 +7768,15 @@ let remoteShackCw = { enabled: false, paddle: false, paddleReason: '' };
 // The driven shack's grid (auth-ok / settings-update settings.grid), so the
 // JTCAT map centres where the decodes are heard (#774). '' = not known.
 let remoteShackGrid = '';
+// The driven shack's station location (auth-ok / settings-update
+// settings.stationLocation, #909): { grid, state, county }, or null when the
+// shack sends none. A contact logged here on a Guest Pass carries it.
+let remoteShackLocation = null;
+/** The lending station's location while this PC is on a Guest Pass; null otherwise. */
+function guestPassShackLocation() {
+  const t = remoteClient && remoteClient._target;
+  return isRemoteMode() && t && t.kind === 'pass' ? remoteShackLocation : null;
+}
 let remoteShackVoice = { labels: [], filled: [] };
 const REMOTE_CW_OFF_MSG = 'Remote CW is off on the shack. Turn on Settings > ECHOCAT > Remote CW Keyer on the shack PC.';
 function remoteCwRefusal(paddle) {
@@ -8262,6 +8271,7 @@ function ensureRemoteClient() {
     if (target.kind === 'pass') { delete target.passSessionClosed; delete target.passEndReason; }
     remoteShackCw = { enabled: !!info.cwAvailable, paddle: !!info.cwPaddleAvailable, paddleReason: String(info.cwPaddleReason || '') };
     remoteShackGrid = ShackGrid.shackGridFrom(info.settings);
+    remoteShackLocation = ShackGrid.shackLocationFrom(info.settings);
     remoteShackVoice = { labels: [], filled: [] };
     remoteJs8Reset();
     _vfoLocked = !!info.vfoLocked;
@@ -8387,6 +8397,7 @@ function ensureRemoteClient() {
   remoteClient.on('message', (msg) => {
     if (bridgeInboundFromShack(msg)) return;
     if (msg.type === 'settings-update' && msg.settings && typeof msg.settings.grid === 'string') remoteShackGrid = ShackGrid.shackGridFrom(msg.settings);
+    if (msg.type === 'settings-update' && msg.settings && msg.settings.stationLocation) remoteShackLocation = ShackGrid.shackLocationFrom(msg.settings);
     // Skip Grid / Hound ride the shack's settings blob, not a JTCAT frame.
     if (msg.type === 'settings-update' && msg.settings && jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
       for (const key of ['jtcatSkipTx1', 'jtcatHoundMode']) {
@@ -8653,6 +8664,7 @@ function tearDownRemoteClient() {
   pushRemoteShackInfo();
   remoteShackCw = { enabled: false, paddle: false, paddleReason: '' };
   remoteShackVoice = { labels: [], filled: [] };
+  remoteShackLocation = null;
   // A scope window left open goes back to this PC's own source (or says why not).
   if (_remoteScopeWanted) { _remoteScopeWanted = false; if (yaesuScopeWanted()) startYaesuScope(); }
   // APRS (#868): the listening card goes back to this PC's own radio.
@@ -19437,6 +19449,13 @@ async function saveQsoRecord(qsoData, opts) {
     qsoData.operator = logAs.call;
     qsoData.stationCallsign = logAs.call;
   }
+  // On a Guest Pass to another station, a contact logged from this PC's own
+  // forms was made at that station: its grid, state and county, and the
+  // Guest Pass mark, as the station stamps the contacts it logs for a guest
+  // (#909, #822). Nothing changes off a pass or with a station that sends none.
+  if (origin !== 'forwarded-from-host') {
+    Object.assign(qsoData, StationCounty.guestDeskStationFor(qsoData, { shack: guestPassShackLocation(), fill: (r) => stationLocationFillFor(r, ops) }));
+  }
   // Activation record: MY_GRIDSQUARE / MY_STATE from the park when the
   // logging path did not supply them (lib/activation-station.js).
   Object.assign(qsoData, stationLocationFillFor(qsoData, ops));
@@ -27844,6 +27863,9 @@ function updateRemoteSettings() {
   remoteServer.setRemoteSettings({
     myCallsign: settings.myCallsign || '',
     grid: settings.grid || '',
+    // Where this station is, as it stamps a Guest Pass contact (#909): a
+    // guest desktop's own log forms put it on what they save. Additive.
+    stationLocation: StationCounty.stationLocationForGuests(settings.grid, (r) => stationLocationFillFor(r, settings)),
     clusterConnected: anyCluster,
     respotDefault: settings.respotDefault !== false,
     logCommentTags: settings.logCommentTags !== false,
