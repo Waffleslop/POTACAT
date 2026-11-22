@@ -74,7 +74,8 @@ t('voice-tx-check.js holds no Icom menu path of its own (they live in rig-setup-
 });
 t('Icom over the LAN (RS-BA1) names DATA MOD = LAN, not USB (#221)', () => {
   const d = decideVoiceTxHint({ ...silent, brand: 'Icom', model: 'IC-7300 MK II', mode: 'USB-D', network: true });
-  assert.ok(/MOD Input > DATA MOD = LAN/.test(d.hint), d.hint);
+  assert.ok(/Set DATA MOD = LAN/.test(d.hint), d.hint);
+  assert.ok(!/MENU > SET|MOD Input >/.test(d.hint), 'the verified menu path stays in the radio setup note');
   assert.ok(/Icom Network Audio \(RS-BA1\)/.test(d.hint) && !/USB Audio CODEC/.test(d.hint), d.hint);
 });
 t('Icom voice over the LAN keeps DATA OFF MOD = USB (LAN is confirmed only for DATA MOD)', () => {
