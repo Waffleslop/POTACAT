@@ -515,6 +515,7 @@ const AprsMessenger = require('./lib/aprs-messenger');     // APRS A1: messages 
 const AprsTemplates = require('./lib/aprs-templates');     // APRS A2: message templates (fills To and Text; nothing sends until Send)
 const AprsRfGate = require('./lib/aprs-rf-gate');          // APRS phase 7: when the 'aprs' owner may key (one manual beacon over the radio)
 const AprsRfBeacon = require('./lib/aprs-rf-beacon');      // APRS phase 7: the RF beacon packet, its cap, and the one-beacon run
+const AprsRfTimer = require('./lib/aprs-rf-timer');        // APRS: the timed radio beacon, 2 m only, off by default, 10 min floor
 const AprsRfMessage = require('./lib/aprs-rf-message');    // APRS A3: messages over the radio (the frame, the words, 2 m only for anything automatic)
 const TuneLinkPending = require('./lib/tune-link-pending'); // a tune link that launches POTACAT waits for the radio
 const AprsRfMeters = require('./lib/aprs-rf-meters');      // APRS window: S-meter, SWR and RF out beside the radio beacon, and its peaks
@@ -943,6 +944,7 @@ const GLOBAL_KEYS = new Set([
   'wsprPreCapPower',   // {watts, rigId, at}: the RF power the WSPR beacon found on the
                        // radio before capping it at 1 W — the radio is this machine's
   'aprsBeaconLastAt',  // when this station last beaconed over APRS-IS: the timer counts from it after a restart
+  'aprsRfBeaconLastAt', // when this station last beaconed over its radio (confirmed): the radio timer counts from it after a restart
   'aprsListenReturn',  // {freqHz, mode, rigId, listenHz, state}: where the radio was before APRS
                        // listening tuned it (lib/aprs-radio-return.js) — this machine's radio
   'wsprBeaconWatts',   // {watts, rigId}: the beacon's RF power when the operator set one
@@ -13401,7 +13403,7 @@ function aprsListenMovedView(band) {
   if (!aprsListen.moved || aprsListen.on) return null;
   return { title: AprsListen.MOVED_TITLE, line: AprsListen.movedLine(aprsListenMovedPlace(band)) };
 }
-function aprsListenPush() { aprsWinSend('aprs-listen', aprsListenPayload()); aprsIgateSync(); }
+function aprsListenPush() { aprsWinSend('aprs-listen', aprsListenPayload()); aprsIgateSync(); aprsRfTimerSync(); }
 
 /** The modem bridge holds the radio's sound card while APRS listens (modemBridgeWanted). */
 function aprsListenWantsAudio() {
@@ -14130,6 +14132,8 @@ function aprsBeaconState() {
     gps: flexGpsPayload(),
     lastAt: aprsBeacon.lastAt, lastPacket: aprsBeacon.lastPacket, sentence: aprsBeacon.sentence, backAt: aprsBeacon.backAt,
     sending: aprsBeacon.sending, timerOn: !!aprsBeacon.timer, nextAt: aprsBeacon.timer ? aprsBeacon.nextAt : 0,
+    // The 2 m radio timer: pending or not, when, and why not (30 m, window).
+    rfTimerOn: !!aprsRfTimer.timer, rfNextAt: aprsRfTimer.timer ? aprsRfTimer.nextAt : 0, rfTimerSentence: aprsRfTimer.sentence, rfBand: aprsListen.band || '',
   };
 }
 function aprsBeaconPush() { aprsWinSend('aprs-beacon', aprsBeaconState()); }
@@ -14223,6 +14227,11 @@ function aprsBeaconSet(patch) {
   if ('aprsRadioMsgAutoAck' in o) aprsLog('messages over the radio: automatic acks on the radio ' + (o.aprsRadioMsgAutoAck ? 'on (2 m only)' : 'off'));
   if ('aprsRadioMsgAutoRetry' in o || 'aprsRadioMsgAutoAck' in o) { aprsMessagesPush(); aprsMessagesRun(); }
   aprsBeacon.sentence = '';
+  if ('aprsRfBeaconIntervalMin' in o) {
+    aprsLog('radio timer: ' + (o.aprsRfBeaconIntervalMin ? 'every ' + o.aprsRfBeaconIntervalMin + ' min on 2 m while the APRS window is open and listening' : 'off'));
+    aprsRfTimerStop();
+    aprsRfTimerSchedule(); // picking never sends: the first timed beacon is one interval on
+  }
   if ('aprsBeaconIntervalMin' in o) {
     aprsLog('beacon timer: ' + (o.aprsBeaconIntervalMin ? 'every ' + o.aprsBeaconIntervalMin + ' min while the APRS window is open' : 'off'));
     aprsBeaconSchedule({ arm: true });
@@ -14612,9 +14621,9 @@ function aprsRfPush() { aprsWinSend('aprs-rf', aprsRfPayload()); }
 async function aprsRfSend() {
   if (_aprsRfSending || aprsRfInFlight()) return; // one click, one beacon
   _aprsRfSending = true;
-  try { await aprsRfTransmit(); } finally { _aprsRfSending = false; aprsRfPush(); }
+  try { await aprsRfTransmit(); } finally { _aprsRfSending = false; aprsRfTimerSchedule(); aprsRfPush(); } // a click moves the next timed one back
 }
-async function aprsRfTransmit() {
+async function aprsRfTransmit(why = 'click') {
   aprsRfSay('');
   aprsRfPush();
   if (APRS_DEV_FRAMES) { aprsRfSay('This test build plays recorded packets and transmits nothing.'); return; }
@@ -14632,7 +14641,9 @@ async function aprsRfTransmit() {
   if (res.ok && res.confirmed) {
     // Only a beacon the radio reported transmitting counts as sent and gets a last-beacon time.
     aprsRfUi.lastAt = Date.now(); aprsRfUi.lastPacket = b.packet; aprsRfUi.lastBand = c.band;
-    sendCatLog(`[APRS beacon] sent over the radio (${c.bandLabel}, ${c.mhz} MHz; the radio reported transmit): ${b.packet}`);
+    settings.aprsRfBeaconLastAt = aprsRfUi.lastAt; // kept: a restart never beacons early on the radio timer
+    try { saveSettings(settings); } catch (e) { aprsLog('could not save the radio beacon time: ' + e.message); }
+    sendCatLog(`[APRS beacon] sent over the radio${why === 'timer' ? ' by the 2 m timer' : ''} (${c.bandLabel}, ${c.mhz} MHz; the radio reported transmit): ${b.packet}`);
   } else if (res.ok) {
     aprsRfSay(res.sentence || AprsRfBeacon.SENT_SENTENCES.noReadback);
     sendCatLog(`[APRS beacon] keyed but not confirmed (${c.bandLabel}, ${c.mhz} MHz): ${aprsRfUi.sentence}`);
@@ -14645,6 +14656,54 @@ async function aprsRfTransmit() {
 /** Stop a beacon in flight now; PTT drops at once. Safe to call any time. */
 function aprsRfAbort(why) {
   if (aprsRf && aprsRf.inFlight()) aprsRf.abort(why);
+}
+
+// ── APRS: the timed radio beacon, 2 m ONLY (Casey 2026-11-21) ────────────────
+// Off by default; Off, 10, 20 or 30 min, never under 10 (lib/aprs-rf-timer.js).
+// 30 m has no timer: unattended HF beaconing needs an FCC 97.221 check first.
+// The timed beacon is the click's own beacon (aprsRfTransmit: the gate, the
+// plan, the cap, the run); this is only WHEN. It never sends on a pick or an
+// open: whenever no timed beacon is pending, the timer starts counting now
+// (armedAt), one interval after the later of that and the last radio beacon.
+// Only while the APRS window is open. A round that is due while the radio is
+// not listening on 2 m, or is sending something else, or that the gate
+// refuses, is skipped, and the next is a full interval later.
+const aprsRfTimer = { timer: null, nextAt: 0, armedAt: 0, lastTryAt: 0, band: '', sentence: '' };
+function aprsRfTimerLastAt() {
+  return Math.max(aprsRfUi.lastAt || 0, AprsRfTimer.lastAtFrom(settings, Date.now()), aprsRfTimer.lastTryAt || 0);
+}
+function aprsRfTimerSchedule() {
+  const pending = !!aprsRfTimer.timer;
+  if (pending) { clearTimeout(aprsRfTimer.timer); aprsRfTimer.timer = null; }
+  aprsRfTimer.band = aprsListen.band || '';
+  const now = Date.now();
+  if (!pending) aprsRfTimer.armedAt = now; // never on a pick, an open or a return to 2 m: one interval on
+  const p = AprsRfTimer.plan({ intervalMin: settings.aprsRfBeaconIntervalMin, band: aprsRfTimer.band, windowOpen: !!(aprsWin && !aprsWin.isDestroyed()), lastAt: aprsRfTimerLastAt(), armedAt: aprsRfTimer.armedAt, now });
+  aprsRfTimer.sentence = p.on ? '' : (p.sentence || '');
+  if (!p.on) { aprsRfTimer.nextAt = 0; return; }
+  aprsRfTimer.nextAt = now + p.dueMs;
+  aprsRfTimer.timer = setTimeout(aprsRfTimerDue, p.dueMs);
+}
+/** The radio's band changed (listening started, stopped or moved): plan again. */
+function aprsRfTimerSync() {
+  if ((aprsListen.band || '') !== aprsRfTimer.band) aprsRfTimerSchedule();
+}
+function aprsRfTimerStop() {
+  if (aprsRfTimer.timer) { clearTimeout(aprsRfTimer.timer); aprsRfTimer.timer = null; }
+  aprsRfTimer.nextAt = 0;
+}
+async function aprsRfTimerDue() {
+  aprsRfTimer.timer = null;
+  aprsRfTimer.lastTryAt = Date.now(); // a skipped or refused round still waits a full interval
+  const skip = AprsRfTimer.dueCheck({ band: aprsListen.band, listenOn: aprsListen.on, listenState: aprsListen.state, busy: _aprsRfSending || aprsRfInFlight() });
+  if (skip) {
+    aprsLog('radio timer: this round skipped: ' + skip.sentence);
+  } else {
+    _aprsRfSending = true;
+    try { await aprsRfTransmit('timer'); } catch (e) { aprsLog('radio timer: ' + e.message); } finally { _aprsRfSending = false; aprsRfPush(); }
+  }
+  aprsRfTimerSchedule();
+  aprsBeaconPush();
 }
 
 /** POTACAT's key-down for the beacon: the same dispatcher, guards and modem audio road as Winlink packet. */
@@ -48114,6 +48173,7 @@ function cloudShackNotice(text, kind) {
       aprsWin = null;
       _aprsMsgViewing = ''; // A1: messages still going out carry on; nothing is being read now
       aprsBeaconStop(); // phase 5: the beacon timer runs only while the window is open
+      aprsRfTimerStop(); // and the 2 m radio timer
     });
     aprsWin.webContents.on('before-input-event', (_e, input) => {
       if (input.key === 'F12' && input.type === 'keyDown') aprsWin.webContents.toggleDevTools();
@@ -48136,6 +48196,7 @@ function cloudShackNotice(text, kind) {
     aprsIgatePush();
     aprsAutoListenOnOpen(); // receive only; once per open, silent when it may not
     aprsBeaconSchedule({ arm: true }); // phase 5: the timer (if set) starts with the window, one interval on
+    aprsRfTimerStop(); aprsRfTimerSchedule(); // the 2 m radio timer (if set) too: one interval on, never at once
     aprsBeaconPush();
     aprsMessagesPush();
   });

@@ -43,13 +43,29 @@ const block = (() => {
   return main.slice(a, b);
 })();
 
-test('only the operator\'s click sends: one IPC path into aprsRfSend, no RF timer', () => {
+// Was: "no RF timer". Casey 2026-11-21 ("approve all") approved one timer,
+// 2 m only, off by default, 10 min at the least, never on a pick or open.
+test('the click sends from one IPC path; the only RF timer is the 2 m one, and it never fires on a pick or open', () => {
   assert.strictEqual((main.match(/aprsRfSend\(\)\.catch/g) || []).length, 1, 'called from one place');
   assert.strictEqual((main.match(/aprsRfSend\(/g) || []).length, 2, 'the definition and the one call');
   assert.ok(/ipcMain\.on\('aprs-rf-send', \(\) => \{ aprsRfSend\(\)/.test(main));
   assert.ok(!/setInterval\(/.test(block), 'no interval in the RF block');
-  for (const t of (block.match(/setTimeout\([^;]*/g) || [])) assert.ok(!/aprsRfSend|send\(/.test(t), 'no timed send: ' + t);
-  assert.ok(!/aprsRfSend|rfSend/.test(fnBody(main, 'aprsBeaconSchedule')), 'the internet timer never sends over the radio');
+  const timed = (block.match(/setTimeout\([^;]*/g) || []).filter((t) => /aprsRfSend|send\(|aprsRfTransmit|aprsRfTimerDue/.test(t));
+  assert.deepStrictEqual(timed, ['setTimeout(aprsRfTimerDue, p.dueMs)'], 'one timed path into the radio');
+  assert.ok(!/aprsRfSend|rfSend|aprsRfTransmit/.test(fnBody(main, 'aprsBeaconSchedule')), 'the internet timer never sends over the radio');
+  const sched = fnBody(main, 'aprsRfTimerSchedule');
+  assert.ok(/if \(!pending\) aprsRfTimer\.armedAt = now;/.test(sched), 'no pending timed beacon: it counts one interval from now');
+  assert.ok(/AprsRfTimer\.plan\(/.test(sched) && /settings\.aprsRfBeaconIntervalMin/.test(sched));
+  const due = fnBody(main, 'aprsRfTimerDue');
+  assert.ok(due.indexOf('AprsRfTimer.dueCheck(') < due.indexOf("aprsRfTransmit('timer')"), '2 m and listening, checked at the due time');
+  assert.ok(/aprsRfTimer\.lastTryAt = Date\.now\(\);/.test(due), 'a skipped round waits a full interval');
+  const tx = fnBody(main, 'aprsRfTransmit');
+  assert.ok(tx.indexOf('AprsRfGate.readiness(aprsRfGateState())') < tx.indexOf('aprsRfRunner()'), 'the timed beacon passes the same gate');
+  assert.ok(/settings\.aprsRfBeaconLastAt = aprsRfUi\.lastAt;/.test(tx), 'only a confirmed beacon sets the time a restart counts from');
+  const open = main.slice(main.indexOf("aprsBeaconSchedule({ arm: true }); // phase 5"), main.indexOf("aprsBeaconSchedule({ arm: true }); // phase 5") + 300);
+  assert.ok(/aprsRfTimerStop\(\); aprsRfTimerSchedule\(\);/.test(open), 'opening the window starts it one interval on');
+  assert.ok(/aprsRfTimerStop\(\); \/\/ and the 2 m radio timer/.test(main), 'closing the window stops it');
+  assert.ok(/aprsRfTimerSchedule\(\); \/\/ picking never sends/.test(fnBody(main, 'aprsBeaconSet')));
 });
 
 // Was: "the press only asks: the confirmation line carries band, frequency,
