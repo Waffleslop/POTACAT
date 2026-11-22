@@ -211,7 +211,9 @@ test('the pop-out loads the stations module before its own script', () => {
   const a = popHtml.indexOf('<script src="../lib/jtcat-stations.js"></script>');
   assert.ok(a > 0, 'script tag');
   assert.ok(a < popHtml.indexOf('<script src="jtcat-popout.js"></script>'));
-  assert.ok(/id="jp-view-stream"[^>]*>Stream</.test(popHtml) && /id="jp-view-stations"[^>]*>Stations</.test(popHtml), 'the Stream / Stations switch');
+  assert.ok(/<select id="jp-view"[^>]*><option value="stream" selected>Stream<\/option><option value="stations">Stations<\/option><\/select>/.test(popHtml), 'the Stream / Stations dropdown, Stream by default');
+  assert.ok(/id="jp-clear"[^>]*>Clear<\/button><select id="jp-view"/.test(popHtml), 'in the filter row, right after Clear, not on its own line');
+  assert.ok(!/jp-view-switch|id="jp-view-stream"|id="jp-view-stations"/.test(popHtml), 'the old two-button switch is gone');
   assert.ok(/<div id="jp-stations" class="jp-decode-list jp-stations" hidden><\/div>/.test(popHtml));
   assert.ok(/id="jp-stations-expiry"><option value="2">2 minutes<\/option><option value="5" selected>5 minutes<\/option><option value="10">10 minutes<\/option>/.test(popHtml));
 });
@@ -255,7 +257,7 @@ test('main keeps the expiry as a machine (display) setting', () => {
 
 test('the Stations styles use theme tokens only (no colour written in)', () => {
   const css = [...popHtml.matchAll(/<style>([\s\S]*?)<\/style>/g)].map(m => m[1]).join('\n');
-  const rules = css.split('\n').filter(l => /\.jp-st-|\.jp-view-switch|#jp-stations/.test(l));
+  const rules = css.split('\n').filter(l => /\.jp-st-|\.jp-view-select|#jp-stations/.test(l));
   assert.ok(rules.length >= 10, 'rules found');
   for (const r of rules) {
     assert.ok(!/#[0-9a-f]{3,8}\b|rgba?\(|hsla?\(/i.test(r.replace(/#jp-[\w-]+/g, '')), 'hard-coded colour: ' + r.trim());

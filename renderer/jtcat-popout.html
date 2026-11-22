@@ -46,10 +46,7 @@
     /* The switch made the Band Activity header wider than a half-width pane: it
        wraps onto a second line rather than push Clear out of sight. */
     .jp-decode-header { flex-wrap: wrap; row-gap: 6px; }
-    .jp-view-switch { display: flex; gap: 0; }
-    .jp-view-switch .jtcat-filter-btn { border-radius: 0; }
-    .jp-view-switch .jtcat-filter-btn:first-child { border-radius: 8px 0 0 8px; }
-    .jp-view-switch .jtcat-filter-btn:last-child { border-radius: 0 8px 8px 0; margin-left: -1px; }
+    .jp-decode-header .jp-view-select { height: 34px; font-size: 14px; font-weight: 700; padding: 0 8px; border-radius: 8px; border: 1px solid var(--border-primary); background: var(--bg-primary); color: var(--text-primary); letter-spacing: 0; text-transform: none; cursor: pointer; }
     #jp-band-activity[hidden], #jp-stations[hidden] { display: none; }
     .jp-stations { padding: 0; overflow-x: auto; container: jp-stations / inline-size; }
     /* Call, Need, Calling, Park, Grid, Country, State, dB, Hz, Age (#557). */
@@ -762,7 +759,7 @@
   <div class="jp-main">
     <div class="jp-decode-pane">
       <div class="jp-decode-section">
-        <div class="jp-decode-header"><span>Band Activity<span id="jp-hidden-note" class="jp-hidden-note" hidden></span></span> <div class="jp-view-switch" role="group" aria-label="Show Band Activity as"><button type="button" id="jp-view-stream" class="jtcat-filter-btn active" title="Every decode as it arrives, newest at the bottom">Stream</button><button type="button" id="jp-view-stations" class="jtcat-filter-btn" title="One line per station heard, kept up to date">Stations</button></div> <div style="display:flex;gap:4px;align-items:center;"><input type="text" id="jp-search" placeholder="Filter by call or word" title="One or more callsigns or words, separated by commas or spaces: a line shows if it contains any of them" spellcheck="false"><button id="jp-cq-filter" class="jtcat-filter-btn" title="Only CQs, 73s and calls to me">CQ &amp; 73</button><button id="jp-wanted-filter" class="jtcat-filter-btn" title="Show only needed DXCC/grid/call">Wanted</button><button id="jp-sort-signal" class="jtcat-filter-btn" title="Sort by signal strength (strongest first)">dB</button><button id="jp-event-filter" class="jtcat-filter-btn" title="Show only tracked-event stations you still need (13 Colonies etc.)">Event</button><button id="jp-clear" class="jtcat-filter-btn" title="Clear all decodes">Clear</button></div></div>
+        <div class="jp-decode-header"><span>Band Activity<span id="jp-hidden-note" class="jp-hidden-note" hidden></span></span> <div style="display:flex;gap:4px;align-items:center;"><input type="text" id="jp-search" placeholder="Filter by call or word" title="One or more callsigns or words, separated by commas or spaces: a line shows if it contains any of them" spellcheck="false"><button id="jp-cq-filter" class="jtcat-filter-btn" title="Only CQs, 73s and calls to me">CQ &amp; 73</button><button id="jp-wanted-filter" class="jtcat-filter-btn" title="Show only needed DXCC/grid/call">Wanted</button><button id="jp-sort-signal" class="jtcat-filter-btn" title="Sort by signal strength (strongest first)">dB</button><button id="jp-event-filter" class="jtcat-filter-btn" title="Show only tracked-event stations you still need (13 Colonies etc.)">Event</button><button id="jp-clear" class="jtcat-filter-btn" title="Clear all decodes">Clear</button><select id="jp-view" class="jp-view-select" aria-label="Show Band Activity as" title="Stream: every decode as it arrives, newest at the bottom. Stations: one line per station heard, kept up to date."><option value="stream" selected>Stream</option><option value="stations">Stations</option></select></div></div>
         <div id="jp-band-activity" class="jp-decode-list">
           <div class="jp-empty">Waiting for decodes...</div>
         </div>
