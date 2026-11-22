@@ -62,12 +62,12 @@ test('main falls back to the chase target only when the modifier is missing', ()
 
 test('every registered C2S type has a case in the demux', () => {
   const src = readSrc(path.join(__dirname, '..', 'lib', 'remote-server.js'));
-  // Not top-level messages: auth, pass-leave, pass-take-over and
+  // Not top-level messages: auth, pass-leave, pass-take-over, pass-claim and
   // owner-presence are handled before the demux (they come from sockets that
   // may not be admitted: a paused guest, an owner device waiting), and
   // start-audio/sdp/ice travel inside a 'signal' envelope.
-  const notTopLevel = new Set(['auth', 'pass-leave', 'pass-take-over', 'owner-presence', 'start-audio', 'sdp', 'ice', 'scan:control']);
-  for (const t of ['pass-leave', 'pass-take-over', 'owner-presence']) {
+  const notTopLevel = new Set(['auth', 'pass-leave', 'pass-take-over', 'pass-claim', 'owner-presence', 'start-audio', 'sdp', 'ice', 'scan:control']);
+  for (const t of ['pass-leave', 'pass-take-over', 'pass-claim', 'owner-presence']) {
     assert.ok(src.includes("msg.type === '" + t + "'"), t + ' is handled before the demux');
   }
   const missing = Object.entries(protocol.MESSAGES)

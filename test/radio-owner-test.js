@@ -111,5 +111,17 @@ test('a Winlink radio session is exclusive with JTCAT and Mercury, both ways', (
   assert.strictEqual(isPreemptive('winlink'), false, 'POTACAT keys it — never observed-only');
 });
 
+test('an APRS beacon over the radio (aprs) is exclusive with every engine, both ways', () => {
+  assert.ok(OWNERS.includes('aprs'));
+  assert.strictEqual(decideAcquire('none', 'aprs').ok, true);
+  for (const other of ['jtcat', 'mercury', 'winlink', 'atu-wizard']) {
+    assert.strictEqual(decideAcquire(other, 'aprs').ok, false, other + ' keeps the radio');
+    assert.strictEqual(decideAcquire('aprs', other).ok, false, 'aprs keeps it from ' + other);
+  }
+  assert.strictEqual(decideRelease('aprs', 'winlink').owner, 'aprs');
+  assert.strictEqual(decideRelease('aprs', 'aprs').owner, 'none');
+  assert.strictEqual(isPreemptive('aprs'), false);
+});
+
 console.log(`\nRadio-owner arbiter: ${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

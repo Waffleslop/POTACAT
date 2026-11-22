@@ -30,7 +30,7 @@
 
     window.api.getSettings().then(function(s) {
       myCallsign = (s.myCallsign || '').toUpperCase();
-      myGrid = (s.grid || '').toUpperCase().substring(0, 4);
+      myGrid = ((s.remoteShack && s.shackGrid) || s.grid || '').toUpperCase().substring(0, 4);
       updateHome();
     });
 

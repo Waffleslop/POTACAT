@@ -51,7 +51,7 @@ test('main records deletes from the log sink and filters the pull; an empty repl
   assert.ok(/N3fjpDeleted\.noteDeleted\(settings\.n3fjpDeletedKeys, changes\)/.test(sink));
   const pull = main.slice(main.indexOf('async function n3fjpPull('), main.indexOf('async function n3fjpPull(') + 4000);
   assert.ok(/N3fjpDeleted\.withoutDeleted\(records, settings\.n3fjpDeletedKeys\)/.test(pull));
-  assert.ok(/importQsoRecords\(wanted\)/.test(pull));
+  assert.ok(/importQsoRecords\(wanted[,)]/.test(pull));
   assert.ok(/if \(\(full \|\| daily\) && records\.length\) \{ settings\.n3fjpPullConfirmAt = Date\.now\(\);/.test(pull));
   assert.ok(!/if \(full \|\| daily\) \{ settings\.n3fjpPullConfirmAt/.test(pull));
 });

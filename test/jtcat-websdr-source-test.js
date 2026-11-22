@@ -154,11 +154,11 @@ test('source selection: one writer — the windows send jtcat-set-rx-source; mai
 
 test('source selection: with the WebSDR chosen, both windows draw the 12 kHz frames main sends, not a sound card', () => {
   assert.ok(APP.includes("var jtcatFromSdr = s.jtcatRxSource === 'websdr';"));
-  assert.ok(APP.includes("if (jtcatFromSdr || s.audioSource === 'smartsdr' || s.audioSource === 'icom-network' || s.audioSource === 'yaesu-lan') {"));
-  assert.ok(/const vita49SourceOptions = jtcatFromSdr\s*\? \{ sourceRate: 12000 \}/.test(APP));
+  assert.ok(APP.includes("if (jtcatFromSdr || jtcatFromTci || s.audioSource === 'smartsdr' || s.audioSource === 'icom-network' || s.audioSource === 'yaesu-lan') {"));
+  assert.ok(/const vita49SourceOptions = (jtcatFromSdr|\(jtcatFromSdr \|\| jtcatFromTci\))\s*\? \{ sourceRate: 12000 \}/.test(APP));
   assert.ok(POP.includes("return s && s.jtcatRxSource === 'websdr' ? 'websdr' : (s && s.audioSource);"));
-  assert.ok(POP.includes("if (audioSource === 'smartsdr' || audioSource === 'yaesu-lan' || audioSource === 'websdr') {"));
-  assert.ok(/processorOptions: audioSource === 'websdr'\s*\? \{ sourceRate: 12000 \}/.test(POP));
+  assert.ok(POP.includes("if (audioSource === 'smartsdr' || audioSource === 'yaesu-lan' || audioSource === 'websdr' || audioSource === 'tci') {"));
+  assert.ok(/processorOptions: (audioSource === 'websdr'|\(audioSource === 'websdr' \|\| audioSource === 'tci'\))\s*\? \{ sourceRate: 12000 \}/.test(POP));
   assert.strictEqual((POP.match(/startPopoutAudio\(s\.remoteAudioInput \|\| '', jpCaptureSource\(s\)\)/g) || []).length, 2, 'both pop-out start paths');
   // The window's capture is the SDR audio coming back: main does not feed it twice.
   const ipc = MAIN.slice(MAIN.indexOf("ipcMain.on('jtcat-audio'"), MAIN.indexOf("ipcMain.on('jtcat-slice-audio'"));
@@ -235,12 +235,12 @@ test('dial follow: main retunes the connected SDR only while JTCAT receives from
 });
 
 test('wiring: a JTCAT band pick (either window, or ECHOCAT) retunes the SDR, even with no radio on the CAT link', () => {
-  const tuneAt = MAIN.indexOf("ipcMain.on('tune', (_e, { frequency, mode, bearing, slicePort, origin }) => {");
+  const tuneAt = MAIN.indexOf("ipcMain.on('tune', (_e, { frequency, mode, bearing, slicePort, origin, pickSideband }) => {");
   const tune = MAIN.slice(tuneAt, MAIN.indexOf('// --- Rig Control Panel IPC ---', tuneAt));
   const follow = tune.indexOf("const sdrFollowed = JtcatRxSource.isJtcatDialMode(mode) && jtcatWebSdrFollowDial(parseFloat(frequency), 'band pick');");
-  const dead = tune.indexOf('if (!((smartSdr && smartSdr.canTune) || (cat && cat.connected))) {');
+  const dead = tune.indexOf('if (!((smartSdr && smartSdr.canTune) || (cat && cat.connected) || tciRigLinked())) {');
   assert.ok(follow > 0 && dead > follow, 'the follow comes before the radio-link refusal');
-  assert.ok(/if \(!\(\(smartSdr && smartSdr\.canTune\) \|\| \(cat && cat\.connected\)\)\) \{\s*if \(sdrFollowed\) return;/.test(tune), 'no "radio not connected" when the SDR took the tune');
+  assert.ok(/if \(!\(\(smartSdr && smartSdr\.canTune\) \|\| \(cat && cat\.connected\) \|\| tciRigLinked\(\)\)\) \{\s*if \(sdrFollowed\) return;/.test(tune), 'no "radio not connected" when the SDR took the tune');
   assert.ok(tune.includes('if (!sdrFollowed && kiwiActive && kiwiClient && kiwiClient.connected) {'), 'the voice-passband auto-tune does not undo it');
   const band = MAIN.slice(MAIN.indexOf("remoteServer.on('jtcat-set-band'"), MAIN.indexOf("remoteServer.on('jtcat-log-qso'"));
   assert.ok(band.includes("jtcatWebSdrFollowDial(freqKhz, 'ECHOCAT band pick');"));

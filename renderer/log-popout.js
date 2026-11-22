@@ -3,6 +3,8 @@
 // both work. Sets data-theme and (in charcoal dark variant only) the
 // data-dark-variant attribute on <html>.
 function _applyPopoutTheme(payload) {
+  // The shared rule (popout-theme-boot*.js) also sets data-ds (#376).
+  if (window.applyPopoutTheme) return window.applyPopoutTheme(payload);
   const theme = typeof payload === 'string'
     ? payload
     : ((payload && payload.theme) || 'dark');
@@ -262,10 +264,10 @@ function _applyPopoutTheme(payload) {
     return `${datePart} ${t.slice(0, 2)}:${t.slice(2, 4)}`;
   }
 
-  /** Display an integer kHz as "14074" (no decimals). */
+  /** kHz written the VFO way, 14.074.00 (lib/freq-dots.js). */
   function formatFreq(kHz) {
     if (kHz == null || isNaN(kHz)) return '';
-    return String(Math.round(kHz));
+    return FreqDots.fromKhz(kHz);
   }
 
   /** Render the past-QSOs panel. */
@@ -485,7 +487,8 @@ function _applyPopoutTheme(payload) {
   function buildQsoData() {
     const callsignRaw = callInput.value.trim().toUpperCase();
     if (!callsignRaw) return { error: 'Callsign required' };
-    const freqKhzNum = parseFloat(freqInput.value);
+    // The exact kHz behind the box unless the operator typed over it (#794).
+    const freqKhzNum = parseFloat(LogFreqField.value(freqInput));
     if (!isFinite(freqKhzNum) || freqKhzNum < 100) return { error: 'Frequency required (kHz)' };
     const date = (dateInput.value || '').replace(/-/g, '');
     // Normalize H:MM / HH:M / 9:5 / 0930 forms → HHMM. Pad each side.
@@ -714,7 +717,7 @@ function _applyPopoutTheme(payload) {
     window.api.onCatFrequency((hz) => {
       if (!hz || hz < 100000) return;
       if (freqUserEdited) return; // user is typing — don't fight them
-      freqInput.value = String(Math.round(hz / 1000));
+      LogFreqField.fill(freqInput, hz / 1000); // shows 100 Hz, logs the hertz (#794)
     });
   }
   if (window.api.onCatMode) {
@@ -748,7 +751,7 @@ function _applyPopoutTheme(payload) {
     callInput.value = String(p.callsign || '').toUpperCase();
     reportCall();
     // Not rounded: 40 m FT4 is 7047.5.
-    if (p.freqKhz) freqInput.value = String(Math.round(p.freqKhz * 1000) / 1000);
+    if (p.freqKhz) LogFreqField.fill(freqInput, p.freqKhz);
     if (p.mode) {
       const m = modeFamily(p.mode);
       if ([...modeSelect.options].some((o) => o.value === m)) modeSelect.value = m;
@@ -802,15 +805,29 @@ function _applyPopoutTheme(payload) {
   let reviewId = 0;
   let reviewHeld = null;
   const reviewBar = document.getElementById('lp-review');
+  // The note names parks read from the activator's spot comment. It goes with
+  // the reference list as it was offered: once the operator edits the box, the
+  // note no longer describes what is in it and is dropped (and comes back if
+  // the box is put back).
+  let reviewShown = null;
+  const refText = (v) => String(v || '').replace(/\s+/g, '').toUpperCase();
   function reviewText(p) {
-    return 'Review before saving' + (p.waiting ? ' · ' + p.waiting + ' more waiting' : '');
+    const noteHolds = p.nferNote && refText(refInput.value) === refText(p.reference);
+    return 'Review before saving' + (p.waiting ? ' · ' + p.waiting + ' more waiting' : '')
+      + (noteHolds ? ' · ' + p.nferNote : '');
   }
+  refInput.addEventListener('input', () => {
+    if (reviewId && reviewShown && reviewShown.nferNote) reviewBar.textContent = reviewText(reviewShown);
+  });
   function showReview(p) {
     reviewHeld = null;
     reviewId = p.review;
     applySpotPrefill(p);
-    respotCheckEl.checked = false; // the automatic log never re-spots
+    // Off, unless JTCAT's "Re-spot the activator" option is on (#351): then
+    // ticked, and this box alone decides whether the spot goes out.
+    respotCheckEl.checked = !!p.respotOn;
     clearBtn.textContent = "Don't log";
+    reviewShown = p;
     reviewBar.textContent = reviewText(p);
     reviewBar.hidden = false;
     window.api.logReviewShown(p.review);
@@ -840,7 +857,7 @@ function _applyPopoutTheme(payload) {
       if (p.review) { offerReview(p); return; }
       if (reviewId) { showToast('Finish the JTCAT contact first', 'error'); return; }
       if (p.force) { applySpotPrefill(p); return; }
-      if (p.freqKhz && !freqUserEdited) freqInput.value = String(Math.round(p.freqKhz));
+      if (p.freqKhz && !freqUserEdited) LogFreqField.fill(freqInput, p.freqKhz);
       if (p.mode && !modeUserEdited) {
         const m = modeFamily(p.mode);
         if ([...modeSelect.options].some((o) => o.value === m)) modeSelect.value = m;
@@ -872,10 +889,10 @@ function _applyPopoutTheme(payload) {
   (async () => {
     try {
       const settings = await window.api.getSettings();
-      // Default power from settings.defaultPower (existing field)
-      if (settings && settings.defaultPower != null && powerInput.value === '') {
-        powerInput.value = String(settings.defaultPower);
-      }
+      // The operator's own Default TX Power, never the old untouched 100;
+      // none = the box stays empty and the contact carries no power (#523).
+      const dp = window.LogTxPower ? window.LogTxPower.operatorDefaultPower(settings) : 0;
+      if (dp && powerInput.value === '') powerInput.value = String(dp);
       // Re-spot prefs hydrated from the same settings keys the spot-row
       // Log dialog and Bottom Banner Logger use, so all three desktop
       // logging paths agree on default state and comment template.
@@ -962,7 +979,7 @@ function _applyPopoutTheme(payload) {
   (async () => {
     try {
       const s = await window.api.getSettings();
-      if (s && s.lightMode) applyTheme('light');
+      if (s && s.themeNow) applyTheme(s.themeNow);
     } catch {}
   })();
 

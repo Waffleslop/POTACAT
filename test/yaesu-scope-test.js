@@ -215,7 +215,8 @@ check('2. a client disconnect clears the remote subscription and stops an unwatc
   const i = mainSrc.indexOf("remoteServer.on('client-disconnected'");
   assert.ok(i > 0);
   const body = mainSrc.slice(i, i + 900);
-  assert.ok(body.includes('yaesuScopeRemoteWants = false'), 'flag not cleared on disconnect');
+  // #358: the flags follow scopeWatchers; the last device gone clears every watcher.
+  assert.ok(body.includes('scopeRemoteApply(scopeWatchers.clear())'), 'flag not cleared on disconnect');
   assert.ok(body.includes("stopYaesuScope('ECHOCAT client disconnected')"), 'helper not stopped on disconnect');
 });
 
@@ -232,9 +233,10 @@ check('3. a Guest Pass cannot turn SCU-LAN10 on, and is told why', () => {
   const pay = mainSrc.slice(mainSrc.indexOf('function yaesuScopeRemotePayload'), mainSrc.indexOf('function yaesuScopeBroadcastState'));
   // One card per source: an Icom guest is told about the radio's scope, an FT-710 guest about SCU-LAN10.
   assert.ok(/yaesuScopeRemoteIsGuest && asksForEnable\) \? \(s\.source === 'icom' \? ICOM_SCOPE_GUEST_DIAG : YAESU_SCOPE_GUEST_DIAG\) : s\.diag/.test(pay), 'remote payload must substitute the guest diag for a guest session');
-  assert.ok(serverSrc.includes("this.emit('scope-subscribe', { on: !!msg.on, guest: !!ws._passSession })"), 'subscribe must carry the guest flag');
+  assert.ok(serverSrc.includes("this.emit('scope-subscribe', { on: !!msg.on, guest: !!ws._passSession, clientId: this._scopeClientId(ws) })"), 'subscribe must carry the guest flag (and the device, #358)');
   const d = mainSrc.indexOf("remoteServer.on('client-disconnected'");
-  assert.ok(mainSrc.slice(d, d + 1000).includes('yaesuScopeRemoteIsGuest = false'), 'guest flag must clear on disconnect');
+  assert.ok(mainSrc.slice(d, d + 1000).includes('scopeRemoteApply(scopeWatchers.clear())'), 'guest flag must clear on disconnect');
+  assert.ok(/function scopeRemoteApply\(sum\) \{[\s\S]{0,200}yaesuScopeRemoteIsGuest = sum\.guest;/.test(mainSrc), 'the guest flag follows the watchers');
 });
 
 check('4. the synthetic signal advertises nativeScope on any rig and re-broadcasts rig state', () => {
@@ -550,10 +552,44 @@ check('#126: "no FT4222 device" right after the radio powers back on is retried;
 
 check('#126: main.js supervises the helper — kills a stalled one and restarts it as a transient exit', () => {
   const start = mainSrc.slice(mainSrc.indexOf('function startYaesuScope()'), mainSrc.indexOf('function stopYaesuScope('));
-  assert.ok(start.includes('YaesuScope.isHelperFatalLine('), 'stderr fatal line not noted');
+  assert.ok(start.includes('YaesuScope.helperFatalExitCode(yaesuScopeStderr)'), 'stderr fatal line not noted (on the whole stderr, a chunk can cut a line)');
   assert.ok(start.includes('YaesuScope.helperExitShouldRetry('), 'exit handler must use helperExitShouldRetry');
   assert.ok(/_stalled/.test(start), 'a killed-for-stall helper must restart, not read as a clean stop');
   assert.ok(mainSrc.includes('YaesuScope.helperStallReason('), 'no watchdog calls helperStallReason');
+});
+
+// #320 (ride1226 2026-11-10, FT-710): the scope was opened with the radio off;
+// the helper printed "could not open" and returned 3 but stayed alive until
+// Retry closed its stdin (14:44:02 to 14:44:58), so the power-on restart at
+// 14:44:05 found it running and did nothing.
+check('#320: a helper that said "could not open" and has not exited is killed and read as exit 3', () => {
+  const said = 'yaesu-scope: could not open "FT4222 A" (FT_STATUS 2) — radio off, not on this USB port, driver missing, or another program has it\n';
+  assert.strictEqual(S.helperFatalExitCode(said), 3);
+  assert.strictEqual(S.helperFatalExitCode('yaesu-scope: 20 consecutive read failures (status 10, got 0 bytes)\n'), 6);
+  assert.strictEqual(S.helperFatalExitCode('yaesu-scope: opened "FT4222 A" — SPI single'), 0);
+  assert.strictEqual(S.helperFatalExitCode(''), 0);
+  // Two pipe chunks, as ride1226's log printed them: judged on the whole stderr.
+  assert.strictEqual(S.helperFatalExitCode('yaesu-scope: 20 consecutive read failures (s' + 'tatus 10, got 0 bytes)'), 6);
+  assert.ok(S.isHelperFatalLine(said), 'an open failure is a line the helper exits after');
+  const fatalAt = T('14:44:02.918');
+  assert.strictEqual(S.helperStallReason({ now: T('14:44:04.000'), fatalAt, fatalCode: 3 }), null, 'a moment to exit on its own');
+  const why = S.helperStallReason({ now: T('14:44:06.000'), fatalAt, fatalCode: 3 });
+  assert.ok(/could not open the bridge/.test(why), why);
+  assert.ok(/reported the bridge lost/.test(S.helperStallReason({ now: T('14:44:06.000'), fatalAt })), 'read failures keep their wording');
+  // The kill reads as 3, which is retried only while the radio is coming back:
+  // power-on at 14:44:05.863, kill about 3 s after the line.
+  assert.strictEqual(S.helperExitShouldRetry(3, { sinceRadioBackMs: 1000 }), true);
+  const start = mainSrc.slice(mainSrc.indexOf('function startYaesuScope()'), mainSrc.indexOf('function stopYaesuScope('));
+  assert.ok(start.includes('code = proc._fatalCode || 6'), 'a watchdog kill reads as the exit its last line named');
+  assert.ok(start.includes('fatalCode: proc._fatalCode'), 'the watchdog says which fault');
+  assert.ok(/if \(proc\._fatalCode !== 3\) yaesuScopeStallKills\+\+/.test(start), 'a failed open spends the ordinary budget, not the stall budget');
+});
+
+check('#320: the Windows helper reads its stdin with ReadFile, so exit() is never stuck behind the C runtime stdin lock', () => {
+  const c = fs.readFileSync(path.join(__dirname, '..', 'helpers', 'yaesu-scope', 'yaesu-scope.c'), 'utf8');
+  const win = c.slice(c.indexOf('static unsigned __stdcall stdin_watch('), c.indexOf('static void start_stdin_watch(void) { _beginthreadex'));
+  assert.ok(win.includes('ReadFile(GetStdHandle(STD_INPUT_HANDLE)'), 'the watcher reads the raw handle');
+  assert.ok(!/fread\(/.test(win), 'fread holds the CRT stdin lock that exit() flushes under');
 });
 
 check('#126: the scope restarts when the radio comes back (power-on, link restored), not only on Retry', () => {

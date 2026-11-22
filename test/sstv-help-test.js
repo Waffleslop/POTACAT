@@ -71,7 +71,7 @@ test('the reply bar takes P5 as well as 595, explains it, and the help is one cl
 test('every calling frequency in the list uses the sideband the reply bar and the app expect', () => {
   const html = R('renderer/sstv-popout.html'), js = R('renderer/sstv-popout.js');
   const i = js.indexOf('function getFreqMode('), src = js.slice(i, js.indexOf('\n}\n', i) + 2);
-  const getFreqMode = new Function(src + 'return getFreqMode;')();
+  const getFreqMode = new Function('window', src + 'return getFreqMode;')({ SsbSideband: require('../lib/ssb-sideband') });
   const opts = [...html.matchAll(/<option value="(\d+)" data-mode="(USB|LSB)">/g)];
   assert.ok(opts.length >= 10);
   for (const [, khz, mode] of opts) assert.strictEqual(mode, getFreqMode(khz), khz + ' kHz is ' + mode + ' in the list');

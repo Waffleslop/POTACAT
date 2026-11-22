@@ -213,6 +213,10 @@ Loopback only; replies are written before the async CAT work (Pat's 1 s timeout)
 | `winlink-compose` | C2S | `to, cc?, subject, body, p2p?, attachments?[{name,dataBase64}], reqId?` (refused until `noticeAccepted`; 2 MB cap) |
 | `winlink-connect` / `winlink-disconnect` / `winlink-abort` | C2S | `mode, gateway?, freqKhz?, reqId?` (RF refused when unavailable or radio busy) |
 | `winlink-gateways-get`, `winlink-posreport`, `winlink-accept-notice`, `winlink-set-mode` | C2S | `mode, band?` / `lat?, lon?, comment?` / — / `mode` |
+| `winlink-history-get` → `winlink-history` | C2S → S2C | — → `gateways[{call,mode,dialKhz,khz,url,band,tries,good,lastAt,lastGoodAt,lastResult,lastOk,saved}], reqId` (#254: every gateway called, newest first, read from Pat's event log) |
+| `winlink-favourite` | C2S | `op add|remove, call, mode, dialKhz, url?, reqId?` → `winlink-result {op:'favourite'}`; the list rides `winlink-state.favourites[{call,mode,dialKhz,khz,url,band,savedAt,lastGoodAt}]` (`url` = Winlink's own gateway URL, so a saved gateway is called at the bandwidth it offers) (#254 My gateways) |
+| `winlink-template` | C2S | `op save|delete, id?, name?, to?, cc?, subject?, body?, reqId?` → `winlink-result {op:'template'}`; the list rides `winlink-state.templates[{id,name,to,cc,subject,body}]` (at most 30, names unique; Position report and POTA spot are built in on every surface, not stored) |
+| (#254 additions) | S2C | `winlink-gateways.leftOut` (gateways on bands the radio is not set up for, shown as the list's last line); `winlink-state.predictMs{mode:ms}` (how long the last ranking took); `winlink-session.session.result{call,mode,dialKhz,url,band,sent,received,saved}` after a good radio session (offer Save to My gateways while `saved` is false) |
 Guest Pass: every C2S → `winlink-refused {guest-pass}`, no hydration. Multi-client: replies to the asker, state/mailbox/session to all. Registration and password recovery are desktop-only.
 
 ### Sidecar lifecycle

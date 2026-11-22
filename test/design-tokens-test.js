@@ -52,11 +52,16 @@ const PAIRS = [
 console.log('design tokens');
 
 test('assets/design/tokens.json is the phone\'s token file, unchanged', () => {
-  const phone = path.join(root, '..', 'potacat-app', 'docs', 'design-system', 'tokens.json');
-  if (!fs.existsSync(phone)) return 'skip';
-  const h = (p) => crypto.createHash('sha256').update(fs.readFileSync(p)).digest('hex');
+  // The phone repo is echocat/ beside desktop/ (potacat-app/ before the folder
+  // move); a worktree sits one level deeper, under worktrees/.
+  const rel = ['docs', 'design-system', 'tokens.json'];
+  const phone = [['..', 'echocat'], ['..', 'potacat-app'], ['..', '..', 'echocat'], ['..', '..', 'potacat-app']]
+    .map((p) => path.join(root, ...p, ...rel)).find((p) => fs.existsSync(p));
+  if (!phone) return 'skip';
+  // Content, not line endings: the Windows main checkout is CRLF.
+  const h = (p) => crypto.createHash('sha256').update(fs.readFileSync(p, 'utf8').replace(/\r\n/g, '\n')).digest('hex');
   assert.strictEqual(h(gen.SRC), h(phone),
-    'the two token files differ: copy potacat-app/docs/design-system/tokens.json to assets/design/tokens.json and run node scripts/gen-design-tokens-css.js');
+    'the two token files differ: copy echocat/docs/design-system/tokens.json to assets/design/tokens.json and run node scripts/gen-design-tokens-css.js');
 });
 
 test('renderer/tokens.css is current (regenerate with node scripts/gen-design-tokens-css.js)', () => {
@@ -85,7 +90,8 @@ test('every desktop theme has a block, ids match the phone, Acid Burn is mono', 
     assert.ok(cols.includes(th.column), th.id + ' names a column the file lacks');
     assert.ok(css.includes(`[data-ds="${th.column}"] {`), th.id + ' block');
   }
-  assert.deepStrictEqual(gen.THEMES.map((x) => x.id), ['potacat-dark', 'midnight', 'acid-burn', 'miami-nights', 'potacat-light', 'shes-on-frequency']);
+  // Casey's order (#376): light to dark to weird.
+  assert.deepStrictEqual(gen.THEMES.map((x) => x.id), ['potacat-light', 'shes-on-frequency', 'potacat-dark', 'midnight', 'acid-burn', 'miami-nights']);
   const acid = css.slice(css.indexOf('[data-ds="acid"] {'));
   assert.ok(/--ds-font-body: var\(--ds-font-mono\);/.test(acid.slice(0, acid.indexOf('}'))));
 });

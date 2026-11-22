@@ -10,6 +10,13 @@ contextBridge.exposeInMainWorld('api', {
   setTuneStep: (hz) => ipcRenderer.send('tune-step-set', Number(hz)),
   onTuneStep: (cb) => ipcRenderer.on('tune-step', (_e, hz) => cb(hz)),
   tune: (frequency, mode, bearing) => ipcRenderer.send('tune', { frequency, mode, bearing }),
+  // A band button or typed frequency: in voice SSB main picks the band's sideband (#445).
+  tuneByBand: (frequency) => ipcRenderer.send('tune', { frequency, pickSideband: true }),
+  // A band button's destination: the radio's last frequency on that band, or the preset (#680).
+  bandJumpTarget: (frequency) => ipcRenderer.invoke('band-jump-target', frequency),
+  // Favourites (#329): starred Landmarks and Channels, as one tune list.
+  favoritesGet: () => ipcRenderer.invoke('favorites-get'),
+  onFavorites: (cb) => ipcRenderer.on('favorites', (_e, st) => cb(st)),
   setVfoLock: (locked) => ipcRenderer.send('vfo-set-lock', locked),
   onVfoLockState: (cb) => ipcRenderer.on('vfo-lock-state', (_e, locked) => cb(locked)),
   onTuneBlocked: (cb) => ipcRenderer.on('tune-blocked', (_e, msg) => cb(msg)),
@@ -31,6 +38,10 @@ contextBridge.exposeInMainWorld('api', {
   onLogPopoutCallsign: (cb) => ipcRenderer.on('log-popout-callsign', (_e, call) => cb(call)),
   onCwWpmChanged: (cb) => ipcRenderer.on('cw-wpm-changed', (_e, wpm) => cb(wpm)),
   voiceMacroPtt: (state) => ipcRenderer.send('voice-macro-ptt', state),
+  // SCU-LAN10 (#227): the macro, decoded here at 16 kHz, goes over the LAN;
+  // main keys the radio and says 'stop-voice-macro' when it is out.
+  voiceMacroLan: (payload) => ipcRenderer.send('voice-macro-lan', payload),
+  onStopVoiceMacro: (cb) => ipcRenderer.on('stop-voice-macro', () => cb()),
   // Naked PTT (manual PTT button, no audio bridge). Distinct from
   // voiceMacroPtt so SSB-over-DATA doesn't disable the rig's hand mic
   // when the user is just keying TX from the popout button.
@@ -48,7 +59,10 @@ contextBridge.exposeInMainWorld('api', {
   openWebSdrSettings: () => ipcRenderer.send('vfo-open-websdr-settings'),
   setAlwaysOnTop: (on) => ipcRenderer.send('vfo-set-always-on-top', on),
   // Mini VFO: shrink to a strip of `height` px, or grow back (main remembers the full size).
-  setVfoCompact: (on, height, save) => ipcRenderer.send('vfo-set-compact', { on: !!on, height: Number(height) || 0, save: save !== false }),
+  setVfoCompact: (on, height, save, width, fit) => ipcRenderer.send('vfo-set-compact', { on: !!on, height: Number(height) || 0, save: save !== false, width: Number(width) || 0, fit: !!fit }),
+  // Small VFO Scan: start or stop the main window's spot scan (or the phone's).
+  scanToggle: () => ipcRenderer.send('vfo-scan-toggle'),
+  onScanState: (cb) => ipcRenderer.on('vfo-scan-state', (_e, d) => cb(d)),
   voiceMacroList: () => ipcRenderer.invoke('voice-macro-list'),
   voiceMacroLoad: (idx) => ipcRenderer.invoke('voice-macro-load', idx),
   getSettings: () => ipcRenderer.invoke('get-settings'),

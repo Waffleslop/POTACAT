@@ -3,6 +3,8 @@
 // both work. Sets data-theme and (in charcoal dark variant only) the
 // data-dark-variant attribute on <html>.
 function _applyPopoutTheme(payload) {
+  // The shared rule (popout-theme-boot*.js) also sets data-ds (#376).
+  if (window.applyPopoutTheme) return window.applyPopoutTheme(payload);
   const theme = typeof payload === 'string'
     ? payload
     : ((payload && payload.theme) || 'dark');
@@ -75,6 +77,17 @@ function gridToLatLonLocal(grid) {
 //   get    — cell text from a QSO record
 //   w      — default width in px
 //   off    — true to start hidden (the operator opts in from the picker)
+/** The mode a record is: MFSK/JS8 reads JS8, MODE=FT4 reads FT4 (lib/adif-mode.js, #381). */
+function qsoMode(q) { return AdifMode.recordMode(q); }
+/** Does a record pass the Mode filter? PSK31/63 are filed under PSK (the
+ *  option's title says so); otherwise the record's mode, or its raw MODE
+ *  for an option that names one (DIGI). */
+function qsoModeMatches(q, want) {
+  const m = qsoMode(q);
+  if (m === want || String(q.MODE || '').toUpperCase() === want) return true;
+  return want === 'PSK' && /^PSK/.test(m);
+}
+
 const ALL_COLUMNS = [
   { key: 'QSO_DATE', label: 'Date', sort: 'QSO_DATE', field: 'QSO_DATE', w: 82,
     get: (q) => (q.QSO_DATE ? q.QSO_DATE.replace(/(\d{4})(\d{2})(\d{2})/, '$1-$2-$3') : '') },
@@ -82,9 +95,14 @@ const ALL_COLUMNS = [
     get: (q) => (q.TIME_ON ? q.TIME_ON.slice(0, 2) + ':' + q.TIME_ON.slice(2, 4) : '') },
   { key: 'CALL', label: 'Callsign', sort: 'CALL', field: 'CALL', w: 92, get: (q) => q.CALL || '' },
   { key: 'FREQ', label: 'Freq', sort: 'FREQ', field: 'FREQ', w: 72, get: (q) => q.FREQ || '' },
-  { key: 'MODE', label: 'Mode', sort: 'MODE', field: 'MODE', w: 56, get: (q) => q.MODE || '' },
+  { key: 'MODE', label: 'Mode', sort: 'MODE', field: 'MODE', w: 56, get: (q) => qsoMode(q) },
+  { key: 'APP_POTACAT_LOG_SOURCE', label: 'Source', sort: 'APP_POTACAT_LOG_SOURCE', w: 85, off: true,
+    get: (q) => q.APP_POTACAT_LOG_SOURCE || '' },
   { key: 'BAND', label: 'Band', sort: 'BAND', w: 52, get: (q) => q.BAND || '' },
   { key: 'TX_PWR', label: 'Pwr', sort: 'TX_PWR', field: 'TX_PWR', w: 46, get: (q) => q.TX_PWR || '' },
+  // ADIF MY_RIG: the radio this contact was logged on (#633). Off by default:
+  // only an operator who switches radios needs it.
+  { key: 'MY_RIG', label: 'Rig', sort: 'MY_RIG', field: 'MY_RIG', w: 100, off: true, get: (q) => q.MY_RIG || '' },
   { key: 'RST_SENT', label: 'RST S', field: 'RST_SENT', w: 48, get: (q) => q.RST_SENT || '' },
   { key: 'RST_RCVD', label: 'RST R', field: 'RST_RCVD', w: 48, get: (q) => q.RST_RCVD || '' },
   // POTA_REF alone: a log imported from QLog before the import filled SIG_INFO (KC9FOZ).
@@ -245,7 +263,7 @@ function updateStats(list) {
     topBands.map(([b, c]) => `${b}: ${c}`).join(', ') || '-';
 
   const modeCounts = {};
-  for (const q of list) if (q.MODE) modeCounts[q.MODE] = (modeCounts[q.MODE] || 0) + 1;
+  for (const q of list) { const m = qsoMode(q); if (m) modeCounts[m] = (modeCounts[m] || 0) + 1; }
   const topModes = Object.entries(modeCounts).sort((a, b) => b[1] - a[1]).slice(0, 4);
   document.getElementById('qso-stat-modes').textContent =
     topModes.map(([m, c]) => `${m}: ${c}`).join(', ') || '-';
@@ -280,7 +298,7 @@ function render() {
   // Text search
   if (search) {
     filtered = filtered.filter(q => {
-      const hay = [q.CALL, q.SIG_INFO || q.POTA_REF, q.COMMENT, q.MODE, q.BAND].join(' ').toLowerCase();
+      const hay = [q.CALL, q.SIG_INFO || q.POTA_REF, q.COMMENT, qsoMode(q), q.MODE, q.BAND].join(' ').toLowerCase();
       return hay.includes(search);
     });
   }
@@ -292,7 +310,7 @@ function render() {
 
   // Mode filter
   if (filterMode) {
-    filtered = filtered.filter(q => (q.MODE || '').toUpperCase() === filterMode);
+    filtered = filtered.filter(q => qsoModeMatches(q, filterMode));
   }
 
   // Region filter (continent from cty.dat)
@@ -317,6 +335,7 @@ function render() {
   const dir = sortAsc ? 1 : -1;
   filtered.sort((a, b) => {
     let va = (a[sortCol] || ''), vb = (b[sortCol] || '');
+    if (sortCol === 'MODE') { va = qsoMode(a); vb = qsoMode(b); }
     if (sortCol === 'FREQ') return (parseFloat(va) - parseFloat(vb)) * dir;
     if (sortCol === 'CQZ' || sortCol === 'ITUZ') {
       // Numeric, and the derived cty.dat zone counts when the record has none.
@@ -832,7 +851,7 @@ function updateMap() {
     // Build popup content
     const lines = qsos.slice(0, 8).map(q => {
       const d = q.QSO_DATE ? q.QSO_DATE.replace(/(\d{4})(\d{2})(\d{2})/, '$1-$2-$3') : '';
-      const parts = [d, q.FREQ ? q.FREQ + ' MHz' : '', q.MODE || '', q.SIG_INFO || ''].filter(Boolean);
+      const parts = [d, q.FREQ ? (FreqDots.mhzMhz(q.FREQ) || q.FREQ + ' MHz') : '', qsoMode(q), q.SIG_INFO || ''].filter(Boolean);
       return parts.join(' &middot; ');
     });
     if (qsos.length > 8) lines.push(`... +${qsos.length - 8} more`);
@@ -945,7 +964,9 @@ tbody.addEventListener('dblclick', (e) => {
     const result = await window.api.updateQso({ idx, fields });
     if (result.success) {
       const qso = allQsos.find(q => q.idx === idx);
-      if (qso) Object.assign(qso, fields);
+      // Main's fields: a My Park edit also writes MY_SIG (#509); a Park edit
+      // writes SIG and POTA_REF (or its program's REF), which POTA.app reads.
+      if (qso) Object.assign(qso, result.fields || fields);
       render();
       toast(`Updated ${qso ? qso.CALL : 'QSO'}`);
     } else {
@@ -1134,7 +1155,7 @@ let _currentRigFreqKhz = null;
 if (window.api.onCatFrequency) {
   window.api.onCatFrequency((hz) => {
     if (typeof hz === 'number' && hz > 0) {
-      _currentRigFreqKhz = Math.round(hz / 1000);
+      _currentRigFreqKhz = hz / 1000; // to the hertz; the box shows 100 Hz (#794)
     }
   });
 }
@@ -1149,7 +1170,7 @@ newQsoBtn.addEventListener('click', () => {
     // actually have a frequency cached — opening the form before the
     // rig connects leaves the field empty to type into.
     if (_currentRigFreqKhz && !newQsoFreq.value.trim()) {
-      newQsoFreq.value = String(_currentRigFreqKhz);
+      LogFreqField.fill(newQsoFreq, _currentRigFreqKhz);
     }
     newQsoCall.focus();
   }
@@ -1167,7 +1188,7 @@ document.getElementById('qso-new-save').addEventListener('click', async () => {
   const nowIso = new Date().toISOString();
   const qsoDate = ((newQsoDate && newQsoDate.value) || nowIso.slice(0, 10)).replace(/-/g, '');
   const timeOn = ((newQsoTime && newQsoTime.value) || nowIso.slice(11, 16)).replace(/:/g, '');
-  const freqKhz = newQsoFreq.value.trim();
+  const freqKhz = LogFreqField.value(newQsoFreq);
   const mode = newQsoMode.value;
   const ref = newQsoRef.value.trim().toUpperCase();
   const type = newQsoSelectedType;
@@ -1334,14 +1355,14 @@ function renderDupeGroups() {
       radio.addEventListener('change', () => { g.keep = m.idx; renderDupeGroups(); });
       const date = f.QSO_DATE ? `${f.QSO_DATE.slice(0, 4)}-${f.QSO_DATE.slice(4, 6)}-${f.QSO_DATE.slice(6, 8)}` : '';
       const time = f.TIME_ON ? `${f.TIME_ON.slice(0, 2)}:${f.TIME_ON.slice(2, 4)}:${(f.TIME_ON.slice(4, 6) || '00')}` : '';
-      const mode = f.SUBMODE && /^(MFSK|PSK)$/i.test(f.MODE || '') ? f.SUBMODE : f.MODE;
+      const mode = qsoMode(f);
       const refs = [f.SIG_INFO, f.MY_SIG_INFO && `my ${f.MY_SIG_INFO}`, f.COMMENT].filter(Boolean).join(' · ');
       const filled = Object.values(f).filter((v) => v != null && v !== '').length;
       row.append(
         radio,
         dupeCell(f.CALL),
         dupeCell(`${date} ${time}`),
-        dupeCell(f.FREQ ? (parseFloat(f.FREQ) * 1000).toFixed(1) : f.BAND),
+        dupeCell(f.FREQ ? FreqDots.fromMhz(f.FREQ) : f.BAND),
         dupeCell(mode),
         dupeCell(f.BAND),
         dupeCell(refs, 'dupe-ref'),
@@ -1548,10 +1569,7 @@ async function resolveAllParkLocations() {
 // --- Initial load ---
 (async function init() {
   const settings = await window.api.getSettings();
-  _applyPopoutTheme({
-    theme: settings.lightMode ? 'light' : 'dark',
-    variant: settings.darkVariant || 'navy',
-  });
+  if (settings.themeNow) _applyPopoutTheme(settings.themeNow);
   if (settings.colorblindMode) accentGreen = '#4fc3f7';
   homeGrid = settings.grid || '';
 

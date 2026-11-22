@@ -456,7 +456,7 @@
     JS8_BANDS.forEach(function (b) {
       var o = document.createElement('option');
       o.value = b[0];
-      o.textContent = b[0] + ' · ' + (b[1] / 1000).toFixed(3);
+      o.textContent = b[0] + ' · ' + FreqDots.fromKhz(b[1]);
       bandEl.appendChild(o);
     });
   })();
@@ -478,7 +478,7 @@
   });
   window.api.onCatFrequency(function (hz) {
     dialHz = Number(hz) || 0;
-    dialEl.textContent = dialHz ? (dialHz / 1e6).toFixed(3) + ' MHz' : '';
+    dialEl.textContent = dialHz ? FreqDots.hzMhz(dialHz) : '';
     var b = bandByRange(dialHz);
     // Reflect, don't fight: only move the select when the value differs, so
     // an open dropdown isn't yanked mid-choice.
@@ -641,6 +641,8 @@
   function fmtOffset(ms) { return (ms > 0 ? '+' : '') + (ms / 1000).toFixed(1) + 's'; }
   function applyClock(d) {
     if (clockHideTimer) { clearTimeout(clockHideTimer); clockHideTimer = null; }
+    // Only the buttons this OS can honour (main's canFix / canOpenSettings, lib/ntp.js).
+    if (d) { el('jc-clock-sync').hidden = d.canFix === false; el('jc-clock-set').hidden = d.canOpenSettings === false; }
     if (!d || d.level === 'ok') {
       if (d && d.rebaselined) {
         clockMsgEl.textContent = 'Clock corrected — JS8 timing re-baselined, decoding resumed.';
@@ -942,7 +944,7 @@
     // Live dial + band picker from the status snapshot (also arrives via
     // cat-frequency; either keeps them current).
     if (s && s.dialHz) {
-      dialEl.textContent = (s.dialHz / 1e6).toFixed(3) + ' MHz';
+      dialEl.textContent = FreqDots.hzMhz(s.dialHz);
       var sb = bandByRange(s.dialHz);
       if (sb !== bandEl.value && document.activeElement !== bandEl) bandEl.value = sb;
     }

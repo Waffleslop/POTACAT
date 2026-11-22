@@ -191,6 +191,73 @@ check('no phone paired to this profile: nothing is forwarded', async () => {
   assert.strictEqual(d.log().length, 1);
 });
 
+// ── Guest Pass (#553) ──────────────────────────────────────────────────────
+/**
+ * A contact NA4DQ made as a Guest Pass guest on another ham's station: that
+ * station's desktop wrote it (main.js passGuestLogContact, buildAdifFields:
+ * APP_POTACAT_UUID) straight to NA4DQ's Cloud logbook, with the mark.
+ */
+function guestRow({ operator = ME, station = ME, licensee = 'W7RTA' } = {}, opts) {
+  const r = desktopRow({}, { ...opts, station });
+  Object.assign(r.adifFields, { OPERATOR: operator, APP_POTACAT_GUEST_PASS: '1' });
+  if (licensee) r.adifFields.APP_POTACAT_STATION_LICENSEE = licensee;
+  return r;
+}
+
+check("a Guest Pass contact made on another ham's station reaches this station's logger, once", async () => {
+  const d = desktop();
+  const r = guestRow();
+  const out = await d.pull([r]);
+  assert.strictEqual(d.log().length, 1);
+  assert.strictEqual(out.forwarded, 1);
+  assert.deepStrictEqual(calls(d.sent.logbook), [r.adifFields.CALL]);
+  const again = await d.pull([r]);
+  assert.strictEqual(again.forwarded, 0, 'never twice');
+});
+
+check("a Guest Pass contact under the owner's call with this station as OPERATOR is ours", async () => {
+  const d = desktop();
+  const out = await d.pull([guestRow({ station: 'W7RTA' })]);
+  assert.strictEqual(out.forwarded, 1);
+});
+
+check("the same Guest Pass contact with someone else's call is not forwarded", async () => {
+  const d = desktop();
+  const out = await d.pull([guestRow({ operator: 'W1AW', station: 'W1AW' }), guestRow({ operator: '', station: '' })]);
+  assert.strictEqual(d.log().length, 2);
+  assert.strictEqual(out.forwarded, 0);
+});
+
+check('a plain desktop record of this station (no mark) is still not forwarded', async () => {
+  const d = desktop();
+  const r = desktopRow({ OPERATOR: ME });
+  const out = await d.pull([r, desktopRow({ APP_POTACAT_GUEST_PASS: '0' })]);
+  assert.strictEqual(out.forwarded, 0);
+});
+
+check('a Guest Pass contact keeps every other gate: backfill, no paired phone, history', async () => {
+  assert.strictEqual((await desktop({ cursor: false }).pull([guestRow(), guestRow()])).forwarded, 0, 'backfill forwards nothing');
+  assert.strictEqual((await desktop({ paired: false }).pull([guestRow()])).forwarded, 0, 'no paired phone');
+  assert.strictEqual((await desktop().pull([guestRow({}, { date: '20261020' })])).forwarded, 0, 'before forwarding started');
+});
+
+check("the owner's private licensee field never reaches a logger (main.js rawQsoToQsoData)", () => {
+  const main = readSrc(path.join(__dirname, '..', 'main.js'));
+  const i = main.indexOf('function rawQsoToQsoData(raw)');
+  assert.ok(i > 0);
+  const body = main.slice(i, main.indexOf('\n}\n', i));
+  assert.ok(!/LICENSEE/i.test(body), 'rawQsoToQsoData must not carry APP_POTACAT_STATION_LICENSEE');
+  assert.ok(!/GUEST_PASS/.test(body));
+});
+
+check("the owner's station marks every Guest Pass contact (main.js passGuestLogContact)", () => {
+  const main = readSrc(path.join(__dirname, '..', 'main.js'));
+  const i = main.indexOf('function passGuestLogContact(');
+  const b = main.slice(i, main.indexOf('passQsoOutbox.add(', i));
+  assert.ok(/qsoData\.guestPass = true;/.test(b));
+  assert.ok(!/if \(passLease\) \{[^}]*guestPass/.test(b), 'the mark does not depend on the lease');
+});
+
 // ── backfill ───────────────────────────────────────────────────────────────
 check('the first sync of an account (no cursor) forwards nothing, however recent', async () => {
   const d = desktop({ cursor: false });
@@ -334,6 +401,12 @@ check('rule pieces: desktop marker, own station, QSO time', () => {
   assert.ok(CPF.isDesktopRecord({ CALL: 'X', APP_POTACAT_UUID: 'u' }));
   assert.ok(CPF.isDesktopRecord({ callsign: 'X', qsodate: '1' }), 'pseudo names, any case');
   assert.ok(!CPF.isDesktopRecord({ CALL: 'X', APP_POTACAT_PASS_SESSION_ID: 's' }), 'a phone guest-pass record is not a desktop one');
+  assert.ok(CPF.isGuestPassRecord({ APP_POTACAT_GUEST_PASS: '1' }));
+  assert.ok(CPF.isGuestPassRecord({ app_potacat_guest_pass: '1' }), 'any case');
+  assert.ok(!CPF.isGuestPassRecord({ APP_POTACAT_GUEST_PASS: '0' }));
+  assert.ok(!CPF.isGuestPassRecord({ APP_POTACAT_UUID: 'u' }));
+  assert.ok(CPF.isOwnGuestContact({ OPERATOR: 'NA4DQ', STATION_CALLSIGN: 'W7RTA' }, ['NA4DQ']));
+  assert.ok(!CPF.isOwnGuestContact({ OPERATOR: 'W1AW', STATION_CALLSIGN: 'W7RTA' }, ['NA4DQ']));
   assert.ok(CPF.isOwnStation({ STATION_CALLSIGN: 'VE3/NA4DQ' }, ['NA4DQ']));
   assert.ok(!CPF.isOwnStation({ STATION_CALLSIGN: 'NA4DQX' }, ['NA4DQ']));
   assert.strictEqual(CPF.qsoTimeMs({ QSO_DATE: '20261107', TIME_ON: '1415' }), Date.UTC(2026, 10, 7, 14, 15));

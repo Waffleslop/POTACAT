@@ -131,7 +131,7 @@ async function owner(port) {
   });
 
   console.log('RemoteServer');
-  await checkAsync('an owner device waits, takes over on confirm, and the guest gets the radio back when it leaves', async () => {
+  await checkAsync('an owner device waits, takes over on confirm, and the guest gets the radio back on Give it back', async () => {
     const PORT = 17411;
     const { rs, events } = server(PORT);
     await sleep(500);
@@ -161,9 +161,14 @@ async function owner(port) {
       assert.ok(fail && fail.code === 'rig_in_use' && fail.by === 'guest', JSON.stringify(fail));
       g2.ws.close();
 
-      rs._ownerHoldMs = 200;
+      // The owner device leaving hands nothing back (#200 step 4: no
+      // automatic hand-back); the owner's Give it back does, at once.
       o.ws.close();
-      assert.ok(await until(() => g.has('pass-resumed')), 'guest told pass-resumed when the owner device left (after the hold)');
+      await sleep(300);
+      assert.ok(!g.has('pass-resumed'), 'the owner device leaving does not hand the radio back');
+      assert.strictEqual(rs.isPassPaused(), true);
+      assert.strictEqual(rs.resumePass(), true, 'Give it back');
+      assert.ok(await until(() => g.has('pass-resumed')), 'guest told pass-resumed on Give it back');
       assert.ok(events.some((x) => x.e === 'pass-resumed' && x.info.guestConnected === true));
       assert.strictEqual(rs.isPassPaused(), false);
       const resumed = g.find('pass-resumed');
@@ -262,24 +267,19 @@ async function owner(port) {
       o.send({ type: 'pass-take-over' });
       assert.ok(await until(() => o.has('pass-take-over-ok') && g.has('pass-paused')));
       // The owner's phone goes idle after taking over (an app switch): the rig
-      // stays with the owner for the hold, and operating again keeps it.
-      rs._ownerHoldMs = 300;
+      // stays with the owner. No automatic hand-back (#200 step 4).
       o.send({ type: 'owner-presence', operating: false });
-      await sleep(100);
-      o.send({ type: 'owner-presence', operating: true });
-      await sleep(450);
-      assert.ok(!g.has('pass-resumed'), 'back inside the hold: the owner keeps the rig');
-      // Idle past the hold: the guest gets it back.
-      o.send({ type: 'owner-presence', operating: false });
-      await sleep(100);
-      assert.ok(!g.has('pass-resumed'), 'not at once');
-      assert.ok(await until(() => g.has('pass-resumed')), 'an owner idle past the hold hands the rig back');
-      assert.ok(await until(() => o.got.filter((m) => m.type === 'pass-guest-waiting').length === 2), 'and waits again');
+      await sleep(400);
+      assert.ok(!g.has('pass-resumed'), 'an idle owner device keeps the rig: nothing switches on its own');
+      assert.strictEqual(rs.isPassPaused(), true);
+      rs.resumePass();
+      assert.ok(await until(() => g.has('pass-resumed')), 'Give it back hands it over');
+      assert.ok(await until(() => o.got.filter((m) => m.type === 'pass-guest-waiting').length === 2), 'and the owner device waits again');
       o.ws.close(); g.ws.close();
     } finally { rs.stop(); await sleep(200); }
   });
 
-  await checkAsync('an owner device that took over and reconnects inside the hold is admitted as usual and keeps the rig', async () => {
+  await checkAsync('an owner device that took over and reconnects is admitted as usual and keeps the rig', async () => {
     const PORT = 17418;
     const { rs } = server(PORT);
     await sleep(500);
@@ -288,14 +288,13 @@ async function owner(port) {
       const o = await owner(PORT);
       o.send({ type: 'pass-take-over' });
       assert.ok(await until(() => g.has('pass-paused')));
-      rs._ownerHoldMs = 600;
       o.ws.close();                       // iOS dropped the socket in the background
       await sleep(150);
       const o2 = await owner(PORT);
       const ok = o2.find('auth-ok');
       assert.ok(ok && !ok.passGuest, 'a normal auth-ok: the owner already confirmed');
       await sleep(700);
-      assert.ok(!g.has('pass-resumed'), 'the hold was kept by the reconnect');
+      assert.ok(!g.has('pass-resumed'), 'the owner keeps the rig');
       assert.strictEqual(rs.isPassPaused(), true);
       o2.ws.close(); g.ws.close();
     } finally { rs.stop(); await sleep(200); }

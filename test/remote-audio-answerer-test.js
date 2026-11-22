@@ -47,7 +47,7 @@ const fakeStream = { getAudioTracks: () => [fakeTrack], getTracks: () => [fakeTr
 global.RTCPeerConnection = FakePC;
 global.MediaStream = function () {};
 
-const { RemoteAudioAnswerer } = require('../renderer/remote-audio-answerer.js');
+const { RemoteAudioAnswerer, playbackVolume } = require('../renderer/remote-audio-answerer.js');
 
 const TURN = [{ urls: ['turn:turn.cloudflare.com:3478', 'turns:turn.cloudflare.com:5349'], username: 'u', credential: 'c' }];
 
@@ -145,6 +145,19 @@ const TURN = [{ urls: ['turn:turn.cloudflare.com:3478', 'turns:turn.cloudflare.c
   check(calls.closed === before + 1, 'stop() closes the peer connection');
   check(micStopped === 1, 'stop() stops the mic track');
   check(a._pc === null, 'pc reference cleared');
+
+  // ── Receive audio is silent while this computer transmits ───────────
+  // (IC-7610 remote, 2026-11-15: open speakers fed the mic back to the shack.)
+  console.log('\n=== playbackVolume ===');
+  check(playbackVolume({ volume: 0.8, muted: false, transmitting: false }) === 0.8, 'receive plays at the chosen volume');
+  check(playbackVolume({ volume: 0.8, muted: false, transmitting: true }) === 0, 'receive is silent while transmitting');
+  check(playbackVolume({ volume: 0.8, muted: true, transmitting: false }) === 0, 'muted stays silent');
+  check(playbackVolume({ volume: 3 }) === 1, 'volume clamps to 1');
+  check(playbackVolume({ volume: -1 }) === 0, 'volume clamps to 0');
+  check(playbackVolume({}) === 1, 'no volume set plays at full');
+  const clientHtml = require('fs').readFileSync(require('path').join(__dirname, '..', 'renderer', 'remote-audio-client.html'), 'utf8');
+  check(/onPtt\(\(on\) => \{[\s\S]*?transmitting = !!on;[\s\S]*?applyVolume\(\);/.test(clientHtml), 'the client window silences receive audio on PTT');
+  check(!/el\.volume = cfg\.muted/.test(clientHtml), 'the client window sets volume only through playbackVolume');
 
   console.log('\n' + '='.repeat(50));
   console.log(`Results: ${passed} passed, ${failed} failed`);

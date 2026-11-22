@@ -75,7 +75,7 @@ test('main: connects nothing, keys nothing, refuses nothing — and says what to
   assert.ok(main.includes("if (target.type === 'none') {") && main.includes("sendCatStatus({ connected: false, noCat: true });"), 'connectCat branch');
   assert.ok(main.includes("[CAT] No CAT control for this radio: tune it by hand"), 'one plain log line');
   assert.ok(main.includes("if (target && target.type === 'none') {") && main.includes("no CAT control, the radio's VOX keys on the audio"), 'PTT is a quiet log, not PTT FAILED');
-  assert.strictEqual((main.match(/No CAT control — set the radio to \$\{mhz\} MHz by hand/g) || []).length, 2, 'both tune paths (desktop IPC + ECHOCAT) say the frequency');
+  assert.strictEqual((main.match(/No CAT control — set the radio to \$\{FreqDots\.khzMhz\((freqKhz|frequency)\)\} by hand/g) || []).length, 2, 'both tune paths (desktop IPC + ECHOCAT) say the frequency');
 });
 
 test('Pebble HF is a real model: no CAT, 20 m, 5 W — and the picker selects the no-CAT type for it', () => {
@@ -90,7 +90,7 @@ test('Pebble HF is a real model: no CAT, 20 m, 5 W — and the picker selects th
   const group = getModelList().find((g) => g.brand === 'Ham Radio Duo');
   assert.ok(group && group.models.includes('Pebble HF'), 'listed under its maker');
   assert.deepStrictEqual(group.noCat, ['Pebble HF'], 'the list tells the editor which models have no CAT');
-  assert.deepStrictEqual(getModelList().find((g) => g.brand === 'Yaesu').noCat, ['FTM-510D'], 'Yaesu carries its one no-CAT mobile');
+  assert.deepStrictEqual(getModelList().find((g) => g.brand === 'Yaesu').noCat.slice().sort(), ['FTM-100D', 'FTM-510D'], 'Yaesu carries its no-CAT mobiles');
   assert.ok(!getModelList().find((g) => g.brand === 'Icom').noCat, 'a brand with no such model carries no noCat list');
   const app = read('renderer/app.js');
   assert.ok(app.includes("if (noCat) setRadioType('nocat');"), 'picking the model picks the type');
@@ -214,6 +214,29 @@ test('KS9B: a no-CAT key-down publishes the TX state, or the ECHOCAT bridge neve
   // The bridge's gate follows that broadcast.
   const bridge = read('renderer/remote-audio.html');
   assert.ok(/_sinkTxGate\.gain\.value = kiwiTxMuted \? 1 : 0/.test(bridge));
+});
+
+test('FTM-100D (Casey 2026-11-21): a no-CAT 2 m / 70 cm mobile keyed through its DATA jack, from Yaesu\'s own manuals', () => {
+  const { RIG_MODELS } = require('../lib/rig-models');
+  const m = RIG_MODELS['FTM-100D'];
+  assert.ok(m, 'in RIG_MODELS');
+  assert.strictEqual(m.brand, 'Yaesu');
+  assert.strictEqual(m.protocol, 'none');
+  assert.strictEqual(m.noCat, true);
+  assert.deepStrictEqual(m.bands, ['2m', '70cm']);
+  assert.strictEqual(m.maxPower, 50); // Operating Manual EH048M204 p.32: HIGH 50 W
+  assert.ok(Object.values(m.caps).every((v) => v === false), 'no CAT capability claimed');
+  const { resolveSetupNotes } = require('../lib/rig-setup-notes');
+  const note = resolveSetupNotes({ model: 'FTM-100D', modelInfo: m, radioType: 'nocat', platform: 'win32', done: [] }).find((n) => n.id === 'ftm100-data-jack');
+  assert.ok(note && note.level === 'required', 'note resolves for the model');
+  // Advance Manual 1808-A pp.50-53: the pins, the 9 DATA menus, VOL sets the level to the interface.
+  assert.ok(note.steps.some((s) => /1 PKD/.test(s) && /3 PSK/.test(s) && /5 RX 1200/.test(s)), 'DATA jack pins');
+  assert.ok(note.steps.some((s) => /DISP SETUP/.test(s) && /9 DATA > 2 DATA SPEED > DATA: 1200 bps/.test(s)), 'data speed menu');
+  assert.ok(note.steps.some((s) => /3 DATA SQUELCH/.test(s) && /1 TX:ON/.test(s)), 'data squelch menu');
+  assert.ok(note.steps.some((s) => /VOL knob/.test(s)), 'VOL sets the level to the interface');
+  assert.ok(/1808-A/.test(note.source), 'cites the manual');
+  assert.ok(!resolveSetupNotes({ model: 'FTM-510D', modelInfo: RIG_MODELS['FTM-510D'], radioType: 'nocat', platform: 'win32', done: [] }).some((n) => n.id === 'ftm100-data-jack'), 'not shown for the FTM-510D');
+  assert.ok(/FTM-100D/.test(read('renderer/index.html')), 'help panel names it');
 });
 
 console.log(`\nNo CAT control: ${passed} passed, ${failed} failed`);

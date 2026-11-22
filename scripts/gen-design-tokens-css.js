@@ -23,14 +23,15 @@ const ROOT = path.join(__dirname, '..');
 const SRC = path.join(ROOT, 'assets', 'design', 'tokens.json');
 const OUT = path.join(ROOT, 'renderer', 'tokens.css');
 
-// The phone's picker: theme id -> token column. Same ids on both apps.
+// The picker: theme id -> token column. Same ids on both apps, in Casey's
+// order, light to dark to weird (#376; lib/app-theme.js APP_THEMES).
 const THEMES = [
+  { id: 'potacat-light', column: 'light', scheme: 'light', name: 'POTACAT Light' },
+  { id: 'shes-on-frequency', column: 'sof', scheme: 'light', name: "She's On Frequency" },
   { id: 'potacat-dark', column: 'night', scheme: 'dark', name: 'POTACAT Dark' },
   { id: 'midnight', column: 'dark', scheme: 'dark', name: 'Midnight' },
   { id: 'acid-burn', column: 'acid', scheme: 'dark', name: 'Acid Burn', font: 'mono' },
   { id: 'miami-nights', column: 'miami', scheme: 'dark', name: 'Miami Nights' },
-  { id: 'potacat-light', column: 'light', scheme: 'light', name: 'POTACAT Light' },
-  { id: 'shes-on-frequency', column: 'sof', scheme: 'light', name: "She's On Frequency" },
 ];
 const DEFAULT_COLUMN = 'night';
 // Digits that line up in a column (the phone's generator marks the same four).

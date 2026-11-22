@@ -25,7 +25,7 @@ const addons = [
   // the combined work GPLv3; see NOTICE and third_party/js8call/NOTES.md).
   { name: 'js8_native',    dir: 'lib/js8_native',    cmd: 'npx node-gyp rebuild' + gypArch },
   { name: 'freedv_native',  dir: 'lib/freedv_native',  cmd: 'npx node-gyp rebuild' + gypArch },
-  { name: 'rade_native',    dir: null,                  cmd: 'node scripts/build-rade.js' },
+  { name: 'rade_native',    dir: null,                  cmd: 'node scripts/build-rade.js' + gypArch },
   // alsa_native gives Linux users access to raw hw:/plughw: ALSA devices
   // that Chromium's enumerateDevices() hides. binding.gyp falls back to a
   // tiny stub on Windows/macOS (so the .node file still loads) but the

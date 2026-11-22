@@ -157,7 +157,10 @@ test('a readback never yanks the thumb mid-drag', () => {
   assert.ok(/document\.activeElement === vfoTxPwrRange/.test(html));
 });
 test('the block is in the dial-pane order, after the filter slider', () => {
-  assert.ok(/\{ key: 'filter-slider'[^\n]*\n\s*\{ key: 'txpower', el: 'sec-txpower', name: 'TX power' \}/.test(html));
+  // The Large VFO's blocks: names and order in lib/vfo-layout.js, elements in the page.
+  const layout = require('fs').readFileSync(path.join(__dirname, '..', 'lib', 'vfo-layout.js'), 'utf8');
+  assert.ok(/\{ key: 'filter-slider'[^\n]*\n\s*\{ key: 'txpower',\s+name: 'TX power' \}/.test(layout));
+  assert.ok(/txpower: 'sec-txpower'/.test(html));
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);

@@ -195,7 +195,7 @@ test('a guest picture must be allowed by the pass', () => {
   pe._pass = { privilege_class: 'us_technician', allowed_modes: [], guest_callsign: 'K3SBP' };
   assert.strictEqual(pe.interceptCatCommand({ type: 'sstv_tx', freqHz: 14230000 }).allowed, false, 'a Technician has no 20 m phone');
   const main = R('main.js');
-  assert.ok(/remoteServer\.on\('sstv-photo', \(\{ image, mode, guest \}\)[\s\S]{0,300}interceptCatCommand\(\{ type: 'sstv_tx'/.test(main));
+  assert.ok(/remoteServer\.on\('sstv-photo', \(\{ image, mode, guest, freqKhz \}\)[\s\S]{0,300}interceptCatCommand\(\{ type: 'sstv_tx'/.test(main));
 });
 
 test('templates travel: export and import in the settings popover', () => {

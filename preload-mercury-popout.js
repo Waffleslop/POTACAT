@@ -15,7 +15,7 @@ contextBridge.exposeInMainWorld('api', {
   mercurySetBw: (bw) => ipcRenderer.send('mercury-cmd-bw', bw),
   mercurySendText: (text) => ipcRenderer.send('mercury-cmd-send-text', text),
   mercurySendFile: () => ipcRenderer.invoke('mercury-cmd-send-file'), // main opens the picker
-  openDownloads: () => ipcRenderer.send('mercury-open-downloads'),
+  openDownloads: () => ipcRenderer.invoke('mercury-open-downloads'),
 
   // Events (main → renderer)
   onMercuryStatus: (cb) => ipcRenderer.on('mercury-status', (_e, d) => cb(d)),   // TNC connection

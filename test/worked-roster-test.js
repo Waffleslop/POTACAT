@@ -158,6 +158,29 @@ test('parseWorkedQsos carries STATE and the DXCC tracker\'s confirmation rule, o
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
+test('#683: a QSO with no BAND counts on the band of its FREQ; the entry\'s band is left as logged', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'was-'));
+  const file = path.join(dir, 'log.adi');
+  fs.writeFileSync(file,
+    'POTACAT<EOH>' +
+    '<CALL:6>JA1XYZ<QSO_DATE:8>20260601<FREQ:8>5.357000<MODE:3>FT8<EOR>' +
+    '<CALL:5>K1ABC<QSO_DATE:8>20260602<FREQ:5>3.573<MODE:3>FT8<STATE:2>NJ<EOR>' +
+    '<CALL:6>XE1ABC<QSO_DATE:8>20260603<BAND:3>20M<FREQ:6>10.136<MODE:3>FT8<EOR>' +
+    '<CALL:6>VE3XYZ<QSO_DATE:8>20260604<MODE:3>FT8<STATE:2>ON<EOR>');
+  const m = parseWorkedQsos(file);
+  const ja = m.get('JA1XYZ')[0];
+  assert.strictEqual(ja.band, '', 'the log\'s own BAND is not rewritten');
+  assert.ok(!('freqBand' in m.get('XE1ABC')[0]), 'a logged BAND wins; no extra field');
+  assert.ok(!('freqBand' in m.get('VE3XYZ')[0]), 'no BAND and no FREQ: nothing to add');
+  const r = WR.build(m, entityOf);
+  assert.strictEqual(WR.status(r, 'entity', 'Japan', { scope: 'band', band: '60m' }), 'worked', '60 m from FREQ 5.357');
+  assert.strictEqual(WR.status(r, 'state', 'NJ', { scope: 'band-mode', band: '80m', mode: 'FT8' }), 'worked', '80 m from FREQ 3.573');
+  assert.strictEqual(WR.status(r, 'entity', 'Mexico', { scope: 'band', band: '30m' }), 'none', 'BAND 20M is what the log says');
+  assert.strictEqual(WR.status(r, 'entity', 'Mexico', { scope: 'band', band: '20m' }), 'worked');
+  assert.strictEqual(WR.status(r, 'entity', 'Canada', { scope: 'any' }), 'worked', 'no band at all still counts as worked ever');
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
 test('wiring: main.js builds the roster from workedQsos, adds live, serves and pushes it', () => {
   const main = readSrc(path.join(__dirname, '..', 'main.js'));
   assert.ok(main.includes("require('./lib/worked-roster')"));
@@ -172,7 +195,10 @@ test('wiring: main.js builds the roster from workedQsos, adds live, serves and p
   const bf = main.slice(main.indexOf('async function wasBackfillStates('), main.indexOf('async function wasBackfillStates(') + 6000);
   assert.ok(/mutateLog\(logPath,[\s\S]*\{ sink: qsoLogSink \}\)/.test(bf));
   assert.ok(!/rewriteAdifFile|appendRawQso/.test(bf));
-  assert.ok(/stateKeys\(ent, state\)\.length/.test(bf), 'a state QRZ lists that is not one for that entity is never written');
+  // The per-record decision lives in lib/state-backfill.js (#389): main hands it WorkedRoster.stateKeys
+  assert.ok(/stateKeys: WorkedRoster\.stateKeys/.test(bf) && /StateBackfill\.decide\(/.test(bf), 'main decides through lib/state-backfill.js');
+  const lib = readSrc(path.join(__dirname, '..', 'lib', 'state-backfill.js'));
+  assert.ok(/if \(!ctx\.stateKeys\(ent, st\)\.length\) return \{ state: ''/.test(lib), 'a state QRZ lists that is not one for that entity is never written');
 });
 
 test('wiring: renderer loads the roster module and the view, preload exposes the channels', () => {

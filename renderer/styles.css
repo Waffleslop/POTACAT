@@ -126,8 +126,24 @@
      points each at the design theme's "on" colour (Acid Burn's green and
      cyan need black). */
   --on-accent-red: #fff;
-  --on-accent-blue: #fff;
-  --on-accent-green: #fff;
+  /* Dark text on the classic dark themes' light blue and green fills: white
+     on #4fc3f7 / #4ecca3 is 2:1 (Casey 2026-11-11, the contrast rule). The
+     light themes and ds-bridge.css set their own. */
+  --on-accent-blue: #10131a;
+  --on-accent-green: #10131a;
+  /* Text on the green button (.btn-primary, var(--accent-green-btn)): black
+     was hard-coded, unreadable on a theme's dark green (She's On Frequency,
+     "Set up VARA HF for me"). */
+  --on-accent-green-btn: #10131a;
+  /* Text on a filled state (--source-dxc) or new-call (--source-sota) mark:
+     both fills stay light in every theme but light WCAG (JTCAT Stations, #557). */
+  --on-source-dxc: #10131a;
+  --on-source-sota: #10131a;
+  /* Text on the small red new-country mark: white on Navy's #e94560 is 3.8:1. */
+  --on-mark-dxcc: #10131a;
+  /* Red used as TEXT (not a fill). The brand red is 4.2:1 on Navy's panels;
+     Navy reads a lighter red here, every other theme its own red. */
+  --accent-red-text: var(--accent-red);
   --on-tx-active: #fff;
   /* One window title bar for every window (custom bars in Log, Winlink,
      Mercury, Scope and SSTV read these too; the VFO window copies them). */
@@ -250,7 +266,21 @@
      it here. */
 }
 
+/* Navy (the classic dark default): the brand red as text, lightened to pass on its panels. */
+:root:not([data-theme="light"]):not([data-dark-variant]):not([data-ds]) {
+  --accent-red-text: #ff6b81;
+}
+
 [data-theme="light"] {
+  /* White on the light theme's darker fills (#1565c0 5.8:1, #2e7d5a 5.0:1).
+     The green button stays #4ecca3 here, so it keeps the dark text. */
+  --on-accent-blue: #fff;
+  --on-accent-green: #fff;
+  --on-mark-dxcc: #fff;
+  /* Warnings as text: the SOTA orange is 1.9:1 on white. */
+  --warn: #8a5c00;
+  /* Red as text: #c62828 is 4.2:1 on the red tint. */
+  --accent-red-text: #b71c1c;
   --bg-primary: #f0f2f5;
   --bg-secondary: #ffffff;
   --bg-tertiary: #e8eaed;
@@ -265,7 +295,7 @@
   --text-dim: #74748a;
   --text-dimmer: #8c8c9e;
   --accent-red: #c62828;
-  --accent-blue: #1976d2;
+  --accent-blue: #1565c0; /* was #1976d2: 3.8:1 as text on the light panels; #1565c0 is 4.8:1 or more */
   --accent-green: #2e7d5a;
   --accent-green-btn: #4ecca3;
   --shadow: rgba(0,0,0,0.1);
@@ -335,12 +365,15 @@
   --accent-red: #b71c1c;
   --accent-green: #1b5e3b;
   --accent-green-btn: #1b5e3b;
+  --on-accent-green-btn: #fff;
   --accent-blue: #0d47a1;
   --border-primary: #888898;
   --border-secondary: #9a9aaa;
   --source-pota: #1b6b48;
   --source-sota: #8a5c00;
   --source-dxc: #8a1aaf;
+  --on-source-sota: #fff;
+  --on-source-dxc: #fff;
   --source-pskr: #b82020;
   --source-wwff: #1a7a6e;
   --source-wwbota: #4a5c66;
@@ -430,6 +463,18 @@ body {
 }
 
 .platform-darwin .titlebar-controls {
+  display: none;
+}
+
+/* A title bar that also holds the window's own controls (the APRS views and
+   settings, the JTCAT map's Worked button) keeps them on macOS; only the
+   drawn minimise / maximise / close go, the traffic lights do that (#866). */
+.platform-darwin .titlebar-controls.titlebar-keep-on-mac {
+  display: flex;
+}
+.platform-darwin .titlebar-controls.titlebar-keep-on-mac #tb-min,
+.platform-darwin .titlebar-controls.titlebar-keep-on-mac #tb-max,
+.platform-darwin .titlebar-controls.titlebar-keep-on-mac #tb-close {
   display: none;
 }
 
@@ -712,6 +757,7 @@ header {
   min-width: 0;
 }
 .echo-cat-url .echo-cat-ip { color: var(--accent-green); font-weight: bold; }
+.echo-cat-url .echo-cat-ip-label { color: var(--text-secondary); }
 .echo-cat-copy-icon {
   background: none;
   border: none;
@@ -900,12 +946,10 @@ button:hover {
 .btn-primary {
   background: var(--accent-green-btn);
   border-color: var(--accent-green-btn);
-  color: #000;
+  color: var(--on-accent-green-btn);
   font-weight: 600;
 }
 .btn-primary:hover { filter: brightness(1.15); background: var(--accent-green-btn); }
-[data-theme="light"][data-wcag] .btn-primary,
-[data-wcag] .btn-primary { color: #000; }
 
 .btn-blue {
   background: var(--accent-blue);
@@ -917,7 +961,7 @@ button:hover {
 .btn-danger {
   background: transparent;
   border-color: var(--accent-red);
-  color: var(--accent-red);
+  color: var(--accent-red-text);
 }
 .btn-danger:hover { background: var(--tint-red); }
 
@@ -934,6 +978,13 @@ button:hover {
   position: relative;
 }
 .status-bar > .hidden { display: none !important; }
+/* A remote shack with a long name ("LAPTOP · ICOM IC-7100 · LAN · 9 ms")
+   pushed HOLD TO TALK off the right edge (#298). The bar may now shrink, and
+   only the shack chip gives way, ending in "..." (its title has the whole
+   line); PTT and every other item keep their size. */
+.status-bar { min-width: 0; flex-shrink: 1; }
+.status-bar > * { flex: none; }
+.status-bar > #remote-shack-status { flex: 0 1 auto; min-width: 64px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .status-bar > .cw-popover,
 .status-bar > .rig-popover { position: absolute; }
 
@@ -955,22 +1006,25 @@ button:hover {
   bottom: 46px;
   right: 8px;
   z-index: 100;
-  background: rgba(22, 33, 62, 0.92);
-  border: 1px solid #333;
+  /* The theme's own panel colours (every design-system theme maps these in
+     ds-bridge.css), not the classic navy: the box was dark navy with grey text
+     on every theme, light ones included. */
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-primary);
   border-radius: 8px;
   padding: 6px 10px;
   font-family: monospace;
   font-size: 11px;
-  backdrop-filter: blur(4px);
+  box-shadow: 0 2px 8px var(--shadow, rgba(0, 0, 0, 0.35));
   cursor: grab;
   user-select: none;
 }
 .meter-box.dragging { cursor: grabbing; opacity: 0.8; }
 .meter-box.hidden { display: none; }
 .meter-row { display: flex; align-items: center; gap: 6px; margin: 2px 0; }
-.meter-label { color: #888; font-weight: 600; min-width: 28px; text-align: right; }
-.meter-tx-hint { color: #555; font-weight: 400; font-size: 9px; margin-left: 2px; vertical-align: middle; }
-.meter-val { color: #ccc; min-width: 42px; text-align: right; font-weight: 700; }
+.meter-label { color: var(--text-secondary); font-weight: 600; min-width: 28px; text-align: right; }
+.meter-tx-hint { color: var(--text-dim); font-weight: 400; font-size: 9px; margin-left: 2px; vertical-align: middle; }
+.meter-val { color: var(--text-primary); min-width: 42px; text-align: right; font-weight: 700; }
 
 /* Floating CW Macro box — draggable */
 .cw-macro-box {
@@ -1055,7 +1109,7 @@ button:hover {
 
 .status.disconnected {
   background: var(--tint-red);
-  color: var(--accent-red);
+  color: var(--accent-red-text);
 }
 
 .status.warn {
@@ -1187,6 +1241,26 @@ button:hover {
   border-radius: 3px;
   flex-shrink: 0;
 }
+
+/* The badge opens this event's settings (show the banner, track, watchlist). */
+button.event-badge-inline { border: 0; font-family: inherit; line-height: 1.3; cursor: pointer; }
+button.event-badge-inline:hover { filter: brightness(1.12); }
+button.event-badge-inline:focus-visible { outline: 2px solid var(--accent-blue); outline-offset: 2px; }
+#event-banner { position: relative; }
+.event-banner-menu {
+  position: absolute; top: calc(100% + 4px); left: 12px; z-index: 900; width: 290px;
+  display: flex; flex-direction: column; gap: 2px; padding: 10px 12px;
+  background: var(--bg-secondary); color: var(--text-primary);
+  border: 1px solid var(--border-secondary); border-radius: 8px; box-shadow: 0 8px 24px rgba(0, 0, 0, .35);
+}
+.event-banner-menu.hidden { display: none; }
+.ebm-title { font-size: 13px; font-weight: 700; padding-bottom: 6px; }
+.ebm-row { display: flex; align-items: center; gap: 8px; min-height: 30px; font-size: 13px; cursor: pointer; }
+.ebm-row input { width: 16px; height: 16px; accent-color: var(--accent-blue); margin: 0; cursor: pointer; }
+.ebm-row.hidden { display: none; }
+.ebm-note { font-size: 11px; color: var(--text-secondary); line-height: 1.4; padding: 4px 0 6px; }
+.ebm-link { align-self: flex-start; background: none; border: 0; padding: 2px 0; color: var(--accent-blue); font-size: 12px; font-weight: 600; cursor: pointer; font-family: inherit; }
+.ebm-link:hover { text-decoration: underline; }
 
 #event-message {
   color: var(--text-primary);
@@ -2210,10 +2284,10 @@ dialog {
    handler) not a tab switcher. Distinct red accent + no active
    state because it never stays "selected." */
 .settings-tab.settings-tab-action {
-  color: var(--accent-red);
+  color: var(--accent-red-text);
 }
 .settings-tab.settings-tab-action:hover {
-  color: #ff6b81;
+  color: var(--accent-red-text);
   background: color-mix(in srgb, var(--accent-red) 10%, transparent);
 }
 /* Sidebar layout is the default everywhere now (Casey 2026-06-08 —
@@ -3018,6 +3092,84 @@ dialog {
   padding: 8px;
   border-radius: 4px;
 }
+/* While a guest holds a pass: who has the radio, and the owner's three
+   controls (#200). Big type and big buttons: an 80-year-old reads it. */
+.share-rig-live {
+  margin: 4px 0 14px;
+  padding: 12px 14px;
+  border-radius: 6px;
+  border: 1px solid var(--border-secondary);
+  border-left: 4px solid var(--accent-green);
+  background: color-mix(in srgb, var(--accent-green) 8%, var(--bg-secondary));
+  color: var(--text-primary);
+}
+.share-rig-live[data-kind="owner"] { border-left-color: var(--accent-blue); background: color-mix(in srgb, var(--accent-blue) 8%, var(--bg-secondary)); }
+.share-rig-live[data-kind="take-pending"] { border-left-color: var(--source-sota); background: color-mix(in srgb, var(--source-sota) 8%, var(--bg-secondary)); }
+.share-rig-live-status { font-size: 18px; font-weight: 700; line-height: 1.3; color: var(--text-primary); }
+.share-rig-live-sub { font-size: 14px; line-height: 1.4; color: var(--text-secondary); margin-top: 2px; }
+.share-rig-live-sub:empty { display: none; }
+.share-rig-live-msg { margin-top: 12px; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+.share-rig-live-msg label { font-size: 14px; color: var(--text-primary); margin: 0; flex-basis: 100%; }
+.share-rig-live-msg input[type="text"] {
+  flex: 1;
+  min-width: 0;
+  font-size: 15px;
+  padding: 7px 9px;
+  border-radius: 4px;
+  border: 1px solid var(--border-primary, var(--border-secondary));
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: inherit;
+}
+.share-rig-live-msg input[type="text"]::placeholder { color: var(--text-tertiary); }
+.share-rig-live-count { font-size: 13px; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+.share-rig-live-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 12px; }
+.share-rig-live-label { font-size: 15px; font-weight: 600; color: var(--text-primary); margin-right: 2px; }
+.share-rig-live-actions button,
+.share-rig-live-confirm button {
+  font-size: 15px;
+  padding: 8px 16px;
+  min-height: 38px;
+  border-radius: 5px;
+  border: 1px solid var(--border-secondary);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  cursor: pointer;
+  font-family: inherit;
+}
+.share-rig-live-actions button:hover { background: var(--bg-hover); }
+.share-rig-live-actions button.primary { background: var(--accent-blue); color: var(--on-accent-blue); border-color: var(--accent-blue); font-weight: 600; }
+.share-rig-live-actions button.primary:hover { background: color-mix(in srgb, var(--accent-blue) 85%, #fff); }
+.share-rig-live-actions button:disabled { opacity: 0.6; cursor: default; }
+/* Red text nudged toward the theme's own text colour: lighter on dark looks,
+   darker on light ones, so it reads at AA on the panel in every theme. */
+#share-rig-dialog .share-rig-live button.danger {
+  background: var(--bg-primary);
+  color: color-mix(in srgb, var(--accent-red) 80%, var(--text-primary));
+  border-color: var(--accent-red);
+  font-weight: 600;
+}
+#share-rig-dialog .share-rig-live button.danger:hover { background: color-mix(in srgb, var(--accent-red) 12%, var(--bg-primary)); }
+.share-rig-live-end { border-top: 1px solid var(--border-secondary); padding-top: 12px; }
+.share-rig-live-confirm {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: 5px;
+  border: 1px solid var(--accent-red);
+  background: color-mix(in srgb, var(--accent-red) 8%, var(--bg-primary));
+  font-size: 15px;
+  line-height: 1.4;
+  color: var(--text-primary);
+}
+.share-rig-live-confirm .share-rig-live-actions { margin-top: 10px; }
+.share-rig-live-error { font-size: 14px; color: var(--accent-red); margin-top: 8px; }
+.share-rig-live-error:empty { display: none; }
+.share-rig-inline-confirm { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.share-rig-inline-confirm .sric-q { font-size: 13px; font-weight: 600; color: var(--text-primary); }
+.share-rig-inline-confirm button { font-size: 12px; padding: 3px 10px; border-radius: 4px; border: 1px solid var(--border-secondary); background: var(--bg-secondary); color: var(--text-primary); cursor: pointer; font-family: inherit; }
+.share-rig-inline-confirm button.danger { color: var(--accent-red); border-color: var(--accent-red); }
+.share-rig-inline-confirm .sric-err { font-size: 12px; color: var(--accent-red); flex-basis: 100%; }
+.share-rig-inline-confirm .sric-err:empty { display: none; }
 #share-rig-dialog button.danger {
   background: var(--bg-secondary);
   color: var(--accent-red);
@@ -3570,6 +3722,11 @@ dialog {
   color: var(--text-primary);
 }
 .displaced-banner.hidden { display: none; }
+/* Guest Pass notices that are a wait, not an ending (#541): warning, not red. */
+.displaced-banner.pass-good {
+  background: linear-gradient(180deg, color-mix(in srgb, var(--warn) 22%, var(--bg-primary)), var(--bg-primary));
+  border-bottom-color: var(--warn);
+}
 .displaced-banner-msg { flex: 1; line-height: 1.4; }
 .displaced-banner-actions { display: flex; gap: 6px; flex-shrink: 0; }
 .displaced-banner-actions button {
@@ -3745,8 +3902,8 @@ dialog {
   font-weight: 700;
   letter-spacing: 0.5px;
   text-transform: uppercase;
-  color: var(--source-pota, #4ecca3);
-  border: 1px solid color-mix(in srgb, var(--source-pota, #4ecca3) 50%, transparent);
+  color: var(--text-primary); /* the green is the border: green text on its tint is 4.2:1 in the light theme */
+  border: 1px solid color-mix(in srgb, var(--accent-green) 50%, transparent);
   border-radius: 999px;
   padding: 1px 7px;
 }
@@ -3974,8 +4131,11 @@ dialog::backdrop {
 
 dialog h3 {
   margin-bottom: 16px;
-  color: var(--accent-red);
+  color: var(--accent-red-text);
 }
+
+/* A link in Settings with no colour of its own: the theme's link colour, not the browser's #0000ee. */
+#settings-dialog a:not([class]):not([style*="color"]) { color: var(--link, var(--accent-blue)); }
 
 #settings-dialog .settings-shell > h3 {
   flex-shrink: 0;
@@ -4712,6 +4872,9 @@ tbody td.source-multi-program { white-space: normal; text-overflow: clip; line-h
   color: var(--text-tertiary);
   flex-shrink: 0;
   padding-top: 8px;
+  /* A band under Save / Cancel that only the π sits in, so it can never
+     land on Cancel at any window size (Casey 2026-11-11). */
+  padding-bottom: 18px;
   border-top: 1px solid var(--border-secondary);
 }
 
@@ -4817,7 +4980,7 @@ a.settings-echocat-badge-link:hover {
 }
 
 .settings-version {
-  color: var(--text-dim);
+  color: var(--text-secondary);
   margin-bottom: 4px;
 }
 
@@ -4840,7 +5003,7 @@ a.settings-echocat-badge-link:hover {
 }
 
 .footer-dot {
-  color: var(--text-dimmer);
+  color: var(--text-secondary);
 }
 
 .settings-footer a {
@@ -4857,8 +5020,8 @@ a.settings-echocat-badge-link:hover {
 /* Pi access easter egg */
 .pi-access {
   position: absolute;
-  bottom: 2px;
-  right: -8px;
+  bottom: 0;
+  right: 22px; /* left of the dialog's resize grip in the corner */
   font-size: 12px;
   color: var(--text-tertiary);
   cursor: default;
@@ -5073,14 +5236,14 @@ a.settings-echocat-badge-link:hover {
 .flex-status {
   margin: 6px 0 4px;
   font-size: 12px;
-  color: #8a8a9a;
+  color: var(--text-secondary);
 }
 .flex-status.connected { color: var(--accent-green); }
 
 #flex-config summary {
   cursor: pointer;
   font-size: 12px;
-  color: #8a8a9a;
+  color: var(--text-secondary);
   user-select: none;
   margin-top: 4px;
 }
@@ -5302,13 +5465,14 @@ a.settings-echocat-badge-link:hover {
 
 .rig-editor-buttons button:first-child {
   background: var(--accent-green);
-  color: var(--bg-primary);
+  color: var(--on-accent-green);
   border-color: var(--accent-green);
   font-weight: bold;
 }
 
 .rig-editor-buttons button:first-child:hover {
-  background: #3db892;
+  background: var(--accent-green);
+  filter: brightness(1.1);
 }
 
 /* Net editor panel (mirrors rig editor) */
@@ -5321,7 +5485,7 @@ a.settings-echocat-badge-link:hover {
 }
 
 #net-editor h4 {
-  color: var(--source-net);
+  color: var(--accent-blue); /* was the net yellow: 1.3:1 on the light themes; the same blue as Add Rig */
   margin-bottom: 10px;
   font-size: 13px;
 }
@@ -5333,6 +5497,15 @@ a.settings-echocat-badge-link:hover {
   gap: 8px;
   padding: 4px 0;
   border-bottom: 1px solid var(--border-primary);
+}
+
+/* `dialog input` makes every input a full-width block; this checkbox is only the
+   on/off state and must leave the row to the net's name (#284). */
+.net-item input[type="checkbox"] {
+  display: inline-block;
+  width: auto;
+  margin: 0;
+  flex: 0 0 auto;
 }
 
 .net-item-info {
@@ -5378,6 +5551,24 @@ a.settings-echocat-badge-link:hover {
 
 .hamlib-test-fail {
   color: var(--accent-red);
+}
+
+/* PTT on RTS with RTS/CTS flow control on the same port (#544). */
+.rig-ptt-conflict {
+  margin-top: 6px;
+  padding: 8px 10px;
+  border-left: 3px solid var(--warn);
+  background: var(--warn-subtle);
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.4;
+}
+.rig-ptt-conflict.hidden { display: none; }
+.rig-ptt-conflict-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
 }
 
 /* Welcome dialog */
@@ -5830,7 +6021,9 @@ a.settings-echocat-badge-link:hover {
 .was-swatch-worked { background: rgba(79, 195, 247, 0.5); border: 1px solid #4fc3f7; }
 .was-swatch-confirmed { background: rgba(78, 204, 163, 0.55); border: 1px solid #4ecca3; }
 .was-tools { margin-left: auto; display: inline-flex; align-items: center; gap: 8px; }
-.was-backfill-status { font-size: 11px; color: var(--text-secondary); }
+.was-backfill-status { font-size: 11px; color: var(--text-secondary); min-width: 0; }
+/* The answer can name the QSOs left (#389): it wraps, the button never does */
+#was-backfill-btn { flex-shrink: 0; white-space: nowrap; }
 #was-count.was-count-confirmed { color: #4ecca3; }
 .ref-state-pill { background: #e040fb; color: #000; font-size: 9px; font-weight: bold; padding: 1px 3px; border-radius: 3px; margin-left: 4px; }
 .ref-dx-pill { background: #ffd740; color: #000; font-size: 9px; font-weight: bold; padding: 1px 3px; border-radius: 3px; margin-left: 4px; }
@@ -6412,6 +6605,16 @@ a.settings-echocat-badge-link:hover {
   padding-right: 28px;
 }
 
+/* #463: the macOS microphone message is read once and acted on: larger text. */
+.log-toast.mac-mic {
+  font-size: 15px;
+  line-height: 1.45;
+  max-width: 460px;
+  /* --warn is the theme's readable amber (dark amber on light themes). */
+  color: var(--warn);
+  border-color: var(--warn);
+}
+
 .log-toast-dismiss {
   position: absolute;
   top: 4px;
@@ -6855,21 +7058,64 @@ a.settings-echocat-badge-link:hover {
   width: auto;
 }
 
-/* Warning shown in the CAT popover when WSJT-X Mode is on but POTACAT
-   isn't receiving WSJT-X heartbeats — the silent-CAT trap N3VD 2026-05-24
-   spent an hour on. The amber matches the visual weight of other "warning,
-   not error" banners. */
-.cat-popover-wsjtx-warning {
-  margin: 4px 8px 8px 8px;
-  padding: 6px 8px;
-  border-left: 3px solid var(--source-sota);
-  background: rgba(240, 165, 0, 0.10);
-  color: #ffd47a;
-  font-size: 11px;
-  line-height: 1.35;
-  border-radius: 3px;
+/* WSJT-X Mode, impossible to miss (#547; lib/wsjtx-mode-notice.js). The
+   chip is the theme's caution amber (--warn / --warn-subtle, which the design
+   system themes point at --ds-warn); the CAT pill goes neutral grey, never
+   green, while WSJT-X has the radio. The panel sits at the top of the CAT
+   menu (the silent-CAT trap N3VD 2026-05-24 spent an hour on). */
+.status.wsjtx-mode-chip {
+  background: var(--warn-subtle);
+  color: var(--warn);
+  border: 1px solid var(--warn);
+  cursor: pointer;
 }
-.cat-popover-wsjtx-warning.hidden { display: none; }
+.status.wsjtx-mode-chip:focus-visible { outline: 2px solid var(--warn); outline-offset: 1px; }
+.status.wsjtx-off {
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.wsjtx-mode-panel {
+  margin: 2px 8px 8px 8px;
+  padding: 8px 10px;
+  border-left: 3px solid var(--warn);
+  background: var(--warn-subtle);
+  border-radius: 4px;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--text-primary);
+}
+.wsjtx-mode-panel.hidden, .wsjtx-mode-panel .hidden { display: none; }
+.wsjtx-mode-title { font-weight: 700; color: var(--warn); margin-bottom: 4px; }
+.wsjtx-mode-card .wsjtx-mode-title { font-size: 16px; margin-bottom: 6px; }
+.station-setup-card.wsjtx-mode-card { border-color: var(--warn); }
+.wsjtx-mode-line { margin-bottom: 6px; }
+.wsjtx-mode-state { font-weight: 700; margin-bottom: 6px; color: var(--warn); }
+.wsjtx-mode-state.heard { color: var(--accent-green); }
+.wsjtx-mode-buttons { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+.wsjtx-mode-btn {
+  font: inherit;
+  font-size: 13px;
+  padding: 5px 10px;
+  border-radius: 5px;
+  border: 1px solid var(--border-secondary);
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+.wsjtx-mode-card .wsjtx-mode-btn { font-size: 15px; padding: 7px 14px; }
+.wsjtx-mode-btn:hover { background: var(--bg-hover); }
+.wsjtx-mode-btn.primary {
+  background: var(--warn);
+  border-color: var(--warn);
+  color: var(--bg-primary);
+  font-weight: 700;
+}
+.wsjtx-mode-btn.primary:hover { filter: brightness(1.1); background: var(--warn); }
+/* Station Setup top line while WSJT-X Mode is on (#547) */
+.ss-notice { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 0 0 10px; padding: 8px 12px; border-left: 3px solid var(--warn); background: var(--warn-subtle); border-radius: 6px; color: var(--text-primary); font-size: 15px; }
+.ss-notice.hidden { display: none; }
+.ss-notice-text { flex: 1 1 240px; font-weight: 600; }
 
 /* Settings > Cloud > POTACAT Tunnel: the live <callsign>.potacat.com link had
    no colour of its own and fell back to the browser's default link blue,
@@ -8653,7 +8899,11 @@ body.activator-rbn-on #rbn-view {
   background: var(--text-tertiary);
 }
 .dir-status-dot.on-air { background: var(--accent-green); }
-.dir-action-col { width: 55px; text-align: center; }
+/* Wide enough for "✓ Remove", and never clipped: at 55 px the table's
+   ellipsis left only the check mark (#284, hoogskev 2026-11-09). Same as the
+   newer Directory view's .dirv-action-col. */
+.dir-action-col { width: 84px; text-align: center; }
+.directory-table tbody td.dir-action-col { overflow: visible; text-overflow: clip; }
 .dir-add-btn {
   background: none;
   border: 1px solid var(--accent-blue, var(--accent-blue));
@@ -10648,7 +10898,7 @@ dialog[open] {
 }
 .cloud-subscribe-section { margin-top: 4px; }
 .cloud-subscribe-section .btn-primary { font-size: 14px; padding: 8px 14px; }
-.cloud-subscribe-section .cloud-yearly-btn { background: #1f6f9f; border-color: #1f6f9f; }
+.cloud-subscribe-section .cloud-yearly-btn { background: var(--accent-blue); border-color: var(--accent-blue); color: var(--on-accent-blue); }
 .cloud-trial-line { font-size: 12px; color: var(--accent-blue); margin-left: 4px; }
 .cloud-trial-line.urgent { color: #f0a500; font-weight: 600; }
 .cloud-upload-nudge {
@@ -10778,3 +11028,22 @@ dialog[open] {
 .rig-preset-rule-line { display: flex; align-items: center; gap: 6px; margin-top: 3px; }
 .settings-preset-root { max-width: 560px; }
 .settings-preset-root .rig-preset-item { font-size: 12px; }
+
+/* Filter presets (lib/spot-filter-presets.js): the button names the preset
+   in force; each menu row applies one, with its tools on the right. */
+.filter-presets-name:not(:empty)::before { content: ': '; }
+.filter-presets-name { display: inline-block; max-width: 160px; overflow: hidden; text-overflow: ellipsis; vertical-align: bottom; }
+#filter-presets-menu { min-width: 320px; max-height: 70vh; overflow-y: auto; }
+.filter-presets-empty { padding: 6px 12px; font-size: 13px; color: var(--text-secondary); max-width: 300px; }
+.filter-presets-row { display: flex; align-items: center; gap: 2px; padding: 1px 4px; }
+.filter-presets-row.active .filter-presets-apply { color: var(--accent-green, #4ecca3); font-weight: 600; }
+.filter-presets-apply {
+  flex: 1; min-width: 0; text-align: left; background: none; border: none; color: var(--text-primary);
+  padding: 6px 8px; font-size: 13px; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.filter-presets-apply:hover, .filter-presets-tool:hover:not(:disabled) { background: var(--bg-header); }
+.filter-presets-tool {
+  background: none; border: 1px solid transparent; color: var(--text-secondary); padding: 3px 6px;
+  font-size: 12px; border-radius: 3px; cursor: pointer;
+}
+.filter-presets-tool:disabled { opacity: 0.35; cursor: default; }

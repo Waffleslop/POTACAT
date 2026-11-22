@@ -32,7 +32,7 @@ for (const name of ['FT-450', 'FT-2000', 'FTDX3000', 'FTDX5000']) {
   c.setFrequency(14061941);
   assert(out.join('') === 'FA14061941;', `${name}: 8-digit FA (got ${out.join('')})`);
 }
-for (const name of ['FT-891', 'FT-991/991A', 'FT-710', 'FTDX10', 'FTDX101D/MP']) {
+for (const name of ['FT-891', 'FT-991/991A', 'FT-710', 'FTDX10', 'FTDX101D', 'FTDX101MP']) {
   const { c, out } = codecFor(name);
   c.setFrequency(7002900);
   assert(out.join('') === 'FA007002900;', `${name}: 9-digit FA (got ${out.join('')})`);

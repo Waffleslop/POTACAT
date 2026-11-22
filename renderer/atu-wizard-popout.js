@@ -6,6 +6,8 @@
 // (lib/atu-wizard.js). STOP is in the footer on every page while a run is
 // live and unkeys at once.
 function _applyPopoutTheme(payload) {
+  // The shared rule (popout-theme-boot*.js) also sets data-ds (#376).
+  if (window.applyPopoutTheme) return window.applyPopoutTheme(payload);
   const theme = typeof payload === 'string' ? payload : ((payload && payload.theme) || 'dark');
   const variant = (payload && typeof payload === 'object' && payload.variant) || 'navy';
   document.documentElement.setAttribute('data-theme', theme);
@@ -36,7 +38,7 @@ $('aw-close').onclick = () => window.api.close();
 window.api.onPopoutTheme(_applyPopoutTheme);
 
 const fmtSwr = (v) => (Number.isFinite(v) ? v.toFixed(1) + ':1' : '—');
-const fmtMhz = (khz) => (khz / 1000).toFixed(khz % 1 ? 4 : 3);
+const fmtMhz = (khz) => FreqDots.fromKhz(khz); // the VFO way, 14.074.00
 const fmtMin = (ms) => { const m = Math.round(ms / 60000); return m < 1 ? 'under a minute' : `about ${m} minute${m === 1 ? '' : 's'}`; };
 const fmtAtu = (s) => (s ? String(s).replace(/^TUNE_/, '').replace(/_/g, ' ').toLowerCase() : '—');
 

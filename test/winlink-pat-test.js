@@ -96,6 +96,25 @@ test('a list row URL is used when it names the same gateway and transport (keeps
   assert.strictEqual(W.sessionUrl({ mode: 'ardop', gateway: 'KG4OCM', dialKhz: 7102.1, rowUrl: 'ardop:///KG4OCM?bw=2000MAX&freq=7102.1' }), 'ardop:///KG4OCM?bw=2000MAX&freq=7102.1');
   assert.strictEqual(W.sessionUrl({ mode: 'mercury', gateway: 'K7EK-10', dialKhz: 14105, rowUrl: 'varahf:///K7EK-10?bw=2300&freq=14105' }), 'varahf:///K7EK-10?bw=2300&freq=14105');
 });
+test('the operator\'s ARDOP bandwidth caps the row\'s bw for the dial (#663)', () => {
+  const row = 'ardop:///KG4OCM?bw=2000MAX&freq=7102.1';
+  assert.strictEqual(W.sessionUrl({ mode: 'ardop', gateway: 'KG4OCM', dialKhz: 7102.1, ardopBw: 500, rowUrl: row }), 'ardop:///KG4OCM?bw=500MAX&freq=7102.1');
+  assert.strictEqual(W.sessionUrl({ mode: 'ardop', gateway: 'KG4OCM', dialKhz: 7102.1, ardopBw: 2000, rowUrl: row }), row);
+  // A gateway offering less keeps its own value, FORCED included.
+  assert.strictEqual(W.sessionUrl({ mode: 'ardop', gateway: 'KG4OCM', dialKhz: 7102.1, ardopBw: 2000, rowUrl: 'ardop:///KG4OCM?bw=500FORCED&freq=7102.1' }), 'ardop:///KG4OCM?bw=500FORCED&freq=7102.1');
+  // A row with no bw names the operator's.
+  assert.strictEqual(W.sessionUrl({ mode: 'ardop', gateway: 'KG4OCM', dialKhz: 7102.1, ardopBw: 500, rowUrl: 'ardop:///KG4OCM?freq=7102.1' }), 'ardop:///KG4OCM?bw=500MAX&freq=7102.1');
+  // A saved gateway or History entry dials the same way.
+  assert.strictEqual(W.sessionUrl({ mode: 'ardop', gateway: 'KG4OCM', dialKhz: 7102.1, ardopBw: 200, rowUrl: 'ardop:///KG4OCM?bw=2000MAX' }), 'ardop:///KG4OCM?bw=200MAX');
+  // Built from the parts, Pat's config arq_bandwidth (the operator's) applies.
+  assert.strictEqual(W.sessionUrl({ mode: 'ardop', gateway: 'KG4OCM', dialKhz: 7102.1, ardopBw: 500 }), 'ardop:///KG4OCM?freq=7102.1');
+  assert.deepStrictEqual(W.buildPatConfig({ mycall: 'K3SBP', httpPort: 8080, shimPort: 4532, transport: { ardopBw: 500 } }).ardop.arq_bandwidth, { Forced: false, Max: 500 });
+});
+test('the operator\'s VARA HF bandwidth caps the row\'s bw; Mercury is left alone', () => {
+  assert.strictEqual(W.sessionUrl({ mode: 'vara', gateway: 'K7EK-10', dialKhz: 14105, bw: 500, rowUrl: 'varahf:///K7EK-10?bw=2300&freq=14105' }), 'varahf:///K7EK-10?bw=500&freq=14105');
+  assert.strictEqual(W.sessionUrl({ mode: 'vara', gateway: 'K7EK-10', dialKhz: 14105, bw: 2750, rowUrl: 'varahf:///K7EK-10?bw=2300&freq=14105' }), 'varahf:///K7EK-10?bw=2300&freq=14105');
+  assert.strictEqual(W.sessionUrl({ mode: 'mercury', gateway: 'K7EK-10', dialKhz: 14105, ardopBw: 500, rowUrl: 'varahf:///K7EK-10?bw=2300&freq=14105' }), 'varahf:///K7EK-10?bw=2300&freq=14105');
+});
 test('a row URL for another gateway, another transport or a host is ignored', () => {
   const built = 'ardop:///KG4OCM?freq=7102.1';
   assert.strictEqual(W.sessionUrl({ mode: 'ardop', gateway: 'KG4OCM', dialKhz: 7102.1, rowUrl: 'ardop:///W1AW-10?bw=2000MAX&freq=7101' }), built);
@@ -247,6 +266,17 @@ test('a gateway list Pat cannot parse is recognised; other failures are not (Mer
   assert.ok(/if \(!WinlinkPat\.isCorruptCacheError\(e && e\.message\)\) throw e;[\s\S]{0,200}patClient\.rmslist\(\{ \.\.\.opts, forceDownload: true \}\)/.test(main), 'one re-download on a damaged cache');
   assert.ok(/const p = _winlinkRmslistChain\.then\(run, run\);/.test(main), 'one request at a time');
   assert.strictEqual((main.match(/patClient\.rmslist\(/g) || []).length, 2, 'no other caller bypasses it');
+});
+
+// #336 (the gateway list keeps only the radio's bands) moved to
+// test/winlink-reach-test.js with the rule that replaced it.
+// #254: how many gateways the radio cannot call is its own field, the last
+// line inside the mail window's gateway list (not a sentence beside it).
+test('#254: the gateway reply carries how many were left out', () => {
+  const main = readSrc(require('path').join(__dirname, '..', 'main.js'));
+  const fn = main.slice(main.indexOf('async function winlinkGateways('), main.indexOf('let _winlinkGatewaysLogged'));
+  assert.ok(fn.includes('const leftOut = onBands.dropped || 0;') && fn.includes('list, predicted, note, leftOut };'));
+  assert.ok(!fn.slice(fn.indexOf('const note ='), fn.indexOf('const tell =')).includes('left out ('), 'the note is the ranking only');
 });
 
 console.log(`\n${pass} passed, ${fail} failed`);

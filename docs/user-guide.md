@@ -144,7 +144,7 @@ The main table shows one row per spot with these columns (right-click any column
 
 **Watchlist stars** — Spots matching your watchlist callsigns show a star icon.
 
-**WSJT-X decodes** — When WSJT-X integration is active, a decode indicator appears on rows where POTACAT hears the activator in WSJT-X.
+**WSJT-X decodes** — When WSJT-X Mode is on, a decode indicator appears on rows where POTACAT hears the activator in WSJT-X.
 
 ### Map View
 
@@ -740,7 +740,9 @@ Right-click the `.exe` → Properties → check **Unblock** → OK. Then run the
 - Check your firewall isn't blocking outbound telnet connections
 - Connection status pills at the top of Settings show live status
 
-### WSJT-X integration not working
+### WSJT-X Mode not working
+
+While WSJT-X Mode is on, POTACAT leaves the radio to WSJT-X: an amber **WSJT-X Mode** chip shows first in the status bar and the CAT pill reads **CAT: off**. Click either one to see whether WSJT-X is talking to POTACAT. If you are not using WSJT-X, click **Turn off WSJT-X Mode** there and POTACAT connects to your radio.
 
 - Make sure WSJT-X is configured to send UDP reports
 - The UDP port must match (default 2237 in both apps)

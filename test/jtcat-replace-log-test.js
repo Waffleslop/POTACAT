@@ -33,8 +33,12 @@ test('reply side, only our grid sent: not logged', () => {
 test('CQ side, we sent their report, waiting for R: not logged', () => {
   assert.strictEqual(replaceLogsQso(q({ mode: 'cq', phase: 'cq-report', sentReport: '-05' }), 'K1ABC'), false);
 });
-test('CQ side, their R-report in and our RR73 out, not yet logged: logged', () => {
-  assert.strictEqual(replaceLogsQso(q({ mode: 'cq', phase: 'cq-rr73', report: '-08', sentReport: '-05' }), 'K1ABC'), true);
+const rr73 = (o) => q(Object.assign({ mode: 'cq', phase: 'cq-rr73', report: '-08', sentReport: '-05', myCall: 'K3SBP', txMsg: 'W1AW K3SBP RR73' }, o));
+test('CQ side, our RR73 went out but the log was missed: logged', () => {
+  assert.strictEqual(replaceLogsQso(rr73({ _txSentMsg: 'W1AW K3SBP RR73' }), 'K1ABC'), true);
+});
+test('CQ side, their R-report in, our RR73 queued but never sent: NOT logged (#807)', () => {
+  assert.strictEqual(replaceLogsQso(rr73(), 'K1ABC'), false);
 });
 test('an already logged QSO is never logged again', () => {
   assert.strictEqual(replaceLogsQso(q({ mode: 'cq', phase: 'cq-rr73', report: '-08', _logged: true }), 'K1ABC'), false);
@@ -49,8 +53,10 @@ test('no QSO, or no call: nothing to log', () => {
 
 const MAIN = readSrc(path.join(__dirname, '..', 'main.js'));
 test('both reply paths (window and ECHOCAT/phone) use the shared rule', () => {
-  assert.ok(/_jtcatStateMachine\.replaceLogsQso\(popoutJtcatQso, data\.call\)/.test(MAIN), 'window path');
-  assert.ok(/_jtcatStateMachine\.replaceLogsQso\(remoteJtcatQso, call\)/.test(MAIN), 'ECHOCAT path');
+  // Both go through jtcatSupersedeQsos -> supersedeRunningQsos -> replaceLogsQso (#519).
+  assert.ok(/await jtcatSupersedeQsos\(data\.call, 'popout'\)/.test(MAIN), 'window path');
+  assert.ok(/await jtcatSupersedeQsos\(call, 'remote'\)/.test(MAIN), 'ECHOCAT path');
+  assert.ok(/_jtcatStateMachine\.supersedeRunningQsos\(/.test(MAIN), 'the shared rule');
 });
 test('the old "holds their report = log it" test is gone', () => {
   assert.ok(!/Replacing active QSO with .* — auto-logging/.test(MAIN));

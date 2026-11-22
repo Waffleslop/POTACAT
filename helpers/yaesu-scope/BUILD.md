@@ -24,8 +24,17 @@ The dev checkout looks for the binary in `helpers/yaesu-scope/build/` after
   https://ftdichip.com/software-examples/ft4222h-software-examples/
 - **Linux:** FTDI's LibFT4222 for Linux (`libft4222.so`, which also carries the
   D2XX entry points), then `sudo ldconfig`, plus a udev rule for the device.
-- **macOS:** FTDI ships a `libft4222.dylib`; nobody has yet reported the
-  FT-710 path working there, so it ships as unverified.
+- **macOS:** FTDI's package (LibFT4222 1.4.4.221) has a `build` folder holding
+  `libft4222.1.4.4.221.dylib` and `libftd2xx.dylib`. Both are universal
+  (x86_64 + arm64), and libft4222 loads `libftd2xx.dylib` by bare name, so the
+  two files must stay together. Station Setup's "Find the file for me" copies
+  both into POTACAT's own folder (userData/ftdi). The helper scans that folder
+  (`POTACAT_FTDI_DIR`), `/usr/local/lib` and `/opt/homebrew/lib` for any
+  `libft4222*.dylib`, loads `libftd2xx.dylib` from the same folder first, and
+  prints `load failed: <path>: <dlerror>` for a file that will not load
+  (GitHub #360). No owner has confirmed the Mac path on air yet.
+  `scripts/test-ft4222-loader.sh` checks the loader against stand-in libraries
+  with FTDI's file names (CI job `ft4222-loader`, macOS and Linux).
 
 The radio needs **SCU-LAN10 = ON** in its menu (OPERATION SETTING > GENERAL
 > 26). The setting, not the hardware box.

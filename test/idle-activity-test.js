@@ -173,7 +173,7 @@ function bodyOf(name) {
 }
 // eslint-disable-next-line no-new-func
 const activityWith = new Function('flags', `
-  let { autoSstvActive, autoIdleJs8Active, autoIdleJtcatActive, autoIdleRxLabel, autoSstvCurrentFreq } = flags;
+  let { autoSstvActive, autoIdleJs8Active, autoIdleJtcatActive, autoIdleAprsActive, autoIdleRxLabel, autoSstvCurrentFreq } = flags;
   const _sstvDecode = null, jtcatManager = null, freedvEngine = null, settings = {}, jtcatWsprHopEnabled = false;
   const _wsprSession = null, js8Threads = { totalUnread: 0 };
   const _isEffectivelyTransmitting = () => false;
@@ -181,11 +181,12 @@ const activityWith = new Function('flags', `
   ${bodyOf('computeActivityState')}
   return { kind: autoRxKind(), state: computeActivityState() };`);
 
-test('an idle WSPR/PSK31/JS8 session is never reported as SSTV', () => {
+test('an idle WSPR/PSK31/JS8/APRS session is never reported as SSTV', () => {
   for (const f of [
     { autoSstvActive: true, autoIdleJtcatActive: true, autoIdleRxLabel: 'WSPR' },
     { autoSstvActive: true, autoIdleJtcatActive: true, autoIdleRxLabel: 'PSK31' },
     { autoSstvActive: true, autoIdleJs8Active: true, autoIdleRxLabel: 'JS8' },
+    { autoSstvActive: true, autoIdleAprsActive: true, autoIdleRxLabel: 'APRS' }, // APRS phase 4
   ]) {
     const r = activityWith(f);
     assert.notStrictEqual(r.state.activity, 'sstv', `${f.autoIdleRxLabel} reported as SSTV`);

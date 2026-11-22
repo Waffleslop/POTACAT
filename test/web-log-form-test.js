@@ -90,7 +90,12 @@ test('qsoAt is parsed as UTC, not local time', () => {
 
 test('web {call} prefers a typed callsign over the tuned spot', () => {
   assert.ok(/function macroCallsign\(\)/.test(REMOTE), 'no macroCallsign helper');
-  assert.ok(/\.replace\(\/\\\{call\\\}\/gi, macroCallsign\(\)\)/.test(REMOTE),
+  // sendCwText expands through lib/cw-remote-expand.js expandForCall, with
+  // the call from macroCallsign() (#524: name and state follow that call).
+  const i = REMOTE.indexOf('function sendCwText(text)');
+  assert.notStrictEqual(i, -1);
+  const body = REMOTE.slice(i, REMOTE.indexOf('\n  }\n', i));
+  assert.ok(/var call = macroCallsign\(\);/.test(body) && /CwRemoteExpand\.expandForCall\(text, call,/.test(body),
     '{call} still expands straight from tunedCallsign');
 });
 

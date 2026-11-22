@@ -55,7 +55,8 @@ test('wiring: the send path splits spots; Mail window and Activation share one t
   assert.ok(/ipcMain\.handle\('winlink-pota-spot-template'/.test(main));
   assert.ok(/ipcMain\.on\('winlink-pota-spot-open'/.test(main));
   assert.ok(/liveActivationMyRefs\(\)\.filter\(\(r\) => r\.sig === 'POTA'\)/.test(main), 'POTA parks only');
-  assert.ok(/id="wl-pota-spot"/.test(read('renderer/winlink-popout.html')));
+  // The POTA spot button moved into the mail window's Templates menu (Casey 2026-11-11).
+  assert.ok(/data-tpl="pota"/.test(read('renderer/winlink-popout.js')) && /window\.api\.potaSpotTemplate\(\{\}\)\.then\(composeSpot\)/.test(read('renderer/winlink-popout.js')));
   assert.ok(/winlink-compose-prefill/.test(read('preload-winlink-popout.js')));
   const app = read('renderer/app.js');
   assert.ok(/window\.api\.winlinkPotaSpotOpen\(\{ freqKhz: freq \|\| 0, mode \}\)/.test(app));

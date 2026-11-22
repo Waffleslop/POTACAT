@@ -40,7 +40,7 @@ function rig(modelId, Codec = KenwoodCodec) {
   return { rig: r, codec, writes, logs };
 }
 
-for (const id of ['FTX-1 Field', 'FTX-1 Optima', 'FTDX101D/MP', 'FT-710', 'FTDX10', 'FT-991/991A']) {
+for (const id of ['FTX-1 Field', 'FTX-1 Optima', 'FTDX101D', 'FTDX101MP', 'FT-710', 'FTDX10', 'FT-991/991A']) {
   test(`${id}: CW text never sends TX1; and holds TX for the message`, async () => {
     const { rig: r, writes } = rig(id);
     r.sendCwText('CQ POTA DE W2XYZ K');
@@ -59,17 +59,44 @@ test('FT-710 without a key port: keyer memory 1, played with KY01; (W3MDT)', asy
   r.disconnect();
 });
 
-test('FTX-1: KM5 then KYA; a long message waits for each memory to play', async () => {
+test('FTX-1: KM5 then KY05; a long message waits for each memory to play', async () => {
   const { rig: r, writes } = rig('FTX-1 Field');
   r.setCwSpeed(60); // 200 ms per character keeps the test short
   writes.length = 0;
   const text = 'A'.repeat(50) + 'B';
   r.sendCwText(text);
-  assert.deepStrictEqual(writes.filter((w) => !/^BI/.test(w)), ['KM5' + 'A'.repeat(50) + ';', 'KYA;'], 'only the first memory now');
+  assert.deepStrictEqual(writes.filter((w) => !/^BI|^SD;/.test(w)), ['KM5' + 'A'.repeat(50) + ';', 'KY05;'], 'only the first memory now');
   assert.strictEqual(r._cwKmTimers.length, 1, 'the second chunk waits');
   r.stopCwText();
   assert.strictEqual(r._cwKmTimers.length, 0, 'stop drops the waiting chunk');
   r.disconnect();
+});
+
+// #384: the FTX-1 CAT manual (2508-C p.18) plays keyer memory with KY P1 P2;
+// P1 0 = TEXT memory, P2 1-5 = the memory. There is no KYA; form, and the
+// radio played nothing. The KY that plays must name the memory KM wrote.
+for (const id of ['FTX-1 Field', 'FTX-1 Optima']) {
+  test(`${id}: KM5<text>; then KY05; (the documented form, not KYA;)`, async () => {
+    const { rig: r, writes } = rig(id);
+    r._breakIn = true;
+    r.sendCwText('TU 73');
+    assert.deepStrictEqual(writes.slice(-2), ['KM5TU 73;', 'KY05;']);
+    assert.ok(!writes.includes('KYA;'), JSON.stringify(writes));
+    r.disconnect();
+  });
+}
+
+// KY0n; on the FT-710 and FTX-1 (KY P1 P2: P1 0 = TEXT memory); KYn; on the
+// FT-991A and FT-891, whose KY has one parameter, P1 1-5 = keyer memory n
+// (FT-991A CAT reference rev 1711-D p. 11, FT-891 rev 1909-C p. 11).
+test('every keyer-memory rig plays the memory it wrote (KY0n; or KYn; names kmMemory n)', () => {
+  for (const [id, m] of Object.entries(RIG_MODELS)) {
+    const cw = m && m.cw;
+    if (!cw || cw.kyMode !== 'km' || !cw.kmPlay) continue;
+    const mm = /^KY0?([1-5]);$/.exec(cw.kmPlay);
+    assert.ok(mm, `${id}: kmPlay ${cw.kmPlay} is not KY0n; or KYn;`);
+    assert.strictEqual(Number(mm[1]), cw.kmMemory, `${id}: KM writes ${cw.kmMemory} but ${cw.kmPlay} plays ${mm[1]}`);
+  }
 });
 
 test('rigctld on an FTX-1 (W2XYZ): "b text" with no "T 1" before it', async () => {
@@ -179,6 +206,39 @@ test('a radio still in transmit 4 s after the message is sent to receive, and th
   r.disconnect();
 });
 
+test('a receive readback in a word space does not end the watch: a radio keyed after the message is sent to receive', async () => {
+  // FT-710 keyer memory over BK-IN: TX0 for ~120 ms in each word space.
+  const { rig: r, codec, writes } = rig('FT-710');
+  const notices = [];
+  r.on('notice', (m) => notices.push(m));
+  r._cwWpm = 60;
+  r._breakIn = true;
+  r.sendCwText('E E');
+  codec.emit('ptt', true);
+  codec.emit('ptt', false);            // the word space
+  assert.strictEqual(r._transmitting, true, 'still keying the message');
+  const polls = setInterval(() => { if (!writes.includes('TX0;')) codec.emit('ptt', true); }, 500); // then stuck in TX
+  await sleep(6500);
+  clearInterval(polls);
+  assert.ok(writes.includes('TX0;'), 'RX sent: ' + JSON.stringify(writes));
+  assert.ok(notices.some((m) => /stayed in transmit after the CW message/.test(m)));
+  r.disconnect();
+});
+
+test('the backstop is armed even when the last readback before the end was receive', async () => {
+  const { rig: r, codec, writes } = rig('FT-710');
+  r._cwWpm = 60;
+  r._breakIn = true;
+  r.sendCwText('E');
+  codec.emit('ptt', false);            // a word-space readback just before the estimate ends
+  await sleep(700);                    // the hold has ended
+  const polls = setInterval(() => { if (!writes.includes('TX0;')) codec.emit('ptt', true); }, 500);
+  await sleep(5500);
+  clearInterval(polls);
+  assert.ok(writes.includes('TX0;'), 'RX sent: ' + JSON.stringify(writes));
+  r.disconnect();
+});
+
 test('the backstop leaves a PTT POTACAT itself is holding alone', async () => {
   const { rig: r, codec, writes } = rig('FTDX10');
   r._cwWpm = 60;
@@ -215,6 +275,88 @@ test('the backstop needs a fresh readback: a TX report from seconds ago proves n
   r.disconnect();
 });
 
+// --- The break-in delay sets the check (DA2PK FT-710, 2026-11-14) ---------
+// The blanket 4 s check came 0.4 s after the operator had reached for PTT.
+
+test('every keyer-memory message asks the radio for its BK-IN delay (SD;)', async () => {
+  const { rig: r, writes } = rig('FT-710');
+  r._breakIn = true;
+  r.sendCwText('TEST');
+  const sd = writes.indexOf('SD;'), km = writes.findIndex((w) => /^KM/.test(w));
+  assert.ok(sd >= 0 && sd < km, 'SD; before the text: ' + JSON.stringify(writes));
+  r.disconnect();
+});
+
+test('codec: the SD reply in Yaesu codes and in milliseconds', () => {
+  const model = RIG_MODELS['FT-710'];
+  const c = new KenwoodCodec(model, () => {});
+  const got = [];
+  c.on('breakInDelay', (ms) => got.push(ms));
+  for (const m of ['SD0005', 'SD0007', 'SD0034', 'SD0200', 'SD3000', 'SD0000']) c.onData(m + ';');
+  assert.deepStrictEqual(got, [200, 300, 3000, 200, 3000]);
+});
+
+test('codec: a TX readback carries the raw state for the log', () => {
+  const c = new KenwoodCodec(RIG_MODELS['FT-710'], () => {});
+  const got = [];
+  c.on('ptt', (on, raw) => got.push([on, raw]));
+  c.onData('TX2;');
+  assert.deepStrictEqual(got, [[true, 2]]);
+});
+
+test('with the delay known, a radio still keyed after it is sent to receive within about a second', async () => {
+  const { rig: r, codec, writes, logs } = rig('FT-710');
+  r._cwWpm = 60;
+  r._breakIn = true;
+  r.sendCwText('E');
+  codec.emit('breakInDelay', 200);
+  const t0 = Date.now();
+  let rxAt = 0;
+  const polls = setInterval(() => {
+    if (writes.includes('TX0;')) { if (!rxAt) rxAt = Date.now(); return; }
+    codec.emit('ptt', true, 2);
+  }, 150);
+  await sleep(2600);
+  clearInterval(polls);
+  assert.ok(rxAt, 'RX sent: ' + JSON.stringify(writes));
+  // 'E' at 60 wpm: hold ~0.8 s + 0.3 s, then delay 200 ms + 600 ms
+  assert.ok(rxAt - t0 < 2300, `receive after ${rxAt - t0} ms, not the blanket 4 s`);
+  assert.ok(logs.some((l) => /still transmitting [\d.]+ s after the message ended \(readback TX2; \d+ ms old, BK-IN delay 200 ms\)/.test(l)), logs.join('\n'));
+  r.disconnect();
+});
+
+test('with the delay known, a readback from inside the delay is not acted on', async () => {
+  const { rig: r, codec, writes } = rig('FT-710');
+  r._cwWpm = 60;
+  r._breakIn = true;
+  r.sendCwText('E');
+  codec.emit('breakInDelay', 1500);
+  codec.emit('ptt', true, 2);
+  await sleep(1150);                  // the hold has just ended
+  codec.emit('ptt', true, 2);         // inside the 1.5 s delay: the radio may still be keyed
+  await sleep(1500);
+  codec.emit('ptt', false, 0);        // and it drops by itself
+  await sleep(1500);
+  assert.ok(!writes.includes('TX0;'), JSON.stringify(writes));
+  r.disconnect();
+});
+
+test('BK-IN goes back off only once the radio reports receive', async () => {
+  const { rig: r, codec, writes } = rig('FT-710');
+  r._cwWpm = 60;
+  r._breakIn = false;
+  r._cwStuckCheckMs = 60000;          // keep the backstop out of this test
+  r.sendCwText('E');
+  const polls = setInterval(() => codec.emit('ptt', true, 2), 300);
+  await sleep(5400);                  // past the 3.5 s grace, the radio still in TX
+  assert.ok(!writes.includes('BI0;'), 'not sent into a transmission: ' + JSON.stringify(writes));
+  clearInterval(polls);
+  codec.emit('ptt', false, 0);
+  await sleep(700);
+  assert.ok(writes.includes('BI0;'), 'put back once in receive: ' + JSON.stringify(writes));
+  r.disconnect();
+});
+
 test('#120: an Icom still reporting TX past the estimate is left alone, with no warning', async () => {
   const { rig: r, codec } = rig('IC-7610', CivCodec);
   const notices = [];
@@ -246,6 +388,34 @@ test('a Yaesu message then an Icom-path message does not keep the watch armed', 
   assert.deepStrictEqual(notices, []);
   r.disconnect();
 });
+
+// #582 (DA2PK, FT-710): TX0; is ignored while the radio plays a keyer
+// memory, so Stop let the message run on. Where the CAT manual has a stop
+// (KY P2 0: FT-710 2306-C p.14, FTX-1 2508-C p.18), Stop sends it first and
+// TX0; after, byte for byte. Radios whose manual has none keep TX0; alone.
+for (const id of ['FT-710', 'FTX-1 Field', 'FTX-1 Optima']) {
+  test(`${id}: Stop sends KY00; then TX0; (#582)`, async () => {
+    const { rig: r, writes } = rig(id);
+    r.sendCwText('TEST DE DA2PK');
+    await sleep(20);
+    writes.length = 0;
+    r.stopCwText();
+    assert.deepStrictEqual(writes.filter((w) => /^KY|^TX/.test(w)), ['KY00;', 'TX0;'], JSON.stringify(writes));
+    r.disconnect();
+  });
+}
+for (const id of ['FTDX10', 'FTDX101D', 'FTDX101MP', 'FT-991/991A', 'FT-891']) {
+  test(`${id}: no stop in its CAT manual, Stop sends TX0; only (#582)`, async () => {
+    const { rig: r, writes } = rig(id);
+    r.sendCwText('TEST');
+    await sleep(20);
+    writes.length = 0;
+    r.stopCwText();
+    assert.ok(!writes.some((w) => /^KY/.test(w)), 'no KY on stop: ' + JSON.stringify(writes));
+    assert.ok(writes.includes('TX0;'), 'TX0; still sent: ' + JSON.stringify(writes));
+    r.disconnect();
+  });
+}
 
 test('Stop ends the TX state at once, on a radio that sends no readback', async () => {
   const { rig: r, codec } = rig('TS-480');
@@ -285,7 +455,8 @@ test('ECHOCAT: an unchanged speed sends the radio no speed command ahead of the 
 
 test('N8JMS: a frequency event keeps the selected spot, and a map Tune finds its own call', () => {
   const app = readSrc(require('path').join(__dirname, '..', 'renderer', 'app.js'));
-  assert.ok(/const onSpot = onPicked \? lastTunedSpot : allSpots\.find/.test(app));
+  // #502: the fallback is the live (not aged-out) spot at the frequency.
+  assert.ok(/const onSpot = onPicked \? lastTunedSpot : liveSpotAtFreq\(/.test(app));
   assert.ok(/s\.callsign === btn\.dataset\.call/.test(app));
   assert.ok(/class="tune-btn" data-call=/.test(app));
 });

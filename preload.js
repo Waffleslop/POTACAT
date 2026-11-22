@@ -31,10 +31,16 @@ contextBridge.exposeInMainWorld('api', {
   // `origin` captures the renderer-side call stack so a stray QSY (e.g. the
   // 33 MHz jump) can be traced to its exact caller in the main-process log.
   tune: (frequency, mode, bearing, slicePort) => ipcRenderer.send('tune', { frequency, mode, bearing, slicePort, origin: (new Error()).stack }),
+  // A band button: in voice SSB main picks the band's sideband (#445).
+  tuneByBand: (frequency) => ipcRenderer.send('tune', { frequency, pickSideband: true, origin: (new Error()).stack }),
+  // A band button's destination: the radio's last frequency on that band, or the preset (#680).
+  bandJumpTarget: (frequency) => ipcRenderer.invoke('band-jump-target', frequency),
   onTuneBlocked: (cb) => ipcRenderer.on('tune-blocked', (_e, msg) => cb(msg)),
   // Generic main→renderer toast ({message, warn?, duration?}) — radio-link
   // transitions etc. Rendered via showLogToast in app.js.
   onAppNotice: (cb) => ipcRenderer.on('app-notice', (_e, data) => cb(data)),
+  onTxAudioInputAsk: (cb) => ipcRenderer.on('tx-audio-input-ask', (_e, data) => cb(data)),
+  setTxAudioInput: (data) => ipcRenderer.invoke('set-tx-audio-input', data),
   // A QSO reached the log, whatever path logged it (saveQsoRecord is the one
   // choke point). Drives the QSO-logged chime.
   onQsoLogged: (cb) => ipcRenderer.on('qso-logged', (_e, q) => cb(q)),
@@ -137,6 +143,22 @@ contextBridge.exposeInMainWorld('api', {
     ipcRenderer.on('remote-client-ptt-released', handler);
     return () => ipcRenderer.removeListener('remote-client-ptt-released', handler);
   },
+  // Guest Pass: the owner took the radio back ({paused:true}) or handed it
+  // back ({paused:false}). #541
+  // Guest Pass state from the station ({state, reason, endsAt, takeAt?,
+  // message?, device?, owner, targetId}) and "Use it here instead". #541 step 2
+  onRemotePassState: (cb) => {
+    const handler = (_e, info) => cb(info || {});
+    ipcRenderer.on('remote-pass-state', handler);
+    return () => ipcRenderer.removeListener('remote-pass-state', handler);
+  },
+  remotePassClaim: () => ipcRenderer.invoke('remote-pass-claim'),
+  remotePassTakeBack: () => ipcRenderer.invoke('remote-pass-take-back'),
+  onRemotePassHold: (cb) => {
+    const handler = (_e, info) => cb(info || {});
+    ipcRenderer.on('remote-pass-hold', handler);
+    return () => ipcRenderer.removeListener('remote-pass-hold', handler);
+  },
   onRemoteClientDisplaced: (cb) => {
     const handler = (_e, info) => cb(info);
     ipcRenderer.on('remote-client-displaced', handler);
@@ -221,6 +243,12 @@ contextBridge.exposeInMainWorld('api', {
   passEnforcementEnd: (reason) => ipcRenderer.invoke('pass-enforcement-end', reason),
   passTakeOver: () => ipcRenderer.invoke('pass-take-over'),
   passGiveBack: () => ipcRenderer.invoke('pass-give-back'),
+  // Share My Rig's owner controls (#200).
+  passOwnerGet: () => ipcRenderer.invoke('pass-owner-get'),
+  passOwnerTake: (opts) => ipcRenderer.invoke('pass-owner-take', opts),
+  passOwnerCancelTake: () => ipcRenderer.invoke('pass-owner-cancel-take'),
+  passOwnerGiveBack: () => ipcRenderer.invoke('pass-owner-give-back'),
+  onPassOwnerControls: (cb) => ipcRenderer.on('pass-owner-controls', (_e, c) => cb(c)),
   onPassEnforcementState: (cb) => {
     const handler = (_e, status) => cb(status);
     ipcRenderer.on('pass-enforcement-state', handler);
@@ -263,8 +291,11 @@ contextBridge.exposeInMainWorld('api', {
     return () => ipcRenderer.removeListener('open-settings-panel', handler);
   },
   getSettings: () => ipcRenderer.invoke('get-settings'),
+  probeTciRig: (target) => ipcRenderer.invoke('probe-tci-rig', target),
   getRigModels: () => ipcRenderer.invoke('get-rig-models'),
   getRigSetupNotes: (q) => ipcRenderer.invoke('get-rig-setup-notes', q),
+  getPacketRigMode: (q) => ipcRenderer.invoke('get-packet-rig-mode', q),
+  getRigPowerOffInfo: (q) => ipcRenderer.invoke('get-rig-power-off-info', q),
   icomScopeCapture: () => ipcRenderer.invoke('icom-scope-capture'),
   stationSetupGet: (rigId) => ipcRenderer.invoke('station-setup-get', rigId),
   stationSetupReport: (q) => ipcRenderer.invoke('station-setup-report', q),
@@ -363,7 +394,11 @@ contextBridge.exposeInMainWorld('api', {
   onCatLogHistory: (cb) => ipcRenderer.on('cat-log-history', (_e, lines) => cb(lines)),
   markBugReportStart: () => ipcRenderer.invoke('bug-report-mark'),
   getBugReportLog: () => ipcRenderer.invoke('get-bug-report-log'),
-  lotwLocations: () => ipcRenderer.invoke('lotw-locations'),
+  // #463: macOS microphone permission (lib/mac-mic-access.js; main decides, off macOS a no-op).
+  macMicCaptureStart: (surface) => ipcRenderer.invoke('mac-mic-capture-start', surface),
+  macMicSilence: (o) => ipcRenderer.send('mac-mic-silence', o),
+  onMacMicNotice: (cb) => ipcRenderer.on('mac-mic-notice', (_e, d) => cb(d)),
+  lotwLocations: (opts) => ipcRenderer.invoke('lotw-locations', opts || {}),
   lotwUpload: (opts) => ipcRenderer.invoke('lotw-upload', opts),
   lotwDownloadConfirmations: (opts) => ipcRenderer.invoke('lotw-download-confirmations', opts),
   clublogUpload: (opts) => ipcRenderer.invoke('clublog-upload', opts),
@@ -427,6 +462,10 @@ contextBridge.exposeInMainWorld('api', {
   channelsImportCsv: () => ipcRenderer.invoke('channels-import-csv'),
   channelGo: (id) => ipcRenderer.invoke('channel-go', { id }),
   channelsExportCsv: () => ipcRenderer.invoke('channels-export-csv'),
+  // Favourites (#329, lib/favorites.js): starred Landmarks and Channels, owned by main.
+  favoritesGet: () => ipcRenderer.invoke('favorites-get'),
+  favoriteSet: (kind, id, on) => ipcRenderer.invoke('favorite-set', { kind, id, on }),
+  onFavorites: (cb) => ipcRenderer.on('favorites', (_e, st) => cb(st)),
   fetchDirectory: () => ipcRenderer.send('fetch-directory'),
   getDirectory: () => ipcRenderer.invoke('get-directory'),
   // Events system
@@ -436,6 +475,7 @@ contextBridge.exposeInMainWorld('api', {
   setEventOptIn: (data) => ipcRenderer.invoke('set-event-optin', data),
   setEventWatchlist: (data) => ipcRenderer.invoke('set-event-watchlist', data),
   setEventSnooze: (data) => ipcRenderer.invoke('set-event-snooze', data),
+  setEventBanner: (data) => ipcRenderer.invoke('set-event-banner', data), // { eventId, shown }
   getEventProgress: (eventId) => ipcRenderer.invoke('get-event-progress', eventId),
   markEventRegion: (data) => ipcRenderer.invoke('mark-event-region', data),
   setEventItem: (data) => ipcRenderer.invoke('set-event-item', data),
@@ -508,12 +548,19 @@ contextBridge.exposeInMainWorld('api', {
   mercuryListDevices: () => ipcRenderer.invoke('mercury-list-devices'),
   // Winlink (Pat) — the mail window, Settings helpers, the bug-report line.
   winlinkPopoutOpen: () => ipcRenderer.send('winlink-popout-open'),
+  aprsPopoutOpen: () => ipcRenderer.send('aprs-popout-open'),
+  // APRS phase 4: the iGate's marks { on, active, call, sentence, link, gated, lastAt, lastFrom }
+  aprsIgateStatus: () => ipcRenderer.invoke('aprs-igate-status'),
+  onAprsIgateStatus: (cb) => ipcRenderer.on('aprs-igate-status', (_e, s) => cb(s)),
+  // The radio's GPS, read only (lib/flex-gps.js): Settings offers its grid, never sets it.
+  getFlexGps: () => ipcRenderer.invoke('flex-gps-get'),
+  onFlexGps: (cb) => ipcRenderer.on('flex-gps', (_e, s) => cb(s)),
   winlinkPotaSpotOpen: (o) => ipcRenderer.send('winlink-pota-spot-open', o || {}),
   winlinkDiag: () => ipcRenderer.invoke('winlink-diag'),
   settingsSaveStatus: () => ipcRenderer.invoke('settings-save-status'),
   winlinkListArdopDevices: () => ipcRenderer.invoke('winlink-list-ardop-devices'),
   winlinkAccountCheck: (call) => ipcRenderer.invoke('winlink-account-check', call),
-  winlinkVaraFind: (kind) => ipcRenderer.invoke('winlink-vara-find', { kind }),
+  winlinkVaraFind: (kind, o) => ipcRenderer.invoke('winlink-vara-find', { kind, host: o && o.host, port: o && o.port }),
   winlinkVaraSetup: (kind, devices, labels) => ipcRenderer.invoke('winlink-vara-setup', { kind, devices, ...(labels || {}) }),
   winlinkAudioRig: () => ipcRenderer.invoke('winlink-audio-rig'),
   winlinkRegister: (o) => ipcRenderer.invoke('winlink-register', o),
@@ -558,6 +605,8 @@ contextBridge.exposeInMainWorld('api', {
   cwStop: () => ipcRenderer.send('cw-stop'),
   sendCwText: (text, opts) => ipcRenderer.send('send-cw-text', text, opts),
   voiceMacroPtt: (state) => ipcRenderer.send('voice-macro-ptt', state),
+  // SCU-LAN10 (#227): the decoded recording, 16 kHz mono, for main to send over the LAN.
+  voiceMacroLan: (payload) => ipcRenderer.send('voice-macro-lan', payload),
   exportSettings: () => ipcRenderer.invoke('export-settings'),
   importSettings: () => ipcRenderer.invoke('import-settings'),
   relaunch: () => ipcRenderer.send('app-relaunch'),

@@ -1,6 +1,6 @@
 {
- "version": 1,
- "about": "Starter channel chart: FRS, GMRS, MURS, marine VHF, aviation, public-safety and federal interop, EMS. From lists shared by KL4XQ and KC8DHX. Edit, reorder or delete any of it in Directory > Channels.",
+ "version": 2,
+ "about": "Starter channel chart: FRS, GMRS, MURS, CB, marine VHF, aviation, public-safety and federal interop, EMS. From lists shared by KL4XQ and KC8DHX; CB from FCC 47 CFR 95.963. Edit, reorder or delete any of it in Directory > Channels.",
  "channels": [
   {
    "id": "air-guard",
@@ -451,6 +451,406 @@
    "tone": "",
    "group": "MURS",
    "note": "Licence-free, 2 W; the old business 'Green Dot' channel"
+  },
+  {
+   "id": "cb-1",
+   "name": "CB 1",
+   "khz": 26965,
+   "mode": "AM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "CB (Citizens Band)",
+   "note": "Citizens Band, AM."
+  },
+  {
+   "id": "cb-2",
+   "name": "CB 2",
+   "khz": 26975,
+   "mode": "AM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "CB (Citizens Band)",
+   "note": "Citizens Band, AM."
+  },
+  {
+   "id": "cb-3",
+   "name": "CB 3",
+   "khz": 26985,
+   "mode": "AM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "CB (Citizens Band)",
+   "note": "Citizens Band, AM."
+  },
+  {
+   "id": "cb-4",
+   "name": "CB 4",
+   "khz": 27005,
+   "mode": "AM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "CB (Citizens Band)",
+   "note": "Citizens Band, AM."
+  },
+  {
+   "id": "cb-5",
+   "name": "CB 5",
+   "khz": 27015,
+   "mode": "AM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "CB (Citizens Band)",
+   "note": "Citizens Band, AM."
+  },
+  {
+   "id": "cb-6",
+   "name": "CB 6",
+   "khz": 27025,
+   "mode": "AM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "CB (Citizens Band)",
+   "note": "Citizens Band, AM."
+  },
+  {
+   "id": "cb-7",
+   "name": "CB 7",
+   "khz": 27035,
+   "mode": "AM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "CB (Citizens Band)",
+   "note": "Citizens Band, AM."
+  },
+  {
+   "id": "cb-8",
+   "name": "CB 8",
+   "khz": 27055,
+   "mode": "AM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "CB (Citizens Band)",
+   "note": "Citizens Band, AM."
+  },
+  {
+   "id": "cb-9",
+   "name": "CB 9 Emergency",
+   "khz": 27065,
+   "mode": "AM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "CB (Citizens Band)",
+   "note": "Emergency and traveler assistance only (FCC rule 47 CFR 95.931). Listen; transmit only for an emergency or to help a traveler."
+  },
+  {
+   "id": "cb-10",
+   "name": "CB 10",
+   "khz": 27075,
+   "mode": "AM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "CB (Citizens Band)",
+   "note": "Citizens Band, AM."
+  },
+  {
+   "id": "cb-11",
+   "name": "CB 11",
+   "khz": 27085,
+   "mode": "AM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "CB (Citizens Band)",
+   "note": "Citizens Band, AM."
+  },
+  {
+   "id": "cb-12",
+   "name": "CB 12",
+   "khz": 27105,
+   "mode": "AM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "CB (Citizens Band)",
+   "note": "Citizens Band, AM."
+  },
+  {
+   "id": "cb-13",
+   "name": "CB 13",
+   "khz": 27115,
+   "mode": "AM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "CB (Citizens Band)",
+   "note": "Citizens Band, AM."
+  },
+  {
+   "id": "cb-14",
+   "name": "CB 14",
+   "khz": 27125,
+   "mode": "AM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "CB (Citizens Band)",
+   "note": "Citizens Band, AM."
+  },
+  {
+   "id": "cb-15",
+   "name": "CB 15",
+   "khz": 27135,
+   "mode": "AM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "CB (Citizens Band)",
+   "note": "Citizens Band, AM."
+  },
+  {
+   "id": "cb-16",
+   "name": "CB 16",
+   "khz": 27155,
+   "mode": "AM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "CB (Citizens Band)",
+   "note": "Citizens Band, AM."
+  },
+  {
+   "id": "cb-17",
+   "name": "CB 17",
+   "khz": 27165,
+   "mode": "AM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "CB (Citizens Band)",
+   "note": "Citizens Band, AM."
+  },
+  {
+   "id": "cb-18",
+   "name": "CB 18",
+   "khz": 27175,
+   "mode": "AM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "CB (Citizens Band)",
+   "note": "Citizens Band, AM."
+  },
+  {
+   "id": "cb-19",
+   "name": "CB 19 Highway",
+   "khz": 27185,
+   "mode": "AM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "CB (Citizens Band)",
+   "note": "The highway and travelers' channel by custom: truckers, road and traffic news. The rules do not reserve it. AM."
+  },
+  {
+   "id": "cb-20",
+   "name": "CB 20",
+   "khz": 27205,
+   "mode": "AM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "CB (Citizens Band)",
+   "note": "Citizens Band, AM."
+  },
+  {
+   "id": "cb-21",
+   "name": "CB 21",
+   "khz": 27215,
+   "mode": "AM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "CB (Citizens Band)",
+   "note": "Citizens Band, AM."
+  },
+  {
+   "id": "cb-22",
+   "name": "CB 22",
+   "khz": 27225,
+   "mode": "AM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "CB (Citizens Band)",
+   "note": "Citizens Band, AM."
+  },
+  {
+   "id": "cb-23",
+   "name": "CB 23",
+   "khz": 27255,
+   "mode": "AM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "CB (Citizens Band)",
+   "note": "Citizens Band, AM. Channel 23 sits above 24 and 25 in frequency (27.255 MHz)."
+  },
+  {
+   "id": "cb-24",
+   "name": "CB 24",
+   "khz": 27235,
+   "mode": "AM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "CB (Citizens Band)",
+   "note": "Citizens Band, AM."
+  },
+  {
+   "id": "cb-25",
+   "name": "CB 25",
+   "khz": 27245,
+   "mode": "AM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "CB (Citizens Band)",
+   "note": "Citizens Band, AM."
+  },
+  {
+   "id": "cb-26",
+   "name": "CB 26",
+   "khz": 27265,
+   "mode": "AM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "CB (Citizens Band)",
+   "note": "Citizens Band, AM."
+  },
+  {
+   "id": "cb-27",
+   "name": "CB 27",
+   "khz": 27275,
+   "mode": "AM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "CB (Citizens Band)",
+   "note": "Citizens Band, AM."
+  },
+  {
+   "id": "cb-28",
+   "name": "CB 28",
+   "khz": 27285,
+   "mode": "AM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "CB (Citizens Band)",
+   "note": "Citizens Band, AM."
+  },
+  {
+   "id": "cb-29",
+   "name": "CB 29",
+   "khz": 27295,
+   "mode": "AM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "CB (Citizens Band)",
+   "note": "Citizens Band, AM."
+  },
+  {
+   "id": "cb-30",
+   "name": "CB 30",
+   "khz": 27305,
+   "mode": "AM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "CB (Citizens Band)",
+   "note": "Citizens Band, AM."
+  },
+  {
+   "id": "cb-31",
+   "name": "CB 31",
+   "khz": 27315,
+   "mode": "AM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "CB (Citizens Band)",
+   "note": "Citizens Band, AM."
+  },
+  {
+   "id": "cb-32",
+   "name": "CB 32",
+   "khz": 27325,
+   "mode": "AM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "CB (Citizens Band)",
+   "note": "Citizens Band, AM."
+  },
+  {
+   "id": "cb-33",
+   "name": "CB 33",
+   "khz": 27335,
+   "mode": "AM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "CB (Citizens Band)",
+   "note": "Citizens Band, AM."
+  },
+  {
+   "id": "cb-34",
+   "name": "CB 34",
+   "khz": 27345,
+   "mode": "AM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "CB (Citizens Band)",
+   "note": "Citizens Band, AM."
+  },
+  {
+   "id": "cb-35",
+   "name": "CB 35",
+   "khz": 27355,
+   "mode": "AM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "CB (Citizens Band)",
+   "note": "Citizens Band, AM."
+  },
+  {
+   "id": "cb-36",
+   "name": "CB 36 SSB",
+   "khz": 27365,
+   "mode": "LSB",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "CB (Citizens Band)",
+   "note": "Used for sideband (SSB) by custom, mostly LSB. Not a rule."
+  },
+  {
+   "id": "cb-37",
+   "name": "CB 37 SSB",
+   "khz": 27375,
+   "mode": "LSB",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "CB (Citizens Band)",
+   "note": "Used for sideband (SSB) by custom, mostly LSB. Not a rule."
+  },
+  {
+   "id": "cb-38",
+   "name": "CB 38 LSB calling",
+   "khz": 27385,
+   "mode": "LSB",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "CB (Citizens Band)",
+   "note": "The usual sideband calling channel by custom (LSB): call here, then move to another sideband channel. Not a rule."
+  },
+  {
+   "id": "cb-39",
+   "name": "CB 39 SSB",
+   "khz": 27395,
+   "mode": "LSB",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "CB (Citizens Band)",
+   "note": "Used for sideband (SSB) by custom, mostly LSB. Not a rule."
+  },
+  {
+   "id": "cb-40",
+   "name": "CB 40 SSB",
+   "khz": 27405,
+   "mode": "LSB",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "CB (Citizens Band)",
+   "note": "Used for sideband (SSB) by custom, mostly LSB. Not a rule."
   },
   {
    "id": "marine-01a",

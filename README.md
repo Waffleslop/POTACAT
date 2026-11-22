@@ -24,11 +24,34 @@ Eight live spot sources on one screen, one-click CAT tuning — then hand the wh
 > *"I want you to know I love this platform. **It is the most awesome POTA platform I have seen.**"*
 > — **K5MUL**, POTACAT Discord
 
-<a href="https://www.youtube.com/watch?v=JOUWVSQPK4Y">
-  <img src="https://i.ytimg.com/vi/JOUWVSQPK4Y/maxresdefault.jpg" alt="Casey K3SBP and Jason KM4ACK discussing POTACAT" width="520">
+### Watch it first
+
+<a href="https://www.youtube.com/watch?v=QyjFec5rQF0">
+  <img src="https://i.ytimg.com/vi/QyjFec5rQF0/hqdefault.jpg" alt="KM4ACK's video: The Free App Remote Hams Are Switching To - POTACAT" width="720">
 </a>
 
-▶️ **[POTACAT on KM4ACK's channel](https://www.youtube.com/watch?v=JOUWVSQPK4Y)** — a walkthrough of what it does and why it was built
+▶️ **[The Free App Remote Hams Are Switching To - POTACAT](https://www.youtube.com/watch?v=QyjFec5rQF0)** — KM4ACK
+
+<br>
+
+**More videos**
+
+<table>
+<tr>
+<td align="center" width="33%" valign="top">
+<a href="https://www.youtube.com/watch?v=JOUWVSQPK4Y"><img src="https://i.ytimg.com/vi/JOUWVSQPK4Y/hqdefault.jpg" alt="Casey K3SBP and Jason KM4ACK discussing POTACAT" width="260"></a><br>
+<sub><a href="https://www.youtube.com/watch?v=JOUWVSQPK4Y">POTACAT on KM4ACK's channel</a><br>a walkthrough of what it does and why it was built</sub>
+</td>
+<td align="center" width="33%" valign="top">
+<a href="https://www.youtube.com/watch?v=3DuQkHkYB8w"><img src="https://i.ytimg.com/vi/3DuQkHkYB8w/hqdefault.jpg" alt="Ham Radio Tube: How To Do HF Ham Radio While Grocery Shopping" width="260"></a><br>
+<sub><a href="https://www.youtube.com/watch?v=3DuQkHkYB8w">How To Do HF Ham Radio While Grocery Shopping</a><br>Ham Radio Tube</sub>
+</td>
+<td align="center" width="33%" valign="top">
+<a href="https://www.youtube.com/watch?v=U4p4HK-u5wo"><img src="https://i.ytimg.com/vi/U4p4HK-u5wo/hqdefault.jpg" alt="Ham Radio 2.0: POTACAT - FREE Remote and Rig Control Software for your Radio" width="260"></a><br>
+<sub><a href="https://www.youtube.com/watch?v=U4p4HK-u5wo">POTACAT - FREE Remote and Rig Control Software for your Radio</a><br>Ham Radio 2.0</sub>
+</td>
+</tr>
+</table>
 
 </div>
 
@@ -113,17 +136,14 @@ Settings live in the same place either way. More Windows detail in **[INSTALL.md
 ### 🍎 macOS
 
 1. Download the `.dmg` for **your** chip — `-arm64.dmg` for Apple Silicon, plain `.dmg` for Intel.
+   Not sure which? Apple menu → **About This Mac** → **Chip** says "Apple M…" or "Intel".
 2. Open it and drag **POTACAT** into **Applications**.
-3. Apple Silicon Macs will say *"POTACAT is damaged and can't be opened."* It isn't damaged —
-   that's what macOS says about any app built without a paid Apple Developer ID. Open **Terminal**
-   and paste this once:
+3. Open POTACAT normally. The Mac builds are signed and notarized by Apple, so no Terminal
+   command is needed.
 
-   ```bash
-   sudo xattr -dr com.apple.quarantine /Applications/POTACAT.app
-   ```
-
-   Enter your Mac password, then open POTACAT normally. On Intel Macs, right-click → **Open** →
-   **Open** is usually enough.
+If macOS says POTACAT *"is damaged and can't be opened"*, you have an old download from before
+signing or the file for the other chip. Delete the app from **Applications**, download the current
+`.dmg` for your chip, and drag it in again.
 
 ### 🐧 Linux
 
@@ -166,7 +186,7 @@ start, run it with `--no-sandbox`.
 
 ## 🕐 The First Five Minutes
 
-**1. Connect your rig.** Settings → **My Rigs** → pick a connection type:
+**1. Connect your rig.** Settings → **Radio** → **+ Add Rig** → pick a connection type:
 
 | Your radio | Connection type |
 |---|---|
@@ -208,24 +228,39 @@ click **Approve**. That's the entire pairing flow. Leave the house and the stati
   DXpedition feed — merged, de-duplicated, and filtered by band, mode, distance and what you still
   need. Hide worked parks; hide anything outside your license privileges.
 - **🎯 One-click QSY.** Click a spot and the rig tunes — frequency, mode and CW offset. FlexRadio
-  native, Hamlib, or direct serial.
+  native, Icom over USB or the network, the Elecraft K4 over the network, Zeus and Thetis SDRs over
+  TCI, Hamlib, or direct serial. A **potacat://** tune link on a web page tunes the same way and
+  never makes the radio transmit. The VFO window comes Large or Small, showing what you choose, and
+  rig presets set TX power, RF gain and AF gain in one tap.
 - **🗺️ Table, map and split views.** Sortable, resizable table; Leaflet map with per-source marker
   colours, day/night terminator, and a pop-out window driven by the same filters.
 - **📻 Flex Direct.** POTACAT drives a FlexRadio all by itself — tune, listen and key CW with no
   SmartSDR running. An SWR guard aborts TX into a bad match before your finals notice.
-- **🔊 FT8 built in.** JTCAT runs FT8 and FT4 with auto-sequencing, a-priori decoding and clock-sync
-  checks. **Spot Target** is the fun part: click a callsign anywhere in the app and JTCAT works
-  them for you.
+- **🔊 FT8 built in.** JTCAT runs FT8, FT4 and FT2 with auto-sequencing, a-priori decoding and
+  clock-sync checks. **Spot Target** is the fun part: click a callsign anywhere in the app and JTCAT
+  works them for you. **Hunt** answers several targets at once in the order you choose, a contact
+  is logged once a 73 is sent or received, and JTTY adds keyboard chats with a tab per station.
+- **Winlink email.** Over the internet, ARDOP, packet, or your own copy of VARA, through the
+  bundled Pat. The Winlink Standard Forms (ICS-213, Winlink Check-in and the rest), templates, an
+  address book, gateways ranked by propagation with your favourites starred, and a dropped link
+  that says what happened and tries once more by itself. Internet mail runs on Windows, macOS and Linux; ARDOP
+  and packet over the radio on Windows and Linux.
+- **APRS.** A map of the stations near you, listening on your own radio on 2 m or 30 m, a
+  one-click position beacon over the radio or the internet, messages, and an iGate you can turn on.
+  Your beacon shows you near home, about a mile out, never at your door.
 - **📬 JS8 mailbox.** Keyboard-to-keyboard when you're at the desk; a message drop that quietly
   collects `@ALLCALL` and directed traffic when you're not.
 - **🌍 WSPR beacon & footprint.** Run a 1-watt beacon overnight, hop bands on a schedule, and wake
   up to a map of every receiver that actually heard you — then spend your real operating time on
   the band that was working.
-- **🖼️ More digital modes.** SSTV send and receive, PSK31 with a live keyboard, FreeDV (including
-  RADE), and the Mercury HF data modem for chat and file transfer. No extra software to babysit.
+- **🖼️ More digital modes.** SSTV send and receive, PSK31 with a live keyboard, FreeDV digital
+  voice receive on Windows, macOS and Linux (including RADE), and the Mercury HF data modem for chat
+  and file transfer. No extra software to babysit.
 - **📖 Logs everywhere you do.** Local ADIF always, forwarded live to Log4OM, DXKeeper, Ham Radio
-  Deluxe, N3FJP and Wavelog, with Cloud sync across your devices. Import a POTA CSV for "NEW park"
-  badges, or an ADIF log for a DXCC band/mode matrix.
+  Deluxe, N3FJP / ACLog, Logger32, MacLoggerDX, HamRS, RUMlogNG, Wavelog and World Radio League,
+  with uploads to LoTW, Club Log and QRZ Logbook and Cloud sync across your devices. A two-fer
+  reaches your logger with every park, and the frequency is kept to the hertz. Import a POTA CSV
+  for "NEW park" badges, or an ADIF log for a DXCC band/mode matrix.
 - **👥 Multi-operator.** Shared shack? Each operator gets their own callsign, logbook, macros and
   watchlist on one install. Ctrl-click several spots to log a multi-op activation in one go.
 - **🏁 Contest & event aware.** 13 Colonies, WRTC, America 250 — event checklists and banners show
@@ -233,6 +268,13 @@ click **Approve**. That's the entire pairing flow. Leave the house and the stati
 - **🔭 Rotators, propagation, alerts.** Rotor-EZ / RotorCard / DCU-1 control, a solar and band
   conditions panel, watchlist desktop notifications, and a scan mode that steps through filtered
   spots on a dwell timer.
+- **Transmit you can trust.** Every transmission POTACAT starts has a time limit, after which the
+  radio is unkeyed by every route POTACAT has. An SWR guard stops TX into a bad match, a Winlink
+  gateway the radio cannot transmit on is refused before anything keys, and a tune link never keys
+  the radio.
+- **Six themes, the same as ECHOCAT.** POTACAT Light, She's On Frequency, POTACAT Dark, Midnight,
+  Acid Burn and Miami Nights, in every window and in ECHOCAT Web, with Light, Dark or System to
+  follow your computer.
 
 ### 📶 Your spots, on the panadapter
 
@@ -247,6 +289,10 @@ the actual frequency** — you watch the band the way you already do, and the ca
 
 Works with **SmartSDR** (FlexRadio 6000/8000), **AetherSDR**, **Thetis** for ANAN / Apache Labs /
 Hermes-Lite over TCI — or your rig's own built-in panadapter.
+
+No panadapter software? POTACAT's **Band Scope** window shows the radio's own scope, with click to
+tune: the FT-710, Icom over USB or LAN, FlexRadio, the Yaesu SCU-LAN10, Zeus and Thetis over TCI,
+and, newest, the Elecraft K4 and Kenwood TS-890S. It is on your phone too.
 
 > *"AetherSDR and POTACAT is going to be a game changer. It's exciting times to be a Flex user."*
 > — **N5ZC**
@@ -301,6 +347,10 @@ Pair your phone to POTACAT once and the station follows you everywhere.
 **Prefer a browser?** The web client built into POTACAT is free and does most of the same job over
 your LAN or Tailscale.
 
+**Have a laptop?** A second POTACAT can run your shack the way your phone does: pair it to the
+station PC and its VFO window, hold to talk, FT8, JS8, SSTV, CW, voice macros and band scope all
+drive the radio at home.
+
 **No radio yet?** Listen to SDR receivers across the globe in ECHOCAT Web — no install, no account,
 just **[sdr.potacat.com](https://sdr.potacat.com)**.
 
@@ -332,7 +382,9 @@ operate your station for a window you control. Email them a link; that's the who
 - **✓ Power-capped and time-boxed.** Set a max TX power and an expiry from 1 hour to 30 days.
   Revoke any pass instantly.
 - **✓ Legal by design.** Station, operator and control-op callsigns are recorded per **§97.119**,
-  and guest QSOs log to *their* logbook.
+  and guest QSOs log to *their* logbook, with the lending station's location.
+- **✓ You stay in charge.** The Share Your Rig window shows who has the radio, with
+  **Take the radio** (now or in 5 minutes), **Give it back** and **Cancel pass**.
 
 > *"My father-in-law in assisted living isn't doing his physical therapy like he's supposed to, so
 > I'm going over the next few weeks to work with him — and **his reward is getting on the air**."*

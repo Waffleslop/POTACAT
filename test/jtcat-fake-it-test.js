@@ -56,15 +56,82 @@ const MAIN = readSrc(path.join(ROOT, 'main.js'));
     assert.strictEqual(7074000 + n, p.txDialHz + (n - s));
   });
 
-  await test('a reading at the shifted dial is ours while shifted and for 3 s after; others are the operator\'s', () => {
+  await test('a reading at the shifted dial is ours while shifted and after, until another frequency is read', () => {
     const st = { active: true, txDialHz: 14073000, restoredAt: 0 };
-    assert.strictEqual(FakeIt.isShiftEcho(14073000, st, 1000), true);
-    assert.strictEqual(FakeIt.isShiftEcho(7074000, st, 1000), true, 'nothing is the operator\'s while shifted');
+    assert.strictEqual(FakeIt.isShiftEcho(14073000, st), true);
+    assert.strictEqual(FakeIt.isShiftEcho(7074000, st), true, "nothing is the operator's while shifted");
     const after = { active: false, txDialHz: 14073000, restoredAt: 10000 };
-    assert.strictEqual(FakeIt.isShiftEcho(14073000, after, 11000), true, 'a late poll answer');
-    assert.strictEqual(FakeIt.isShiftEcho(14074000, after, 11000), false, 'the restored dial');
-    assert.strictEqual(FakeIt.isShiftEcho(14073000, after, 10000 + FakeIt.LATE_READ_MS + 1), false);
-    assert.strictEqual(FakeIt.isShiftEcho(14073000, { active: false, txDialHz: 0 }, 0), false);
+    assert.strictEqual(FakeIt.isShiftEcho(14073000, after), true, 'a late poll answer');
+    assert.strictEqual(FakeIt.isShiftEcho(14074000, after), false, 'the restored dial');
+    assert.strictEqual(FakeIt.isShiftEcho(14073000, { ...after, settled: true }), false, "after another read, the operator's");
+    assert.strictEqual(FakeIt.isShiftEcho(14073000, { active: false, txDialHz: 0 }), false);
+  });
+
+  // GitHub #681 (FTDX10 on a Mac): the dial crept 500 Hz per transmission.
+  // Run the whole cycle against a model radio: TX shifts from the home dial,
+  // the restore goes out, then the radio is read back.
+  function cycle(st, homeHz, shiftHz) {
+    const plan = FakeIt.planShift({ shiftHz, dialHz: homeHz });
+    Object.assign(st, { active: true, dialHz: plan.dialHz, txDialHz: plan.txDialHz, shiftHz, restoredAt: 0, restorePending: false, settled: false, restoreRetries: 0, lastRetryAt: 0 });
+    return plan;
+  }
+  function read(st, hz, now) {
+    const r = FakeIt.onDialRead(hz, st, now);
+    if (r.patch) Object.assign(st, r.patch);
+    return r;
+  }
+
+  await test('#681: a late read of the shifted dial, however late, never becomes the dial', () => {
+    const st = {};
+    let home = 14074000;
+    for (let i = 0; i < 8; i++) {
+      const plan = cycle(st, home, 500);
+      assert.strictEqual(plan.txDialHz, 14074500, `cycle ${i} shifts from the operator's dial`);
+      st.active = false; st.restoredAt = 100000 * (i + 1);            // the restore went out
+      const r = read(st, plan.txDialHz, st.restoredAt + 9000 + i * 5000);   // 9 s and later: the old window was 3 s
+      assert.strictEqual(r.echo, true, `cycle ${i}: late read dropped`);
+      assert.strictEqual(r.action, 'restore', 'and the dial is sent back again');
+      const ok = read(st, 14074000, st.restoredAt + 20000 + i * 5000);
+      assert.strictEqual(ok.echo, false, "the restored dial is the operator's");
+      assert.strictEqual(st.settled, true);
+      home = 14074000;                                            // what _currentFreqHz holds: only accepted reads
+    }
+  });
+
+  await test('#681: a restore the radio dropped is sent again, at most three times, then the read is accepted', () => {
+    const st = {};
+    const plan = cycle(st, 7074000, -1000);
+    st.active = false; st.restoredAt = 1000;
+    const acts = [];
+    for (let t = 1500; t <= 9000; t += 500) {
+      const r = read(st, plan.txDialHz, t);
+      acts.push(r.echo ? (r.action || 'echo') : r.action);
+      if (!r.echo) break;
+    }
+    assert.deepStrictEqual(acts.filter(a => a === 'restore').length, FakeIt.RESTORE_RETRIES, acts.join(','));
+    assert.strictEqual(acts[acts.length - 1], 'accept', acts.join(','));
+    // Retries are at least a second apart.
+    assert.deepStrictEqual(acts.slice(0, 4), ['restore', 'echo', 'restore', 'echo']);
+    assert.strictEqual(st.settled, true);
+    assert.strictEqual(FakeIt.onDialRead(plan.txDialHz, st, 20000).echo, false, "settled: the operator's");
+  });
+
+  await test('#681: the operator turning the knob after a transmission is never held back', () => {
+    const st = {};
+    const plan = cycle(st, 14074000, 500);
+    st.active = false; st.restoredAt = 1000;
+    const r = read(st, 14080000, 1200);
+    assert.deepStrictEqual([r.echo, r.action], [false, null]);
+    assert.strictEqual(st.settled, true);
+    // A stale read of the shifted dial after the knob is no longer ours to drop or undo.
+    const late = read(st, plan.txDialHz, 9000);
+    assert.deepStrictEqual([late.echo, late.action], [false, null]);
+    // During TX everything is ours; with the link down the restore waits, no re-send.
+    cycle(st, 14074000, 500);
+    assert.strictEqual(read(st, 14080000, 1).echo, true);
+    st.active = false; st.restorePending = true;
+    assert.deepStrictEqual(FakeIt.onDialRead(14074500, st, 5000), { echo: true, action: null, patch: null });
+    assert.deepStrictEqual(FakeIt.onDialRead(14074000, {}, 5000), { echo: false, action: null, patch: null });
   });
 
   await test('the engine renders the tone at the shifted audio and reports the dial shift on tx-start', async () => {

@@ -106,5 +106,33 @@ check('every field the module can state has a row, and every row is in the rig s
   }
 });
 
+// The 2026-11-19 30 m beacon (8600M v4.2.20): the radio was at 5 W, the
+// confirmation line said 100 W. `sub tx all` also sends one `transmit band <n>
+// ... rfpower=` line per band, the radio's per-band power MEMORY; the last one
+// (630 m) said 100. Only the live `transmit ... rfpower=` line is the power.
+// The same rule as #676's commit 1576d1a1, here for #760's path.
+check('`transmit band` lines are the per-band power memory: they never change the live power', () => {
+  const live = 'S58E318C3|transmit freq=10.147600 rfpower=5 tunepower=10 tx_slice_mode=DIGU hwalc_enabled=0 inhibit=0 dax=1 sb_monitor=0';
+  const bands = [
+    'S58E318C3|transmit band 0 band_name=160 rfpower=100 tunepower=10 hwalc_enabled=0 inhibit=0',
+    'S58E318C3|transmit band 7 band_name=30 rfpower=70 tunepower=10 hwalc_enabled=0 inhibit=0',
+    'S58E318C3|transmit band 99 band_name=630 rfpower=100 tunepower=10 hwalc_enabled=0 inhibit=0',
+  ];
+  const c = new SmartSdrClient();
+  const power = [];
+  let statuses = 0;
+  c.on('power', (w) => power.push(w));
+  c.on('transmit-status', () => statuses++);
+  c._handleLine(live);
+  for (const b of bands) c._handleLine(b);
+  assert.deepStrictEqual(power, [5], 'live 5 W stands after the band lines (emitted ' + JSON.stringify(power) + ')');
+  assert.strictEqual(statuses, 1, 'band lines are not transmit status');
+  const { SmartSdrAudio } = require('../lib/smartsdr-audio');
+  const a = new SmartSdrAudio();
+  a._handleLine('S1|transmit dax=1');
+  a._handleLine(bands[0]);
+  assert.strictEqual(a._txDaxOn, true, 'the audio connection ignores band lines');
+});
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

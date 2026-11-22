@@ -35,6 +35,7 @@ lib/ft8_native/build/
 lib/ft8_native/bin/
 lib/js8_native/build/
 lib/rade_native/build/
+lib/freedv_native/build/
 
 # ── Local-only working files (present on Casey's machine, never committed) ──
 # NOTE: gitignoring only stops them being staged — nothing here is deleted.

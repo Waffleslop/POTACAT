@@ -69,7 +69,7 @@ test('the read-back: within 1 kHz is the channel; elsewhere names both frequenci
   assert.strictEqual(M.recallVerdict({ channel: ch, gotHz: 146940600 }).ok, true);
   const bad = M.recallVerdict({ channel: ch, gotHz: 147300000 });
   assert.strictEqual(bad.ok, false);
-  assert.ok(/147\.3000 MHz, not W4XYZ's 146\.9400 MHz/.test(bad.text) && /memory number in Directory > Channels/.test(bad.text));
+  assert.ok(/147\.300\.00 MHz, not W4XYZ's 146\.940\.00 MHz/.test(bad.text) && /memory number in Directory > Channels/.test(bad.text));
   assert.strictEqual(M.recallVerdict({ channel: ch, gotHz: 0 }).ok, null);
 });
 
@@ -140,7 +140,7 @@ test('ECHOCAT: a channel tap names its channel; the shack recalls, an older app 
   assert.ok(/type: 'tune', freqKhz: String\(c\.khz\), mode: channelTuneMode\(c\.mode\), channelId: c\.id/.test(web));
   const srv = readSrc(path.join(root, 'lib', 'remote-server.js'));
   assert.ok(/channelId: typeof msg\.channelId === 'string' \? msg\.channelId\.slice\(0, 64\) : undefined/.test(srv));
-  const i = main.indexOf("remoteServer.on('tune', ({ freqKhz, mode, bearing, channelId }) => {");
+  const i = main.indexOf("remoteServer.on('tune', ({ freqKhz, mode, bearing, channelId, pickSideband }) => {");
   assert.ok(i > 0);
   const head = main.slice(i, i + 700);
   assert.ok(/channelMemoryOf\(String\(channelId\)\) != null && cat && cat\.connected && cat\.canRecallMemory/.test(head) && /channelGo\(String\(channelId\), 'ECHOCAT'\)/.test(head));

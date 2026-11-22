@@ -1,6 +1,10 @@
 const { contextBridge, ipcRenderer, webFrame } = require('electron');
 
 contextBridge.exposeInMainWorld('api', {
+  // #463: macOS microphone permission (lib/mac-mic-access.js; main decides, off macOS a no-op).
+  macMicCaptureStart: (surface) => ipcRenderer.invoke('mac-mic-capture-start', surface),
+  macMicSilence: (o) => ipcRenderer.send('mac-mic-silence', o),
+  onMacMicNotice: (cb) => ipcRenderer.on('mac-mic-notice', (_e, d) => cb(d)),
   // Waterfall palette (lib/waterfall-palettes.js), one setting for every waterfall window.
   getWaterfallPalette: () => ipcRenderer.invoke('get-waterfall-palette'),
   setWaterfallPalette: (id) => ipcRenderer.invoke('set-waterfall-palette', id),
@@ -59,7 +63,7 @@ contextBridge.exposeInMainWorld('api', {
   },
   // Gallery
   sstvGetGallery: () => ipcRenderer.invoke('sstv-get-gallery'),
-  sstvOpenGalleryFolder: () => ipcRenderer.send('sstv-open-gallery-folder'),
+  sstvOpenGalleryFolder: () => ipcRenderer.invoke('sstv-open-gallery-folder'),
   sstvKeepImage: (d) => ipcRenderer.invoke('sstv-keep-image', d),
   sstvDeleteImage: (filename) => ipcRenderer.invoke('sstv-delete-image', filename),
   sstvLoadFile: () => ipcRenderer.invoke('sstv-load-file'),

@@ -3,6 +3,8 @@
 // both work. Sets data-theme and (in charcoal dark variant only) the
 // data-dark-variant attribute on <html>.
 function _applyPopoutTheme(payload) {
+  // The shared rule (popout-theme-boot*.js) also sets data-ds (#376).
+  if (window.applyPopoutTheme) return window.applyPopoutTheme(payload);
   const theme = typeof payload === 'string'
     ? payload
     : ((payload && payload.theme) || 'dark');
@@ -444,7 +446,7 @@ function updateMapMarkers(spots) {
 
     const popupContent = `
       <b>${watched ? '\u2B50 ' : ''}<a href="#" class="popup-qrz" data-call="${s.callsign}">${s.callsign}</a></b> <span style="color:${sourceColor};font-size:11px;">[${sourceLabel}]</span>${expeditionBadge}${newBadge}${wwffBadge}<br>
-      ${opLine}${parseFloat(s.frequency).toFixed(1)} kHz &middot; ${s.mode}<br>
+      ${opLine}${FreqDots.khzMhz(s.frequency)} &middot; ${s.mode}<br>
       <b>${s.reference || ''}</b> ${s.parkName || ''}${wwffRefLine}<br>
       ${distStr}<br>
       <button class="tune-btn" data-freq="${s.frequency}" data-mode="${s.mode}" data-bearing="${s.bearing != null ? s.bearing : ''}" data-lat="${s.lat != null ? s.lat : ''}" data-lon="${s.lon != null ? s.lon : ''}" data-source="${s.source || ''}">Tune</button>${logBtnHtml}
@@ -664,11 +666,8 @@ async function init() {
     distUnit = settings.distUnit || 'mi';
     enableLogging = !!settings.enableLogging;
 
-    // Apply theme + dark variant
-    _applyPopoutTheme({
-      theme: settings.lightMode ? 'light' : 'dark',
-      variant: settings.darkVariant || 'navy',
-    });
+    // The theme in force (main's themeQuery(), lib/app-theme.js)
+    if (settings.themeNow) _applyPopoutTheme(settings.themeNow);
 
     // Apply colorblind mode
     if (settings.colorblindMode) {

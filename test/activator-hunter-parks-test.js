@@ -17,8 +17,8 @@ function test(name, fn) {
   try { fn(); passed++; console.log('  ok  ' + name); }
   catch (e) { failed++; console.log('  FAIL ' + name + '\n       ' + (e.message || e)); }
 }
-const fnSrc = (src.match(/function parseHunterParkInput[\s\S]*?\n\}\n/) || [])[0];
-const parse = new Function(fnSrc + ';return parseHunterParkInput;')();
+// The parser lives in lib/p2p-park-entry.js (#506); app.js uses that one.
+const parse = require('../lib/p2p-park-entry').parseHunterParkInput;
 // The form is read at press time (activatorReadEntry) and saved from that
 // snapshot (activatorLogContactNow(s)); both halves together are the log path.
 const logFn = ((src.match(/function activatorReadEntry\(\)[\s\S]*?\n\}\n/) || [''])[0])
@@ -36,9 +36,10 @@ test('a token that is not a reference is reported, not dropped', () => {
   assert.deepStrictEqual(parse('US-1234, Shenandoah').bad, ['SHENANDOAH']);
 });
 test('the log path refuses on a bad token and builds hunterParkRefs from the list', () => {
-  assert.ok(/parseHunterParkInput\(hunterInput\.value\)/.test(logFn), 'the typed box is parsed at log time');
-  assert.ok(/if \(parsed\.bad\.length\) \{[\s\S]{0,400}return;/.test(logFn), 'a bad token stops the log');
-  assert.ok(/parsed\.refs\.length > 1 \|\| hunterParkRefs\.length === 0/.test(logFn), 'a list replaces a single dropdown pick');
+  assert.ok(/P2pParkEntry\.resolveHunterParks\(\{\s*text: hunterInput\.value/.test(logFn), 'the typed box is read at log time');
+  assert.ok(/if \(resolved\.bad\.length\) \{[\s\S]{0,400}return;/.test(logFn), 'a bad token stops the log');
+  assert.ok(/hunterParkRefs = resolved\.refs;/.test(logFn), 'the box, not the stored list, is what is logged (#506)');
+  assert.ok(/const parseHunterParkInput = P2pParkEntry\.parseHunterParkInput;/.test(src), 'one parser');
   assert.ok(/hunted: hunterParkRefs\.slice\(\)/.test(logFn) && /hunted: s\.hunted\.map/.test(logFn), 'every park reaches logContact as hunted, from the press-time snapshot');
 });
 

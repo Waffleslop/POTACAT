@@ -32,3 +32,13 @@
 .chn-empty { padding: 20px; color: var(--text-dim); text-align: center; }
 .chn-hidden-note td { color: var(--text-dim); font-size: 11px; padding-top: 8px; }
 .chn-status { font-size: 11px; color: var(--text-dim); }
+
+/* Favourites (issue 329, lib/favorites.js starHtml): the star on Landmarks and
+   Channels rows. POTACAT blue when starred, never yellow; theme tokens only. */
+.fav-star { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; padding: 0; margin: 0; border: 0; border-radius: 4px; background: transparent; color: var(--text-tertiary); cursor: pointer; vertical-align: middle; }
+.fav-star:hover { color: var(--accent-blue); background: var(--bg-hover); }
+.fav-star:focus-visible { outline: 2px solid var(--accent-blue); outline-offset: 1px; }
+.fav-star.on { color: var(--accent-blue); }
+.chn-lead { white-space: nowrap; }
+.lmk-col-fav, .lmk-fav { width: 28px; padding-left: 4px; padding-right: 0; text-align: center; }
+.lmk-group-fav td { color: var(--accent-blue); }

@@ -122,5 +122,16 @@ test('every operating surface filters by the rig\'s bands', () => {
   }
 });
 
+// #277: a KX3 with the KX3-2M module was refused 144.2 MHz from POTACAT and
+// ECHOCAT because KX2/KX3 listed HF and 6 m only. Elecraft KX3-2M/4M manual
+// rev D p.2: TX 144-148 MHz; Programmer's Reference G5 p.11: FA tunes into a
+// transverter band, which is how the internal module is set up.
+test('KX2/KX3 lists 2 m (the KX3-2M module), so a 144.2 MHz tune reaches the radio', () => {
+  const n = RB.nativeBands('KX2/KX3', RIG_MODELS['KX2/KX3']);
+  assert.ok(n.includes('2m'), JSON.stringify(n));
+  assert.ok(RB.allowed(n, RB.bandOfMhz(144.2)));
+  assert.ok(n.includes('6m') && n.includes('160m'));
+});
+
 console.log(`\nRig bands: ${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

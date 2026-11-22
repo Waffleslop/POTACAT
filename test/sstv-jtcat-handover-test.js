@@ -51,7 +51,10 @@ test('an SSTV window you or the app open hands the radio over; auto-SSTV does no
 });
 
 test('auto-SSTV at night listens on 7.171 LSB', () => {
-  assert.ok(/\{ freqKhz: 7171, mode: 'LSB' \}/.test(body('function getSstvAutoFreq(')));
+  // The day/night channels live in lib/sstv-start-band.js since #292.
+  const S = require('../lib/sstv-start-band');
+  assert.deepStrictEqual(S.autoChannel(null, false), { freqKhz: 7171, mode: 'LSB' });
+  assert.ok(/SstvStartBand\.autoChannel\(activeRigBands\(\), daytime\)/.test(body('function getSstvAutoFreq(')));
 });
 
 console.log(`\nSSTV / JTCAT handover: ${passed} passed, ${failed} failed`);

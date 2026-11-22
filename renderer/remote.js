@@ -93,6 +93,13 @@
     } catch (_) { /* don't recurse */ }
   }
 
+  function pageHref() {
+    try { return (location && location.href) || ''; } catch (_) { return ''; }
+  }
+  function warnIgnored(txt) {
+    try { console.warn('[ECHOCAT banner] ignored, not our script:', txt); } catch (_) { /* no console */ }
+  }
+
   window.addEventListener('error', (e) => {
     // Suppress Safari's "Script error." cross-origin mask. When an async
     // error fires from a script Safari can't fully introspect (CORS-less
@@ -107,12 +114,31 @@
     const filename = e.filename || '';
     const msg = e.message || '';
     if (!filename && !e.lineno && msg === 'Script error.') return;
-    show((e.error && (e.error.stack || e.error.message)) || msg || 'unknown',
+    // Name and message first, then the stack: Safari's stack has no
+    // message in it (#806). lib/error-banner-text.js, inlined above.
+    const EBT = window.ErrorBannerText;
+    if (EBT) {
+      const r = EBT.formatErrorEvent(e);
+      // Line 1 of the page is "<!doctype html>": an error there is a
+      // browser-injected script (Brave for iOS), not ours. Log, no banner.
+      if (EBT.isForeignErrorEvent(e, pageHref())) { warnIgnored(r.src + ' ' + r.text); return; }
+      show(r.text, r.src);
+      return;
+    }
+    const err = e.error;
+    show((err && (String(err) + '\n' + (err.stack || ''))) || msg || 'unknown',
          filename + ':' + (e.lineno || '?'));
   });
   window.addEventListener('unhandledrejection', (e) => {
+    const EBT = window.ErrorBannerText;
+    if (EBT) {
+      const r = EBT.formatRejection(e.reason);
+      if (EBT.isForeignRejection(e.reason, pageHref())) { warnIgnored(r.src + ' ' + r.text); return; }
+      show(r.text, r.src);
+      return;
+    }
     const r = e.reason || {};
-    show(r.stack || r.message || String(r), 'unhandledrejection');
+    show(String(r) + '\n' + (r.stack || ''), 'unhandledrejection');
   });
 })();
 
@@ -187,6 +213,7 @@
   let clubMember = null;  // { callsign, firstname, role, licenseClass }
   let pingInterval = null;
   let lastPingSent = 0;
+  const wsLiveness = WsLiveness.create();
 
   // WebRTC
   let pc = null;
@@ -357,7 +384,7 @@
       logFreqPinnedKhz = 0;
     }
     if (!logFreqDirty && currentFreqKhz) {
-      logFreq.value = String(Math.round(currentFreqKhz * 10) / 10);
+      LogFreqField.fill(logFreq, currentFreqKhz); // shows 100 Hz, logs the hertz (#794)
     }
     if (!logTimeDirty) logStampNow();
   }
@@ -504,6 +531,13 @@
   // VFO Lock — mirrors desktop _vfoLocked, synced via WS.
   let vfoLocked = false;
   var qrzNameCache = {}; // callsign -> first name / nickname from QRZ
+  // Base callsign -> { name, state } from every qrz-result. CW macros take
+  // {op_firstname} and {state} from here for the call {call} sends, never from
+  // the tuned spot: with two spots on one frequency the tuned spot and the
+  // call being worked can be different stations (GitHub #524).
+  var qrzOpByCall = {};
+  var qrzOpPending = {};
+  var qrzOpWarmTimer = null;
   let tunedState = '';
   let currentNb = false;
   let currentAtu = false;
@@ -517,6 +551,8 @@
   let directorySwl = [];
   let directoryLandmarks = [];        // the Landmarks tab (lib/landmarks.js)
   let directoryChannels = [];         // the Channels tab: the shack's saved frequency chart (lib/channels.js)
+  let directoryLandmarkFavs = [];     // the ids the shack's operator starred (#329, lib/favorites.js)
+  let directoryChannelFavs = [];
   let directoryLandmarkCategories = [];
   let dirActiveTab = 'nets';          // 'nets' | 'swl' | 'landmarks'
 
@@ -876,11 +912,16 @@
   // ended up blank. Defer the TX row from tx-status to the cycle-decode
   // handler so it lands AFTER the cycle separator instead of before.
   let ft8PendingTxMsg = '';
+  let ft8PendingTxHz = 0; // the offset that pending TX went out on (#503)
   let ft8QsoState = null;       // {mode, call, grid, phase, txMsg, report, sentReport} or null
   let ft8CycleSlot = '--';
   let ft8CountdownTimer = null;
   let ft8CycleBoundary = 0;     // epoch ms of next cycle boundary
   let ft8Mode = 'FT8';
+  // The mode this tab would run: ft8Mode follows an idle-RX session (WSPR,
+  // PSK31, JTTY) for display; opening the tab hands the radio back in this.
+  let ft8OwnMode = 'FT8';
+  let ft8IdleRx = null;         // jtcat-status idleRx: the engine is the shack's idle receive
   let ft8HuntCall = '';        // callsign we're hunting from spot list
   let ft8UserScrolled = false; // true when user has scrolled up in decode log
   let ft8CqFilter = false;     // CQ-only filter
@@ -1560,8 +1601,6 @@
   const soMaxageVal = document.getElementById('so-maxage-val');
   const soDistMi = document.getElementById('so-dist-mi');
   const soDistKm = document.getElementById('so-dist-km');
-  const soThemeDark = document.getElementById('so-theme-dark');
-  const soThemeLight = document.getElementById('so-theme-light');
   // Tuning settings overlay elements
   const soXitDn = document.getElementById('so-xit-dn');
   const soXitUp = document.getElementById('so-xit-up');
@@ -1590,20 +1629,42 @@
   let tuneClick = false;
 
   // --- Theme ---
-  function applyTheme(light) {
-    document.documentElement.setAttribute('data-theme', light ? 'light' : 'dark');
-    soThemeDark.classList.toggle('active', !light);
-    soThemeLight.classList.toggle('active', light);
-    // Update mobile browser chrome color
-    var meta = document.querySelector('meta[name="theme-color"]');
-    if (meta) meta.setAttribute('content', light ? '#e8eaed' : '#0f3460');
-    localStorage.setItem('echocat-theme', light ? 'light' : 'dark');
+  // The six ECHOCAT looks (#376, lib/app-theme.js): Light / Dark / System and
+  // one theme per mode, kept in this browser like the phone keeps its own.
+  // System follows the device's light or dark setting live.
+  const lookSysDark = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null;
+  const lookGet = (k) => { try { return localStorage.getItem(k); } catch (e) { return null; } };
+  let lookState = window.AppTheme ? window.AppTheme.webState(lookGet) : null;
+  function applyLook() {
+    const AT = window.AppTheme;
+    if (!AT || !lookState) return;
+    const sysDark = !!(lookSysDark && lookSysDark.matches);
+    const r = AT.resolveAppTheme(lookState, sysDark);
+    AT.applyToDocument(document, r);
+    // Mobile browser chrome colour
+    const meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) meta.setAttribute('content', AT.WINDOW_BG[r.ds] || '#07111b');
+    if (window.LookPicker) {
+      window.LookPicker.render(document.getElementById('so-look-picker'), {
+        state: lookState, systemDark: sysDark, scope: 'all',
+        onChange: (next) => {
+          lookState = { appearance: next.appearance, themeLight: next.themeLight, themeDark: next.themeDark };
+          try {
+            localStorage.setItem(AT.WEB_KEYS.appearance, lookState.appearance);
+            localStorage.setItem(AT.WEB_KEYS.themeLight, lookState.themeLight);
+            localStorage.setItem(AT.WEB_KEYS.themeDark, lookState.themeDark);
+          } catch (e) { /* private window: the look holds for this visit */ }
+          applyLook();
+        },
+      });
+    }
   }
-  // Apply saved theme on load
-  applyTheme(localStorage.getItem('echocat-theme') === 'light');
-
-  soThemeDark.addEventListener('click', () => applyTheme(false));
-  soThemeLight.addEventListener('click', () => applyTheme(true));
+  applyLook();
+  if (lookSysDark) {
+    const onSys = () => { if (lookState && lookState.appearance === 'system') applyLook(); };
+    if (lookSysDark.addEventListener) lookSysDark.addEventListener('change', onSys);
+    else if (lookSysDark.addListener) lookSysDark.addListener(onSys);
+  }
 
   // --- Split layout (iPad-sized screens: dock the VFO panel on a side) ---
   // Modes: 'right' (default), 'left', 'off'. Only actually engages when the
@@ -1826,29 +1887,64 @@
           // one record per log write instead of re-pushing the whole log.
           // local-cw-sidetone: this page plays its own sidetone for the CW it
           // sends, so the desktop must not mix a second copy into RX audio.
-          capabilities: ['chunked-all-qsos', 'qso-delta', 'chunked-worked-qsos', 'local-cw-sidetone'],
+          // jtcat-qso-logged: this page says which parks a JTCAT contact was
+          // logged at when some were read from the activator's spot comment.
+          // mail-folders-v2: this page shows the Deleted folder (#475), so the shack may push it.
+          // pass-state: on a Guest Pass, the shack sends pass-state {state,
+          // reason, ...} and lets a second device of the same guest wait
+          // instead of taking the radio (#541 step 2).
+          // worked-incremental: the full worked list comes once per connection;
+          // each logged QSO arrives in worked-today, merged below (#731).
+          // aprs: the shack sends aprs-state and, while the APRS tab (or the
+          // Map's APRS layer) is open, aprs-stations (APRS phase 6).
+          capabilities: ['chunked-all-qsos', 'qso-delta', 'chunked-worked-qsos', 'local-cw-sidetone', 'jtcat-qso-logged', 'mail-folders-v2', 'pass-state', 'worked-incremental', 'aprs'],
         }));
       } catch {}
       onOpen();
     };
     ws.onmessage = function(event) {
+      wsLiveness.messageReceived(Date.now());
       var msg;
       try { msg = JSON.parse(event.data); } catch { return; }
       handleMessage(msg);
     };
-    ws.onclose = function() {
-      clearInterval(pingInterval);
-      pingInterval = null;
-      if (bc) { try { bc.postMessage({ kind: 'connection', online: false, reason: wasKicked ? 'kicked' : 'closed' }); } catch {} }
-      if (wasKicked) return;
-      if (mainUI.classList.contains('hidden')) {
-        connectBtn.textContent = 'Connect';
-        connectBtn.disabled = false;
-      } else {
-        scheduleReconnect();
-      }
-    };
+    ws.onclose = onWsClosed;
     ws.onerror = function() {};
+  }
+
+  function onWsClosed() {
+    clearInterval(pingInterval);
+    pingInterval = null;
+    // The shack stops keying when it loses this page; the page's own keyer
+    // and sidetone stop too, so neither goes on without the other (#244).
+    if (cwKeyStreamOk && window.__echocatReleasePaddles) { try { window.__echocatReleasePaddles(false); } catch (e) {} }
+    if (bc) { try { bc.postMessage({ kind: 'connection', online: false, reason: wasKicked ? 'kicked' : 'closed' }); } catch {} }
+    if (wasKicked) return;
+    if (mainUI.classList.contains('hidden')) {
+      connectBtn.textContent = 'Connect';
+      connectBtn.disabled = false;
+    } else {
+      scheduleReconnect();
+    }
+  }
+
+  // A socket that died while the screen was off can still read OPEN, and
+  // anything sent on it is lost (lib/ws-liveness.js decides when). Detach it
+  // first so its late onclose cannot tear down the next socket, then take the
+  // normal close path; `now` skips the reconnect delay unless a retry is
+  // already scheduled (a Guest Pass wait keeps its own backoff).
+  function dropDeadSocket(now) {
+    var retryPending = !!reconnectTimer;
+    var dead = ws;
+    if (dead) {
+      dead.onopen = null; dead.onmessage = null; dead.onclose = null; dead.onerror = null;
+      try { dead.close(); } catch {}
+    }
+    onWsClosed();
+    if (now && !retryPending && !wasKicked && !mainUI.classList.contains('hidden')) {
+      if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+      reconnectNow();
+    }
   }
 
   function connect(token) {
@@ -1951,6 +2047,7 @@
         break;
 
       case 'auth-ok':
+        try { aprsOnReconnect(); } catch { /* pre-init */ }
         connectScreen.classList.add('hidden');
         mainUI.classList.remove('hidden');
         tabBar.classList.remove('hidden');
@@ -1966,6 +2063,7 @@
         vfoLocked = !!msg.vfoLocked;
         updateVfoLockUi();
         // ECHOCAT Web session (POTACAT Cloud): pass banner + Sign out row
+        passAuthRetries = 0;
         renderPassBanner(msg.passSession);
         renderWebSessionRow(msg.passSession);
         try { sessionStorage.removeItem('echocat-web-reload'); } catch {}
@@ -2099,7 +2197,7 @@
       // Pass, anything outside the pass (lib/guest-pass-authority.js). Said
       // out loud, never a silent dead control.
       case 'refused':
-        showToast(msg.text || ('Not available on a Guest Pass: ' + (msg.of || 'that control')), 4000, true);
+        showToast(msg.text || 'That is not available on a Guest Pass.', 4000, true);   // never msg.of: an internal name
         break;
 
       case 'voice-tx-hint':
@@ -2131,6 +2229,28 @@
         break;
 
       case 'auth-fail':
+        // The owner or another guest has the radio, the shack could not check
+        // a Guest Pass with Cloud, or the pass has not started: the pass is
+        // fine, so say which and ask again on a timer. Never "revoked" (#541).
+        if (window.PassWording && PassWording.isRetryableAuthFail(msg.code, msg.passReason)) {
+          var waitWords = (msg.passState && PassWording.describeState)
+            ? PassWording.describeState(msg.passState, { owner: passOwnerCall() })
+            : PassWording.describe({ kind: 'auth-fail', code: msg.code, by: msg.by, reason: msg.passReason, at: msg.passAt, owner: passOwnerCall() });
+          var waitText = [waitWords.title, waitWords.line].filter(Boolean).join(' ');
+          var waitMs = PassWording.retryDelayMs(msg.code, passAuthRetries, { reason: msg.passReason, at: msg.passAt });
+          passAuthRetries++;
+          if (reconnectTimer) clearTimeout(reconnectTimer);
+          reconnectTimer = setTimeout(function() { reconnectTimer = null; reconnectNow(); }, waitMs);
+          if (mainUI.classList.contains('hidden')) {
+            connectError.textContent = waitText;
+            connectError.classList.remove('hidden');
+            connectBtn.textContent = waitWords.action || 'Connect';
+            connectBtn.disabled = false;
+          } else {
+            showToast(waitText, 8000);
+          }
+          break;
+        }
         if (webCookieMode()) {
           // The cookie the server pre-authenticated on was refused after
           // all (expired device row, Guest Pass no longer valid). Nothing
@@ -2138,7 +2258,14 @@
           webSignOutAndReload('link-expired');
           break;
         }
-        connectError.textContent = msg.reason || 'Authentication failed';
+        if (msg.code === 'pass_not_valid' && window.PassWording) {
+          var overWords = (msg.passState && PassWording.describeState)
+            ? PassWording.describeState(msg.passState, { owner: passOwnerCall() })
+            : PassWording.describe({ kind: 'auth-fail', code: msg.code, reason: msg.passReason, at: msg.passAt, owner: passOwnerCall() });
+          connectError.textContent = [overWords.title, overWords.line].filter(Boolean).join(' ');
+        } else {
+          connectError.textContent = msg.reason || 'Authentication failed';
+        }
         connectError.classList.remove('hidden');
         connectBtn.textContent = authMode === 'club' ? 'Log In' : 'Connect';
         connectBtn.disabled = false;
@@ -2163,8 +2290,24 @@
       case 'pass-ended':
         // The owner ended or revoked the Guest Pass, or it expired.
         if (webCookieMode()) { webSignOutAndReload('pass-ended'); break; }
+        var endWords = window.PassWording ? PassWording.describe({ kind: 'pass-ended', reason: msg.reason, owner: passOwnerCall() }) : null;
         renderPassBanner(null);
-        showToast('Guest Pass ended' + (msg.reason ? ': ' + msg.reason : ''), 6000, true);
+        showToast(endWords ? [endWords.title, endWords.line].filter(Boolean).join(' ') : ('Guest Pass ended' + (msg.reason ? ': ' + msg.reason : '')), 8000, !endWords || endWords.terminal);
+        break;
+
+      case 'pass-paused':
+        // The owner took the radio back. The guest keeps listening and is
+        // back on the air when the owner hands it over (#541).
+        renderPassHold(true);
+        break;
+
+      case 'pass-resumed':
+        renderPassHold(false);
+        break;
+
+      case 'pass-state':
+        // The guest's state and why (#541 step 2), in the shared words.
+        renderPassState(msg);
         break;
 
       case 'audio-devices':
@@ -2181,6 +2324,10 @@
 
       case 'typed-call':
         sharedTypedCall = String(msg.call || '').trim().toUpperCase();
+        // Fetch the name/state for the call being worked once typing settles,
+        // so the first macro already has them (#524).
+        if (qrzOpWarmTimer) clearTimeout(qrzOpWarmTimer);
+        qrzOpWarmTimer = setTimeout(function() { qrzOpWarmTimer = null; requestQrzOp(sharedTypedCall); }, 800);
         break;
 
       case 'swr-ratio':
@@ -2305,47 +2452,17 @@
         // arrives through the next status.
         showToast('Rig preset ' + (msg.name || '') + ': ' + (msg.text || '') + (msg.why && msg.why !== 'tap' ? ' — ' + msg.why : ''), 4000);
         break;
+      // Winlink mail: every message is handled in the Mail section (mailOnMessage).
       case 'winlink-state':
-        mailState = msg;
-        mailRenderState();
-        break;
       case 'winlink-account':
-        mailAcctAnswer(msg);
-        break;
       case 'winlink-mailbox':
-        mailLists[msg.box] = msg.messages || [];
-        if (msg.box === mailBox) mailRenderList();
-        break;
       case 'winlink-session':
-        if (mailState) mailState.session = msg.session || {};
-        mailRenderSession();
-        break;
       case 'winlink-message':
-        mailShowMessage(msg);
-        break;
       case 'winlink-gateways':
-        mailGateways = msg.list || [];
-        mailGatewayNote = msg.note || '';
-        mailRenderGateways();
-        break;
       case 'winlink-attachment':
-        try {
-          var bin = atob(msg.dataBase64 || '');
-          var bytes = new Uint8Array(bin.length);
-          for (var bi = 0; bi < bin.length; bi++) bytes[bi] = bin.charCodeAt(bi);
-          var url = URL.createObjectURL(new Blob([bytes]));
-          var a = document.createElement('a'); a.href = url; a.download = msg.name || 'attachment';
-          document.body.appendChild(a); a.click(); a.remove();
-          setTimeout(function () { URL.revokeObjectURL(url); }, 5000);
-        } catch (e) { showToast('Could not save the attachment', 3000, true); }
-        break;
       case 'winlink-result':
-        if (msg.op === 'account-check' || msg.op === 'register' || msg.op === 'set-password') { mailAcctResult(msg); break; }
-        if (!msg.ok && msg.error) showToast(msg.error, 5000, true);
-        else if (msg.ok && msg.op === 'compose') { showToast('In the Outbox. It goes out on the next Send / Receive.', 3000); mailShowList(); }
-        break;
       case 'winlink-refused':
-        showToast(msg.reason === 'guest-pass' ? 'Winlink mail belongs to the shack\'s owner — not available on a Guest Pass' : 'Not available', 4000, true);
+        mailOnMessage(msg);
         break;
       case 'rig-presets-refused':
         showToast('A Guest Pass cannot change the rig presets', 3000, true);
@@ -2360,6 +2477,11 @@
       }
 
       case 'qrz-result':
+        if (msg.callsign) {
+          var qrzKey = String(msg.callsign).toUpperCase();
+          qrzOpByCall[qrzKey] = { name: msg.nickname || msg.fname || '', state: msg.state || '' };
+          delete qrzOpPending[qrzKey];
+        }
         if (msg.callsign && msg.callsign.toUpperCase() === JtcatParser.baseCall(tunedCallsign)) {
           // Prefer nickname over fname (matches desktop QRZ display logic)
           tunedOpName = msg.nickname || msg.fname || '';
@@ -2390,6 +2512,8 @@
         directorySwl = msg.swl || [];
         if (Array.isArray(msg.landmarks)) directoryLandmarks = msg.landmarks;
         if (Array.isArray(msg.channels)) directoryChannels = msg.channels;
+        if (Array.isArray(msg.landmarkFavorites)) directoryLandmarkFavs = msg.landmarkFavorites;
+        if (Array.isArray(msg.channelFavorites)) directoryChannelFavs = msg.channelFavorites;
         if (Array.isArray(msg.landmarkCategories)) directoryLandmarkCategories = msg.landmarkCategories;
         // Show/hide Dir tab based on whether we have data
         var dirTabBtn = document.getElementById('dir-tab-btn');
@@ -2538,6 +2662,13 @@
         break;
 
       case 'log-ok':
+        // A follow-up (#732): the QSO was confirmed and counted already; this
+        // only says how the re-spot went. It never touches the form, the
+        // contact list or the counts, and only a failure is shown.
+        if (msg.followUp) {
+          if (msg.respotError) showLogToast((msg.callsign || '') + ': re-spot failed', true);
+          break;
+        }
         logSaveBtn.disabled = false;
         ltSave.disabled = false;
         if (msg.success) {
@@ -2816,6 +2947,14 @@
           logbookQsos.push(msg.data);
           lbTotal = msg.total || logbookQsos.length;
           renderLogbook();
+          // worked-incremental (#731): the full worked list is not re-sent per
+          // QSO, so merge this one (back-dated ones too) with the same entry
+          // rule as the full list; a same-QSO last entry is replaced, not doubled.
+          if (typeof WorkedEntry !== 'undefined' && WorkedEntry.mergeRecord(workedQsos, msg.data)) {
+            ddPanel(spotsDropdown).querySelector('.rc-hide-worked-row').style.display = '';
+            renderSpots();
+            if (activeTab === 'map') renderMapSpots();
+          }
         }
         break;
 
@@ -2894,7 +3033,11 @@
         // the FT8 tab never sent jtcat-start after an idle stop (kc8zp 11-03:
         // the Cloud FT8 view stayed stale until the phone app woke it).
         ft8Running = msg.running === true || msg.state === 'running';
+        // idleRx: the shack's idle receive (WSPR, PSK31, JTTY) owns the engine.
+        // Opening the tab takes it over (Casey 2026-11-12, #249 follow-up).
+        ft8IdleRx = ft8Running && msg.idleRx ? String(msg.idleRx) : null;
         if (ft8Running) ft8Mode = msg.mode || ft8Mode;
+        if (ft8Running && !ft8IdleRx) ft8OwnMode = ft8Mode;
         ft8ModeSelect.value = ft8Mode;
         ft8SyncStatus.textContent = 'Sync: ' + (msg.sync || '--');
         applyDigitalPanes(); // host-driven mode change (popout/phone) swaps panes too
@@ -2939,6 +3082,19 @@
         ft8StartCountdown();
         break;
 
+      case 'jtcat-qso-logged': {
+        // The shack wrote a JTCAT contact. Said here only when parks were read
+        // from the activator's own spot comment (the operator must learn of
+        // those); an ordinary contact shows no new toast, and an error toast
+        // on screen is never replaced.
+        if (!msg.parksNote) break;
+        if (logToast.classList.contains('error') && !logToast.classList.contains('hidden')) break;
+        let line = 'Logged ' + (msg.callsign || '');
+        if (msg.parksText) line += ' ' + msg.parksText;
+        line += ' (' + msg.parksNote + ')';
+        showToast(line, 6000);
+        break;
+      }
       case 'jtcat-tx-status':
         ft8Transmitting = msg.state === 'tx';
         ft8TxMsg = msg.message || ft8TxMsg;
@@ -2957,6 +3113,8 @@
           // the time the cycle decode arrives (~14s later), live append
           // would land in the *previous* cycle's section.
           ft8PendingTxMsg = ft8TxMsg;
+          // Its offset, kept with it: the slider may move before the row draws.
+          ft8PendingTxHz = msg.txFreq || 0;
         }
         // JTTY has no cycles: our transmission is a row in its list right now.
         if (ft8Mode === 'JTTY') jttyOnTxStatus(msg);
@@ -2971,8 +3129,20 @@
           const toast = document.createElement('div');
           toast.className = 'ft8-error-toast';
           toast.textContent = msg.error || 'Error';
+          // The retry cap stopped a QSO whose RR73 never came: not logged
+          // (#807). Send 73 puts the 73 on the air, which logs it.
+          if (msg.send73) {
+            toast.classList.add('ft8-error-toast-action');
+            const b = document.createElement('button');
+            b.type = 'button';
+            b.className = 'ft8-qso-skip-btn';
+            b.textContent = 'Send 73';
+            b.addEventListener('click', () => { ft8Send({ type: 'jtcat-skip-phase', unconfirmed: true }); toast.remove(); });
+            toast.appendChild(document.createTextNode(' '));
+            toast.appendChild(b);
+          }
           ft8View.appendChild(toast);
-          setTimeout(() => toast.remove(), 4000);
+          setTimeout(() => toast.remove(), msg.send73 ? 60000 : 4000);
           break;
         }
         ft8QsoState = (msg.phase && msg.phase !== 'idle') ? msg : null;
@@ -2995,6 +3165,13 @@
         break;
       case 'scope-state':
         scopeApplyState(msg);
+        break;
+      // APRS phase 6 (capability 'aprs'): the shack's APRS window on this page.
+      case 'aprs-state':
+        aprsApplyState(msg);
+        break;
+      case 'aprs-stations':
+        aprsApplyStations(msg);
         break;
 
       case 'jtcat-auto-cq-state':
@@ -3064,14 +3241,18 @@
         if (msg.state === 'tx') {
           sstvPhoneStartTxProgress(msg.durationSec || 0);
           if (sstvPhoneStatus) { sstvPhoneStatus.textContent = 'Transmitting...'; sstvPhoneStatus.style.color = 'var(--accent)'; }
-        } else if (msg.state === 'auto-rx') {
+        } else if (msg.state === 'auto-rx' && !msg.error) {
           if (sstvPhoneStatus) {
-            sstvPhoneStatus.textContent = 'Auto-SSTV ' + (msg.freqKhz ? (msg.freqKhz / 1000).toFixed(3) : '') + ' MHz';
+            sstvPhoneStatus.textContent = 'Auto-SSTV' + (msg.freqKhz ? ' ' + FreqDots.khzMhz(msg.freqKhz) : '');
             sstvPhoneStatus.style.color = 'var(--pota)';
           }
         } else {
           sstvPhoneStopTxProgress();
-          if (sstvPhoneStatus) { sstvPhoneStatus.textContent = 'Ready'; sstvPhoneStatus.style.color = 'var(--text-dim)'; }
+          // error (#357): a picture was not sent; say why until the next send.
+          if (sstvPhoneStatus) {
+            if (msg.error) { sstvPhoneStatus.textContent = String(msg.error); sstvPhoneStatus.style.color = 'var(--accent)'; }
+            else { sstvPhoneStatus.textContent = 'Ready'; sstvPhoneStatus.style.color = 'var(--text-dim)'; }
+          }
         }
         sstvPhoneUpdateSendBtn();
         break;
@@ -3112,6 +3293,27 @@
   }
 
   // --- Status ---
+  // WSJT-X Mode at the shack (#547): status.wsjtxMode / wsjtxHeard. A chip in
+  // the header and an explain-only note; turning it off happens at the shack.
+  var wsjtxModeChip = document.getElementById('wsjtx-mode-chip');
+  var wsjtxModeNote = document.getElementById('wsjtx-mode-note');
+  var wsjtxModeOn = false;
+  var wsjtxNoteHidden = false; // the chip toggles the note for this page load
+  function applyWsjtxMode(on, heard) {
+    if (!wsjtxModeChip || !wsjtxModeNote) return;
+    if (on && !wsjtxModeOn) wsjtxNoteHidden = false;
+    wsjtxModeOn = on;
+    wsjtxModeChip.classList.toggle('hidden', !on);
+    wsjtxModeChip.title = on ? ('The shack is in WSJT-X Mode' + (heard ? '; WSJT-X is talking to POTACAT' : '; WSJT-X not heard')) : '';
+    var W = window.WsjtxModeNotice;
+    wsjtxModeNote.textContent = W ? W.remoteNote() : '';
+    wsjtxModeNote.classList.toggle('hidden', !on || wsjtxNoteHidden);
+  }
+  if (wsjtxModeChip) wsjtxModeChip.addEventListener('click', function () {
+    wsjtxNoteHidden = !wsjtxNoteHidden;
+    if (wsjtxModeNote) wsjtxModeNote.classList.toggle('hidden', !wsjtxModeOn || wsjtxNoteHidden);
+  });
+
   function updateStatus(s) {
     // Merged copy for custom toggles that follow the radio (fields a push
     // leaves out keep their last value).
@@ -3149,7 +3351,7 @@
       quickLogFollowRadio();
       // Display friendly name for FreeDV modes
       const mUp = s.mode.toUpperCase();
-      modeBadge.textContent = mUp.startsWith('FREEDV') ? (mUp.includes('RADE') ? 'RADE' : 'FreeDV') : s.mode;
+      modeBadge.textContent = FreedvDisplayMode.freedvBadge(s.mode); // lib/freedv-display-mode.js
       // PKTUSB / PKTLSB / DIGU / DIGL are SSB sub-band positions used for
       // FT8/FT4/FreeDV — they're voice-capable carriers, not CW. Without
       // these, FreeDV (which lands the rig on PKTLSB on lower bands and
@@ -3174,6 +3376,7 @@
       catDot.title = s.catConnected ? 'Radio connected' : 'Radio disconnected';
       settingsOverlay.classList.toggle('disabled', !s.catConnected);
     }
+    if (s.wsjtxMode !== undefined) applyWsjtxMode(!!s.wsjtxMode, !!s.wsjtxHeard);
     if (s.txState !== undefined) {
       txState = s.txState;
       txBanner.classList.toggle('hidden', !s.txState);
@@ -3260,10 +3463,23 @@
       if (rcSplitBtn) rcSplitBtn.classList.toggle('hidden', !s.capabilities.split);
       // Rig On/Off — show wherever the radio's CAT set supports PS0/PS1, 0x18, or equivalent.
       // Applies to both the Settings-overlay group and the VFO widget row.
+      // #485: powerOn false = off over CAT but not on (FTX-1): no On.
+      // #293: powerOff false = the shack could not switch it back on: no Off.
+      const offOnly = s.capabilities.powerOn === false;
+      const noOff = s.capabilities.powerOff === false;
+      const anyPower = !!s.capabilities.power && !(offOnly && noOff);
       const rcPowerGroup = document.getElementById('rc-power');
-      if (rcPowerGroup) rcPowerGroup.classList.toggle('hidden', !s.capabilities.power);
+      if (rcPowerGroup) rcPowerGroup.classList.toggle('hidden', !anyPower);
       const vfPowerRow = document.getElementById('vf-power-row');
-      if (vfPowerRow) vfPowerRow.classList.toggle('hidden', !s.capabilities.power);
+      if (vfPowerRow) vfPowerRow.classList.toggle('hidden', !anyPower);
+      const rcPowerOn = document.getElementById('rc-power-on');
+      if (rcPowerOn) rcPowerOn.classList.toggle('hidden', offOnly);
+      const vfPowerOn = document.getElementById('vf-power-on-btn');
+      if (vfPowerOn) vfPowerOn.classList.toggle('hidden', offOnly);
+      const rcPowerOff = document.getElementById('rc-power-off');
+      if (rcPowerOff) rcPowerOff.classList.toggle('hidden', noOff);
+      const vfPowerOff = document.getElementById('vf-power-off-btn');
+      if (vfPowerOff) vfPowerOff.classList.toggle('hidden', noOff);
       // Clamp TX power slider to radio's min/max
       if (s.capabilities.minPower != null) rcTxPowerSlider.min = s.capabilities.minPower;
       if (s.capabilities.maxPower != null) rcTxPowerSlider.max = s.capabilities.maxPower;
@@ -3705,8 +3921,7 @@
       currentFreqKhz = parseFloat(freqKhz);
     }
     if (mode) {
-      const mu = mode.toUpperCase();
-      modeBadge.textContent = mu.startsWith('FREEDV') ? (mu.includes('RADE') ? 'RADE' : 'FreeDV') : mode;
+      modeBadge.textContent = FreedvDisplayMode.freedvBadge(mode); // lib/freedv-display-mode.js
     }
     tunedFreqKhz = freqKhz;
     tunedCallsign = callsign;
@@ -3745,11 +3960,13 @@
       // an FT4 spot was hunted by an FT8 engine; LZ3AW item 15).
       const modeChanged = ft8Mode !== modeUpper;
       ft8Mode = modeUpper;
+      ft8OwnMode = modeUpper;
       ft8ModeSelect.value = ft8Mode;
       if (modeChanged) {
         updateBandFreqs();
         if (ft8Running) ft8Send({ type: 'jtcat-set-mode', mode: ft8Mode });
         if (typeof applyDigitalPanes === 'function') applyDigitalPanes();
+        ft8ClearForModeChange('Switching to ' + ft8Mode + '...'); // #517, before the hunt below
       }
       ft8HuntCall = callsign.toUpperCase();
       // Clear decode log for fresh start
@@ -4105,7 +4322,7 @@
       return;
     }
     if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ type: 'tune', freqKhz: val.toString(), mode: '' }));
+      ws.send(JSON.stringify({ type: 'tune', freqKhz: val.toString(), mode: '', pickSideband: true }));
     }
     cancelFreqEdit();
   }
@@ -4161,14 +4378,19 @@
     }
   }
 
-  function dpTune(freqKhz) {
+  // pickSideband: a band button or a typed frequency. In voice SSB the shack
+  // then picks the band's sideband, as for a spot (#445); a dial step or
+  // the arrows leave it unset and keep the mode.
+  function dpTune(freqKhz, pickSideband) {
     if (!freqKhz || isNaN(freqKhz) || freqKhz < 100 || freqKhz > 500000) return;
     if (vfoLocked) {
       showToast('VFO Locked — Unlock VFO to change frequency', 2000);
       return;
     }
     if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ type: 'tune', freqKhz: freqKhz.toString(), mode: '' }));
+      var tuneMsg = { type: 'tune', freqKhz: freqKhz.toString(), mode: '' };
+      if (pickSideband) tuneMsg.pickSideband = true;
+      ws.send(JSON.stringify(tuneMsg));
     }
     // Immediately update local display
     const hz = Math.round(freqKhz * 1000);
@@ -4208,7 +4430,7 @@
 
   dpGo.addEventListener('click', () => {
     const val = parseFloat(dpInput);
-    dpTune(val);
+    dpTune(val, true);
     closeDialPad();
   });
 
@@ -6364,12 +6586,16 @@
   // --- Ping / Latency ---
   function startPing() {
     if (pingInterval) clearInterval(pingInterval);
+    wsLiveness.reset(Date.now());
     pingInterval = setInterval(() => {
       if (ws && ws.readyState === WebSocket.OPEN) {
+        // No pong (or anything else) for about 10 s: the shack is gone.
+        if (wsLiveness.isDead(Date.now())) { dropDeadSocket(false); return; }
         lastPingSent = Date.now();
+        wsLiveness.pingSent(lastPingSent);
         ws.send(JSON.stringify({ type: 'ping', ts: lastPingSent }));
       }
-    }, 3000);
+    }, WsLiveness.PING_INTERVAL_MS);
   }
 
   // --- ECHOCAT Web session (POTACAT Cloud) ---
@@ -6429,7 +6655,66 @@
   }
   // Guest Pass banner under the status bar: who issued it and what it
   // allows, so a guest is never surprised by a refused mode or power.
+  var lastPassSession = null;
+  var passAuthRetries = 0;
+  function passOwnerCall() {
+    return (lastPassSession && lastPassSession.ownerCallsign) || '';
+  }
+  // The owner holds the radio (pass-paused): the banner says so, in the
+  // words POTACAT uses (lib/pass-wording.js). pass-resumed puts the
+  // normal Guest Pass line back.
+  function renderPassHold(held) {
+    var el = document.getElementById('pass-banner');
+    if (!el) return;
+    if (!held || !window.PassWording) { el.classList.remove('pass-held'); renderPassBanner(lastPassSession); return; }
+    var w = PassWording.describe({ kind: 'paused', owner: passOwnerCall() });
+    el.textContent = w.title + ' ' + w.line;
+    el.classList.add('pass-held');
+    el.classList.remove('hidden');
+  }
+  // The station's pass-state (#541 step 2): on the air with nothing to say
+  // shows the normal Guest Pass line; anything else is a wrapping notice in
+  // the shared words, with "Use it here instead" when another of this guest's
+  // devices has the radio (pass-claim, no redial), and "Take the radio" when
+  // the owner has not used it for 5 minutes (pass-take-back).
+  function renderPassState(ps) {
+    var el = document.getElementById('pass-banner');
+    if (!el || !window.PassWording || !PassWording.describeState) return;
+    if (!ps || (ps.state === 'on-air' && ps.reason === 'none')) {
+      el.classList.remove('pass-held');
+      el.classList.remove('pass-over');
+      renderPassBanner(lastPassSession);
+      return;
+    }
+    var w = PassWording.describeState(ps, { owner: passOwnerCall() });
+    if (!w.title) return;
+    el.textContent = '';
+    var span = document.createElement('span');
+    span.textContent = w.text;
+    el.appendChild(span);
+    // "Use it here instead" claims from this guest's other device; "Take the
+    // radio" (waiting/owner-idle, #200 step 4) takes it back after the
+    // owner's 5 idle minutes. The station answers both with pass-state.
+    var ask = null;
+    if (w.action === 'Use it here instead') ask = { type: 'pass-claim' };
+    else if (w.action === 'Take the radio') ask = { type: 'pass-take-back' };
+    if (ask) {
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'pass-state-btn';
+      btn.textContent = w.action;
+      btn.addEventListener('click', function() {
+        btn.disabled = true;
+        try { ws.send(JSON.stringify(ask)); } catch (e) {}
+      });
+      el.appendChild(btn);
+    }
+    el.classList.add('pass-held');
+    el.classList.toggle('pass-over', !!w.terminal);
+    el.classList.remove('hidden');
+  }
   function renderPassBanner(ps) {
+    if (ps && ps.code) lastPassSession = ps;
     // A Guest Pass session must never see the owner's billing (Cloud section
     // + top banner read this flag).
     window.__echoGuestPass = !!(ps && ps.code);
@@ -6466,18 +6751,21 @@
 
   // --- Reconnect ---
   let noTokenMode = false;
+  function reconnectNow() {
+    if (authMode === 'club') {
+      var call = clubCallInput.value.trim().toUpperCase();
+      var pass = clubPassInput.value;
+      if (call && pass) connectClub(call, pass);
+    } else {
+      connect(storedToken || '');
+    }
+  }
   function scheduleReconnect() {
     if (reconnectTimer) return;
     latencyEl.textContent = '--ms';
     reconnectTimer = setTimeout(function() {
       reconnectTimer = null;
-      if (authMode === 'club') {
-        var call = clubCallInput.value.trim().toUpperCase();
-        var pass = clubPassInput.value;
-        if (call && pass) connectClub(call, pass);
-      } else {
-        connect(storedToken || '');
-      }
+      reconnectNow();
     }, 3000);
   }
 
@@ -6555,7 +6843,7 @@
   function refreshLogTabFields() {
     // Pre-fill freq/mode from radio state
     if (currentFreqKhz && !ltFreq.value) {
-      ltFreq.value = String(Math.round(currentFreqKhz * 10) / 10);
+      LogFreqField.fill(ltFreq, currentFreqKhz); // shows 100 Hz, logs the hertz (#794)
     }
     if (currentMode && ltMode.value === 'SSB') {
       ltMode.value = currentMode;
@@ -6640,7 +6928,7 @@
 
   function submitLogTab() {
     const raw = ltCall.value.trim().toUpperCase();
-    const freq = ltFreq.value.trim();
+    const freq = LogFreqField.value(ltFreq);
     if (!raw) { ltCall.focus(); return; }
     if (!freq || isNaN(parseFloat(freq))) { ltFreq.focus(); return; }
 
@@ -6802,7 +7090,7 @@
     logCall.value = p.callsign || '';
     reportTypedCall('log', logCall.value); // a value set in code counts too
     webRenderWorkedMatrix(logCall, 'log-worked-matrix');
-    logFreq.value = p.freqKhz || (currentFreqKhz ? String(Math.round(currentFreqKhz * 10) / 10) : '');
+    LogFreqField.fill(logFreq, p.freqKhz ? parseFloat(p.freqKhz) : (currentFreqKhz || 0)); // shows 100 Hz, logs the hertz (#794)
     // INVARIANT: passing freqKhz means "this frequency is NOT the dial's" —
     // a spot's, a decode's — so it is treated as the operator's choice and
     // frozen. A caller whose frequency IS just the current dial must pass
@@ -6885,7 +7173,7 @@
   logForm.addEventListener('submit', (e) => {
     e.preventDefault();
     const rawCall = logCall.value.trim().toUpperCase();
-    const freq = logFreq.value.trim();
+    const freq = LogFreqField.value(logFreq);
     if (!rawCall) { logCall.focus(); return; }
     if (!freq || isNaN(parseFloat(freq))) { logFreq.focus(); return; }
 
@@ -6988,6 +7276,174 @@
   }
 
   // =============================================
+  // APRS (phase 6): the shack's APRS window on this page. Only with a shack
+  // that lists the 'aprs' capability (the tab appears with the first
+  // aprs-state). Rows come parsed from the desktop (lib/aprs-echocat.js); the
+  // icons are the APRS window's own (renderer/aprs-icons.js) and the ages and
+  // compass points are lib/aprs-stations.js, both inlined. The internet beacon
+  // only: the radio beacon is not reachable from here.
+  // =============================================
+  const aprsView = document.getElementById('aprs-view');
+  const aprsTabBtn = document.getElementById('aprs-tab-btn');
+  const aprsRows = new Map();          // key -> row
+  let aprsState = null;
+  let aprsSubscribedSent = false;
+  let aprsSnapshotParts = null;        // rows of a snapshot still arriving
+  let aprsMapOn = false;
+  try { aprsMapOn = localStorage.getItem('echocat-aprs-map') === '1'; } catch { /* private window */ }
+  let aprsMapLayer = null;
+  const aprsMarkers = new Map();       // key -> L.marker
+  let aprsMapFitted = false;           // the layer's first stations bring the map to them, once
+  let aprsListTimer = null;
+
+  function aprsSendMsg(m) {
+    try { if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(m)); } catch { /* not connected */ }
+  }
+  /** Watching while the APRS tab is open, or the Map tab with its APRS layer on. */
+  function aprsSyncSubscription(tab) {
+    const want = !!aprsState && (tab === 'aprs' || (tab === 'map' && aprsMapOn));
+    if (want === aprsSubscribedSent) return;
+    aprsSubscribedSent = want;
+    if (!want) { aprsRows.clear(); aprsSnapshotParts = null; aprsMapClear(); }
+    aprsSendMsg({ type: 'aprs-subscribe', on: want });
+  }
+  /** A new connection: the shack starts from nothing, so ask again if watching. */
+  function aprsOnReconnect() { aprsSubscribedSent = false; aprsRows.clear(); aprsMapClear(); }
+
+  function aprsApplyState(st) {
+    aprsState = st;
+    if (aprsTabBtn) aprsTabBtn.classList.remove('hidden');
+    aprsSyncSubscription(activeTab); // the first state, or the first after a reconnect
+    aprsRenderControls();
+  }
+
+  function aprsApplyStations(m) {
+    if (m.op === 'snapshot') {
+      if (m.chunk === 0) aprsSnapshotParts = [];
+      if (!aprsSnapshotParts) return;
+      for (const r of m.stations || []) aprsSnapshotParts.push(r);
+      if (m.chunk + 1 < m.totalChunks) return;
+      aprsRows.clear();
+      for (const r of aprsSnapshotParts) aprsRows.set(r.key, r);
+      aprsSnapshotParts = null;
+      aprsMapClear();
+    } else if (m.op === 'delta') {
+      for (const r of (m.add || []).concat(m.update || [])) aprsRows.set(r.key, r);
+      for (const k of m.gone || []) aprsRows.delete(k);
+    }
+    aprsScheduleRender();
+  }
+
+  function aprsScheduleRender() {
+    if (aprsListTimer) return;
+    aprsListTimer = setTimeout(() => { aprsListTimer = null; if (activeTab === 'aprs') aprsRenderList(); aprsMapSync(); }, 120);
+  }
+
+  function aprsAge(ms) { return window.AprsStations ? window.AprsStations.formatAge(Date.now() - ms) : ''; }
+  function aprsIcon(r, px) { return window.AprsIcons ? window.AprsIcons.svg(r.cls, px, r.course) : ''; }
+  function aprsDist(r) {
+    if (r.distanceKm == null) return '';
+    const mi = distUnit === 'km' ? false : true;
+    const d = mi ? r.distanceKm * 0.621371 : r.distanceKm;
+    const pt = window.AprsStations ? window.AprsStations.compass(r.bearing) : '';
+    return Math.round(d) + (mi ? ' mi' : ' km') + (pt ? ' ' + pt : '');
+  }
+
+  function aprsRenderControls() {
+    const st = aprsState;
+    if (!st || !aprsView) return;
+    const l = st.listen || {}, ig = st.igate || {}, b = st.beacon || {}, f = st.feed || {};
+    const feedWords = { connected: 'Internet: connected', connecting: 'Internet: connecting', waiting: 'Internet: reconnecting', refused: 'Internet: APRS-IS refused the connection', off: 'Internet: off', stopped: 'Internet: off', 'no-grid': 'Set your grid in Settings to see stations near you.' };
+    document.getElementById('aprs-feed').textContent = feedWords[f.state] || ('Internet: ' + (f.state || 'off'));
+    const sw = document.getElementById('aprs-listen');
+    sw.checked = !!l.on;
+    const chips = document.getElementById('aprs-bands');
+    chips.innerHTML = (l.bands || []).map((bd) => '<button type="button" class="aprs-chip' + (bd === l.band ? ' active' : '') + '" data-band="' + esc(bd) + '">' + esc(bd.replace('m', ' m')) + '</button>').join('');
+    let line = '';
+    if (l.on && l.state === 'listening') line = 'Listening on ' + (l.mhz ? l.mhz + ' MHz' : l.band) + (l.modeLabel ? ' ' + l.modeLabel : '') + ' · ' + (l.heard || 0) + ' heard' + (l.lastAt ? ', last ' + aprsAge(l.lastAt) : '');
+    else if (l.on && l.state === 'starting') line = 'Setting up the radio...';
+    document.getElementById('aprs-listen-line').textContent = line;
+    const igRow = document.getElementById('aprs-igate-row');
+    igRow.classList.toggle('hidden', st.mayIgate === false);
+    document.getElementById('aprs-igate').checked = !!ig.on;
+    document.getElementById('aprs-igate-line').textContent = ig.on ? (ig.paused ? ig.paused : (ig.active ? 'Reporting as ' + (ig.call || '') : 'On when the radio listens') + ' · ' + (ig.gated || 0) + ' sent') : '';
+    const bRow = document.getElementById('aprs-beacon-row');
+    bRow.classList.toggle('hidden', st.mayBeacon === false);
+    const bb = document.getElementById('aprs-beacon');
+    bb.disabled = !!b.sending;
+    bb.textContent = b.sending ? 'Sending...' : 'Beacon now (internet)';
+    document.getElementById('aprs-beacon-line').textContent = b.lastAt ? 'Last beacon ' + aprsAge(b.lastAt) + ' ago' + (b.backAt >= b.lastAt ? ', seen on APRS-IS' : '') : '';
+    document.getElementById('aprs-map-on').checked = aprsMapOn;
+    const ref = document.getElementById('aprs-refusal');
+    ref.textContent = st.refusal || '';
+    ref.classList.toggle('hidden', !st.refusal);
+  }
+
+  function aprsRenderList() {
+    const el = document.getElementById('aprs-list');
+    if (!el) return;
+    const q = (document.getElementById('aprs-search').value || '').trim().toUpperCase();
+    const mine = document.getElementById('aprs-mine').checked;
+    let rows = [...aprsRows.values()];
+    if (mine) rows = rows.filter((r) => r.heardByMe);
+    if (q) rows = rows.filter((r) => (r.label || '').toUpperCase().includes(q) || (r.comment || '').toUpperCase().includes(q));
+    rows.sort((a, b) => (a.distanceKm == null ? 1e9 : a.distanceKm) - (b.distanceKm == null ? 1e9 : b.distanceKm));
+    document.getElementById('aprs-count').textContent = rows.length + (rows.length === 1 ? ' station' : ' stations');
+    if (!rows.length) { el.innerHTML = '<div class="dir-empty">' + (aprsRows.size ? 'No station matches.' : 'No stations yet.') + '</div>'; return; }
+    el.innerHTML = rows.slice(0, 300).map((r) => {
+      const heard = r.heardByMe ? '<span class="aprs-heard">' + (r.rf && r.rf.kind === 'digi' ? 'Heard via ' + esc(r.rf.digi || 'digi') : 'Heard direct') + '</span>' : '';
+      const sp = r.speed ? ' · ' + Math.round(r.speed * (distUnit === 'km' ? 1.852 : 1.15078)) + (distUnit === 'km' ? ' km/h' : ' mph') : '';
+      return '<div class="aprs-row' + (r.heardByMe ? ' mine' : '') + '">' + aprsIcon(r, 26)
+        + '<div class="aprs-row-main"><div class="aprs-row-top"><span class="aprs-call">' + esc(r.label) + '</span>' + heard + '<span class="aprs-age">' + esc(aprsAge(r.lastHeard)) + '</span></div>'
+        + '<div class="aprs-row-sub">' + esc(aprsDist(r)) + esc(sp) + (r.comment || r.status ? ' · ' + esc(r.comment || r.status) : '') + '</div></div></div>';
+    }).join('');
+  }
+
+  // The Map tab's APRS layer: one marker per station, the window's icons.
+  function aprsMapClear() {
+    if (aprsMapLayer) aprsMapLayer.clearLayers();
+    aprsMarkers.clear();
+  }
+  function aprsMapSync() {
+    if (!spotMap || typeof L === 'undefined') return;
+    if (!aprsMapOn) { aprsMapFitted = false; if (aprsMapLayer) { spotMap.removeLayer(aprsMapLayer); aprsMapLayer = null; aprsMarkers.clear(); } return; }
+    if (!aprsMapLayer) aprsMapLayer = L.layerGroup().addTo(spotMap);
+    for (const [k, mk] of aprsMarkers) if (!aprsRows.has(k)) { aprsMapLayer.removeLayer(mk); aprsMarkers.delete(k); }
+    const pts = [];
+    for (const r of aprsRows.values()) {
+      if (r.lat == null || r.lon == null) continue;
+      pts.push([r.lat, r.lon]);
+      const icon = L.divIcon({ className: 'aprs-pin' + (r.heardByMe ? ' mine' : ''), html: aprsIcon(r, 22), iconSize: [22, 22], iconAnchor: [11, 11] });
+      let mk = aprsMarkers.get(r.key);
+      if (!mk) {
+        mk = L.marker([r.lat, r.lon], { icon, keyboard: false });
+        mk.addTo(aprsMapLayer);
+        aprsMarkers.set(r.key, mk);
+      } else { mk.setLatLng([r.lat, r.lon]); mk.setIcon(icon); }
+      mk.bindPopup('<b>' + esc(r.label) + '</b><br>' + esc(aprsDist(r)) + (r.comment ? '<br>' + esc(r.comment) : '') + '<br>' + esc(aprsAge(r.lastHeard)) + (r.heardByMe ? ' · heard on my radio' : ''));
+    }
+    if (!aprsMapFitted && pts.length) { aprsMapFitted = true; try { spotMap.fitBounds(pts, { maxZoom: 9, padding: [20, 20] }); } catch { /* map not sized yet */ } }
+  }
+
+  if (aprsView) {
+    document.getElementById('aprs-listen').addEventListener('change', (e) => aprsSendMsg({ type: 'aprs-listen', on: !!e.target.checked }));
+    document.getElementById('aprs-bands').addEventListener('click', (e) => {
+      const b = e.target.closest('.aprs-chip');
+      if (!b) return;
+      aprsSendMsg({ type: 'aprs-listen', on: !!(aprsState && aprsState.listen && aprsState.listen.on), band: b.dataset.band });
+    });
+    document.getElementById('aprs-igate').addEventListener('change', (e) => aprsSendMsg({ type: 'aprs-igate', on: !!e.target.checked }));
+    document.getElementById('aprs-beacon').addEventListener('click', () => aprsSendMsg({ type: 'aprs-beacon-is' }));
+    document.getElementById('aprs-map-on').addEventListener('change', (e) => {
+      aprsMapOn = !!e.target.checked;
+      try { localStorage.setItem('echocat-aprs-map', aprsMapOn ? '1' : '0'); } catch { /* private window */ }
+      aprsMapSync();
+    });
+    document.getElementById('aprs-search').addEventListener('input', () => aprsRenderList());
+    document.getElementById('aprs-mine').addEventListener('change', () => aprsRenderList());
+  }
+
+  // =============================================
   // ACTIVATOR MODE
   // =============================================
 
@@ -7029,6 +7485,9 @@
       }
     } catch { /* pre-init switch — nothing subscribed yet */ }
     try { scopeSyncSubscription(tab); } catch { /* pre-init */ }
+    try { aprsSyncSubscription(tab); } catch { /* pre-init */ }
+    // Leaving Mail: a radio moved to a gateway for a look goes back (W1).
+    try { if (activeTab === 'mail' && tab !== 'mail') mailOnLeave(); } catch { /* pre-init */ }
     // Leaving FT8: remember where it was, to come back to it (item 15).
     try {
       if (activeTab === 'ft8' && tab !== 'ft8' && currentFreqKhz > 0) {
@@ -7050,15 +7509,16 @@
     if (sstvView) { sstvView.classList.add('hidden'); sstvView.style.display = 'none'; }
     if (scopeView) { scopeView.classList.add('hidden'); scopeView.style.display = 'none'; }
     if (mailView) { mailView.classList.add('hidden'); mailView.style.display = 'none'; }
+    try { if (aprsView) { aprsView.classList.add('hidden'); aprsView.style.display = 'none'; } } catch { /* pre-init */ }
     // Popout trigger: visible only on the Map tab, and only in non-popout windows
     if (mapPopoutBtn) mapPopoutBtn.classList.toggle('hidden', isPopout || tab !== 'map');
     if (scanning) stopScan();
     // Show/hide PTT button — hide when FT8/SSTV tab is active
-    pttBtn.style.display = (tab === 'ft8' || tab === 'sstv' || tab === 'scope' || tab === 'mail') ? 'none' : '';
+    pttBtn.style.display = (tab === 'ft8' || tab === 'sstv' || tab === 'scope' || tab === 'mail' || tab === 'aprs') ? 'none' : '';
     // Hide entire bottom bar on FT8/SSTV tab
-    bottomBar.style.display = (tab === 'ft8' || tab === 'sstv' || tab === 'scope' || tab === 'mail') ? 'none' : '';
+    bottomBar.style.display = (tab === 'ft8' || tab === 'sstv' || tab === 'scope' || tab === 'mail' || tab === 'aprs') ? 'none' : '';
     // Hide Scan button and freq step arrows on FT8/SSTV tab
-    scanBtn.style.display = (tab === 'ft8' || tab === 'sstv' || tab === 'scope' || tab === 'mail') ? 'none' : '';
+    scanBtn.style.display = (tab === 'ft8' || tab === 'sstv' || tab === 'scope' || tab === 'mail' || tab === 'aprs') ? 'none' : '';
     var freqStepBtns = document.getElementById('freq-step-btns');
     if (freqStepBtns) freqStepBtns.style.display = tab === 'ft8' ? 'none' : '';
     // Hide CW/SSB panels on tabs where they're not relevant
@@ -7086,6 +7546,11 @@
       }
       setTimeout(() => spotMap.invalidateSize(), 100);
       renderMapSpots();
+      try { aprsMapSync(); } catch { /* pre-init */ } // the APRS layer, when it is on (APRS tab)
+    } else if (tab === 'aprs') {
+      if (aprsView) { aprsView.classList.remove('hidden'); aprsView.style.display = 'flex'; }
+      aprsRenderControls();
+      aprsRenderList();
     } else if (tab === 'log') {
       logTabView.classList.remove('hidden');
       refreshLogTabFields();
@@ -7097,10 +7562,9 @@
       updateLogViewState();
     } else if (tab === 'ft8') {
       ft8View.classList.remove('hidden');
-      // Auto-start engine if not running
-      if (!ft8Running) {
-        ft8Send({ type: 'jtcat-start', mode: ft8Mode });
-      }
+      // Auto-start engine if not running, or take it from the shack's idle
+      // receive: an idle WSPR is nobody's session (Casey 2026-11-12).
+      if (!ft8Running || ft8IdleRx) ft8TakeEngine();
       // If coming from a spot click with a specific frequency, select the matching band
       // and skip the default band tune (the spot already tuned the radio)
       var spotFreq = opts && opts.freqKhz ? parseFloat(opts.freqKhz) : 0;
@@ -7154,7 +7618,7 @@
           var freqEl = document.getElementById('sstv-freq-phone');
           if (freqEl && freqEl.value) {
             var fOpt = freqEl.options[freqEl.selectedIndex];
-            var fMode = (fOpt && fOpt.dataset.mode) || (parseInt(freqEl.value) < 10000 ? 'LSB' : 'USB');
+            var fMode = (fOpt && fOpt.dataset.mode) || 'SSB'; // the shack picks the band's sideband
             ws.send(JSON.stringify({ type: 'tune', freqKhz: freqEl.value, mode: fMode }));
           }
         } catch (e) {}
@@ -7540,7 +8004,7 @@
         const offClass = c._offline ? ' offline' : '';
         const dupeClass = c.dupe ? ' dupe' : '';
         const time = c.timeUtc ? c.timeUtc.slice(0, 2) + ':' + c.timeUtc.slice(2, 4) : '';
-        const freq = c.freqKhz ? parseFloat(c.freqKhz).toFixed(1) : '';
+        const freq = c.freqKhz ? FreqDots.fromKhz(c.freqKhz) : '';
         const dupeTag = c.dupe ? ' <span class="dupe-tag">DUPE</span>' : '';
         return `<div class="contact-row${offClass}${dupeClass}">
           <span class="contact-nr">${c.nr || ''}</span>
@@ -7630,7 +8094,7 @@
           '<span class="pa-nr">' + (j + 1) + '</span>' +
           '<span class="pa-time">' + formatPaTime(c.timeOn) + '</span>' +
           '<span class="pa-call">' + esc(c.callsign) + '</span>' +
-          '<span class="pa-freq">' + (c.freq ? parseFloat(c.freq).toFixed(3) : '') + '</span>' +
+          '<span class="pa-freq">' + (c.freq ? FreqDots.fromMhz(c.freq) : '') + '</span>' +
           '<span class="pa-mode">' + esc(c.mode) + '</span>' +
           '<span class="pa-rst">' + esc(c.rstSent) + '/' + esc(c.rstRcvd) + '</span>' +
           '</div>';
@@ -7695,7 +8159,8 @@
       var rec = '';
       rec += af('CALL', c.callsign);
       if (c.freq) rec += af('FREQ', c.freq);
-      rec += af('MODE', c.mode);
+      // adifMode + submode: the record's own pair (main.js getPastActivations).
+      rec += afMode(c.adifMode || c.mode, c.adifMode ? c.submode : '');
       rec += af('BAND', c.band);
       rec += af('QSO_DATE', act.date);
       rec += af('TIME_ON', c.timeOn);
@@ -7848,7 +8313,7 @@
       let rec = '';
       rec += af('CALL', c.callsign);
       if (c.freqKhz) rec += af('FREQ', (parseFloat(c.freqKhz) / 1000).toFixed(6));
-      if (c.mode) rec += af('MODE', c.mode);
+      if (c.mode) rec += afMode(c.mode, c.submode);
       if (c.band) rec += af('BAND', c.band);
       if (c.timeUtc) {
         const d = new Date();
@@ -7868,7 +8333,7 @@
       let rec = '';
       rec += af('CALL', c.callsign);
       if (c.freqKhz) rec += af('FREQ', (parseFloat(c.freqKhz) / 1000).toFixed(6));
-      if (c.mode) rec += af('MODE', c.mode);
+      if (c.mode) rec += afMode(c.mode, c.submode);
       if (c.rstSent) rec += af('RST_SENT', c.rstSent);
       if (c.rstRcvd) rec += af('RST_RCVD', c.rstRcvd);
       if (c._ts) {
@@ -7896,6 +8361,14 @@
   function af(name, val) {
     if (!val) return '';
     return `<${name}:${val.length}>${val}\n`;
+  }
+
+  /** MODE (+ SUBMODE) of an app mode, the desktop writer's rule
+   *  (lib/adif-mode.js): JS8 -> MFSK/JS8, PSK31 -> PSK/PSK31 (#381). */
+  function afMode(mode, submode) {
+    if (!mode) return '';
+    const ms = AdifMode.adifModeSubmode(String(mode), submode ? String(submode) : '');
+    return af('MODE', String(ms.mode || '')) + af('SUBMODE', String(ms.submode || ''));
   }
 
   // Refresh spot ages every 30s
@@ -8079,9 +8552,7 @@
    * PSK31/63 are PSK.
    */
   function lbModeFamily(q) {
-    const sub = String(q.SUBMODE || '').toUpperCase();
-    const m = String(q.MODE || '').toUpperCase();
-    const v = (m === 'MFSK' && sub) ? sub : m;
+    const v = AdifMode.recordMode(q);
     if (v === 'USB' || v === 'LSB') return 'SSB';
     if (/^PSK/.test(v)) return 'PSK';
     return v;
@@ -8101,7 +8572,7 @@
       if (from && d < from) return false;
       if (to && d > to) return false;
       if (!query) return true;
-      return [q.CALL, q.SIG_INFO, q.COMMENT, q.MODE, q.BAND].some(v => String(v || '').toUpperCase().includes(query));
+      return [q.CALL, q.SIG_INFO, q.COMMENT, AdifMode.recordMode(q), q.MODE, q.BAND].some(v => String(v || '').toUpperCase().includes(query));
     });
   }
 
@@ -8141,8 +8612,8 @@
     lbList.innerHTML = filtered.map(q => {
       const idx = q.idx;
       const call = esc(q.CALL || '');
-      const freqMhz = q.FREQ ? parseFloat(q.FREQ).toFixed(3) : '';
-      const mode = esc(q.MODE || '');
+      const freqMhz = q.FREQ ? FreqDots.fromMhz(q.FREQ) : '';
+      const mode = esc(AdifMode.recordMode(q));
       const ref = esc(q.SIG_INFO || '');
       const date = formatLbDate(q.QSO_DATE || '');
       const time = formatLbTime(q.TIME_ON || '');
@@ -8168,7 +8639,7 @@
             <div class="log-field"><label>Freq MHz</label><input type="text" data-field="FREQ" value="${esc(q.FREQ || '')}"></div>
           </div>
           <div class="log-row">
-            <div class="log-field"><label>Mode</label><input type="text" data-field="MODE" value="${esc(q.MODE || '')}"></div>
+            <div class="log-field"><label>Mode</label><input type="text" data-field="MODE" value="${mode}"></div>
             <div class="log-field"><label>Band</label><input type="text" data-field="BAND" value="${band}"></div>
           </div>
           <div class="log-row">
@@ -8319,9 +8790,10 @@
         // next quiet cycle shows "No decodes" again.
         const row = document.createElement('div');
         row.className = 'ft8-row ft8-tx';
-        row.innerHTML = DecodeRow.txRowInner(ft8PendingTxMsg, 'ft8');
+        row.innerHTML = DecodeRow.txRowInner(ft8PendingTxMsg, 'ft8', ft8PendingTxHz);
         log.appendChild(row);
         ft8PendingTxMsg = '';
+        ft8PendingTxHz = 0;
       } else {
         const row = document.createElement('div');
         row.className = 'ft8-row';
@@ -8433,26 +8905,40 @@
   // My Activity is an append-only view of decodes directed at us; over a long
   // session it becomes a wall. Clearing is a VIEW action only — the log, the
   // QSO state machine and Band Activity are untouched (LZ3AW 2026-08-29).
+  function ft8ClearMyActivity() {
+    const myLog = document.getElementById('ft8-my-activity');
+    const myHeader = document.getElementById('ft8-my-activity-header');
+    if (myLog) myLog.innerHTML = '';
+    // Re-hide the empty pane so the layout returns to its pre-activity
+    // state; the next directed decode unhides both again.
+    if (myLog) myLog.classList.add('hidden');
+    if (myHeader) myHeader.classList.add('hidden');
+  }
   (function initMyActivityClear() {
     const btn = document.getElementById('ft8-my-activity-clear');
     if (!btn) return;
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
-      const myLog = document.getElementById('ft8-my-activity');
-      const myHeader = document.getElementById('ft8-my-activity-header');
-      if (myLog) myLog.innerHTML = '';
-      // Re-hide the empty pane so the layout returns to its pre-activity
-      // state; the next directed decode unhides both again.
-      if (myLog) myLog.classList.add('hidden');
-      if (myHeader) myHeader.classList.add('hidden');
+      ft8ClearMyActivity();
     });
   })();
 
-  function ft8AddTxRow(message) {
+  // The operator changed mode (#517): the shack stops TX and drops its decode
+  // replay; this page clears its decode history and the stations calling us
+  // (My Activity). The hunt call is NOT cleared: a spot click sets it right
+  // after its own mode change.
+  function ft8ClearForModeChange(note) {
+    ft8DecodeLog = [];
+    ft8DecodeLogEl.innerHTML = '<div class="ft8-empty">' + esc(note) + '</div>';
+    ft8UserScrolled = false;
+    ft8ClearMyActivity();
+  }
+
+  function ft8AddTxRow(message, txHz) {
     const log = ft8DecodeLogEl;
     const row = document.createElement('div');
     row.className = 'ft8-row ft8-tx';
-    row.innerHTML = DecodeRow.txRowInner(message, 'ft8');
+    row.innerHTML = DecodeRow.txRowInner(message, 'ft8', txHz);
     log.appendChild(row);
     log.scrollTop = log.scrollHeight;
   }
@@ -8683,8 +9169,8 @@
     if (!RB) return;
     RB.applyToElements(document, '.vf-band', webRigBands);
     RB.applyToElements(document, '#rc-band-filter .rc-dropdown-item', webRigBands);
-    var mailSel = document.getElementById('mail-band');
-    if (mailSel) { RB.applyToElements(mailSel, 'option', webRigBands); RB.fixSelect(mailSel); }
+    // The Mail tab's band chips are drawn from the same list (mailRenderBands).
+    if (document.getElementById('mail-band') && typeof mailRenderBands === 'function') mailRenderBands();
     var ft8Sel = document.getElementById('ft8-band-select');
     if (ft8Sel) {
       var cur = ft8Sel.value;
@@ -9142,11 +9628,26 @@
     ft8UserScrolled = false;
   });
 
+  // Start the engine in this tab's own mode. Over an idle-RX session the
+  // desktop's jtcat-start cancels the idle receive (markUserActive) first.
+  function ft8TakeEngine() {
+    if (ft8IdleRx) {
+      ft8Mode = ft8OwnMode;
+      ft8ModeSelect.value = ft8Mode;
+      ft8IdleRx = null;
+      updateBandFreqs();
+      if (typeof applyDigitalPanes === 'function') applyDigitalPanes();
+    }
+    ft8Send({ type: 'jtcat-start', mode: ft8Mode });
+  }
+
   // --- Mode select ---
   ft8ModeSelect.addEventListener('change', () => {
     ft8Mode = ft8ModeSelect.value;
+    ft8OwnMode = ft8Mode;
     updateBandFreqs();
     ft8Send({ type: 'jtcat-set-mode', mode: ft8Mode });
+    ft8ClearForModeChange('Switching to ' + ft8Mode + '...'); // #517: decodes and callers go with the old mode
     ft8StartCountdown(); // restart with new cycle duration
     applyDigitalPanes(); // WSPR/PSK panes replace the decode log for those modes
     // Retune to the active band's new frequency for the selected mode
@@ -9189,10 +9690,8 @@
     ft8DecodeLog = [];
     ft8DecodeLogEl.innerHTML = '<div class="ft8-empty">Switching to ' + band + '...</div>';
     ft8UserScrolled = false;
-    // Auto-start if not running
-    if (!ft8Running) {
-      ft8Send({ type: 'jtcat-start', mode: ft8Mode });
-    }
+    // Auto-start if not running, or take it from the shack's idle receive
+    if (!ft8Running || ft8IdleRx) ft8TakeEngine();
   });
 
   // --- Waterfall tap to set TX freq ---
@@ -9251,8 +9750,22 @@
         wsprTxPct.value = echoSettings.wsprTxPct;
         wsprTxPctVal.textContent = echoSettings.wsprTxPct + '%';
       }
-      if (typeof echoSettings.wsprDbm === 'number') wsprDbm.value = String(Math.min(30, echoSettings.wsprDbm));
+      if (typeof echoSettings.wsprDbm === 'number') wsprRenderDbm({ dBm: echoSettings.wsprDbm, dBmAuto: echoSettings.wsprDbmAuto });
     }
+  }
+
+  // The Reported power menu: Auto (follows the beacon's RF power, #268) or a
+  // fixed WSPR value 0..60 dBm. Drawn from the host's state by the same
+  // lib/wspr/dbm.js the JTCAT window uses, so both show the same value.
+  function wsprRenderDbm(st) {
+    if (!wsprDbm || !window.WsprDbm || !st || st.dBm == null) return;
+    const m = window.WsprDbm.menu(st);
+    if (wsprDbm.options.length !== m.options.length) {
+      wsprDbm.innerHTML = '';
+      for (const o of m.options) { const el = document.createElement('option'); el.value = o.value; wsprDbm.appendChild(el); }
+    }
+    m.options.forEach((o, i) => { wsprDbm.options[i].textContent = o.text; });
+    wsprDbm.value = m.value;
   }
 
   function wsprHandleSpots(msg) {
@@ -9299,12 +9812,14 @@
     // renders ONLY from here, never from the local tap.
     wsprBeaconOn = !!msg.enabled;
     if (wsprTxEnable) wsprTxEnable.checked = wsprBeaconOn;
+    wsprRenderDbm(msg);
   }
 
   if (wsprTxEnable) wsprTxEnable.addEventListener('change', () => {
     const wanted = wsprTxEnable.checked;
     wsprTxEnable.checked = wsprBeaconOn; // optimistic-free: revert; the state echo flips it
-    ft8Send({ type: 'jtcat-wspr-beacon', enabled: wanted, txPct: parseInt(wsprTxPct.value, 10), dBm: Math.min(30, parseInt(wsprDbm.value, 10)) });
+    // The reported power is the host's (Auto or the fixed pick); not resent here.
+    ft8Send({ type: 'jtcat-wspr-beacon', enabled: wanted, txPct: parseInt(wsprTxPct.value, 10) });
   });
   if (wsprTxPct) wsprTxPct.addEventListener('input', () => {
     wsprTxPctVal.textContent = wsprTxPct.value + '%';
@@ -9313,7 +9828,8 @@
     ft8Send({ type: 'jtcat-wspr-beacon', txPct: parseInt(wsprTxPct.value, 10) });
   });
   if (wsprDbm) wsprDbm.addEventListener('change', () => {
-    ft8Send({ type: 'jtcat-wspr-beacon', dBm: Math.min(30, parseInt(wsprDbm.value, 10)) });
+    if (!window.WsprDbm) return;
+    ft8Send(Object.assign({ type: 'jtcat-wspr-beacon' }, window.WsprDbm.controlFromMenu(wsprDbm.value)));
   });
 
   // 120s cycle phase/countdown — same window math as the popout: the TX
@@ -10134,20 +10650,21 @@
     // a new press; 15 ms is a whole dot at 80 WPM. Same rule in lib/keyer.js.
     var BOUNCE_MS = 15;
     var ditReleaseAt = -1e9, dahReleaseAt = -1e9;
-    // A held paddle's next element is chosen when the space ends, but it is
-    // only HEARD a scheduling lead later (schedulePaddleElement, 20 ms) plus
-    // the device's output latency, and the release reaches this page after
-    // the contact opens (MIDI and keyboard events arrive late). The operator
-    // releases on what he hears, so at 25 wpm (48 ms dit and space) his
-    // release could miss the choice and the keyer sent one more element:
-    // LZ3AW (#244, 1.13.8) measured 54 ms from choice to speaker and paddle
-    // input up to 24 ms late. A release of the contact whose HOLD chose the
-    // element now withdraws it while it has not begun to sound. A latched
-    // element (a real press during the element) is never withdrawn.
+    // A held paddle's next element is chosen when the space ends, a lead
+    // before it sounds (schedulePaddleElement), and the operator releases on
+    // what he hears, so at 25 wpm a release can come after that choice
+    // (LZ3AW, #244). A release of the contact whose HOLD chose the element
+    // asks to withdraw it (a latched element, a real press during the
+    // element, is never withdrawn). The page grants it only while the
+    // element's sidetone has not started (lib/cw-sidetone-commit.js, Casey
+    // 2026-11-19): once it sounds, it is committed and keyed on the air in
+    // full, so the sidetone and the air always agree. Until 1.14.6 a release
+    // could withdraw an element after its tone had started (judged by when
+    // the release happened and what he could have heard): the page cut its
+    // tone into a blip while the shack dropped the element, the extra
+    // elements LZ3AW heard only in his own sidetone.
     var heldBy = null;   // 'dit' | 'dah': the held contact that chose this element
     var undoState = null; // the keyer before that choice
-    var soundAt = 0;     // performance.now() when this element starts to sound
-    var RETRACT_MARGIN_MS = 2;
     function ditMs() { return Math.round(1200 / wpm); }
     function dahMs() { return ditMs() * 3; }
     function clearTimers() {
@@ -10160,8 +10677,7 @@
       bothAtStart = ditPressed && dahPressed;
       ditLatch = false; dahLatch = false;
       heldBy = null; undoState = null;
-      var lead = onKey(true, isDit ? ditMs() : dahMs(), { continued: !!continued, spaceMs: ditMs() });
-      soundAt = performance.now() + (Number(lead) > 0 ? Number(lead) : 0);
+      onKey(true, isDit ? ditMs() : dahMs(), { continued: !!continued, spaceMs: ditMs() });
       clearTimers();
       timerDue = performance.now() + (isDit ? ditMs() : dahMs());
       toneTimer = setTimeout(onToneEnd, isDit ? ditMs() : dahMs());
@@ -10208,15 +10724,18 @@
       }
       state = IDLE;
     }
-    // The contact whose hold chose the element now sounding-soon opened: take
-    // the element back and choose again as if the release had come in time.
+    // The contact whose hold chose the element about to sound opened: ask for
+    // the element back and, if it has not started to sound, choose again as
+    // if the release had come in time.
     function retractHeldBy(contact) {
-      if (state !== TONE || heldBy !== contact || !undoState) return;
-      if (performance.now() >= soundAt - RETRACT_MARGIN_MS) return; // already sounding
+      // TONE or the space after it (a dit can be over in the keyer's own time
+      // before its tone starts); heldBy is cleared when the next element starts.
+      if ((state !== TONE && state !== IES) || heldBy !== contact || !undoState) return;
       var u = undoState;
-      clearTimers();
       heldBy = null; undoState = null;
-      onKey(false, undefined, { cancel: true, retract: true });
+      // true only while its sidetone has not started (lib/cw-sidetone-commit.js)
+      if (onKey(false, undefined, { cancel: true, retract: true }) !== true) return;
+      clearTimers();
       currentIsDit = u.isDit;
       ditLatch = ditLatch || u.ditLatch;
       dahLatch = dahLatch || u.dahLatch;
@@ -10373,46 +10892,82 @@
   // second keyer at the shack meant network jitter decided the elements:
   // a dit release that arrived late became two dits (LZ3AW, 400 km from his
   // TS-480, 2026-09-29: "errors ... especially with the dots").
+  //
+  // An iambic element goes to the shack when its sidetone STARTS (#244,
+  // lib/cw-sidetone-commit.js), not when the keyer chooses it: before that
+  // the keyer may still withdraw it, after it nothing is withdrawn, so a
+  // withdrawal never goes on the wire and the air keys exactly what was heard.
   var cwStreamNextAt = 0, cwStreamLastAt = 0;
-  function sendCwKeyStream(down, durMs, info) {
+  // The stream time (`at`) of an iambic element, fixed when it is chosen.
+  function cwStreamElementAt(durMs, info) {
+    // A continued element starts exactly one space after the previous
+    // one, whatever this page's timers did; a new streak starts now.
+    var at = (info && info.continued && cwStreamNextAt) ? cwStreamNextAt : performance.now();
+    cwStreamNextAt = at + durMs + ((info && info.spaceMs) || 0);
+    cwStreamLastAt = at;
+    return at;
+  }
+  // Straight-key edges, and the cancelling key-up of a stop (atMs: where it cuts).
+  function sendCwKeyStream(down, info, atMs) {
     if (!cwKeyStreamOk || !ws || ws.readyState !== WebSocket.OPEN) return;
     var now = performance.now();
     var msg;
-    if (down && durMs) {
-      // A continued element starts exactly one space after the previous
-      // one, whatever this page's timers did; a new streak starts now.
-      var at = (info && info.continued && cwStreamNextAt) ? cwStreamNextAt : now;
-      cwStreamNextAt = at + durMs + ((info && info.spaceMs) || 0);
-      cwStreamLastAt = at;
-      msg = { type: 'cw-key', at: at, down: true, ms: durMs };
-    } else if (down) {
+    if (down) {
       cwStreamNextAt = 0;
       msg = { type: 'cw-key', at: now, down: true };
     } else {
       cwStreamNextAt = 0;
-      msg = { type: 'cw-key', at: now, down: false };
+      msg = { type: 'cw-key', at: (atMs != null ? atMs : now), down: false };
       if (info && info.cancel) msg.cancel = true;
     }
     ws.send(JSON.stringify(msg));
   }
-  // The keyer withdrew an element that has not begun to sound (its held
-  // contact opened in time, #244): drop its tone and, in stream mode, its
-  // keying at the shack (a cancelling key-up just before its start; the
-  // playout drops what is scheduled after that), and give its slot back.
+  // The gate between this keyer and the shack: an element is committed, and
+  // sent, when its sidetone starts on the audio clock.
+  var cwCommit = window.CwSidetoneCommit.createGate({
+    now: function() { return cwAudioCtx ? cwAudioCtx.currentTime * 1000 : 0; },
+    send: function(msg) {
+      if (!cwKeyStreamOk) return true; // an older shack keys from the contacts
+      if (!ws || ws.readyState !== WebSocket.OPEN) return false;
+      ws.send(JSON.stringify(msg));
+      return true;
+    },
+    setTimer: function(fn, ms) { return setTimeout(fn, ms); },
+    clearTimer: function(h) { clearTimeout(h); },
+    // It could not reach the shack (the socket is gone): its tone has not
+    // started, so silence it and stop the keyer; nothing more sounds.
+    onLost: function() { try { localCwKeyer.stop(); } catch (e) { cancelPaddleTones(); } },
+  });
+  // The keyer asks for an element back (its held contact opened). Granted
+  // only while its sidetone has not started: drop its tone and give its slot
+  // back; it was never sent. Once it sounds it is keyed in full (#244).
   function retractPaddleElement() {
+    if (!cwCommit.withdraw()) return false;
     if (paddleGain && cwAudioCtx && paddleLastAt) paddleGain.gain.cancelScheduledValues(paddleLastAt);
     paddleNextAt = paddleLastAt;
-    if (cwKeyStreamOk && cwStreamLastAt && ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ type: 'cw-key', at: cwStreamLastAt - 1, down: false, cancel: true }));
-      cwStreamNextAt = cwStreamLastAt;
-    }
+    cwStreamNextAt = cwStreamLastAt;
+    return true;
+  }
+  // A stop (STOP, mode change, paddle keying lost, the socket closed): the
+  // tone stops now, an element not yet sounding is dropped on both sides, and
+  // the shack cuts the element now sounding at the same point (cutAt).
+  function stopPaddleElements(info) {
+    var cut = cwCommit.stop();
+    cancelPaddleTones();
+    sendCwKeyStream(false, info, cut);
   }
   var localCwKeyer = createLocalCwKeyer(function(down, durMs, info) {
-    if (durMs) { sendCwKeyStream(true, durMs, info); var lead = schedulePaddleElement(durMs); cwDiagNote('ahead', lead); return lead; } // iambic element
+    if (durMs) { // iambic element: sounds `lead` ms from now, is sent when it does
+      var at = cwStreamElementAt(durMs, info);
+      var lead = schedulePaddleElement(durMs); cwDiagNote('ahead', lead);
+      cwCommit.element(at, durMs, paddleLastAt * 1000);
+      return lead;
+    }
     if (durMs === 0) return;                              // its end is already scheduled
-    if (info && info.retract) { retractPaddleElement(); return; }
-    // Straight key, or a keyer stop/mode change.
-    sendCwKeyStream(down, 0, info);
+    if (info && info.retract) return retractPaddleElement(); // true: withdrawn before it sounded
+    if (!down && info && info.cancel) { stopPaddleElements(info); handleCwSidetone(false); return; }
+    // Straight key.
+    sendCwKeyStream(down, info);
     if (!down) cancelPaddleTones();
     handleCwSidetone(down);
   });
@@ -10778,14 +11333,26 @@
     return tunedCallsign || '';
   }
 
+  /** Ask main for a callsign's QRZ name/state (once per call) for CW macros. */
+  function requestQrzOp(call) {
+    var base = call ? String(JtcatParser.baseCall(String(call).toUpperCase()) || '').toUpperCase() : '';
+    if (!base || qrzOpByCall[base] || (qrzOpPending[base] && Date.now() - qrzOpPending[base] < 30000)) return;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    qrzOpPending[base] = Date.now();
+    ws.send(JSON.stringify({ type: 'qrz-lookup', callsign: base }));
+  }
+
   function sendCwText(text) {
     if (!text || !ws || ws.readyState !== WebSocket.OPEN) return;
-    // Expand macros: {op_firstname} -> operator name or "OM", {call} -> the
-    // callsign being worked (typed in the log form, else the tuned spot).
-    var expanded = text
-      .replace(/\{op_firstname\}/gi, tunedOpName || '')
-      .replace(/\{call\}/gi, macroCallsign())
-      .replace(/\{state\}/gi, tunedState || '');
+    // Expand macros: {call} -> the callsign being worked (typed in any
+    // callsign field, else the tuned spot); see macroCallsign().
+    // {op_firstname} and {state} belong to that same callsign: they are looked
+    // up for it in qrzOpByCall, never taken from the tuned spot (#524). No
+    // name known yet -> 'OM', as main uses for device text; the lookup is
+    // asked for so the next macro has it. CW never waits on the network.
+    var call = macroCallsign();
+    var expanded = CwRemoteExpand.expandForCall(text, call, qrzOpByCall, JtcatParser.baseCall).text;
+    if (/\{(op_firstname|state)\}/i.test(text)) requestQrzOp(call);
     ws.send(JSON.stringify({ type: 'cw-text', text: expanded }));
     playCwTextSidetone(expanded);
   }
@@ -11172,7 +11739,7 @@
         'kernel driver rejects DTR control; (b) connecting via Hamlib / rigctld, which has ' +
         'no per-element CW command in its protocol — only mic PTT. ' +
         'Workaround for either case: wire an external USB-UART adapter (FTDI / CH340) to the ' +
-        'radio’s CW KEY jack and set it as <i>CW Key Port</i> in Settings → Rig. ' +
+        'radio’s CW KEY jack and set it as <i>CW Key Port</i> in Settings &gt; ECHOCAT. ' +
         'CW macros and text-send still work without it — only paddle is affected.'
       );
       helpEl.innerHTML = bits.join('<br>');
@@ -12141,6 +12708,22 @@ var _paddleHoldTimer = { dit: null, dah: null };
       ws.send(JSON.stringify({ type: 'tune', freqKhz: String(lm.khz), mode: lm.mode }));
     }
   }
+  // Favourites (#329): a star on each card; a starred one heads its list in a
+  // Favorites group. Stars are the shack operator's (C2S favorite-set); a
+  // Guest Pass sees them but has no star to press (the shack refuses it too).
+  function favStar(kind, id, name) {
+    if (window.__echoGuestPass || !window.Favorites) return '';
+    var ids = kind === 'landmark' ? directoryLandmarkFavs : directoryChannelFavs;
+    return window.Favorites.starHtml(ids.indexOf(id) >= 0, name);
+  }
+  function favToggle(kind, id) {
+    var ids = kind === 'landmark' ? directoryLandmarkFavs : directoryChannelFavs;
+    var on = ids.indexOf(id) < 0;
+    var next = on ? ids.concat([id]) : ids.filter(function(x) { return x !== id; });
+    if (kind === 'landmark') directoryLandmarkFavs = next; else directoryChannelFavs = next;
+    renderDirectoryTab();
+    if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'favorite-set', kind: kind, id: id, on: on }));
+  }
   function renderDirLandmarks(search) {
     var L = window.Landmarks;
     if (!L) return;
@@ -12158,13 +12741,15 @@ var _paddleHoldTimer = { dit: null, dah: null };
           || String(r.lm.khz).indexOf(search) >= 0;
       });
     }
-    var hidden = rows.filter(function(r) { return !r.ok; });
-    var shown = lmkShowAll ? rows : rows.filter(function(r) { return r.ok; });
+    var isFav = function(r) { return directoryLandmarkFavs.indexOf(r.lm.id) >= 0; };
+    // A starred landmark is never hidden: the operator asked for it.
+    var hidden = rows.filter(function(r) { return !r.ok && !isFav(r); });
+    var shown = lmkShowAll ? rows : rows.filter(function(r) { return r.ok || isFav(r); });
 
     if (!lmkHintDismissed() && !search && directoryLandmarks.some(function(l) { return l.id === 'wwv-10000'; })) {
       var hint = document.createElement('div');
       hint.className = 'lmk-hint';
-      hint.innerHTML = '<p><b>New radio?</b> Tune <b>WWV on 10000 kHz</b>. A tick every second means the radio, the antenna and the audio all work.</p>'
+      hint.innerHTML = '<p><b>New radio?</b> Tune <b>WWV on 10.000.00 MHz</b>. A tick every second means the radio, the antenna and the audio all work.</p>'
         + '<div class="lmk-actions"><button type="button" class="lmk-btn lmk-btn-tint" data-act="tune">Tune WWV</button>'
         + '<button type="button" class="lmk-btn lmk-btn-plain" data-act="close">Got it</button></div>';
       hint.addEventListener('click', function(ev) {
@@ -12182,14 +12767,17 @@ var _paddleHoldTimer = { dit: null, dah: null };
 
     var cats = directoryLandmarkCategories.length ? directoryLandmarkCategories
       : L.CATEGORY_IDS.map(function(id) { return { id: id, label: id, reason: '' }; });
+    cats = [{ id: '__fav', label: 'Favorites', reason: 'the stations you starred' }].concat(cats);
     cats.forEach(function(cat) {
-      var inCat = shown.filter(function(r) { return r.lm.category === cat.id; });
+      var inCat = shown.filter(function(r) { return (isFav(r) ? '__fav' : r.lm.category) === cat.id; });
       if (!inCat.length) return;
       // Live first, then by when it is next on, then in the catalog's own
-      // (curated) order: the most useful station first.
-      inCat.sort(function(a, b) { return (a.cd.sortKey - b.cd.sortKey) || (a.i - b.i); });
+      // (curated) order: the most useful station first. Favorites keep the
+      // order they were starred in.
+      if (cat.id === '__fav') inCat.sort(function(a, b) { return directoryLandmarkFavs.indexOf(a.lm.id) - directoryLandmarkFavs.indexOf(b.lm.id); });
+      else inCat.sort(function(a, b) { return (a.cd.sortKey - b.cd.sortKey) || (a.i - b.i); });
       var head = document.createElement('div');
-      head.className = 'lmk-group';
+      head.className = 'lmk-group' + (cat.id === '__fav' ? ' fav-group' : '');
       head.innerHTML = esc(cat.label) + (cat.reason ? '<span>' + esc(cat.reason) + '</span>' : '');
       dirList.appendChild(head);
       inCat.forEach(function(r) {
@@ -12200,8 +12788,8 @@ var _paddleHoldTimer = { dit: null, dah: null };
         card.className = 'dir-card lmk-card' + (cd.status === 'live' ? ' dir-live' : cd.status === 'soon' ? ' dir-soon' : '')
           + (tuned ? ' tuned' : '') + (open ? ' open' : '') + (r.ok ? '' : ' lmk-out');
         var statusHtml = cd.label ? '<span class="dir-card-status ' + cd.status + '">' + esc(cd.label) + '</span>' : '';
-        var html = '<div class="dir-card-row"><span class="dir-card-name">' + esc(lm.name) + '</span>' + statusHtml + '</div>'
-          + '<div class="dir-card-detail"><span class="dir-card-freq">' + lm.khz + ' kHz</span> ' + esc(lm.mode) + ' · ' + esc(r.band) + '</div>'
+        var html = '<div class="dir-card-row"><span class="dir-card-name">' + esc(lm.name) + '</span>' + statusHtml + favStar('landmark', lm.id, lm.name) + '</div>'
+          + '<div class="dir-card-detail"><span class="dir-card-freq">' + FreqDots.khzMhz(lm.khz) + '</span> ' + esc(lm.mode) + ' · ' + esc(r.band) + '</div>'
           + '<div class="lmk-line">' + esc(lm.line) + (lm.ncdxf ? '<span class="lmk-now" data-khz="' + lm.khz + '"></span>' : '') + '</div>';
         if (open) {
           html += '<div class="lmk-detail">'
@@ -12211,12 +12799,13 @@ var _paddleHoldTimer = { dit: null, dah: null };
             + (lm.hear ? '<div class="lmk-sec"><b>What you’ll hear</b><p>' + esc(lm.hear) + '</p></div>' : '')
             + (lm.why ? '<div class="lmk-sec"><b>Why it matters</b><p>' + esc(lm.why) + '</p></div>' : '')
             + (lm.try ? '<div class="lmk-sec lmk-try"><b>Try this</b><p>' + esc(lm.try) + '</p></div>' : '')
-            + '<div class="lmk-actions"><button type="button" class="lmk-btn lmk-btn-tint" data-act="tune">Tune ' + lm.khz + ' kHz</button>'
+            + '<div class="lmk-actions"><button type="button" class="lmk-btn lmk-btn-tint" data-act="tune">Tune ' + FreqDots.khzMhz(lm.khz) + '</button>'
             + (lm.region ? '<span class="lmk-region">' + esc(lm.region) + '</span>' : '') + '</div>'
             + '</div>';
         }
         card.innerHTML = html;
         card.addEventListener('click', function(ev) {
+          if (ev.target && ev.target.closest && ev.target.closest('[data-fav]')) { ev.stopPropagation(); favToggle('landmark', lm.id); return; }
           if (ev.target && ev.target.dataset && ev.target.dataset.act === 'tune') { ev.stopPropagation(); lmkTune(lm); return; }
           lmkOpenId = open ? null : lm.id;
           renderDirectoryTab();
@@ -12282,7 +12871,7 @@ var _paddleHoldTimer = { dit: null, dah: null };
       card.className = 'dir-card' + (cd.status === 'live' ? ' dir-live' : cd.status === 'soon' ? ' dir-soon' : '') + (isTunedNet ? ' tuned' : '');
       var statusHtml = cd.label ? '<span class="dir-card-status ' + cd.status + '">' + cd.label + '</span>' : '';
       card.innerHTML = '<div class="dir-card-row"><span class="dir-card-name">' + (n.name || 'Unknown') + '</span>' + statusHtml + '</div>' +
-        '<div class="dir-card-detail"><span class="dir-card-freq">' + (n.frequency || '?') + ' kHz</span> ' + (n.mode || '') + (e.band ? ' \u00b7 ' + e.band : '') +
+        '<div class="dir-card-detail"><span class="dir-card-freq">' + (FreqDots.khzMhz(n.frequency) || '?') + '</span> ' + (n.mode || '') + (e.band ? ' \u00b7 ' + e.band : '') +
         (n.days && n.days !== 'Daily' ? ' \u00b7 ' + n.days : '') + '</div>';
       (function(net, band) {
         card.addEventListener('click', function() {
@@ -12291,11 +12880,9 @@ var _paddleHoldTimer = { dit: null, dah: null };
             showToast('VFO Locked — Unlock VFO to change frequency', 2000);
             return;
           }
+          // A net listed as SSB goes as SSB: the shack resolves it to the
+          // band's sideband (lib/ssb-sideband.js; 60 m is USB).
           var mode = (net.mode || '').toUpperCase();
-          if (mode === 'SSB') {
-            var lsbBands = { '160m': 1, '80m': 1, '60m': 1, '40m': 1 };
-            mode = lsbBands[band] ? 'LSB' : 'USB';
-          }
           var freqStr = String(net.frequency);
           if (ws && ws.readyState === WebSocket.OPEN) {
             ws.send(JSON.stringify({ type: 'tune', freqKhz: freqStr, mode: mode }));
@@ -12349,26 +12936,30 @@ var _paddleHoldTimer = { dit: null, dah: null };
     var rows = directoryChannels.filter(function(c) {
       if (!search) return true;
       return [c.name, c.note, c.group, c.mode].some(function(v) { return String(v || '').toLowerCase().indexOf(search) >= 0; })
-        || String(c.khz).indexOf(search) >= 0 || (c.khz / 1000).toFixed(3).indexOf(search) >= 0;
+        || String(c.khz).indexOf(search) >= 0 || (c.khz / 1000).toFixed(3).indexOf(search) >= 0 || FreqDots.fromKhz(c.khz).indexOf(search) >= 0;
     });
-    var groups = [];
-    rows.forEach(function(c) { var g = c.group || 'Other'; if (groups.indexOf(g) < 0) groups.push(g); });
+    // Favorites first (starred order), then each group without them.
+    var favRows = directoryChannelFavs.map(function(id) { return rows.filter(function(c) { return c.id === id; })[0]; }).filter(Boolean);
+    var groupOf = function(c) { return directoryChannelFavs.indexOf(c.id) >= 0 ? '__fav' : (c.group || 'Other'); };
+    var groups = favRows.length ? ['__fav'] : [];
+    rows.forEach(function(c) { var g = groupOf(c); if (groups.indexOf(g) < 0) groups.push(g); });
     groups.forEach(function(g) {
       var head = document.createElement('div');
-      head.className = 'lmk-group';
-      head.textContent = g;
+      head.className = 'lmk-group' + (g === '__fav' ? ' fav-group' : '');
+      head.textContent = g === '__fav' ? 'Favorites' : g;
       dirList.appendChild(head);
-      rows.filter(function(c) { return (c.group || 'Other') === g; }).forEach(function(c) {
+      (g === '__fav' ? favRows : rows.filter(function(c) { return groupOf(c) === g; })).forEach(function(c) {
         var card = document.createElement('div');
         card.className = 'dir-card';
-        var mhz = (c.khz / 1000).toFixed(c.khz % 1 ? 5 : 4).replace(/0+$/, '').replace(/\.$/, '');
+        var mhz = FreqDots.fromKhz(c.khz);
         var off = channelOffsetText(c.offsetKhz);
-        card.innerHTML = '<div class="dir-card-row"><span class="dir-card-name"></span><span class="dir-card-freq"></span></div>'
+        card.innerHTML = '<div class="dir-card-row"><span class="dir-card-name"></span><span class="dir-card-freq"></span>' + favStar('channel', c.id, c.name) + '</div>'
           + '<div class="dir-card-detail"></div>';
         card.querySelector('.dir-card-name').textContent = c.name;
         card.querySelector('.dir-card-freq').textContent = mhz + ' ' + (c.mode || 'FM') + (off ? ' ' + off : '') + (c.tone ? ' T' + c.tone : '') + (c.mem != null ? ' M' + c.mem : '');
         card.querySelector('.dir-card-detail').textContent = c.note || '';
-        card.addEventListener('click', function() {
+        card.addEventListener('click', function(ev) {
+          if (ev.target && ev.target.closest && ev.target.closest('[data-fav]')) { ev.stopPropagation(); favToggle('channel', c.id); return; }
           // channelId (#308): the shack recalls the radio's memory for a channel that has one.
           if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'tune', freqKhz: String(c.khz), mode: channelTuneMode(c.mode), channelId: c.id }));
         });
@@ -12482,6 +13073,16 @@ var _paddleHoldTimer = { dit: null, dah: null };
     if (document.visibilityState === 'visible' && !mainUI.classList.contains('hidden')) {
       requestWakeLock();
     }
+  });
+
+  // Screen back on: a socket that went quiet while it was off is replaced at
+  // once instead of waiting for the pong timeout or the reconnect timer.
+  document.addEventListener('visibilitychange', function() {
+    // A pop-out has no socket of its own (it talks to the main page over BC).
+    if (isPopout || document.visibilityState !== 'visible' || wasKicked || mainUI.classList.contains('hidden')) return;
+    var state = !ws || ws.readyState === WebSocket.CLOSED || ws.readyState === WebSocket.CLOSING ? 'closed'
+      : ws.readyState === WebSocket.CONNECTING ? 'connecting' : 'open';
+    if (wsLiveness.reconnectOnWake(Date.now(), state)) dropDeadSocket(true);
   });
 
   // ── Cloud Sync UI (ECHOCAT) ──────────────────────────────────────
@@ -13618,7 +14219,7 @@ var _paddleHoldTimer = { dit: null, dah: null };
     sstvPhoneRenderTemplates();
     if (echoSettings.sstvTextElements && echoSettings.sstvTextElements.length) {
       sstvPhoneTexts = echoSettings.sstvTextElements.map(function(t) {
-        return { key: t.key, label: t.label || '', x: t.x, y: t.y, fontSize: t.fontSize || 14, bold: !!t.bold, italic: !!t.italic, color: t.color || '#ffffff', rotation: t.rotation || 0, visible: t.visible !== false };
+        return { key: t.key, label: t.label || '', x: t.x, y: t.y, fontSize: t.fontSize || 14, bold: !!t.bold, italic: !!t.italic, color: t.color || '#ffffff', rotation: t.rotation || 0, visible: t.visible !== false, face: t.face || '', fontCss: t.fontCss, fontWeight: t.fontWeight, outline: !!t.outline, shadow: t.shadow, spacing: t.spacing || 0 };
       });
       sstvPhoneUserTextCount = sstvPhoneTexts.filter(function(t) { return t.key.indexOf('user-') === 0; }).length;
     }
@@ -13707,7 +14308,7 @@ var _paddleHoldTimer = { dit: null, dah: null };
       bgParams: null,
       bgDataUrl: bgDataUrl,
       texts: sstvPhoneTexts.map(function(t) {
-        return { key: t.key, x: t.x, y: t.y, fontSize: t.fontSize, bold: t.bold, italic: t.italic, color: t.color, rotation: t.rotation || 0, visible: t.visible, label: t.label };
+        return { key: t.key, x: t.x, y: t.y, fontSize: t.fontSize, bold: t.bold, italic: t.italic, color: t.color, rotation: t.rotation || 0, visible: t.visible, label: t.label, face: t.face || '', fontCss: t.fontCss, fontWeight: t.fontWeight, outline: !!t.outline, shadow: t.shadow, spacing: t.spacing || 0 };
       }),
       thumbnail: thumbnail,
     };
@@ -13739,7 +14340,7 @@ var _paddleHoldTimer = { dit: null, dah: null };
       // Restore text elements
       if (Array.isArray(tpl.texts)) {
         sstvPhoneTexts = tpl.texts.map(function(t) {
-          return { key: t.key, label: t.label || '', x: t.x, y: t.y, fontSize: t.fontSize || 14, bold: !!t.bold, italic: !!t.italic, color: t.color || '#ffffff', rotation: t.rotation || 0, visible: t.visible !== false };
+          return { key: t.key, label: t.label || '', x: t.x, y: t.y, fontSize: t.fontSize || 14, bold: !!t.bold, italic: !!t.italic, color: t.color || '#ffffff', rotation: t.rotation || 0, visible: t.visible !== false, face: t.face || '', fontCss: t.fontCss, fontWeight: t.fontWeight, outline: !!t.outline, shadow: t.shadow, spacing: t.spacing || 0 };
         });
       }
       // Fill auto-labels with current callsign/grid
@@ -14016,6 +14617,37 @@ var _paddleHoldTimer = { dit: null, dah: null };
     sstvRenderPhoneCompose();
   }
 
+  // One text layer, with the desktop's rules for typeface, outline, shadow
+  // and letter spacing (#327, lib/sstv-templates.js layerStyle/layerFont).
+  // The OFL faces are not served to this page, so a picked face falls back
+  // to sans-serif here; the transmitted picture is the desktop's.
+  function sstvPhoneDrawText(ctx, t) {
+    var T = window.SstvTemplates;
+    var st = T ? T.layerStyle(t) : { outline: !!t.outline, shadow: !t.outline, spacing: 0 };
+    var lf = T ? T.layerFont(t, t.fontCss ? { css: t.fontCss, weight: t.fontWeight || 400 } : null) : { css: 'sans-serif', weight: t.bold ? 700 : 400 };
+    var size = t.fontSize || 14;
+    var auto = t.shadow !== true && t.shadow !== false;
+    ctx.font = (t.italic ? 'italic ' : '') + lf.weight + ' ' + size + 'px ' + lf.css + ', sans-serif';
+    ctx.letterSpacing = st.spacing + 'px';
+    if (t.rotation) { ctx.translate(t.x, t.y); ctx.rotate(t.rotation); } else { ctx.translate(t.x, t.y); }
+    var shadowOn = function() {
+      var off = auto ? 1 : Math.max(1, Math.round(size / 14));
+      ctx.shadowColor = '#000'; ctx.shadowBlur = auto ? 3 : Math.max(3, size / 6); ctx.shadowOffsetX = off; ctx.shadowOffsetY = off;
+    };
+    if (st.outline) {
+      if (st.shadow) shadowOn();
+      ctx.lineJoin = 'round';
+      ctx.lineWidth = Math.max(3, size / 5);
+      ctx.strokeStyle = (T && T.isDark(t.color || '#ffffff')) ? 'rgba(255,255,255,0.9)' : 'rgba(0,0,0,0.85)';
+      ctx.strokeText(t.label, 0, 0);
+      ctx.shadowColor = 'transparent'; ctx.shadowBlur = 0; ctx.shadowOffsetX = 0; ctx.shadowOffsetY = 0;
+    } else if (st.shadow) {
+      shadowOn();
+    }
+    ctx.fillStyle = t.color || '#ffffff';
+    ctx.fillText(t.label, 0, 0);
+  }
+
   // Receive live compose state from desktop POTACAT (background + texts)
   function sstvPhoneApplyComposeState(msg) {
     if (msg.texts && Array.isArray(msg.texts)) {
@@ -14026,6 +14658,7 @@ var _paddleHoldTimer = { dit: null, dah: null };
           bold: !!t.bold, italic: !!t.italic,
           color: t.color || '#ffffff', rotation: t.rotation || 0,
           visible: t.visible !== false,
+          face: t.face || '', fontCss: t.fontCss, fontWeight: t.fontWeight, outline: !!t.outline, shadow: t.shadow, spacing: t.spacing || 0,
         };
       });
       sstvPhoneUserTextCount = sstvPhoneTexts.filter(function(t) { return t.key && t.key.indexOf('user-') === 0; }).length;
@@ -14208,19 +14841,7 @@ var _paddleHoldTimer = { dit: null, dah: null };
       var t = sstvPhoneTexts[i];
       if (!t.visible || !t.label) continue;
       sstvPhoneComposeCtx.save();
-      sstvPhoneComposeCtx.shadowColor = '#000';
-      sstvPhoneComposeCtx.shadowBlur = 3;
-      sstvPhoneComposeCtx.shadowOffsetX = 1;
-      sstvPhoneComposeCtx.shadowOffsetY = 1;
-      sstvPhoneComposeCtx.fillStyle = t.color || '#ffffff';
-      sstvPhoneComposeCtx.font = (t.italic ? 'italic ' : '') + (t.bold ? 'bold ' : '') + t.fontSize + 'px sans-serif';
-      if (t.rotation) {
-        sstvPhoneComposeCtx.translate(t.x, t.y);
-        sstvPhoneComposeCtx.rotate(t.rotation);
-        sstvPhoneComposeCtx.fillText(t.label, 0, 0);
-      } else {
-        sstvPhoneComposeCtx.fillText(t.label, t.x, t.y);
-      }
+      sstvPhoneDrawText(sstvPhoneComposeCtx, t);
       sstvPhoneComposeCtx.restore();
     }
     // PiP reply inset (drawn last so it sits above text)
@@ -14338,7 +14959,12 @@ var _paddleHoldTimer = { dit: null, dah: null };
       var dataUrl = sstvPhoneCompose.toDataURL('image/jpeg', 0.9);
       var modeEl = document.getElementById('sstv-mode-phone');
       var mode = modeEl ? modeEl.value : 'martin1';
-      if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'sstv-photo', image: dataUrl, mode: mode }));
+      // freqKhz: the channel shown here. The shack tunes there before the
+      // picture keys, unless the radio is already within 10 kHz of it (#357).
+      var sendKhz = sstvFreqPhone ? parseInt(sstvFreqPhone.value, 10) : 0;
+      var photoMsg = { type: 'sstv-photo', image: dataUrl, mode: mode };
+      if (sendKhz > 0) photoMsg.freqKhz = sendKhz;
+      if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(photoMsg));
       if (sstvPhoneStatus) { sstvPhoneStatus.textContent = 'Sending...'; sstvPhoneStatus.style.color = 'var(--accent)'; }
     });
   }
@@ -14407,7 +15033,7 @@ var _paddleHoldTimer = { dit: null, dah: null };
     var d = img.timestamp ? new Date(img.timestamp) : null;
     var dateStr = d ? d.toLocaleDateString([], { month: 'numeric', day: 'numeric' }) + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
     var imgHz = img.freqHz || (img.freqKhz ? img.freqKhz * 1000 : 0);
-    info.textContent = (img.mode || '') + (imgHz ? ' ' + (Math.round(imgHz / 1000) / 1000).toFixed(3) : '') + ' ' + dateStr;
+    info.textContent = (img.mode || '') + (imgHz ? ' ' + FreqDots.fromHz(Math.round(imgHz / 1000) * 1000) : '') + ' ' + dateStr;
     div.appendChild(info);
     // Reply button — overlays the thumb, taps set this image as PiP reply inset
     var replyBtn = document.createElement('button');
@@ -14501,7 +15127,7 @@ var _paddleHoldTimer = { dit: null, dah: null };
     var info = document.createElement('div');
     info.style.cssText = 'position:absolute;bottom:0;left:0;right:0;background:rgba(0,0,0,0.6);font-size:10px;color:#ccc;padding:1px 4px;text-align:center;';
     var now = new Date();
-    info.textContent = 'NEW ' + (msg.mode || '') + (msg.freqHz ? ' ' + (Math.round(msg.freqHz / 1000) / 1000).toFixed(3) : '') + ' ' + now.toLocaleDateString([], {month:'numeric',day:'numeric'}) + ' ' + now.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
+    info.textContent = 'NEW ' + (msg.mode || '') + (msg.freqHz ? ' ' + FreqDots.fromHz(Math.round(msg.freqHz / 1000) * 1000) : '') + ' ' + now.toLocaleDateString([], {month:'numeric',day:'numeric'}) + ' ' + now.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
     div.appendChild(info);
     // Reply button on live decode — most valuable placement since this is the
     // thumbnail users reach for first right after receiving
@@ -14654,7 +15280,7 @@ var _paddleHoldTimer = { dit: null, dah: null };
               const d = tunedDupe;
               const parts = [];
               if (d.timeUtc) parts.push(d.timeUtc.slice(0, 2) + ':' + d.timeUtc.slice(2, 4) + ' UTC');
-              if (d.freqKhz) parts.push((parseFloat(d.freqKhz) / 1000).toFixed(3) + ' MHz');
+              if (d.freqKhz) parts.push(FreqDots.khzMhz(d.freqKhz));
               if (d.mode) parts.push(d.mode);
               vfOpDupe.textContent = 'DUPE';
               vfOpDupe.title = parts.length ? 'Already worked: ' + parts.join(' · ') : 'Already worked this activation';
@@ -14667,12 +15293,10 @@ var _paddleHoldTimer = { dit: null, dah: null };
           vfOpCard.classList.add('vf-op-empty');
         }
       }
-      // Hide PTT in non-voice modes (CW/digital) — same logic as main pttBtn.
+      // Hide PTT in non-voice modes (CW/digital); show it while the mode is
+      // unknown, like the main PTT (#190). lib/vfo-ptt-row.js.
       if (vfPttRow) {
-        const mUp = (currentMode || '').toUpperCase();
-        const isVoice = (mUp === 'SSB' || mUp === 'USB' || mUp === 'LSB' ||
-                         mUp === 'FM' || mUp === 'AM' || mUp.startsWith('FREEDV'));
-        vfPttRow.classList.toggle('hidden', !isVoice);
+        vfPttRow.classList.toggle('hidden', !VfoPttRow.showVfoPttRow(currentMode));
       }
     }
 
@@ -14843,7 +15467,7 @@ var _paddleHoldTimer = { dit: null, dah: null };
     fullview.querySelectorAll('.vf-band').forEach((btn) => {
       btn.addEventListener('click', () => {
         const khz = parseInt(btn.dataset.khz, 10);
-        if (khz > 0) dpTune(khz);
+        if (khz > 0) dpTune(khz, true);
       });
     });
 
@@ -15153,8 +15777,8 @@ var _paddleHoldTimer = { dit: null, dah: null };
       vfoProfiles.forEach((p, i) => {
         const item = document.createElement('div');
         item.className = 'vf-profile-item';
-        const freqMhz = p.freqKhz ? (p.freqKhz / 1000).toFixed(3) : '?';
-        const detail = freqMhz + ' MHz ' + (p.mode || '') + (p.filterWidth ? ' BW:' + p.filterWidth : '');
+        const freqMhz = p.freqKhz ? FreqDots.khzMhz(p.freqKhz) : '? MHz';
+        const detail = freqMhz + ' ' + (p.mode || '') + (p.filterWidth ? ' BW:' + p.filterWidth : '');
         const nameSpan = document.createElement('span');
         nameSpan.className = 'vf-profile-item-name';
         nameSpan.textContent = p.name || '(unnamed)';
@@ -15465,38 +16089,179 @@ var _paddleHoldTimer = { dit: null, dah: null };
   // ── Winlink mail (the shack's Pat; owner only) ────────────────────────
   // The shack holds the mailbox and runs the session; this tab composes,
   // reads and presses Send / Receive. State arrives as winlink-state.
+  //
+  // Layout (W0, 2026-11-12): #mail-view carries data-screen = list | read |
+  // compose | connect. On a phone one screen shows at a time; once the Mail
+  // view is 700 px wide the list stays on the left and the open screen sits
+  // on the right (remote.css, a container query). Every word from the shack
+  // is set with textContent; rows and cards are built with createElement.
+  var MailView = window.WinlinkMailView;
+  var MailActions = window.WinlinkMailActions;
   var mailState = null;
-  var mailLists = { in: [], out: [], sent: [], archive: [] };
+  var mailLists = { in: [], out: [], sent: [], archive: [], deleted: [] };
   var mailBox = 'in';
   var mailGateways = [];
-  var mailGatewayNote = '';
+  var mailPick = -1;          // index into mailGateways of the gateway picked
+  var mailMode = '';          // the "Send via" mode chosen on this page
+  var mailBand = '';          // '' = all bands
   var mailNoticeThen = null;
+  var mailOpen = false;       // the Mail tab is on screen
+  var mailScreen = 'list';
+  var mailReadMid = '';       // the message open in the reader
   function mailSend(obj) { if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj)); }
   function mailEl(id) { return document.getElementById(id); }
+  function mailShow(id, on) { var el = mailEl(id); if (el) el.classList.toggle('hidden', !on); }
+  function mailMake(tag, cls, text) {
+    var el = document.createElement(tag);
+    if (cls) el.className = cls;
+    if (text != null) el.textContent = text;
+    return el;
+  }
+
+  // Which screen is open. 'list' on a phone is the list alone; on a wide
+  // view the right-hand pane then shows "Pick a message to read it."
+  function mailGo(screen) {
+    mailScreen = screen;
+    var view = mailEl('mail-view');
+    if (view) view.setAttribute('data-screen', screen);
+    mailShow('mail-empty', screen === 'list');
+    mailShow('mail-reader', screen === 'read');
+    mailShow('mail-compose', screen === 'compose');
+    mailShow('mail-connect-screen', screen === 'connect');
+    if (screen !== 'read') mailReadMid = '';
+    if (screen === 'connect') mailOpenConnect();
+    mailRenderList();
+  }
+
+  // Every S2C winlink-* message lands here (the page's message switch calls it).
+  function mailOnMessage(msg) {
+    switch (msg.type) {
+      case 'winlink-state':
+        mailState = msg;
+        mailSessionSeen(mailState.session);
+        mailRenderState();
+        // A pick made before the link dropped, and the tab left meanwhile: put the radio back now.
+        if (!mailOpen) mailQsyRestore();
+        break;
+      case 'winlink-account':
+        mailAcctAnswer(msg);
+        break;
+      case 'winlink-mailbox':
+        mailLists[msg.box] = msg.messages || [];
+        if (msg.box === mailBox) mailRenderList();
+        break;
+      case 'winlink-session':
+        if (mailState) mailState.session = msg.session || {};
+        mailSessionSeen(msg.session);
+        mailRenderSession();
+        mailRenderLast();
+        break;
+      case 'winlink-message':
+        mailShowMessage(msg);
+        break;
+      case 'winlink-gateways':
+        mailGatewaysArrived(msg);
+        break;
+      case 'winlink-attachment':
+        try {
+          var bin = atob(msg.dataBase64 || '');
+          var bytes = new Uint8Array(bin.length);
+          for (var bi = 0; bi < bin.length; bi++) bytes[bi] = bin.charCodeAt(bi);
+          var url = URL.createObjectURL(new Blob([bytes]));
+          var a = document.createElement('a'); a.href = url; a.download = msg.name || 'attachment';
+          document.body.appendChild(a); a.click(); a.remove();
+          setTimeout(function () { URL.revokeObjectURL(url); }, 5000);
+        } catch (e) { showToast('Could not save the attachment', 3000, true); }
+        break;
+      case 'winlink-result':
+        if (msg.op === 'account-check' || msg.op === 'register' || msg.op === 'set-password') { mailAcctResult(msg); break; }
+        // 'gateways-get' is the shack's answer when the request itself threw (#435).
+        if (msg.op === 'gateways' || msg.op === 'gateways-get') { if (!msg.ok) mailGatewaysFailed(msg); break; }
+        // The shack tuned to the picked gateway: this page now owes it a restore.
+        if (msg.op === 'qsy' && msg.ok) { mailQsyMoved = true; mailRenderBar(); }
+        if (!msg.ok && msg.error) showToast(msg.error, 5000, true);
+        else if (msg.ok && (msg.op === 'move' || msg.op === 'delete') && mailDoneWord) { showToast(mailDoneWord, 3000); mailDoneWord = ''; }
+        else if (msg.ok && msg.op === 'compose') { showToast('In the Outbox. It goes out on the next Send / Receive.', 3000); mailShowList(); }
+        break;
+      case 'winlink-refused':
+        showToast(msg.reason === 'guest-pass' ? 'Winlink mail belongs to the shack\'s owner — not available on a Guest Pass' : 'Not available', 4000, true);
+        break;
+      default:
+    }
+  }
+
+  // ── W1: the radio goes back after a look at a gateway ────────────────
+  // Picking a gateway tunes the shack's radio there (C2S winlink-qsy). The
+  // desktop Mail window puts the dial back when it closes; this page does the
+  // same when the operator leaves the Mail tab, closes the page, or goes back
+  // to the internet without connecting (C2S winlink-qsy-restore). Never while
+  // a session runs: the radio is the session's, and the shack puts it back
+  // itself when the session ends (lib/winlink-return.js).
+  var mailQsyMoved = false;   // the shack answered a winlink-qsy from this page with ok
+  function mailSessionSeen(ss) {
+    if (MailView.sessionActive(ss)) mailQsyMoved = false; // the session carries the return now
+  }
+  function mailQsyRestore() {
+    var act = MailView.restoreOnLeave({ moved: mailQsyMoved, session: mailState && mailState.session });
+    if (act === 'none') return;
+    if (act === 'send') {
+      // No link right now: keep the debt; it is paid when the shack is back (winlink-state).
+      if (!(ws && ws.readyState === WebSocket.OPEN)) return;
+      mailSend({ type: 'winlink-qsy-restore' });
+    }
+    mailQsyMoved = false;
+    mailRenderBar();
+  }
+  function mailOnLeave() {
+    mailOpen = false;
+    mailQsyRestore();
+  }
+  window.addEventListener('pagehide', mailQsyRestore);
+  window.addEventListener('beforeunload', mailQsyRestore);
+
   // No Winlink password on the shack yet: set the account up from here.
   // winlink.org has no web sign-up; the shack's Pat creates the account.
   var mailAcct = { asked: false, exists: null };
+  function mailAcctForm(on) {
+    mailShow('mail-acct-pw', on);
+    mailShow('mail-acct-go', on);
+    mailShow('mail-acct-email', on && mailAcct.exists === false);
+    var lab = document.querySelector ? document.querySelector('label[for="mail-acct-pw"]') : null;
+    if (lab) lab.classList.toggle('hidden', !on);
+    mailShow('mail-acct-email-label', on && mailAcct.exists === false);
+  }
+  function mailAcctCheck() {
+    mailAcct.asked = true;
+    mailEl('mail-acct-text').textContent = MailView.CHECKING_ACCOUNT;
+    mailShow('mail-acct-retry', false);
+    mailAcctForm(false);
+    mailSend({ type: 'winlink-account-check' });
+  }
   function mailAcctRender(s) {
     var card = mailEl('mail-acct');
     if (!card) return;
     var need = !!(s.enabled && s.hasPassword === false && (s.patReady || s.patStarted === false));
     card.classList.toggle('hidden', !need);
-    card.style.display = need ? 'flex' : 'none';
     if (!need) { mailAcct.asked = false; return; }
-    if (!mailAcct.asked) { mailAcct.asked = true; mailSend({ type: 'winlink-account-check' }); }
+    if (!mailAcct.asked) mailAcctCheck();
   }
   function mailAcctAnswer(msg) {
     mailAcct.exists = !!msg.exists;
     mailEl('mail-acct-text').textContent = msg.exists
       ? msg.callsign + ' already has a Winlink account. Enter its password.'
       : msg.callsign + ' has no Winlink account yet. Create one here; winlink.org does not sign up new users on its website.';
-    mailEl('mail-acct-email').style.display = msg.exists ? 'none' : '';
+    mailShow('mail-acct-retry', false);
+    mailAcctForm(true);
     mailEl('mail-acct-go').textContent = msg.exists ? 'Save password' : 'Create my Winlink account';
   }
   function mailAcctResult(msg) {
     if (msg.op === 'account-check') {
-      mailEl('mail-acct-text').textContent = 'Could not reach Winlink to check: ' + (msg.error || 'no answer') + '. Close and reopen Mail to try again.';
-      mailAcct.asked = false;
+      // Winlink could not be reached: say so and offer Try again (W4), as the desktop card does.
+      var f = MailView.accountCheckFailed(msg.error);
+      mailEl('mail-acct-text').textContent = f.text;
+      mailEl('mail-acct-retry').textContent = f.button;
+      mailShow('mail-acct-retry', true);
+      mailAcctForm(false);
       return;
     }
     if (msg.ok) { mailEl('mail-acct-pw').value = ''; showToast(mailAcct.exists ? 'Saved. Try Send / Receive over the internet.' : 'Account created. Send / Receive over the internet is your first login.', 4000); }
@@ -15523,189 +16288,590 @@ var _paddleHoldTimer = { dit: null, dah: null };
 
   function mailRenderState() {
     var s = mailState || {};
-    mailAcctRender(s);
+    // The tab shows for the shack's owner whether Winlink is on or off: off
+    // says where to turn it on (W4). winlink-state is never sent to a Guest
+    // Pass (lib/remote-server.js _sendToOwners), so a guest never gets the tab.
     var btn = mailEl('mail-tab-btn');
-    if (btn) btn.classList.toggle('hidden', !s.enabled);
+    if (btn) btn.classList.toggle('hidden', !mailState);
+    var view = mailEl('mail-view');
+    if (view) view.classList.toggle('mail-is-off', !s.enabled);
+    var off = mailEl('mail-off');
+    if (off) { off.textContent = s.enabled ? '' : MailView.OFF_TEXT; off.classList.toggle('hidden', !!s.enabled); }
+    mailAcctRender(s);
     var badge = mailEl('tab-mail-badge');
     if (badge) { badge.textContent = String(s.unread || 0); badge.classList.toggle('hidden', !s.unread); }
-    var sel = mailEl('mail-mode');
-    if (sel) {
-      var cur = sel.value || s.mode || 'telnet';
-      sel.innerHTML = (s.modes || []).map(function (m) {
-        return '<option value="' + esc(m.id) + '"' + (m.available ? '' : ' disabled') + '>' + esc(m.label) + (m.available ? '' : ' (unavailable)') + '</option>';
-      }).join('');
-      var ok = (s.modes || []).some(function (m) { return m.id === cur && m.available; });
-      sel.value = ok ? cur : 'telnet';
-      mailEl('mail-radio').classList.toggle('hidden', sel.value === 'telnet');
-    }
+    var sub = mailEl('mail-head-sub');
+    if (sub) sub.textContent = (s.mycall ? s.mycall + ' · ' : '') + 'Winlink';
+    mailRenderFolders();
+    mailRenderLast();
+    mailRenderModes();
     mailRenderSession();
   }
+
+  // "Send via": one segment per mode the shack offers now. A mode it cannot
+  // offer is not a segment; the line under the control says why (W4).
+  function mailCurrentMode() {
+    var modes = (mailState && mailState.modes) || [];
+    var ok = function (id) { return modes.some(function (m) { return m.id === id && m.available; }); };
+    if (mailMode && ok(mailMode)) return mailMode;
+    var s = mailState || {};
+    return s.mode && ok(s.mode) ? s.mode : 'telnet';
+  }
+  var mailModesDrawn = '';
+  function mailRenderModes() {
+    var box = mailEl('mail-mode');
+    if (!box) return;
+    var modes = ((mailState && mailState.modes) || []).filter(function (m) { return m.available; });
+    if (!modes.length) modes = [{ id: 'telnet', label: 'Internet (telnet)', available: true }];
+    var cur = mailCurrentMode();
+    mailMode = cur;
+    var sig = modes.map(function (m) { return m.id; }).join(',') + '|' + cur;
+    if (sig !== mailModesDrawn) {
+      mailModesDrawn = sig;
+      box.textContent = '';
+      box.className = 'mail-seg mail-seg-' + Math.min(modes.length, 3);
+      modes.forEach(function (m) {
+        var b = mailMake('button', 'mail-seg-btn', MailView.MODE_WORDS[m.id] || m.label);
+        b.type = 'button';
+        b.setAttribute('data-mode', m.id);
+        b.setAttribute('aria-pressed', m.id === cur ? 'true' : 'false');
+        b.setAttribute('title', m.label);
+        b.onclick = function () { mailChooseMode(m.id); };
+        box.appendChild(b);
+      });
+    }
+    // Why a mode is not offered, in the shack's own words (W4).
+    var note = mailEl('mail-mode-note');
+    if (note) {
+      var why = MailView.modeReasons(mailState && mailState.modes);
+      note.textContent = '';
+      why.forEach(function (line) { note.appendChild(mailMake('div', '', line)); });
+      note.classList.toggle('hidden', !why.length);
+    }
+    // A mode that runs with a caveat (no CAT control: the operator sets the dial).
+    var cav = mailEl('mail-mode-caveat');
+    var curMode = ((mailState && mailState.modes) || []).filter(function (m) { return m.id === cur; })[0];
+    if (cav) { cav.textContent = (curMode && curMode.note) || ''; cav.classList.toggle('hidden', !(curMode && curMode.note)); }
+    mailShow('mail-radio', cur !== 'telnet');
+    mailRenderBands();
+    mailRenderBar();
+  }
+  function mailChooseMode(id) {
+    if (id === mailMode) return;
+    mailMode = id;
+    mailSend({ type: 'winlink-set-mode', mode: id });
+    mailGateways = [];
+    mailPick = -1;
+    mailBand = '';
+    // Back to the internet without connecting: the gateway picker is closed, the radio goes back (W1).
+    if (id === 'telnet') mailQsyRestore();
+    mailRenderModes();
+    mailLoadGateways();
+  }
+
+  // Band chips: the bands this mode uses that the shack's rig is set up for
+  // (S2C rig-bands), then All.
+  function mailRenderBands() {
+    var box = mailEl('mail-band');
+    if (!box) return;
+    var RB = window.RigBands;
+    var rig = typeof webRigBands !== 'undefined' ? webRigBands : null;
+    var bands = MailView.bandsFor(mailCurrentMode()).filter(function (b) { return !RB || RB.allowed(rig, b); });
+    if (mailBand && bands.indexOf(mailBand) < 0) mailBand = '';
+    box.textContent = '';
+    bands.concat(['']).forEach(function (b) {
+      var c = mailMake('button', 'mail-chip', b || 'All');
+      c.type = 'button';
+      c.setAttribute('data-band', b);
+      c.setAttribute('aria-pressed', b === mailBand ? 'true' : 'false');
+      c.onclick = function () {
+        if (mailBand === b) return;
+        mailBand = b;
+        mailRenderBands();
+        mailLoadGateways();
+      };
+      box.appendChild(c);
+    });
+  }
+
+  // The last session, or the one running now, as a card at the top of the inbox.
+  function mailRenderLast() {
+    var el = mailEl('mail-last');
+    if (!el) return;
+    var c = MailView.lastCard(mailState);
+    el.classList.toggle('hidden', !c);
+    if (!c) return;
+    el.className = 'mail-card mail-last mail-tone-' + c.tone;
+    mailEl('mail-last-label').textContent = c.label;
+    mailEl('mail-last-text').textContent = c.text;
+  }
+  function mailRenderFolders() {
+    var box = mailEl('mail-folders');
+    if (!box) return;
+    // The Deleted folder only from a shack that keeps one (#475, mail-folders-v2).
+    var v2 = mailFoldersV2();
+    box.className = 'mail-seg mail-seg-' + (v2 ? 5 : 4);
+    if (!v2 && mailBox === 'deleted') mailBox = 'in';
+    Array.prototype.forEach.call(box.querySelectorAll('[data-box]'), function (b) {
+      var id = b.getAttribute('data-box');
+      b.textContent = MailView.folderLabel(id, mailState);
+      b.setAttribute('aria-pressed', id === mailBox ? 'true' : 'false');
+      if (id === 'deleted') b.classList.toggle('hidden', !v2);
+    });
+  }
+
   function mailActive(ss) { return ['starting', 'connecting', 'connected', 'disconnecting'].indexOf(ss.state) >= 0; }
+  var mailPromptDrawn = '';
   function mailRenderSession() {
     var s = mailState || {};
     var ss = s.session || {};
     var el = mailEl('mail-session');
     if (!el) return;
-    if (!s.patReady) { el.textContent = s.patError ? 'Shack: ' + s.patError : 'The shack is starting Pat…'; }
+    if (!s.patReady) { el.textContent = s.patError ? 'Shack: ' + s.patError : 'The shack is starting Pat…'; el.className = 'mail-card mail-session'; }
     else {
-      var t = ss.state === 'error' ? (ss.error || 'Session failed') : (ss.text || '');
+      // How a session ended is on the card (mailRenderEndCard); the line says
+      // it only once the card has been put away.
+      var carded = !!mailEndCardShown();
+      var t = carded ? '' : ss.state === 'error' ? (ss.error || 'The session did not finish.') : (ss.text || '');
       if (mailActive(ss) && ss.subject) t = (ss.direction === 'receiving' ? 'Receiving ' : 'Sending ') + '"' + ss.subject + '" ' + (ss.pct || 0) + '%';
       if (mailActive(ss) && ss.remainingSec != null) t += ' · ' + Math.floor(ss.remainingSec / 60) + ' min left';
       if (mailActive(ss) && ss.mode !== 'telnet') t = (ss.ptt ? 'TX · ' : 'RX · ') + t;
-      var words = { starting: 'Starting', connecting: 'Connecting', connected: 'Connected', disconnecting: 'Stopping', done: '', error: 'Failed: ' };
-      el.textContent = (words[ss.state] ? words[ss.state] + (ss.state === 'error' ? '' : ' · ') : '') + t;
-      el.style.color = ss.state === 'error' ? '#e94560' : ss.state === 'done' ? '#4ecca3' : '';
-      el.style.fontWeight = (ss.state === 'done' || ss.state === 'error') ? '700' : '';
+      // How a session ended is one sentence from the shack (session.error,
+      // lib/winlink-outcome.js): it says what happened and what to do, so
+      // nothing is put in front of it. "Failed: connect: HTTP 500" is gone (#425).
+      var words = { starting: 'Starting', connecting: 'Connecting', connected: 'Connected', disconnecting: 'Stopping', done: '', error: '' };
+      el.textContent = (words[ss.state] ? words[ss.state] + ' · ' : '') + t;
+      el.className = 'mail-card mail-session' + (mailActive(ss) ? ' mail-tone-run' : ss.state === 'done' ? ' mail-tone-ok' : ss.state === 'error' ? ' mail-tone-warn' : '');
     }
-    mailEl('mail-connect').classList.toggle('hidden', mailActive(ss));
-    mailEl('mail-abort').classList.toggle('hidden', !mailActive(ss));
+    el.classList.toggle('hidden', !el.textContent);
+    mailRenderEndCard();
+    mailRenderBar();
     var pr = mailEl('mail-prompt');
     var p = ss.prompt;
     // "Keep waiting" is remembered per prompt (#296): the session arrives twice a second.
     pr.classList.toggle('hidden', !p || (p.kind === 'busy-channel' && p.id === mailKeptWaitingFor));
-    if (p) {
-      var busy = p.kind === 'busy-channel';
-      var mmss = function (s) { return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); };
-      var busyText = 'The frequency is busy.' + (p.limitSec && p.waitedSec != null ? ' Waited ' + mmss(Math.min(p.waitedSec, p.limitSec)) + ' of ' + mmss(p.limitSec) + '; the call starts by itself when it clears and is dropped at ' + mmss(p.limitSec) + '.' : '') + ' Call anyway only if you have listened and it is clear.';
-      pr.innerHTML = '<span style="flex:1">' + esc(busy ? busyText : (p.message || 'Decision needed')) + '</span>'
-        + '<button type="button" id="mail-p-yes">' + (busy ? 'Keep waiting' : 'Accept') + '</button>'
-        + (busy ? '<button type="button" id="mail-p-go">Call anyway</button>' : '')
-        + '<button type="button" id="mail-p-no">' + (busy ? 'Give up' : 'Decline') + '</button>';
-      if (busy) mailEl('mail-p-go').onclick = function () { mailSend({ type: 'winlink-prompt', id: p.id, value: 'continue' }); };
-      mailEl('mail-p-yes').onclick = function () { if (busy) { mailKeptWaitingFor = p.id; pr.classList.add('hidden'); } else mailSend({ type: 'winlink-prompt', id: p.id, value: 'accept' }); };
-      mailEl('mail-p-no').onclick = function () { mailSend({ type: 'winlink-prompt', id: p.id, value: busy ? 'abort' : 'decline' }); };
-    }
+    if (!p) { mailPromptDrawn = ''; return; }
+    // A prompt needs the operator: bring Send / Receive up unless they are writing.
+    if (mailOpen && mailScreen === 'list') mailGo('connect');
+    var busy = p.kind === 'busy-channel';
+    var mmss = function (s) { return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); };
+    var busyText = 'The frequency is busy.' + (p.limitSec && p.waitedSec != null ? ' Waited ' + mmss(Math.min(p.waitedSec, p.limitSec)) + ' of ' + mmss(p.limitSec) + '; the call starts by itself when it clears and is dropped at ' + mmss(p.limitSec) + '.' : '') + ' Call anyway only if you have listened and it is clear.';
+    var text = busy ? busyText : (p.message || 'Decision needed');
+    var sig = p.id + '|' + text;
+    if (sig === mailPromptDrawn) return;   // the same words: keep the buttons under the finger
+    var hadButtons = mailPromptDrawn && mailPromptDrawn.split('|')[0] === String(p.id);
+    mailPromptDrawn = sig;
+    if (hadButtons && pr.firstChild) { pr.firstChild.textContent = text; return; }
+    pr.textContent = '';
+    pr.appendChild(mailMake('div', 'mail-prompt-text', text));
+    var row = mailMake('div', 'mail-prompt-actions');
+    var addBtn = function (id, word, cls) { var b = mailMake('button', 'mail-btn ' + (cls || ''), word); b.type = 'button'; b.id = id; row.appendChild(b); return b; };
+    addBtn('mail-p-yes', busy ? 'Keep waiting' : 'Accept', 'mail-btn-main');
+    if (busy) addBtn('mail-p-go', 'Call anyway');
+    addBtn('mail-p-no', busy ? 'Give up' : 'Decline', busy ? 'mail-btn-danger' : '');
+    pr.appendChild(row);
+    if (busy) mailEl('mail-p-go').onclick = function () { mailSend({ type: 'winlink-prompt', id: p.id, value: 'continue' }); };
+    mailEl('mail-p-yes').onclick = function () { if (busy) { mailKeptWaitingFor = p.id; pr.classList.add('hidden'); } else mailSend({ type: 'winlink-prompt', id: p.id, value: 'accept' }); };
+    mailEl('mail-p-no').onclick = function () { mailSend({ type: 'winlink-prompt', id: p.id, value: busy ? 'abort' : 'decline' }); };
   }
   var mailKeptWaitingFor = null; // the busy-channel prompt the operator chose to keep waiting on (#296)
-  function mailShowList() {
-    mailEl('mail-list').classList.remove('hidden');
-    mailEl('mail-reader').classList.add('hidden');
-    mailEl('mail-compose').classList.add('hidden');
-    mailRenderList();
+
+  // ── W2: how the last session ended, as a card ─────────────────────────
+  // "Mail exchanged with KY4RY" after a good radio session; the not-finished
+  // card (the shack's label and sentences, Try again, OK) after one that did
+  // not finish. Every word but the buttons is the shack's (session.outcome,
+  // lib/winlink-outcome.js) and is set with textContent. MailView.endCard()
+  // reads only the fields it knows, so new fields on session.outcome are ignored.
+  var mailCardDismissed = '';
+  var mailCardDrawn = '';
+  function mailEndCardShown() {
+    var card = MailView.endCard((mailState && mailState.session) || {}, { fmtDial: FreqDots.khzMhz });
+    return card && card.key !== mailCardDismissed ? card : null;
   }
+  function mailRenderEndCard() {
+    var box = mailEl('mail-end-card');
+    if (!box) return;
+    var card = mailEndCardShown();
+    if (!card) { box.classList.add('hidden'); box.textContent = ''; mailCardDrawn = ''; return; }
+    // The session arrives twice a second: redraw only when the words change,
+    // so a button is never replaced under a finger.
+    var sig = [card.key, card.label, card.title].concat(card.lines).join('\n');
+    if (sig === mailCardDrawn) return;
+    mailCardDrawn = sig;
+    box.textContent = '';
+    box.className = 'mail-end-card mail-end-' + card.kind;
+    var add = function (tag, cls, text) {
+      var el = document.createElement(tag);
+      el.className = cls;
+      el.textContent = text;
+      box.appendChild(el);
+      return el;
+    };
+    add('div', 'mail-end-label', card.label);
+    add('div', 'mail-end-title', card.title);
+    card.lines.forEach(function (line) { add('div', 'mail-end-line', line); });
+    // AUTOMATIC RETRY (follow-up): the countdown line ("Trying KY4RY again in
+    // 14 s") and its Cancel button go HERE, between the sentences and the
+    // buttons, once the shack sends the retry fields on session.outcome. Add
+    // them to MailView.endCard() first; this function only draws its result.
+    // The layout keeps a block for it: .mail-end-retry-box in remote.css.
+    var actions = add('div', 'mail-end-actions', '');
+    var dismiss = function () {
+      mailCardDismissed = card.key;
+      mailRenderSession();
+    };
+    if (card.retry) {
+      var again = document.createElement('button');
+      again.type = 'button';
+      again.id = 'mail-end-retry';
+      again.className = 'mail-btn mail-btn-main';
+      again.textContent = MailView.TRY_AGAIN;
+      // The same gateway, dial, mode and url the session used.
+      again.onclick = function () {
+        dismiss();
+        mailRequireNotice(function () { mailSend(MailView.retryMessage(card)); });
+      };
+      actions.appendChild(again);
+    }
+    var ok = document.createElement('button');
+    ok.type = 'button';
+    ok.id = 'mail-end-ok';
+    ok.className = 'mail-btn';
+    ok.textContent = card.ok;
+    ok.onclick = dismiss;
+    actions.appendChild(ok);
+  }
+
+  // ── the list ──────────────────────────────────────────────────────────
+  function mailShowList() { mailGo('list'); }
   function mailRenderList() {
     var rows = mailLists[mailBox] || [];
     var el = mailEl('mail-list');
     if (!el) return;
-    if (!rows.length) { el.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-dim);font-size:13px;">Nothing here.</div>'; return; }
-    el.innerHTML = rows.map(function (m) {
-      var who = mailBox === 'in' ? m.from : (m.to || []).join(', ');
-      return '<div class="mail-row" data-mid="' + esc(m.mid) + '" style="padding:8px 10px;border-bottom:1px solid var(--border);cursor:pointer;">'
-        + '<div style="display:flex;justify-content:space-between;font-size:12px;color:var(--text-dim);"><span>' + esc(who) + '</span><span>' + esc(new Date(m.date).toLocaleDateString()) + '</span></div>'
-        + '<div style="font-size:14px;' + (m.read ? '' : 'font-weight:700;') + '">' + (m.attachments && m.attachments.length ? '[' + m.attachments.length + ' att] ' : '') + esc(m.subject || '(no subject)') + '</div></div>';
-    }).join('');
+    el.textContent = '';
+    // How long the Deleted folder keeps a message; the choice is made at the shack (#475).
+    if (mailBox === 'deleted') el.appendChild(mailMake('div', 'mail-list-empty mail-del-note', MailActions.deletedFolderNote(mailState && mailState.deletedDays)));
+    rows.forEach(function (m) {
+      var fromOther = mailBox === 'in' || ((mailBox === 'archive' || mailBox === 'deleted') && !MailActions.isOwnAddress(m.from, mailState && mailState.mycall));
+      var who = fromOther ? m.from : (m.to || []).join(', ');
+      var b = mailMake('button', 'mail-row' + (m.read ? '' : ' mail-unread'));
+      b.type = 'button';
+      b.setAttribute('data-mid', m.mid);
+      if (mailScreen === 'read' && m.mid === mailReadMid) b.setAttribute('aria-current', 'true');
+      b.appendChild(mailMake('span', 'mail-dot'));
+      var mid = mailMake('span', 'mail-row-main');
+      mid.appendChild(mailMake('span', 'mail-row-who', who || '(no address)'));
+      var n = (m.attachments && m.attachments.length) || 0;
+      mid.appendChild(mailMake('span', 'mail-row-line', (m.subject || '(no subject)') + (n ? ' · ' + n + (n === 1 ? ' attachment' : ' attachments') : '')));
+      b.appendChild(mid);
+      b.appendChild(mailMake('span', 'mail-row-time', MailView.shortTime(m.date)));
+      b.onclick = function () { mailSend({ type: 'winlink-read', box: mailBox, mid: m.mid }); };
+      el.appendChild(b);
+    });
+    if (!rows.length) el.appendChild(mailMake('div', 'mail-list-empty', 'Nothing here.'));
+    if (mailBox === 'in') el.appendChild(mailMake('div', 'mail-list-empty', 'New mail arrives when you press Send / Receive.'));
   }
+
+  // ── reading ───────────────────────────────────────────────────────────
+  // The reader's buttons come from lib/winlink-mail-actions.js (#462, #475):
+  // the same buttons, order and words as the desktop Winlink window. Archive,
+  // Move back, Restore and the Deleted folder need a shack that lists
+  // mail-folders-v2 (it sends winlink-state.deletedDays); Reply all is a
+  // compose with Cc and works with any shack.
+  var MAIL_BTN = { reply: 'mail-reply', 'reply-all': 'mail-reply-all', archive: 'mail-archive', 'move-back': 'mail-move-back', delete: 'mail-del', restore: 'mail-restore', 'delete-for-good': 'mail-del' };
+  var MAIL_V2_ONLY = { archive: 1, 'move-back': 1, restore: 1, 'delete-for-good': 1 };
+  var mailDelArmed = null;
+  var mailDoneWord = '';      // the toast for the move / delete just asked
+  function mailFoldersV2() { return !!mailState && typeof mailState.deletedDays === 'number'; }
   function mailShowMessage(msg) {
     var m = msg.message || {};
-    var r = mailEl('mail-reader');
-    mailEl('mail-list').classList.add('hidden');
-    mailEl('mail-compose').classList.add('hidden');
-    r.classList.remove('hidden');
-    r.innerHTML = '<div style="display:flex;gap:6px;margin-bottom:8px;"><button type="button" id="mail-back">Back</button>'
-      + (msg.box === 'in' ? '<button type="button" id="mail-reply">Reply</button>' : '')
-      + '<span style="flex:1"></span><button type="button" id="mail-del" style="color:#e94560;">Delete</button></div>'
-      + '<div style="font-size:12px;color:var(--text-dim);line-height:1.6;"><b style="color:var(--text)">' + esc(m.subject || '') + '</b><br>From ' + esc(m.from) + '<br>To ' + esc((m.to || []).join(', ')) + '</div>'
-      + '<div style="white-space:pre-wrap;word-break:break-word;font-family:monospace;font-size:13px;margin-top:8px;">' + esc(m.body || '') + '</div>'
-      + (m.attachments || []).map(function (a) { return '<button type="button" class="mail-att" data-name="' + esc(a.name) + '" style="margin:6px 6px 0 0;">Save ' + esc(a.name) + '</button>'; }).join('');
-    mailEl('mail-back').onclick = mailShowList;
-    var rp = mailEl('mail-reply');
-    if (rp) rp.onclick = function () { mailCompose(m.from, /^re:/i.test(m.subject) ? m.subject : 'Re: ' + m.subject); };
-    var delArmed = null;
-    mailEl('mail-del').onclick = function () {
-      var b = mailEl('mail-del');
-      if (!delArmed) {
-        b.textContent = 'Delete this message?';
-        delArmed = setTimeout(function () { delArmed = null; b.textContent = 'Delete'; }, 5000);
-        return;
+    mailReadMid = msg.mid;
+    var deleted = msg.box === MailActions.DELETED;
+    mailEl('mail-read-subject').textContent = m.subject || '(no subject)';
+    // The time the way the list says it: "1431z" today, else "Nov 10".
+    mailEl('mail-read-meta').textContent = ['From ' + (m.from || ''), 'to ' + (m.to || []).join(', '), m.date ? MailView.shortTime(m.date) : ''].filter(Boolean).join(' · ');
+    var cc = mailEl('mail-read-cc');
+    cc.textContent = m.cc && m.cc.length ? 'Cc ' + m.cc.join(', ') : '';
+    cc.classList.toggle('hidden', !(m.cc && m.cc.length));
+    var note = mailEl('mail-read-note');
+    note.textContent = deleted ? MailActions.deletedNote(m, mailState && mailState.deletedDays, Date.now()) : '';
+    note.classList.toggle('hidden', !deleted);
+    // How it went out (#442): message.sentRoute, from a shack that kept it; nothing otherwise.
+    var route = mailEl('mail-read-route');
+    if (route) {
+      var routeText = MailActions.sentRouteLine(m.sentRoute);
+      route.textContent = routeText;
+      route.classList.toggle('hidden', !routeText);
+    }
+    mailEl('mail-read-body').textContent = m.body || '';
+    var atts = mailEl('mail-read-atts');
+    atts.textContent = '';
+    (m.attachments || []).forEach(function (a) {
+      var card = mailMake('div', 'mail-card mail-att');
+      var t = mailMake('div', 'mail-att-text');
+      t.appendChild(mailMake('div', 'mail-att-name', a.name + (a.size ? ' · ' + Math.max(1, Math.round(a.size / 1024)) + ' kB' : '')));
+      // The shack's Pat cannot read its Deleted folder: Restore first, then Save.
+      t.appendChild(mailMake('div', 'mail-muted', deleted ? 'Restore the message to save it' : 'Attachment'));
+      card.appendChild(t);
+      if (!deleted) {
+        var save = mailMake('button', 'mail-btn mail-btn-fit', 'Save');
+        save.type = 'button';
+        save.setAttribute('aria-label', 'Save ' + a.name);
+        save.onclick = function () { mailSend({ type: 'winlink-attachment-get', box: msg.box, mid: msg.mid, name: a.name }); };
+        card.appendChild(save);
       }
-      clearTimeout(delArmed); delArmed = null;
-      mailSend({ type: 'winlink-delete', box: msg.box, mid: msg.mid }); mailShowList();
-    };
-    Array.prototype.forEach.call(r.querySelectorAll('.mail-att'), function (b) {
-      b.onclick = function () { mailSend({ type: 'winlink-attachment-get', box: msg.box, mid: msg.mid, name: b.getAttribute('data-name') }); };
+      atts.appendChild(card);
     });
+    var row = mailEl('mail-read-actions');
+    row.textContent = '';
+    if (mailDelArmed) { clearTimeout(mailDelArmed); mailDelArmed = null; }
+    var v2 = mailFoldersV2();
+    MailActions.readerActions(msg.box, m, mailState && mailState.mycall).forEach(function (a) {
+      if (!MAIL_BTN[a.id] || (MAIL_V2_ONLY[a.id] && !v2)) return;
+      var b = mailMake('button', 'mail-btn mail-btn-fit' + (a.danger ? ' mail-btn-danger' : a.id === 'reply' ? ' mail-btn-main' : ''), a.label);
+      b.type = 'button';
+      b.id = MAIL_BTN[a.id];
+      if (a.id === 'reply') b.onclick = function () { mailCompose(m.from, MailActions.replySubject(m.subject)); };
+      else if (a.id === 'reply-all') b.onclick = function () { var ra = MailActions.replyAll(m, mailState && mailState.mycall); mailCompose(ra.to.join(', '), MailActions.replySubject(m.subject), ra.cc.join(', ')); };
+      else if (a.id === 'delete') b.onclick = function () {
+        // Undoable on a shack with the Deleted folder; an older shack deletes for good, so it asks first.
+        if (!v2 && !mailDelArmed) {
+          b.textContent = 'Delete this message?';
+          mailDelArmed = setTimeout(function () { mailDelArmed = null; b.textContent = a.label; }, 5000);
+          return;
+        }
+        if (mailDelArmed) { clearTimeout(mailDelArmed); mailDelArmed = null; }
+        mailDoneWord = v2 ? 'Moved to Deleted.' : '';
+        mailSend({ type: 'winlink-delete', box: msg.box, mid: msg.mid }); mailShowList();
+      };
+      else if (a.id === 'delete-for-good') b.onclick = function () {
+        if (!mailDelArmed) {
+          b.textContent = MailActions.DELETE_FOR_GOOD_CONFIRM;
+          mailDelArmed = setTimeout(function () { mailDelArmed = null; b.textContent = a.label; }, 6000);
+          return;
+        }
+        clearTimeout(mailDelArmed); mailDelArmed = null;
+        mailDoneWord = 'Deleted for good.';
+        mailSend({ type: 'winlink-delete', box: msg.box, mid: msg.mid }); mailShowList();
+      };
+      else if (a.to) b.onclick = function () {
+        mailDoneWord = 'Moved to ' + MailActions.folderName(a.to) + '.';
+        mailSend({ type: 'winlink-move', box: msg.box, mid: msg.mid, to: a.to }); mailShowList();
+      };
+      row.appendChild(b);
+    });
+    mailGo('read');
   }
+
   function mailRequireNotice(then) {
     if (mailState && mailState.noticeAccepted) { then(); return; }
     mailNoticeThen = then;
     mailEl('mail-notice-text').textContent = (mailState && mailState.noticeText) || '';
     mailEl('mail-notice').classList.remove('hidden');
   }
-  function mailCompose(to, subj) {
+  function mailCompose(to, subj, cc) {
     mailRequireNotice(function () {
-      mailEl('mail-list').classList.add('hidden');
-      mailEl('mail-reader').classList.add('hidden');
-      mailEl('mail-compose').classList.remove('hidden');
       mailEl('mail-to').value = to || '';
+      mailEl('mail-cc').value = cc || '';
       mailEl('mail-subj').value = subj || '';
       mailEl('mail-body').value = '';
       mailEl('mail-err').textContent = '';
+      mailGo('compose');
     });
   }
+
+  // ── Send / Receive: the gateway list ──────────────────────────────────
   function mailGatewayLabel(g) {
     var parts = [g.call];
-    if (g.dialKhz) parts.push(g.dialKhz.toFixed(1) + ' kHz');
+    if (g.dialKhz) parts.push(FreqDots.khzMhz(g.dialKhz));
     if (g.qualityWord) parts.push(g.qualityWord + (g.quality != null ? ' ' + g.quality + '%' : ''));
     if (g.distKm != null) parts.push(g.distKm + ' km');
     return parts.join('  ');
   }
-  function mailRenderGateways() {
-    var sel = mailEl('mail-gateway');
+  // The line under the gateway list: prediction progress while it loads, the
+  // list's order once it is here, or why it did not load, with Try again (W4).
+  var mailGwSeq = 0;
+  var mailGwReqId = '';
+  var mailGwTimer = null;
+  var mailGwLoaded = false;   // a list (or its failure) has arrived for the current mode and band
+  function mailGwStatus(text, retry) {
     var note = mailEl('mail-gw-note');
-    if (note) note.textContent = mailGatewayNote;
-    if (!mailGateways.length) { sel.innerHTML = '<option value="">No gateways for that band</option>'; return; }
-    sel.innerHTML = mailGateways.slice(0, 80).map(function (g, i) {
-      return '<option value="' + i + '">' + esc(mailGatewayLabel(g)) + '</option>';
-    }).join('');
+    if (note) note.textContent = text || '';
+    mailShow('mail-gw-retry', !!retry);
+    mailShow('mail-gw-status', !!(text || retry));
+  }
+  function mailGwMessage(text) {
+    var box = mailEl('mail-gateway');
+    box.textContent = '';
+    box.appendChild(mailMake('div', 'mail-gw-msg', text));
+  }
+  function mailGwStopTimer() { if (mailGwTimer) { clearInterval(mailGwTimer); mailGwTimer = null; } }
+  function mailRenderGateways() {
+    var box = mailEl('mail-gateway');
+    if (!mailGateways.length) { mailGwMessage('No gateways for that band'); mailRenderBar(); return; }
+    box.textContent = '';
+    mailGateways.slice(0, 80).forEach(function (g, i) {
+      var b = mailMake('button', 'mail-gw');
+      b.type = 'button';
+      b.setAttribute('data-i', String(i));
+      b.setAttribute('aria-pressed', i === mailPick ? 'true' : 'false');
+      b.setAttribute('aria-label', mailGatewayLabel(g));
+      var main = mailMake('span', 'mail-row-main');
+      main.appendChild(mailMake('span', 'mail-row-who', g.call));
+      main.appendChild(mailMake('span', 'mail-row-line', [g.dialKhz ? FreqDots.khzMhz(g.dialKhz) : '', g.distKm != null ? g.distKm + ' km' : ''].filter(Boolean).join(' · ')));
+      b.appendChild(main);
+      var tag = MailView.qualityTag(g);
+      if (tag) b.appendChild(mailMake('span', 'mail-tag mail-tag-' + tag.tone, tag.text));
+      b.onclick = function () { mailPickGateway(i); };
+      box.appendChild(b);
+    });
+    mailRenderBar();
+  }
+  function mailPickGateway(i) {
+    var g = mailGateways[i];
+    if (!g) return;
+    mailPick = i;
+    Array.prototype.forEach.call(mailEl('mail-gateway').querySelectorAll('.mail-gw'), function (b) {
+      b.setAttribute('aria-pressed', b.getAttribute('data-i') === String(i) ? 'true' : 'false');
+    });
+    if (g.dialKhz) mailSend({ type: 'winlink-qsy', dialKhz: g.dialKhz, mode: mailCurrentMode() });
+    mailRenderBar();
+  }
+  function mailGatewaysArrived(msg) {
+    if (msg.reqId && msg.reqId !== mailGwReqId) return; // an answer to an earlier band or mode
+    mailGwStopTimer();
+    mailGwLoaded = true;
+    mailGateways = msg.list || [];
+    mailPick = mailGateways.length ? 0 : -1;   // the first is picked; a tap on it (or another) tunes the radio
+    var head = mailEl('mail-gw-head');
+    if (head) head.textContent = mailGateways.length ? (msg.predicted ? 'Best path now' : 'Nearest first') : 'Gateway';
+    mailRenderGateways();
+    mailGwStatus(MailView.gatewayNote(msg), false);
+  }
+  function mailGatewaysFailed(msg, f) {
+    if (msg.reqId && msg.reqId !== mailGwReqId) return;
+    mailGwStopTimer();
+    mailGwLoaded = true;
+    mailGwReqId = '';   // a late answer to the request given up on is not drawn
+    mailGateways = [];
+    mailPick = -1;
+    f = f || MailView.gatewaysFailed(msg.error);
+    mailGwMessage(f.option);
+    mailEl('mail-gw-retry').textContent = f.button;
+    mailGwStatus(f.text, true);
+    mailRenderBar();
   }
   function mailLoadGateways() {
-    var mode = mailEl('mail-mode').value;
-    if (mode === 'telnet') return;
-    mailEl('mail-gateway').innerHTML = '<option value="">' + (mode === 'packet' || mode === 'varafm' ? 'Loading…' : 'Loading, predicting propagation…') + '</option>';
-    mailGatewayNote = '';
-    mailSend({ type: 'winlink-gateways-get', mode: mode, band: mailEl('mail-band').value });
+    var mode = mailCurrentMode();
+    mailGwStopTimer();
+    if (mode === 'telnet') { mailGwStatus('', false); return; }
+    var s = mailState || {};
+    mailGateways = [];
+    mailPick = -1;
+    mailGwLoaded = false;
+    var head = mailEl('mail-gw-head');
+    if (head) head.textContent = 'Gateway';
+    mailGwReqId = 'gw' + (++mailGwSeq);
+    // No link to the shack: the request would be dropped and the list would
+    // say Loading for ever. Say so, with Try again (#435).
+    if (!(ws && ws.readyState === WebSocket.OPEN)) {
+      mailGatewaysFailed({}, { option: MailView.gatewaysTimedOut().option, text: MailView.NOT_CONNECTED, button: MailView.TRY_AGAIN });
+      return;
+    }
+    mailGwMessage(MailView.loadingText(mode, s.predictionOn));
+    // How long the ranking has run, and about how long the last one took.
+    // The same tick gives up when the shack has not answered in time (#435).
+    var t0 = Date.now();
+    var waitMs = MailView.gatewayWait(mode, s.predictionOn);
+    var tick = function () {
+      if (Date.now() - t0 > waitMs) { mailGatewaysFailed({}, MailView.gatewaysTimedOut()); return; }
+      mailGwStatus(MailView.predictText({ mode: mode, predictionOn: s.predictionOn, predictMs: s.predictMs, elapsedMs: Date.now() - t0 }), false);
+    };
+    tick();
+    mailGwTimer = setInterval(tick, 1000);
+    mailRenderBar();
+    mailSend({ type: 'winlink-gateways-get', mode: mode, band: mailBand, reqId: mailGwReqId });
   }
+  // Opening Send / Receive in a radio mode loads the list once.
+  function mailOpenConnect() {
+    mailRenderModes();
+    if (mailCurrentMode() !== 'telnet' && !mailGwLoaded && !mailGwTimer && !mailGateways.length) mailLoadGateways();
+  }
+
+  // The bottom bar of Send / Receive: the radio line and one button.
+  function mailRenderBar() {
+    var c = mailEl('mail-connect');
+    if (!c) return;
+    var ss = (mailState && mailState.session) || {};
+    var active = mailActive(ss);
+    var mode = mailCurrentMode();
+    var g = mode !== 'telnet' ? mailGateways[mailPick] : null;
+    // The not-finished card has its own Try again: one way to call again at a time.
+    var carded = mailEndCardShown();
+    if (carded && carded.retry) active = true;
+    c.textContent = mode === 'telnet' ? 'Send / Receive over the internet' : g ? 'Connect to ' + g.call : 'Connect';
+    c.classList.toggle('hidden', active || (mode !== 'telnet' && !g));
+    mailShow('mail-abort', mailActive(ss));
+    var line = mailEl('mail-radio-line');
+    var text = '';
+    if (!active && mode !== 'telnet') {
+      // While the list is fetched or ranked (up to about two minutes) the line says so (#435).
+      if (!g) text = mailGwLoaded ? 'No gateway to call on this band.' : MailView.connectWaitText(mode, (mailState || {}).predictionOn);
+      else if (mailQsyMoved) text = 'The radio is set for ' + g.call + (g.dialKhz ? ' on ' + FreqDots.khzMhz(g.dialKhz) : '') + '. It goes back when you leave Mail.';
+      else text = 'Tap a gateway to tune the radio to it, or connect now.';
+    }
+    if (line) { line.textContent = text; line.classList.toggle('hidden', !text); }
+    // Nothing to say and nothing to press: no empty bar.
+    mailShow('mail-connect-bar', !!text || !c.classList.contains('hidden') || mailActive(ss));
+  }
+  function mailConnect() {
+    mailRequireNotice(function () {
+      var mode = mailCurrentMode();
+      var o = { type: 'winlink-connect', mode: mode };
+      if (mode !== 'telnet') {
+        var g = mailGateways[mailPick];
+        if (!g) { showToast(mailGwLoaded ? 'Pick a gateway first' : MailView.connectWaitText(mode, (mailState || {}).predictionOn), 3000, true); return; }
+        o.gateway = g.call; o.dialKhz = g.dialKhz; o.url = g.url;
+      }
+      mailSend(o);
+    });
+  }
+
   function mailOnOpen() {
+    mailOpen = true;
+    // Winlink off on the shack: the tab only says where to turn it on. A
+    // request would start Pat (any winlink-* request does).
+    if (mailState && !mailState.enabled) return;
     mailSend({ type: 'winlink-list', box: mailBox });
-    mailShowList();
+    mailRenderList();
   }
   (function mailWire() {
     if (!mailEl('mail-view')) return;
-    mailEl('mail-box').addEventListener('change', function () { mailBox = mailEl('mail-box').value; mailOnOpen(); });
-    mailEl('mail-new').addEventListener('click', function () { mailCompose('', ''); });
-    mailEl('mail-list').addEventListener('click', function (e) {
-      var row = e.target.closest('.mail-row');
-      if (row) mailSend({ type: 'winlink-read', box: mailBox, mid: row.getAttribute('data-mid') });
+    Array.prototype.forEach.call(mailEl('mail-folders').querySelectorAll('[data-box]'), function (b) {
+      b.addEventListener('click', function () {
+        mailBox = b.getAttribute('data-box');
+        mailRenderFolders();
+        mailSend({ type: 'winlink-list', box: mailBox });
+        mailGo('list');
+      });
     });
+    Array.prototype.forEach.call(mailEl('mail-view').querySelectorAll('[data-back]'), function (b) {
+      b.addEventListener('click', mailShowList);
+    });
+    mailEl('mail-new').addEventListener('click', function () { mailCompose('', ''); });
+    mailEl('mail-open-connect').addEventListener('click', function () { mailGo('connect'); });
+    mailEl('mail-last').addEventListener('click', function () { mailGo('connect'); });
     mailEl('mail-cancel').addEventListener('click', mailShowList);
     mailEl('mail-queue').addEventListener('click', function () {
       if (!mailEl('mail-to').value.trim() || !mailEl('mail-subj').value.trim()) { mailEl('mail-err').textContent = 'Add a recipient and a subject'; return; }
-      mailSend({ type: 'winlink-compose', to: mailEl('mail-to').value, subject: mailEl('mail-subj').value, body: mailEl('mail-body').value });
+      mailEl('mail-err').textContent = '';
+      var out = { type: 'winlink-compose', to: mailEl('mail-to').value, subject: mailEl('mail-subj').value, body: mailEl('mail-body').value };
+      if (mailEl('mail-cc').value.trim()) out.cc = mailEl('mail-cc').value;
+      mailSend(out);
     });
-    mailEl('mail-mode').addEventListener('change', function () {
-      var mode = mailEl('mail-mode').value;
-      mailSend({ type: 'winlink-set-mode', mode: mode });
-      mailEl('mail-radio').classList.toggle('hidden', mode === 'telnet');
-      mailGateways = [];
-      mailLoadGateways();
-    });
-    mailEl('mail-band').addEventListener('change', mailLoadGateways);
-    mailEl('mail-gateway').addEventListener('change', function () {
-      var g = mailGateways[parseInt(mailEl('mail-gateway').value, 10)];
-      if (g && g.dialKhz) mailSend({ type: 'winlink-qsy', dialKhz: g.dialKhz, mode: mailEl('mail-mode').value });
-    });
-    mailEl('mail-connect').addEventListener('click', function () {
-      mailRequireNotice(function () {
-        var mode = mailEl('mail-mode').value || 'telnet';
-        var o = { type: 'winlink-connect', mode: mode };
-        if (mode !== 'telnet') {
-          var g = mailGateways[parseInt(mailEl('mail-gateway').value, 10)];
-          if (!g) { showToast('Pick a gateway first', 3000, true); return; }
-          o.gateway = g.call; o.dialKhz = g.dialKhz; o.url = g.url;
-        }
-        mailSend(o);
-      });
-    });
+    mailEl('mail-gw-retry').addEventListener('click', mailLoadGateways);
+    mailEl('mail-acct-retry').addEventListener('click', mailAcctCheck);
+    mailEl('mail-connect').addEventListener('click', mailConnect);
     mailEl('mail-abort').addEventListener('click', function () { mailSend({ type: 'winlink-abort' }); });
     mailEl('mail-notice-ok').addEventListener('click', function () {
       mailSend({ type: 'winlink-accept-notice' });
@@ -15714,6 +16880,7 @@ var _paddleHoldTimer = { dit: null, dah: null };
       var f = mailNoticeThen; mailNoticeThen = null; if (f) f();
     });
     mailEl('mail-notice-no').addEventListener('click', function () { mailEl('mail-notice').classList.add('hidden'); mailNoticeThen = null; });
+    mailGo('list');
   })();
 
   // Auto-connect on page load (or bootstrap popout view)

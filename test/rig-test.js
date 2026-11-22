@@ -183,9 +183,9 @@ test('Yaesu ATU ft891 sequence: AC001 + AC002', () => {
 // 2 tuning start. It shipped on the Kenwood-form 'standard' (AC011;) until
 // Artemis asked for AC002 (2026-10-04). Pinned here so a model-table edit
 // can never put it back.
-test('FT-991/991A and FTDX101D/MP ATU are the FT-891 shape (AC001 then AC002), never AC011', () => {
+test('FT-991/991A, FTDX101D and FTDX101MP ATU are the FT-891 shape (AC001 then AC002), never AC011', () => {
   const { RIG_MODELS } = require('../lib/rig-models');
-  for (const id of ['FT-991/991A', 'FTDX101D/MP']) {
+  for (const id of ['FT-991/991A', 'FTDX101D', 'FTDX101MP']) {
     assert.strictEqual(RIG_MODELS[id].atuCmd, 'ft891', id);
     const { codec } = captureWrites(KenwoodCodec, RIG_MODELS[id]);
     const seq = codec.getAtuStartSequence();
@@ -267,17 +267,46 @@ test('FT-991A: split on/off is FT3;/FT2;, reported at once and confirmed with FT
   assert.ok(!writes.some((w) => /^ST/.test(w)), 'ST is not a 991A command');
 });
 
-test('FT-991A and FT-891: filter width is SH0nn from the 991A chart', () => {
+test('FT-891: filter width is SH01nn (WIDTH on + index), SSB chart from its CAT reference p. 17', () => {
   const { RIG_MODELS } = require('../lib/rig-models');
-  for (const id of ['FT-991/991A', 'FT-891']) {
+  const { codec, writes } = captureWrites(KenwoodCodec, RIG_MODELS['FT-891']);
+  codec._lastParsedMode = 'USB';
+  codec.setFilterWidth(200);    // index 01
+  codec.setFilterWidth(2200);   // index 12
+  codec.setFilterWidth(2400);   // index 14
+  codec.setFilterWidth(3000);   // index 20
+  codec._lastParsedMode = 'CW';
+  codec.setFilterWidth(500);    // index 10
+  assert.deepStrictEqual(writes, ['SH0101;', 'SH0112;', 'SH0114;', 'SH0120;', 'SH0110;']);
+});
+
+test('FT-891: RF gain is RG0 000-030 (CAT reference rev 1909-C, PDF p. 16); other Yaesu stay 000-255', () => {
+  const { RIG_MODELS } = require('../lib/rig-models');
+  const { codec, writes } = captureWrites(KenwoodCodec, RIG_MODELS['FT-891']);
+  codec.setRfGain(0); codec.setRfGain(25); codec.setRfGain(50); codec.setRfGain(100); codec.setRfGain(140);
+  assert.deepStrictEqual(writes, ['RG0000;', 'RG0008;', 'RG0015;', 'RG0030;', 'RG0030;']);
+  const seen = [];
+  codec.on('rfgain', (v) => seen.push(v));
+  codec.onData('RG0030;RG0015;RG0000;');
+  assert.deepStrictEqual(seen, [100, 50, 0]);
+  for (const id of ['FT-710', 'FTDX10', 'FT-991/991A']) {
+    const o = captureWrites(KenwoodCodec, RIG_MODELS[id]);
+    o.codec.setRfGain(50); o.codec.setRfGain(100);
+    assert.deepStrictEqual(o.writes, ['RG0128;', 'RG0255;'], id);
+  }
+});
+
+test('FT-991A: filter width is SH0nn from the 991A chart', () => {
+  const { RIG_MODELS } = require('../lib/rig-models');
+  for (const id of ['FT-991/991A']) {
     const { codec, writes } = captureWrites(KenwoodCodec, RIG_MODELS[id]);
     codec._lastParsedMode = 'USB';
-    codec.setFilterWidth(2400);   // index 13 on the 991A chart
+    codec.setFilterWidth(2400);   // index 14 on the 991A chart (CAT reference p. 16)
     codec.setFilterWidth(3000);   // index 20 (the FTDX chart would say 19)
     codec._lastParsedMode = 'CW';
     codec.setFilterWidth(500);    // index 10
     codec.setFilterWidth(2400);   // index 16
-    assert.deepStrictEqual(writes, ['SH013;', 'SH020;', 'SH010;', 'SH016;'], id);
+    assert.deepStrictEqual(writes, ['SH014;', 'SH020;', 'SH010;', 'SH016;'], id);
   }
 });
 
@@ -547,6 +576,14 @@ test('TS-890S / TS-990S (real models) setTransmit on -> TX1; (data send)', () =>
     codec.setTransmit(true);
     assert.strictEqual(writes[0], 'TX1;', `${id} should data-send key with TX1;`);
   }
+});
+
+// #511: a TS-480SAT on the ACC cable sent FT8 as dead air with plain TX;.
+test('TS-480 (real model) setTransmit on -> TX1; (data send), off -> RX;', () => {
+  const { RIG_MODELS } = require('../lib/rig-models');
+  const { codec, writes } = captureWrites(KenwoodCodec, RIG_MODELS['TS-480']);
+  codec.setTransmit(true); codec.setTransmit(false);
+  assert.deepStrictEqual(writes.slice(0, 2), ['TX1;', 'RX;']);
 });
 
 // Guard against over-broadening: TS-2000 predates TX0/TX1 data-send, so it must
@@ -1007,6 +1044,18 @@ test('Kenwood setFrequencyOther writes the OTHER VFO (FB on A, FA on B) and read
   const y = captureWrites(KenwoodCodec, FT891_MODEL);
   assert.strictEqual(y.codec.setFrequencyOther(14205000), false);
   assert.strictEqual(y.writes.length, 0);
+});
+
+test('FT-991/991A setFrequencyOther writes VFO B directly and reads its TX frequency back', () => {
+  const model = require('../lib/rig-models').RIG_MODELS['FT-991/991A'];
+  const { codec, writes } = captureWrites(KenwoodCodec, model);
+  const other = [];
+  codec._splitOn = true;
+  codec.on('frequencyOther', (hz) => other.push(hz));
+  assert.strictEqual(codec.setFrequencyOther(14345000), true);
+  assert.deepStrictEqual(writes, ['FB014345000;', 'FB;']);
+  codec.onData(Buffer.from('FB014345000;'));
+  assert.deepStrictEqual(other, [14345000]);
 });
 
 test('every Icom model that offers VFO A/B also offers split, and the wiring exists end to end', () => {
@@ -3173,7 +3222,9 @@ test('main.js adopts the reported address and probes it first (source-text guard
   assert.ok(src.includes('networkCodec.setRadioAddress(reported)'), 'live path re-addresses the codec');
   assert.ok(src.includes('probeAddrs = uniq([reported, ...probeAddrs])'), 'test probe puts the reported address first');
   assert.ok(src.includes('0xB2, // IC-7760'), 'IC-7760 is in the probe list');
-  assert.ok(/models: \['IC-7760'\],\s*civAddrs: \[0xB2\],\s*settingId: 0x0130,/.test(src), 'IC-7760 DATA1 MOD spec');
+  // The spec table moved to lib/icom-network-data-mod.js (#853).
+  const specSrc = readSrc(require('path').join(__dirname, '..', 'lib', 'icom-network-data-mod.js'));
+  assert.ok(/models: \['IC-7760'\],\s*civAddrs: \[0xB2\],\s*settingId: 0x0130,/.test(specSrc), 'IC-7760 DATA1 MOD spec');
   assert.ok(src.includes('if (civAddr != null) merged.civAddr = civAddr;'), 'getActiveRigModel borrows the picked CI-V address');
 });
 
@@ -3259,14 +3310,14 @@ test('ATU Tune via the controller: a CI-V Icom sends 1C 01 02 to its own address
 // a TS-590; data send is `T 3` → `TX1;` (checked against the bundled Hamlib
 // 4.7.0 rigctld -m 2037 with a fake radio). The serial Kenwood codec has sent
 // TX1; since June; the rigctld path never learned it.
-test('rigctld PTT: TS-590S/SG, 890S, 990S key data send (T 3); others stay T 1', () => {
+test('rigctld PTT: TS-480, TS-590S/SG, 890S, 990S key data send (T 3); others stay T 1', () => {
   const RM = require('../lib/rig-models').RIG_MODELS;
-  for (const m of ['TS-590S/SG', 'TS-890S', 'TS-990S']) {
+  for (const m of ['TS-480', 'TS-590S/SG', 'TS-890S', 'TS-990S']) {
     const { codec, writes } = captureWrites(RigctldCodec, RM[m]);
     codec.setTransmit(true); codec.setTransmit(false);
     assert.deepStrictEqual(writes, ['T 3\n', 'T 0\n'], m);
   }
-  for (const m of ['TS-480', 'TS-2000', 'IC-7300', 'FT-710']) {
+  for (const m of ['TS-2000', 'IC-7300', 'FT-710']) {
     const { codec, writes } = captureWrites(RigctldCodec, RM[m]);
     codec.setTransmit(true);
     assert.deepStrictEqual(writes, ['T 1\n'], m);
@@ -3415,7 +3466,7 @@ if (failed > 0) {
 // so every Yaesu showed its ALC meter as SWR (3.3:1 into a 1.00 match, 2026-10-23).
 test('Yaesu (FT-991A / FTDX10 / FT-891) reads SWR on RM6 and ALC on RM4', () => {
   const { RIG_MODELS } = require('../lib/rig-models');
-  for (const name of ['FT-991/991A', 'FTDX10', 'FT-891', 'FT-710', 'FTDX101D/MP', 'FTDX3000']) {
+  for (const name of ['FT-991/991A', 'FTDX10', 'FT-891', 'FT-710', 'FTDX101D', 'FTDX101MP', 'FTDX3000']) {
     const w = [];
     const c = new KenwoodCodec({ ...RIG_MODELS[name], brand: 'Yaesu' }, (x) => w.push(String(x)));
     c.getSwr(); c.getAlc();
