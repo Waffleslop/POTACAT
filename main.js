@@ -495,6 +495,7 @@ const WinlinkSentRoutes = require('./lib/winlink-sent-routes'); // how each sent
 const WinlinkGpsd = require('./lib/winlink-gpsd'); // #346: the Settings grid's centre for Pat's forms, as a GPSd on 127.0.0.1
 const WinlinkForms = require('./lib/winlink-forms'); // #346: Winlink forms through Pat (1.0.1 or newer), its catalog, and what the form window may load
 const { createRigctldServer } = require('./lib/rigctld-server');
+const { RIGCTLD_HOST, rigctldListenArgs } = require('./lib/rigctld-bind'); // POTACAT's own rigctld: loopback only (Casey 2026-11-22)
 const ArdopProcess = require('./lib/ardop-process');
 const DirewolfProcess = require('./lib/direwolf-process');
 const DirewolfAgwMonitor = require('./lib/direwolf-agw-monitor');
@@ -4226,7 +4227,7 @@ function spawnRigctld(target, portOverride) {
       '-m', String(target.rigId),
       '-r', serialPort,
       '-s', String(target.baudRate || 9600),
-      '-t', port,
+      ...rigctldListenArgs(port),
     ];
     // Separate PTT port (DigiRig / SignaLink / etc.) — tell rigctld to
     // drive PTT via DTR or RTS on the supplied serial port instead of
@@ -9559,8 +9560,8 @@ async function connectCat() {
     cat.on('power', sendCatPower);
     cat.on('powerMeter', sendCatFwdPower);
     cat.on('ptt', (on) => _radioTxWatch.cat(on)); // the radio's TX status: owner use during a hold (#200)
-    sendCatLog(`Connecting to rigctld on 127.0.0.1:${rigctldPort}`);
-    transport.connect({ host: '127.0.0.1', port: rigctldPort });
+    sendCatLog(`Connecting to rigctld on ${RIGCTLD_HOST}:${rigctldPort}`);
+    transport.connect({ host: RIGCTLD_HOST, port: rigctldPort });
 
   } else if (target.type === 'rigctldnet') {
     transport = new TcpTransport();
@@ -56486,7 +56487,7 @@ function cloudShackNotice(text, kind) {
           reject(new Error(explain(hint ? `Timed out — rigctld: ${hint}` : 'Timed out waiting for rigctld response')));
         }, 5000);
 
-        const sock = net.createConnection({ host: '127.0.0.1', port: 4533 }, () => {
+        const sock = net.createConnection({ host: RIGCTLD_HOST, port: 4533 }, () => {
           sock.write('f\n');
         });
 
