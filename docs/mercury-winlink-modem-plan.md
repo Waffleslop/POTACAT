@@ -1,6 +1,7 @@
 # Mercury as a bundled Winlink modem: the plan
 
-Filed 2026-11-22. Status: plan only. Nothing here is built yet beyond what "What exists" lists.
+Filed 2026-11-22. Status: plan, with Casey's decisions of 2026-11-22 (section 12). Phase 0 is
+with a tester; nothing is bundled.
 
 Mercury is experimental. It is a young modem that changes every week or two, few Winlink
 gateways run it, and no Mercury Winlink session has completed in POTACAT's hands. Every
@@ -138,8 +139,9 @@ them helps on Windows, which is where most operators are.
 ### 4.3 The pin
 - Pin a release tag, never a branch. Record tag, SHA and date in `VERSION.txt`.
 - Because Mercury versions do not talk across some boundaries (1.9.25 and older), the pin must
-  match what gateways run. Rule: follow upstream releases within a POTACAT patch release when a
-  release breaks compatibility, and say in the release note which Mercury version ships.
+  match what gateways run. Rule (decision 4): move the pin to a compatibility-breaking Mercury
+  release only when the gateways have moved to it and Casey says so; never on upstream's
+  release alone. Say in the release note which Mercury version ships.
 - The session log and the bug report's Winlink line name the Mercury version. A Mercury
   `VERSION` command answers with a VARA-style string by design, so the real version comes from
   the banner Mercury prints on start (stdout, now captured since 8490f71).
@@ -160,8 +162,11 @@ The same doc notes that Pat sends `WINLINK SESSION` or `P2P SESSION` before each
 it; upstream users have run Pat over Mercury on the air since 2026-06
 (https://github.com/la5nta/pat/issues/523). A first-class Pat "mercury" transport is specified
 (https://github.com/la5nta/pat/issues/546) but waits on a Pat refactor (#545, #558); when it
-lands we can move to it, not before. One known difference: Mercury's `BW2750` currently behaves
-as 2300 (stated in #546), so the bandwidth picker should not promise more speed at 2750.
+lands we can move to it, not before. One known difference: Mercury's `BW2750` behaved
+as 2300 (stated in #546), so the bandwidth picker should not promise more speed at 2750. Decision
+5: 2750 is hidden. (1.9.25's TNC.md gives BW2750 two 44-carrier rungs of its own, DATAC17W and
+QAM16C2W; whether that is faster on the air is unmeasured, so it stays hidden until a session
+shows it.)
 
 | VARA-era piece | Carries over? | Note |
 |---|---|---|
@@ -211,6 +216,13 @@ as 2300 (stated in #546), so the bandwidth picker should not promise more speed 
   (https://github.com/la5nta/pat/issues/564, open, 2026-11-15). POTACAT's bundled Pat also writes
   `service_codes: ['PUBLIC']` (`lib/winlink-pat.js`), so Mercury-coded gateways never reach the
   mail window now.
+- **Decision 7: our Pat patch carries the service code now** (branch
+  `feat/pat-service-codes`): two lines in `app/rmslist.go` put `service_code` on each row,
+  `normalizeRmslist` carries it, and the mail window and ECHOCAT Web show a code other than
+  `PUBLIC` after the call. Checked 2026-11-22 with the patched Pat on 127.0.0.1: with
+  `service_codes` `PUBLIC, MERCURY`, Winlink returned 1256 VARA HF channels, 13 of them `MERCURY`.
+  Stacked on it, `feat/winlink-mercury-service-code` makes Pat download `PUBLIC` and `MERCURY`,
+  so a phase 0 tester can pick a Mercury gateway (marked) without a hand-added favourite.
 
 ### 6.2 Ways to find them, and what each depends on
 
@@ -219,8 +231,8 @@ as 2300 (stated in #546), so the bandwidth picker should not promise more speed 
 | A | **Winlink's channel list, filtered by service code `MERCURY`.** Pat downloads with `ServiceCodes=PUBLIC,MERCURY`. Rows with code `MERCURY` become the Mercury list; they are removed from the VARA HF list so a VARA operator never calls a Mercury gateway. | First release. | Either Pat #564 landing upstream (then bump our Pat pin), or a small addition to our existing Pat patch that puts the channel's `service_code` on each RMS row. Sysops keep using the `MERCURY` code. |
 | B | **The operator's own tags** (`winlinkMercuryGateways`, exists). A call tagged by hand joins the Mercury list from the VARA rows. | Now. | Nothing. Catches gateways that kept `PUBLIC`. |
 | C | **A Mercury mode in Winlink itself.** | Unknown. | The Winlink Development Team. Nothing public suggests it is coming. When it does, Pat's classifier and ours pick it up with a one-line change. |
-| D | **A list kept by POTACAT Cloud.** After a Mercury session completes, the app may report gateway call, frequency, Mercury version and date (opt-in). Others see "last worked from POTACAT on <date> with Mercury <version>". | Later. | A CLOUD handoff (endpoint, storage), a privacy page update (website handoff), Casey's go. Adds value over A only by showing which gateways actually answered which version. |
-| E | **Peer to peer Winlink between POTACAT stations.** Pat P2P over Mercury, with one station listening. | Later. | Casey's decision to let Pat listen (today Pat is never given `--listen`, by design: no unattended answering). Listening must be attended and operator-started. Both ends need the same Mercury version, which bundling gives POTACAT users for free. |
+| D | A list kept by POTACAT Cloud of gateways that answered. | **Not now** (decision 9). | Would need a cloud handoff, a privacy page update and a new go. |
+| E | Peer to peer Winlink between POTACAT stations (Pat listening). | **No** (decisions 8 and 10). | "Pat never listens" stays, and POTACAT is a Mercury client only: it never answers a call. |
 | F | **Mercury stations heard on the air.** Mercury reports decoded calls (`CQFRAME`, `MONITOR` lines); POTACAT could list "Mercury stations heard". | Later. | Gateways or stations sending CQ frames; whether gateways beacon at all is unknown. Receive only. |
 
 Rhizomatica's HERMES network (Mercury plus UUCP store and forward, on sBitx radios) moves email
@@ -246,12 +258,14 @@ system. Two routes:
   existing non-device backends compiles on Windows. Two ways to get it: carry a POTACAT patch
   (`third_party/mercury/potacat-socket-audio.patch`, generated like `gen-ardopcf-patch.py`), or
   offer it upstream as a PR so we carry nothing. Upstream ships a release every week or two and
-  a patch would need refreshing each time, so upstream is the better home (open question 3).
+  a patch would need refreshing each time, so upstream is the better home. Decision 3: offer it
+  to Rhizomatica as an upstream pull request, which Casey reads before it is posted. Nothing is
+  posted from this plan.
   The same patch should bind Mercury's TNC ports to 127.0.0.1 (section 8).
 
 | Rig | Route | Why |
 |---|---|---|
-| USB-codec rigs (IC-7300, FT-710, FT-991A, TS-590, QMX and the rest) | Socket when built; device route until then | POTACAT already opens this device for its waterfall and other modes. One owner of the device ends the fight and the stale-id failure. |
+| USB-codec rigs (IC-7300, FT-710, FT-991A, TS-590, QMX and the rest) | Device route first (decision 2: these ship first); socket when built | POTACAT already opens this device for its waterfall and other modes. One owner of the device ends the fight and the stale-id failure. |
 | Flex, SmartSDR Direct | Socket only | POTACAT owns the audio over the network. DAX is the fallback for operators who run it, through the device route, with the DAX-era limits already written up in `docs/vara-integration-plan.md`. |
 | Icom Network (IC-705, IC-7610, IC-9700 over LAN) | Socket only | No sound card exists on the computer for Mercury to open. Without the socket route Mercury is not offered on these rigs, and the mail window says why. |
 | TCI rigs (Thetis, Zeus) | Socket only | Same: POTACAT holds the TCI audio stream. |
@@ -273,7 +287,7 @@ TX level: the session uses `lib/winlink-tx-level.js` like ARDOP. Mercury's own
   keys through POTACAT's rigctld shim; POTACAT keys the radio through its one dispatcher.
 - **Nothing transmits unless asked.** Mercury is started only when the operator starts a
   Winlink session (or opens the chat window and connects). `LISTEN` stays off; Pat never
-  listens. POTACAT never sends `TUNE` (Mercury's `TUNE` makes a carrier for up to 60 s), `CQFRAME`
+  listens (decision 8), and POTACAT is a Mercury client only (decision 10). POTACAT never sends `TUNE` (Mercury's `TUNE` makes a carrier for up to 60 s), `CQFRAME`
   or `BEACONMODE` in a Winlink session. Mercury is killed when the session ends, so an idle
   Mercury cannot answer a call.
 - **Stuck-TX limits.** POTACAT's 30 s rolling failsafe stays, re-armed by `BUFFER` progress.
@@ -302,20 +316,22 @@ TX level: the session uses `lib/winlink-tx-level.js` like ARDOP. Mercury's own
 - **Gateway list:** the Mercury list from section 6 route A plus B. A short line under it while
   the list is small: "Experimental. Few gateways run Mercury, and both ends need a compatible
   Mercury version." An empty list says so plainly and points to the operator tags.
-- **Settings > Station > Winlink > Mercury (experimental):** bandwidth (500 or 2300; 2750 shown
-  as "2750 (same speed as 2300 today)" or hidden, open question 5), the gateway tag list
+- **Settings > Station > Winlink > Mercury (experimental):** bandwidth (500 or 2300; 2750
+  hidden, decision 5), the gateway tag list
   (exists), an advanced "Use my own Mercury" path (`mercuryPath`, exists), and, for the device
   route only, the device pickers that exist today. No enable switch for Winlink: the mode is
   there when it can work.
-- **The July chat window** keeps working, now on the bundled binary. Whether it stays visible
-  is open question 6.
+- **The July chat window** keeps its code, but More > Mercury HF Data is hidden until Mercury
+  has been used on the air (decision 6): shown only when `enableMercury` and a new
+  `mercuryChatWindow` setting (default off, no switch yet) are both on. Branch
+  `feat/mercury-hide-2750-and-july-window` (with the 2750 change, `lib/mercury-offer.js`).
 - **Bug report and session log:** Mercury version, route (socket or device), device names,
   pinned commit.
 - **ECHOCAT:** the mode arrives in `winlink-state.modes` with its reason, as the other modes do.
   Phone parity: one ECHOCAT handoff line (new mode id is live; the "experimental" note shown the
   same way).
 - **Release notes, platform truth:** say which systems carry Mercury and which rigs it works
-  with, in that release's words. For example: "Mercury, experimental, bundled for Windows,
+  with, in that release's words. USB-codec radios come first (decision 2). For example: "Mercury, experimental, bundled for Windows,
   macOS and Linux. Works with radios that have a USB sound card. Flex and Icom Network radios
   are not supported yet. A few Winlink gateways run Mercury; both ends need Mercury 1.9.25." No
   claim beyond what a test or an on-air session has shown.
@@ -346,36 +362,30 @@ Each phase is its own branch and PR. None ships until Casey says so.
 
 | Phase | What | Exit check |
 |---|---|---|
-| 0. Spike, no product change | Build pinned 1.9.25 by hand on Windows with our flags. Run Pat 1.0.1 over it to one Mercury gateway from a USB-codec rig (device route). Check the `PTT ON/OFF` lines reach Pat with `radio_model = -1`. Record the real version banner. | One mail sent and received on the air, session log kept. If no gateway answers, the plan stops here and Casey decides. |
+| 0. Spike by a tester, no bundling | A tester with a Mercury gateway in range (decision 1; triage finds the tester) runs upstream's Mercury 1.9.25 Windows zip with its own sound card and `-P none`, and points POTACAT's "your own VARA HF" at it (Host blank, Port 8300): `docs/mercury-phase0-tester-guide.md`. POTACAT 1.14.7 hands the session to Mercury without code, but cannot list a `MERCURY` gateway; the tester uses a build with `feat/winlink-mercury-service-code`, or adds the gateway as a favourite by hand on 1.14.7 (the guide's step 6). | One mail sent and received on the air; the tester returns the bug report paste, Mercury's console output and log, the gateway call and frequency, and Mercury's version line. If no gateway answers, the plan stops here and Casey decides. |
 | 1. Bundle the binary | `build-winlink-helpers.sh mercury`, `winlink-helpers.yml` on six runners, `release.yml`, `package.json`, `third_party/mercury/` (LICENSE, LICENSE-freedv, VERSION.txt, README), NOTICE. Licence table re-checked against the pin. | CI green on all six runners; smoke test starts Mercury and opens its TNC port; the packaging guard passes; an installer built by CI contains `resources/bin/mercury[.exe]`. |
-| 2. Gateway list | Pat downloads `PUBLIC` and `MERCURY`; Mercury rows split out (Pat #564 if it has landed, else our Pat patch); tags merge in. | Unit tests; a live list on a test machine shows the `MERCURY` gateways and the VARA HF list no longer contains them. |
-| 3. Winlink mode on, device route | Real gating replaces `MERCURY_OFFERED`; Mercury started per session and killed after; pre-check; outcome line for no answer; settings section; bug report line. Offered only for USB-codec rigs. | `mercury-session` loopback green on Linux and macOS (FIFO stand-in); one on-air session from Windows through POTACAT itself, start to finish, log reviewed. |
-| 4. Socket audio | TCP audio backend in Mercury (upstream PR, or our patch); `modem-audio-server` at 8 kHz; Flex Direct, Icom Network and TCI offered; USB-codec rigs move to the socket route; ports bound to loopback. | Loopback green on all six runners through the socket; one on-air session each from a Flex over SmartSDR Direct and from an Icom over the network. |
+| 2. Gateway list | The service code per row is in our Pat patch already (decision 7, `feat/pat-service-codes`), and Pat downloads `PUBLIC` and `MERCURY` (`feat/winlink-mercury-service-code`). This phase splits the `MERCURY` rows out of the VARA HF list into the Mercury list; tags merge in. Move to Pat #564 when it lands. | Unit tests; a live list on a test machine shows the `MERCURY` gateways and the VARA HF list no longer contains them. |
+| 3. Winlink mode on, device route | Real gating replaces `MERCURY_OFFERED`; Mercury started per session and killed after; pre-check; outcome line for no answer; settings section; bug report line. Offered only for USB-codec rigs, which ship first (decision 2). | `mercury-session` loopback green on Linux and macOS (FIFO stand-in); one on-air session from Windows through POTACAT itself, start to finish, log reviewed. |
+| 4. Socket audio | TCP audio backend in Mercury, offered upstream as a PR that Casey reads before it posts (decision 3); `modem-audio-server` at 8 kHz; Flex Direct, Icom Network and TCI offered; USB-codec rigs move to the socket route; ports bound to loopback. | Loopback green on all six runners through the socket; one on-air session each from a Flex over SmartSDR Direct and from an Icom over the network. |
 | 5. ECHOCAT and docs | Phone handoff line, docs page, website privacy check, release-note wording. | Handoffs written; Casey has read the release-note lines. |
-| Later | POTACAT Cloud gateway list (6.2 D), P2P (6.2 E), heard list (6.2 F), Pat's own Mercury transport when it lands. | Each needs its own go. |
+| Later | Heard list (6.2 F), Pat's own Mercury transport when it lands, showing the July chat window once Mercury has been used on the air. Not planned: a POTACAT Cloud gateway list (decision 9), P2P or answering calls (decisions 8 and 10). | Each needs its own go. |
 
-## 12. Open questions for Casey
+## 12. Decisions (Casey, 2026-11-22)
 
-1. Phase 0 needs one on-air Mercury session to a gateway before anything is bundled. Is a
-   USB-codec radio on your station available for that, or should a tester with a Mercury
-   gateway in range run it?
-2. Release scope: is it all right to ship Mercury for Winlink on USB-codec radios first
-   (phase 3) and add Flex, Icom Network and TCI with the socket audio later (phase 4)? Or hold
-   the mode until every rig family works?
-3. Socket audio: offer a TCP audio backend to Rhizomatica as an upstream pull request (a public
-   GitHub action, so your word is needed), or carry it as a POTACAT patch like ardopcf's?
-4. Pin policy: Mercury breaks compatibility between some releases (1.9.25 does not talk to
-   1.9.24). Do we follow each breaking upstream release in the next POTACAT patch release, or
-   only when you say?
-5. Bandwidth 2750: Mercury treats it as 2300 today. Hide it, or show it with "same speed as 2300
-   today"?
-6. The July chat and file window (More > Mercury HF Data): keep it visible once the binary is
-   bundled, hide it until it has been used on the air, or remove it?
-7. Gateway list route A needs a service code per row. Wait for Pat #564 upstream, or add it to
-   our Pat patch now?
-8. Peer to peer Winlink between POTACAT stations needs Pat to listen, attended and started by the
-   operator. Is that a direction you want, or does "Pat never listens" stay?
-9. A POTACAT Cloud list of gateways that answered (opt-in, with a privacy page update): worth a
-   cloud handoff later, or not?
-10. Should POTACAT's own Mercury ever answer calls (a POTACAT station as a Mercury gateway or
-    P2P peer), or is it a client only?
+1. **Phase 0** is done by a tester with a Mercury gateway in range; triage finds the tester.
+   Guide: `docs/mercury-phase0-tester-guide.md`.
+2. **USB-codec radios ship first** (phase 3); Flex, Icom Network and TCI follow with the socket
+   audio (phase 4).
+3. **Socket audio** is offered upstream to Rhizomatica as a pull request, and Casey sees it before
+   it posts. Not part of phase 0.
+4. **Pin policy:** follow a compatibility-breaking Mercury release only when the gateways have
+   moved and Casey says so.
+5. **Bandwidth 2750 is hidden** wherever POTACAT offers Mercury bandwidths
+   (`feat/mercury-hide-2750-and-july-window`, PR #922).
+6. **The July Mercury chat window** (More > Mercury HF Data) is hidden until Mercury has been
+   used on the air; the code stays (PR #922: `mercuryChatWindow`, default off).
+7. **The per-row service code goes into our Pat patch now** (`feat/pat-service-codes`, PR #924), with
+   Pat #564 as the upstream direction.
+8. **"Pat never listens" stays.**
+9. **No POTACAT Cloud gateway list** for now.
+10. **POTACAT stays a Mercury client only.**
