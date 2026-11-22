@@ -345,7 +345,7 @@ t('the power-restore safety stays out of a test that is still running', () => {
   const rec = main.slice(main.indexOf('function stationSetupReconcilePower('), main.indexOf('function stationSetupReconcilePower(') + 900);
   assert.ok(/carrierRunning: !!\(_stationSetupTxTest \|\| _stationSetupTxBusy \|\| _externalAtuActive\)/.test(rec));
   const run = main.slice(main.indexOf('async function runStationSetupTxTest('), main.indexOf('async function _runStationSetupTxTest('));
-  assert.ok(/_stationSetupTxBusy = true;\s*try \{ return await _runStationSetupTxTest\(rigId, opts\); \}\s*finally \{ _stationSetupTxBusy = false; \}/.test(run),
+  assert.ok(/_stationSetupTxBusy = true;\s*try \{ return await _runStationSetupTxTest\(rigId, opts\); \}\s*finally \{ _stationSetupTxBusy = false;( releaseRadio\('setup-test'\);)? \}/.test(run),
     'held from before the power drop until the restore is confirmed');
 });
 
