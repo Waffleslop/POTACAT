@@ -14677,6 +14677,7 @@ async function aprsRfTransmit() {
     // Only a beacon the radio reported transmitting counts as sent and gets a last-beacon time.
     aprsRfUi.lastAt = Date.now(); aprsRfUi.lastPacket = b.packet; aprsRfUi.lastBand = c.band;
     sendCatLog(`[APRS beacon] sent over the radio (${c.bandLabel}, ${c.mhz} MHz; the radio reported transmit): ${b.packet}`);
+    try { aprsEcho.beaconSent(b.source); } catch (e) { aprsLog('heard you: ' + e.message); } // 15 minutes on APRS-IS for who heard it (read only)
   } else if (res.ok) {
     aprsRfSay(res.sentence || AprsRfBeacon.SENT_SENTENCES.noReadback);
     sendCatLog(`[APRS beacon] keyed but not confirmed (${c.bandLabel}, ${c.mhz} MHz): ${aprsRfUi.sentence}`);
@@ -15057,6 +15058,9 @@ const aprsEcho = AprsEchocat.createController({
   setFeedRange: (km) => { if (aprsFeedHooks) aprsFeedHooks.setRange(km); },
   setFollow: (calls) => { if (aprsFeedHooks) aprsFeedHooks.setFollow(calls); }, // aprs-find: calls passed beyond the range
   sendTo: (id, m) => { if (remoteServer && remoteServer.sendAprsTo) remoteServer.sendAprsTo(id, m); },
+  setWatch: (calls) => { if (aprsFeedHooks) aprsFeedHooks.setWatch(calls); }, // heard you: my beacon's call and who heard it
+  ownLogin: () => { const l = AprsIgate.uplinkLogin(settings.myCallsign); return l.ok ? l.call : ''; },
+  heardChanged: (map) => { if (aprsWin && !aprsWin.isDestroyed()) aprsWin.webContents.send('aprs-heard-you', map); },
   windowOpen: () => !!(aprsWin && !aprsWin.isDestroyed()),
   listenSet: (on) => aprsListenSet(on),
   listenSetBand: (b) => aprsListenSetBand(b),
@@ -48191,7 +48195,7 @@ function cloudShackNotice(text, kind) {
     const Feed = require('./lib/aprs-is-feed');
     const AprsParser = require('./lib/aprs-parser');
     const dev = APRS_IS_DEV_SERVER || {}; // dev builds only: a local fake APRS-IS server
-    aprsFeed = new Feed.AprsIsFeed({ call: settings.myCallsign, version: app.getVersion(), lat: home.lat, lon: home.lon, km: settings.aprsRangeKm, follow: aprsEcho.followCalls(), host: dev.host, port: dev.port });
+    aprsFeed = new Feed.AprsIsFeed({ call: settings.myCallsign, version: app.getVersion(), lat: home.lat, lon: home.lon, km: settings.aprsRangeKm, follow: aprsEcho.followCalls(), watch: aprsEcho.watchCalls(), host: dev.host, port: dev.port });
     aprsBatch = Feed.createBatcher((packets) => aprsSend('aprs-packets', packets), 500);
     aprsFeed.on('line', (line) => {
       try { aprsMessagesFeedLine(line); } catch (e) { aprsLog('message: ' + e.message); } // A1: messages, acks and rejs for us
@@ -48213,6 +48217,7 @@ function cloudShackNotice(text, kind) {
     stop: () => aprsStopFeed(),
     setRange: (km) => { if (aprsFeed) aprsFeed.setRange(null, null, require('./lib/aprs-is-feed').clampRangeKm(km)); },
     setFollow: (calls) => { if (aprsFeed) aprsFeed.setFollow(calls); },
+    setWatch: (calls) => { if (aprsFeed) aprsFeed.setWatch(calls); },
   };
   ipcMain.on('aprs-popout-open', () => {
     if (aprsWin && !aprsWin.isDestroyed()) { aprsWin.focus(); return; }
@@ -48260,6 +48265,7 @@ function cloudShackNotice(text, kind) {
     }
     aprsSend('aprs-init', { home: aprsHome(), distUnit: settings.distUnit || 'mi', km: Feed.clampRangeKm(settings.aprsRangeKm), showLastMin: AprsWindowState.normShowLast(settings.aprsShowLastMin), mapView: AprsMap.cleanView(settings.aprsMapView) });
     aprsStartFeed();
+    if (aprsWin && !aprsWin.isDestroyed()) aprsWin.webContents.send('aprs-heard-you', aprsEcho.heardList()); // the "heard you" marks held now
     if (isRemoteMode()) remoteAprsWatch(true); // #868: listening and the heard stations are the shack's
     aprsListenPush();
     aprsIgatePush();
@@ -48327,6 +48333,7 @@ function cloudShackNotice(text, kind) {
   // watching the feed keeps it running for itself); on connects again.
   ipcMain.on('aprs-feed-set', (_e, on) => {
     if (on) { aprsStartFeed(); return; }
+    aprsEcho.heardStop(); // switched off by the operator: the heard-you watch ends too
     if (aprsEcho.keepsFeed()) { aprsLog('APRS-IS stays connected: an ECHOCAT device is watching it'); return; }
     aprsStopFeed();
     aprsSend('aprs-status', { state: 'stopped' });
