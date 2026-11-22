@@ -347,6 +347,7 @@ const { RigController } = require('./lib/rig-controller');
 const { RIG_CONTROLS } = require('./lib/rig-controls');
 const _rigGainSteps = require('./lib/rig-gain-steps'); // preamp/ATT ladders (KB2UXB)
 const { normalizeMuteRules } = require('./lib/spot-mute-rules'); // per-band region mutes (N7BBQ)
+const { normalizePresets: normalizeSpotFilterPresets } = require('./lib/spot-filter-presets'); // named spot filter sets
 const ScanRun = require('./lib/scan-run'); // #37: a phone-started scan the desktop runs in main (phone locked or not)
 const SpotAge = require('./lib/spot-age'); // Max Spot Age, shared with the table (#239)
 const SpotHides = require('./lib/spot-hides'); // hidden spots, one list for every surface (K8IKO)
@@ -54624,6 +54625,10 @@ function cloudShackNotice(text, kind) {
         }
         return out;
       });
+    }
+    // Spot filter presets: sanitised on every write, like the mutes below.
+    if (newSettings.spotFilterPresets !== undefined) {
+      newSettings.spotFilterPresets = normalizeSpotFilterPresets(newSettings.spotFilterPresets);
     }
     // Per-band region mutes: sanitize on every write (never store a payload
     // verbatim) and ship the updated set to connected ECHOCAT clients so a
