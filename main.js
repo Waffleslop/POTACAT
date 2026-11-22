@@ -43590,6 +43590,8 @@ let _ownTxRefusedLogAt = 0;
 let _ownTxRefusedLast = '';
 let _ownTxRefused = null; // { why, at } of the latest refusal, logged or not
 function ownTxPrivilegeRefused(emission, freqHz) {
+  // A live Guest Pass judges by the guest's class at every gate (#913).
+  if (passEnforcement && passEnforcement.getState && PassEnforcementLib.passJudgesTx(passEnforcement.getState())) return false;
   const why = Privileges.txPrivilegeRefusal({
     freqHz: freqHz != null ? freqHz : _currentFreqHz,
     mode: emission || _currentMode,
