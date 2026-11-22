@@ -16,9 +16,28 @@ function t(name, fn) {
 const silent = { keyedMs: 4000, fwdEvents: 8, peakW: 0, alcEvents: 8, peakAlc: 0, mode: 'USB' };
 
 console.log('voice TX check:');
-t('Yaesu, 0 W and no ALC: SSB MOD SOURCE = REAR, REAR SELECT = USB, and the sound device', () => {
-  const d = decideVoiceTxHint({ ...silent, brand: 'Yaesu' });
-  assert.ok(d && /SSB MOD SOURCE to REAR and REAR SELECT to USB/.test(d.hint) && /USB Audio CODEC/.test(d.hint), d && d.hint);
+t('FTDX10, 0 W and no ALC: SSB MOD SOURCE = REAR, REAR SELECT = USB (OM EH076H202 p.87), and the sound device', () => {
+  const d = decideVoiceTxHint({ ...silent, brand: 'Yaesu', model: 'FTDX10' });
+  assert.ok(d && /RADIO SETTING > MODE SSB > SSB MOD SOURCE = REAR, then REAR SELECT = USB/.test(d.hint) && /USB Audio CODEC/.test(d.hint), d && d.hint);
+});
+t('#911 FT-710: MOD SOURCE = AUTO or USB (OM EH080H201 p.78); never REAR, never REAR SELECT', () => {
+  const h = decideVoiceTxHint({ ...silent, brand: 'Yaesu', model: 'FT-710' }).hint;
+  assert.ok(/RADIO SETTING > MODE SSB > MOD SOURCE = AUTO or USB/.test(h), h);
+  assert.ok(!/REAR SELECT|SOURCE = REAR|SOURCE to REAR/.test(h), h);
+  assert.ok(/USB Audio CODEC/.test(h), h);
+});
+t('#911 a Yaesu with no verified path, or in a DATA mode, gets a plain step and no menu path', () => {
+  const cases = [['FT-991A', 'USB'], ['FT-891', 'USB'], ['FTDX101D', 'USB'], [undefined, 'USB'], ['FT-710', 'DATA-U'], ['FTDX10', 'DATA-U']];
+  for (const [model, mode] of cases) {
+    const h = decideVoiceTxHint({ ...silent, brand: 'Yaesu', model, mode }).hint;
+    assert.ok(/transmit audio input is set to the USB jack on the back/.test(h), model + ' ' + mode + ': ' + h);
+    assert.ok(!/RADIO SETTING|REAR SELECT|MOD SOURCE/.test(h), model + ' ' + mode + ': ' + h);
+  }
+});
+t('every Yaesu path in the table is a model POTACAT knows', () => {
+  const { YAESU_SSB_MOD_SOURCE_STEPS } = require('../lib/rig-setup-notes');
+  const { RIG_MODELS } = require('../lib/rig-models');
+  for (const m of Object.keys(YAESU_SSB_MOD_SOURCE_STEPS)) assert.ok(RIG_MODELS[m], m);
 });
 t('Icom voice in USB names DATA OFF MOD; in USB-D it names DATA MOD (IC-7300 MK II has a MOD Input level)', () => {
   assert.ok(/Connectors > MOD Input > DATA OFF MOD = USB/.test(decideVoiceTxHint({ ...silent, brand: 'Icom', model: 'IC-7300 MK II' }).hint));
@@ -51,6 +70,7 @@ t('every Icom path in the table is a model POTACAT knows', () => {
 t('voice-tx-check.js holds no Icom menu path of its own (they live in rig-setup-notes.js)', () => {
   const src = readSrc(path.join(__dirname, '..', 'lib', 'voice-tx-check.js'));
   assert.ok(!/MENU > SET/.test(src.replace(/^\s*\/\/.*$/gm, '')));
+  assert.ok(!/MOD SOURCE|REAR SELECT/.test(src.replace(/^\s*\/\/.*$/gm, '')), 'no Yaesu menu text either (#911)');
 });
 t('no hint when power or ALC moved, when the over was a blip, or when the radio reports no power at all', () => {
   assert.strictEqual(decideVoiceTxHint({ ...silent, brand: 'Yaesu', peakW: 12 }), null);
