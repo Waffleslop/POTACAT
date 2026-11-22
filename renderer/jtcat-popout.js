@@ -1274,8 +1274,9 @@ function _applyPopoutTheme(payload) {
   // are a property of this screen (localStorage, like the filters); how long
   // a station stays is the jtcatStationsExpiryMin setting.
   var stationsEl = document.getElementById('jp-stations');
-  var viewStreamBtn = document.getElementById('jp-view-stream');
-  var viewStationsBtn = document.getElementById('jp-view-stations');
+  // Stream / Stations: one dropdown in the filter row (Stream by default; the
+  // choice is remembered across restarts).
+  var viewSelect = document.getElementById('jp-view');
   var stationsExpirySelect = document.getElementById('jp-stations-expiry');
   var VIEW_LS_KEY = 'jtcat-band-view';
   var STATIONS_SORT_LS_KEY = 'jtcat-stations-sort';
@@ -1403,14 +1404,12 @@ function _applyPopoutTheme(payload) {
     stationsView = !!toStations;
     bandActivity.hidden = stationsView;
     if (stationsEl) stationsEl.hidden = !stationsView;
-    if (viewStreamBtn) viewStreamBtn.classList.toggle('active', !stationsView);
-    if (viewStationsBtn) viewStationsBtn.classList.toggle('active', stationsView);
+    if (viewSelect) viewSelect.value = stationsView ? 'stations' : 'stream';
     if (save) { try { localStorage.setItem(VIEW_LS_KEY, stationsView ? 'stations' : 'stream'); } catch (e) {} }
     if (stationsView) renderStations();
     else bandActivity.scrollTop = bandActivity.scrollHeight;
   }
-  if (viewStreamBtn) viewStreamBtn.addEventListener('click', function() { setBandView(false, true); });
-  if (viewStationsBtn) viewStationsBtn.addEventListener('click', function() { setBandView(true, true); });
+  if (viewSelect) viewSelect.addEventListener('change', function() { setBandView(viewSelect.value === 'stations', true); });
   function applyStationsExpiry(v, persist) {
     var n = JtcatStations.setExpiryMin(jpStations, v);
     if (stationsExpirySelect) stationsExpirySelect.value = String(n);
