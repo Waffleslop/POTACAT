@@ -20,6 +20,22 @@ features should be advertised through the `capabilities` array on the
 server `hello`, so the client can hide UI for things the server doesn't
 yet support.
 
+**`pttClientId` (optional, added 2026-11-22, #941).** A client may add
+`pttClientId` to its `hello`: a random secret it makes once (22-64 characters
+`[A-Za-z0-9_-]`; ECHOCAT Web makes 32 hex characters with
+`crypto.getRandomValues` per page and keeps it in `sessionStorage`; logic in
+`lib/ptt-client-id.js`). When a new connection is admitted with the same id,
+authenticated the same way (both the owner, or both the same Guest Pass; and,
+when both are paired, the same paired device), while the old connection still
+holds PTT, the shack unkeys at once (`ptt` off through the same path a
+disconnect uses) and closes the old connection, instead of waiting for the
+heartbeat to drop it (about 45 s). This matters with "more than one device" on,
+where a reconnect does not otherwise replace the old socket. It only releases;
+it never keys. A connection with a different id never releases or takes
+another client's PTT (`estop` is unchanged). A client that sends no id behaves
+as before. The shack never sends the id to anyone and never logs it, so it
+cannot be learned from presence (`clients-list` ids are the shack's own).
+
 The legacy browser web app does **not** send a `hello` — when the server
 sees its first message be `auth` instead of `hello`, it falls back to
 protocol-version 0 behavior (which is "everything works as it did before
@@ -190,7 +206,7 @@ for the history.
 
 | Message | Dir | Purpose |
 |---|---|---|
-| `ptt` | C→S | Engage / release transmit. |
+| `ptt` | C→S | Engage / release transmit. A release from a device that does not hold PTT is ignored while another live device holds it; a reconnect that sent the holder's own `pttClientId` in its `hello` releases it first (#941, see the handshake section). |
 | `estop` | C→S | Hard stop — release PTT and halt all TX subsystems. |
 | `ptt-timeout` | S→C | Server forced PTT release after configured timeout. |
 | `ptt-force-rx` | S→C | Server forced PTT release (manual override or safety). |
