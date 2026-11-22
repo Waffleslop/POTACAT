@@ -63,6 +63,7 @@ const TESTS = [
   'test/cloud-state-test.js', // ECHOCAT ask 2026-11-21: auth-ok carries the shack's Cloud state and cloud-state follows it; never to a Guest Pass
   'test/scan-run-test.js', // #37: a phone-started scan run on the desktop: the phone's 13 filter vectors, the desktop's exclusions, start/step/end rules, wire and glue
   'test/clock-platform-test.js', // NJ2DX 2026-11-21: each OS gets only the clock buttons it can honour; Time settings opens on a Mac
+  'test/main-ismac-scope-test.js', // K3SBP 2026-11-21: isMac is not defined (opening APRS crashed); every isMac in main.js is declared in its own function
   'test/aprs-rf-phone-test.js', // ECHOCAT ask 2026-11-21: one radio beacon per press from the owner's phone; the window's gate and caps; Listen off is set up and put back
   'test/smartsdr-meter-test.js',
   'test/smartsdr-udpport-reconnect-test.js', // K3SBP 2026-11-21: after a network drop the new Flex connection is told client udpport again (pan FFT, meters)
@@ -279,12 +280,15 @@ const TESTS = [
   'test/direwolf-aprs-tx-config-test.js', // APRS phase 7: the transmit config (PTT via the shim, channel access per band); listen and Winlink configs byte-identical
   'test/direwolf-aprs-tx-offline-test.js', // APRS phase 7: the bundled Dire Wolf keys a fake shim once and its audio decodes back (skips without the build)
   'test/aprs-echocat-test.js', // APRS phase 6: ECHOCAT devices: snapshot, 1.5 s deltas, feed and listen ownership, Guest Pass, aprs-state
+  'test/aprs-find-band-test.js', // ECHOCAT 2026-11-21: rf.band on aprs-stations rows, aprs-find (follow one call beyond range, budlist, validated, guest allowed)
   'test/aprs-echocat-wire-test.js', // APRS phase 6: the 'aprs' capability on the wire (old clients untouched), guest refusals, main.js glue, ECHOCAT Web
   'test/aprs-message-test.js', // APRS A1: message, ack, rej and reply-ack formats (APRS 1.0.1 ch. 14), the 67-character limit, ours by SSID, the g/ filter
   'test/aprs-messenger-test.js', // APRS A1: retries 30 s/60 s/120 s/5 min (5 tries), stop on ack/rej/Stop, acks owed, 30 s duplicates, unread, bounds, the saved file
   'test/aprs-templates-test.js', // APRS A2: message templates: each built-in's fill and 67-character fit, activation/radio fields, the held-back gateways, my templates' round trip
   'test/aprs-templates-wiring-test.js', // APRS A2: templates as wired in main.js (context, per-profile list), the preload and the Messages view (nothing sends until Send)
   'test/aprs-messages-wiring-test.js', // APRS A1: messages end to end against a fake APRS-IS server, and the main.js/preload/window wiring (internet only)
+  'test/aprs-rf-message-test.js', // APRS A3: messages over the radio: one press per try (automatic retries and radio acks only with their default-off settings, 2 m only), refusals in plain words, heard on radio, the frame and cap, end to end through the radio run and gate on a fake shim
+  'test/aprs-rf-timer-test.js', // APRS: the timed radio beacon, 2 m only, off by default, 10 min floor, never on a pick or open, a skipped round waits a full interval, the same gate as the click
   'test/log-comment-test.js',
   'test/raw-cat-command-test.js',
   'test/rigctld-stderr-test.js',
