@@ -48029,6 +48029,7 @@ function cloudShackNotice(text, kind) {
   // --- JS8 Heartbeat Map (RX-only reachability: heard / heard-by / both) ---
   ipcMain.on('js8-map-popout', () => {
     if (js8MapWin && !js8MapWin.isDestroyed()) { js8MapWin.focus(); return; }
+    const isMac = process.platform === 'darwin'; // #866: main.js has no file-wide isMac (each function declares its own)
     js8MapWin = new BrowserWindow({
       minWidth: 400, minHeight: 300, // never smaller than its own controls (N0KAH 2026-10-24)
       width: 700, height: 500, title: 'JS8 Heartbeat Map',
@@ -48099,6 +48100,7 @@ function cloudShackNotice(text, kind) {
   };
   ipcMain.on('aprs-popout-open', () => {
     if (aprsWin && !aprsWin.isDestroyed()) { aprsWin.focus(); return; }
+    const isMac = process.platform === 'darwin'; // #866: main.js has no file-wide isMac (each function declares its own)
     aprsWin = new BrowserWindow({
       minWidth: 640, minHeight: 400,
       width: 1280, height: 860, title: 'APRS', // the approved layout's size; a saved place wins (rememberWindowPlace)
@@ -48715,6 +48717,7 @@ function cloudShackNotice(text, kind) {
       jtcatMapPopoutWin.focus();
       return;
     }
+    const isMac = process.platform === 'darwin'; // #866: main.js has no file-wide isMac (each function declares its own)
     jtcatMapPopoutWin = new BrowserWindow({
       minWidth: 360, minHeight: 300, // never smaller than its own controls (N0KAH 2026-10-24)
       width: 700, height: 500,
