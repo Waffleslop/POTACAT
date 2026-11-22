@@ -776,6 +776,10 @@ const SERIAL = new Set([
   'test/paddle-bounce-test.js', // web keyer element timing in real milliseconds; a dash was cut short once under load
 ]);
 
+// SERIAL files that may be retried once after a failure (timing under load,
+// never a logic failure). Every file here must also be in SERIAL.
+const RETRY_ONCE = new Set(SERIAL);
+
 // The longest files, started first so the pool does not wait on one that began
 // late (sstv-quality alone is about 6 minutes under load). Order only, never results.
 const SLOW_FIRST = [
@@ -879,7 +883,16 @@ async function runParallel(list, jobs) {
   if (alone.length) console.log(`\n[run-tests] ${alone.length} file(s) that run alone (SERIAL):`);
   for (const f of alone) {
     process.stdout.write(`\n[run-tests] ${f} (alone)\n`);
-    const r = await runFile(f, true);
+    let r = await runFile(f, true);
+    // A timing test that failed gets one more try (Casey 2026-11-22: "Retry
+    // timing tests"). These three fail when another agent's suite loads the
+    // machine; a pass on the retry is printed as FLAKY so it stays visible.
+    // Only SERIAL files are retried; every other failure counts at once.
+    if (r.code !== 0 && RETRY_ONCE.has(f)) {
+      console.error(`\n[run-tests] RETRY: ${f} failed (${why(r.code, r.signal)}); a timing test, so one more try`);
+      r = await runFile(f, true);
+      if (r.code === 0) console.log(`\n[run-tests] FLAKY: ${f} passed on the retry`);
+    }
     r.out = null;
     r.ms = 0;
     n++;
@@ -931,7 +944,7 @@ function parseArgs(argv) {
   return o;
 }
 
-module.exports = { TESTS, SERIAL, SLOW_FIRST, runAll, parseArgs, defaultJobs };
+module.exports = { TESTS, SERIAL, RETRY_ONCE, SLOW_FIRST, runAll, parseArgs, defaultJobs };
 
 if (require.main === module) {
   const o = parseArgs(process.argv.slice(2));
