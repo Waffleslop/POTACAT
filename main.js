@@ -38855,7 +38855,8 @@ function flexDigitalViewWanted() {
     const mode = wlSession ? winlinkState.session.mode : WinlinkModes.pickWinlinkMode(winlinkState.snapshot().modes, settings.winlinkDefaultMode || 'telnet');
     if (!WinlinkModes.isRadioMode(mode)) return null;
     return ScopeDigitalView.winlinkView({ band: WinlinkSpectrum.markerBand(mode, winlinkModemBw()), rigMode: _currentMode,
-      digOffsetHz: ScopeDigitalView.flexDigOffsetHz(_currentMode, _flexSliceKv), minSpanHz: g.minSpanHz });
+      digOffsetHz: ScopeDigitalView.flexDigOffsetHz(_currentMode, _flexSliceKv),
+      filterLoHz: parseInt(_flexSliceKv.filter_lo, 10), filterHiHz: parseInt(_flexSliceKv.filter_hi, 10), minSpanHz: g.minSpanHz });
   }
   return ScopeDigitalView.digitalView({ mode: ft8Engine._mode, rigMode: _currentMode, minSpanHz: g.minSpanHz });
 }
@@ -38878,7 +38879,7 @@ function flexDigitalViewSync() {
     smartSdr.setPanBandwidth(v.spanHz);
     yaesuScopeState.spanHz = v.spanHz;   // the pan status confirms (or clamps) it
     if (dial) flexScopeAskCenter(dial + v.offsetHz);
-    sendCatLog(`[Scope] Flex panadapter: ${v.kind === 'winlink' ? 'Winlink' : ft8Engine._mode} view, ${v.spanHz} Hz wide, centred ${v.offsetHz > 0 ? '+' : ''}${v.offsetHz} Hz from the dial (${v.kind === 'winlink' ? `the modem's channel ${v.window.lo} to ${v.window.hi} Hz${ScopeDigitalView.flexDigOffsetHz(_currentMode, _flexSliceKv) ? `, with the slice's ${String(_currentMode).toUpperCase()} offset of ${ScopeDigitalView.flexDigOffsetHz(_currentMode, _flexSliceKv)} Hz` : ''}` : `decode window ${v.window.lo} to ${v.window.hi} Hz`})`);
+    sendCatLog(`[Scope] Flex panadapter: ${v.kind === 'winlink' ? 'Winlink' : ft8Engine._mode} view, ${v.spanHz} Hz wide, centred ${v.offsetHz > 0 ? '+' : ''}${v.offsetHz} Hz from the dial (${v.kind === 'winlink' ? `the modem's channel ${v.window.lo} to ${v.window.hi} Hz${ScopeDigitalView.flexDigOffsetHz(_currentMode, _flexSliceKv) ? `, the slice's ${String(_currentMode).toUpperCase()} offset ${ScopeDigitalView.flexDigOffsetHz(_currentMode, _flexSliceKv)} Hz, filter ${_flexSliceKv.filter_lo} to ${_flexSliceKv.filter_hi}` : ''}` : `decode window ${v.window.lo} to ${v.window.hi} Hz`})`);
   } else if (wasOn) {
     flexScopeWantOffsetHz = 0;
     flexDigitalView = null;
