@@ -529,6 +529,7 @@ const AprsMap = require('./lib/aprs-map');                 // APRS window: the m
 const AprsEchocat = require('./lib/aprs-echocat');         // APRS phase 6: APRS on ECHOCAT devices through this desktop
 const VaraProcess = require('./lib/vara-process');
 const VaraSetup = require('./lib/vara-setup');
+const VaraVersion = require('./lib/vara-version');
 const WinlinkModes = require('./lib/winlink-modes');
 const WinlinkReturn = require('./lib/winlink-return');
 const WinlinkMailViews = require('./lib/winlink-mail-views');
@@ -11682,6 +11683,23 @@ const _varaLaunch = { hf: null, fm: null }; // { child, at } for a VARA POTACAT 
 // answering" until VARA was restarted (W7RTA IC-7300, 2026-10-24).
 const _patHoldsVara = { hf: null, fm: null };
 let _patVaraKind = null; // the VARA this session hands Pat: the one to clear above if Pat could not open it
+// VARA's 1 January 2027 cut-off (Casey 2026-11-22): VARA HF before 4.9.1 and
+// VARA FM before 4.4.1 stop working that day. The version is the one VARA gave
+// on its command port (probe.version); a silent VARA gives no notice. Said once
+// per app run per modem in the log and as an app notice; the Winlink window
+// and ECHOCAT Web show it beside the mode while that VARA is picked. Never blocks.
+const _varaNoticeOnce = VaraVersion.createVaraNoticeOnce();
+function winlinkVaraVersionNotice(kind, version) {
+  if (!version) return;
+  let text = null;
+  try { text = VaraVersion.varaUpdateNotice(version, { kind }); } catch { text = null; }
+  const had = _varaNoticeOnce.current()[kind];
+  if (_varaNoticeOnce.take(kind, text)) {
+    winlinkLog(text);
+    if (win && !win.isDestroyed()) win.webContents.send('app-notice', { message: text, warn: true, duration: 20000 });
+  }
+  if (had !== _varaNoticeOnce.current()[kind]) winlinkPush();
+}
 // ── closing the VARA POTACAT opened for an ECHOCAT session (#697) ──────────
 // Casey 2026-11-21: "close VARA we opened". The rule is
 // VaraProcess.shouldCloseVara; this is the glue. Looked at after a session
@@ -11847,6 +11865,7 @@ async function winlinkVaraReady(mode, { configured } = {}) {
   _patVaraKind = kind;
   _patHoldsVara[kind] = patProc; // Pat opens it this session and keeps it (cleared if Pat says it could not)
   winlinkLog(`${name} ready on ${where}${probe.version ? ' — ' + probe.version : probe.silent ? ' (answered the connection, no VERSION reply)' : ''}`);
+  winlinkVaraVersionNotice(kind, probe.version);
 }
 
 /**
@@ -11903,6 +11922,8 @@ function winlinkPayload() {
     lastSession: settings.winlinkLastSession || null,
     noticeAccepted: !!settings.winlinkNoticeAcceptedAt,
     noticeText: WINLINK_NOTICE_TEXT,
+    // VARA too old for 1 January 2027, per modem ({ hf, fm }: text or null).
+    varaNotice: _varaNoticeOnce.current(),
     // The Deleted folder empties itself after this many days (0 = never, #475).
     deletedDays: WinlinkMailActions.deletedDays(settings.winlinkDeletedDays),
     mode: WinlinkModes.pickWinlinkMode(winlinkState.snapshot().modes, settings.winlinkDefaultMode || 'telnet'),
@@ -49079,9 +49100,11 @@ function cloudShackNotice(text, kind) {
     const launches = VaraProcess.canLaunchVara({ platform: process.platform, host });
     const bin = launches ? findVara(kind) : { found: false, path: '' };
     const probe = await VaraProcess.probeVaraPort(port, { host, timeoutMs: 1500 });
-    const text = launches
+    const said = launches
       ? VaraProcess.describeVara(kind, { enabled: true, found: bin.found, path: bin.found ? bin.path : '', probe, host, port, launches })
       : VaraProcess.varaTestText(kind, { probe, host, port });
+    const old = probe.version ? VaraVersion.varaUpdateNotice(probe.version, { kind }) : null;
+    const text = old ? `${said}${/[.!?]$/.test(said) ? '' : '.'} ${old}` : said;
     return { kind, found: bin.found, path: bin.found ? bin.path : '', host, port, launches, running: probe.ok, version: probe.version || '', text };
   });
   ipcMain.handle('winlink-vara-setup', (_e, o = {}) => winlinkVaraSetup({ kind: o.kind, devices: Array.isArray(o.devices) ? o.devices.slice(0, 200) : [], inputLabel: String(o.inputLabel || ''), outputLabel: String(o.outputLabel || '') }));
