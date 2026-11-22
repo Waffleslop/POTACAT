@@ -16683,6 +16683,7 @@ var _paddleHoldTimer = { dit: null, dah: null };
   // ── Send / Receive: the gateway list ──────────────────────────────────
   function mailGatewayLabel(g) {
     var parts = [g.call];
+    if (g.serviceTag) parts.push(g.serviceTag); // MERCURY and other non-PUBLIC service codes, as on the desktop
     if (g.dialKhz) parts.push(FreqDots.khzMhz(g.dialKhz));
     if (g.qualityWord) parts.push(g.qualityWord + (g.quality != null ? ' ' + g.quality + '%' : ''));
     if (g.distKm != null) parts.push(g.distKm + ' km');

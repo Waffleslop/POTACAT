@@ -1022,6 +1022,8 @@
   // carries a star and keeps its place in the ranking.
   function gatewayLabel(g) {
     var parts = [(isFav(g) ? '\u2605 ' : '') + g.call];
+    // Service code other than PUBLIC (MERCURY: a Mercury gateway Winlink lists as VARA).
+    if (g.serviceTag) parts.push(g.serviceTag);
     if (g.dialKhz) parts.push(fmtDial(g.dialKhz) + ' MHz');
     if (g.qualityWord) parts.push(g.qualityWord + (g.quality != null ? ' ' + g.quality + '%' : ''));
     if (g.distKm != null) parts.push(g.distKm + ' km');
