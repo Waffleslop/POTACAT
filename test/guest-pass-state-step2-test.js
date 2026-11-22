@@ -473,7 +473,7 @@ const END = '2026-11-14T20:30:00.000Z';
     c.on('auth-fail', (f) => { fail = f; });
     c._handleMessage(JSON.stringify({ type: 'auth-fail', reason: 'busy', code: 'rig_in_use', by: 'owner', passState: { state: 'waiting', reason: 'owner-has-radio', endsAt: END } }));
     assert.deepStrictEqual(fail.passState, { state: 'waiting', reason: 'owner-has-radio', endsAt: END });
-    assert.ok(/'pass-state'\]/.test(read('lib/remote-client.js')), 'hello capability');
+    assert.ok(/'pass-state'[,\]]/.test(read('lib/remote-client.js')), 'hello capability');
   });
 
   await check('ECHOCAT Web and the POTACAT renderer read the one table; main stays glue', () => {

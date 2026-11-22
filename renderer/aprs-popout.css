@@ -110,6 +110,8 @@ body { display: flex; flex-direction: column; }
 /* ── the Beacon panel ── */
 .aprs-beacon { display: flex; flex-direction: column; gap: 10px; padding: 14px 16px; border-bottom: 1px solid var(--border-primary); flex: none; }
 .aprs-grid2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.aprs-rf-timer { margin-top: 10px; }
+.aprs-rf-timer select:disabled { opacity: 0.55; }
 .aprs-grid-wide { grid-template-columns: minmax(0, 1.7fr) minmax(0, 1fr); }
 .aprs-field { display: flex; flex-direction: column; gap: 4px; font-size: 14px; color: var(--text-secondary); min-width: 0; }
 .aprs-field select, .aprs-field input, .aprs-within select, #aprs-search { font: inherit; font-size: 15px; padding: 7px 9px; border-radius: 8px;

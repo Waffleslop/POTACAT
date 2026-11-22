@@ -51,10 +51,28 @@ test('parseMonitorText reads the direction, the calls and the frame kind', () =>
 });
 
 console.log('NA4DQ\'s stuck link: FRMR, then UA, and never a greeting');
-test('FRMR before any greeting is a held link, at once', () => {
+test('#867: an FRMR before the UA is an AX.25 2.0 node refusing SABME, not a held link', () => {
+  // KQ4VPW to K4WOF-10, 2026-11-21: SABME, FRMR, SABM, UA, then the greeting.
   const w = watch();
   w.noteFrame(rx('FRMR', ' F=1'), 1000);
-  assert.deepStrictEqual(w.stuck(1000), { stuck: true, why: 'frmr' });
+  assert.deepStrictEqual(w.stuck(1000), { stuck: false, why: '' }, 'not stuck: Dire Wolf falls back to SABM');
+  w.noteFrame(rx('UA', ' F=1'), 1200);
+  w.noteFrame(rx('I', ' R0 S0 pid=F0 Len=40'), 2500); // "*** KQ4VPW Connected to CMS"
+  assert.strictEqual(w.greeting, true);
+  assert.strictEqual(w.stuck(60000).stuck, false, 'a good link');
+});
+test('#300 still holds: FRMR before the UA, then UA and no greeting, ends after GREETING_WAIT_MS', () => {
+  const w = watch();
+  w.noteFrame(rx('FRMR', ' F=1'), 1000);
+  w.noteFrame(rx('UA', ' F=1'), 1200);
+  assert.strictEqual(w.stuck(1200 + L.GREETING_WAIT_MS - 1).stuck, false);
+  assert.deepStrictEqual(w.stuck(1200 + L.GREETING_WAIT_MS), { stuck: true, why: 'no-greeting' });
+});
+test('FRMR after the UA and before any greeting is a held link, at once', () => {
+  const w = watch();
+  w.noteFrame(rx('UA', ' F=1'), 1000);
+  w.noteFrame(rx('FRMR', ' F=1'), 1500);
+  assert.deepStrictEqual(w.stuck(1500), { stuck: true, why: 'frmr' });
 });
 test('UA and then silence for GREETING_WAIT_MS is a held link; a greeting in time is not', () => {
   // #791 changed this rule on purpose. It used to feed an RR R0 P=1 here and call it
@@ -154,7 +172,7 @@ test('old-link evidence still aborts at once: the gateway acknowledging frames t
   assert.strictEqual(w.stuck(9000).why, 'old-link');
   assert.ok(/acknowledged frames from an earlier link \(N\(R\)=4\): it is still holding the last link to this station$/.test(L.stuckLogText({ why: 'old-link', nr: 4, gateway: GW })));
 });
-test('FRMR still aborts at once, before or after a poll', () => {
+test('FRMR after the UA still aborts at once, before or after a poll', () => {
   const w = watch();
   w.noteFrame(rx('UA', ' F=1'), 1000);
   w.noteFrame(rx('RR', ' R0 P=1'), 5000);

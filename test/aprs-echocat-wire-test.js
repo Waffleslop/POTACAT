@@ -14,7 +14,7 @@
 //   - a subscribed device leaving is told to main
 //   - every new message is registered
 //   - main.js sends each request to the APRS window's own functions, and the
-//     radio beacon is not reachable from a client
+//     radio beacon only as aprs-beacon-rf from an owner device (2026-11-21)
 // Run: node test/aprs-echocat-wire-test.js
 'use strict';
 const assert = require('assert');
@@ -189,13 +189,16 @@ test('each request goes to the function the APRS window or Settings calls', () =
   assert.ok(/remoteServer\.on\('aprs-request'/.test(mainSrc) || /rs\.on\('aprs-request'/.test(mainSrc), 'requests wired');
   assert.ok(/on\('aprs-client-gone'/.test(mainSrc), 'device leaving wired');
 });
-test('the radio beacon is not reachable from a client (phase 7 is not on the wire)', () => {
+// Was "the radio beacon is not reachable from a client". Casey 2026-11-21
+// ("go on the APRS radio beacon handoff"): one radio beacon per press from an
+// owner device, through the window's own run; a Guest Pass never.
+test('the radio beacon is reachable only as aprs-beacon-rf, owner only, through the window run', () => {
   const at = mainSrc.indexOf('AprsEchocat.createController(');
   const block = mainSrc.slice(at, at + 2500);
-  assert.ok(!/beacon-rf|beaconRf|aprsRfBeacon|radio beacon/i.test(block));
-  const lib = readSrc(path.join(__dirname, '..', 'lib', 'aprs-echocat.js'));
-  assert.ok(!/case 'aprs-beacon-(rf|radio)'/.test(lib));
-  for (const t of Object.keys(protocol.MESSAGES || {})) assert.ok(!/^aprs-beacon-(rf|radio)/.test(t), t);
+  assert.ok(/beaconRf: \(req\) => aprsRfSendFromPhone\(req\)/.test(block));
+  assert.ok(!/aprsRfRunner|aprsRfKey/.test(block), 'never keys directly');
+  for (const t of Object.keys(protocol.MESSAGES || {})) assert.ok(!/^aprs-beacon-radio/.test(t), t);
+  assert.strictEqual(A.isGuestAllowed('aprs-beacon-rf'), false, 'a Guest Pass is denied at the wall');
 });
 test('listening a guest started never gates under the owner\'s callsign', () => {
   const fn = mainSrc.slice(mainSrc.indexOf('function aprsIgateWanted()'), mainSrc.indexOf('function aprsIgateWanted()') + 400);

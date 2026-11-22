@@ -43,13 +43,32 @@ const block = (() => {
   return main.slice(a, b);
 })();
 
-test('only the operator\'s click sends: one IPC path into aprsRfSend, no RF timer', () => {
-  assert.strictEqual((main.match(/aprsRfSend\(\)\.catch/g) || []).length, 1, 'called from one place');
-  assert.strictEqual((main.match(/aprsRfSend\(/g) || []).length, 2, 'the definition and the one call');
+// Casey 2026-11-21: the owner's phone press is the second way in
+// (aprsRfSendFromPhone), and one timer, 2 m only, off by default, 10 min at
+// the least, never on a pick or open ("approve all").
+test('only an operator press sends (window click, phone press); the only RF timer is the 2 m one, never on a pick or open', () => {
+  assert.strictEqual((main.match(/aprsRfSend\(\)\.catch/g) || []).length, 1, 'the window click');
+  assert.strictEqual((main.match(/await aprsRfSend\(\);/g) || []).length, 1, 'the phone press');
+  assert.strictEqual((main.match(/aprsRfSend\(/g) || []).length, 3, 'the definition and the two presses');
+  assert.ok(/beaconRf: \(req\) => aprsRfSendFromPhone\(req\)/.test(main), 'the phone press comes only from aprs-beacon-rf');
   assert.ok(/ipcMain\.on\('aprs-rf-send', \(\) => \{ aprsRfSend\(\)/.test(main));
   assert.ok(!/setInterval\(/.test(block), 'no interval in the RF block');
-  for (const t of (block.match(/setTimeout\([^;]*/g) || [])) assert.ok(!/aprsRfSend|send\(/.test(t), 'no timed send: ' + t);
-  assert.ok(!/aprsRfSend|rfSend/.test(fnBody(main, 'aprsBeaconSchedule')), 'the internet timer never sends over the radio');
+  const timed = (block.match(/setTimeout\([^;]*/g) || []).filter((t) => /aprsRfSend|send\(|aprsRfTransmit|aprsRfTimerDue/.test(t));
+  assert.deepStrictEqual(timed, ['setTimeout(aprsRfTimerDue, p.dueMs)'], 'one timed path into the radio');
+  assert.ok(!/aprsRfSend|rfSend|aprsRfTransmit/.test(fnBody(main, 'aprsBeaconSchedule')), 'the internet timer never sends over the radio');
+  const sched = fnBody(main, 'aprsRfTimerSchedule');
+  assert.ok(/if \(!pending\) aprsRfTimer\.armedAt = now;/.test(sched), 'no pending timed beacon: it counts one interval from now');
+  assert.ok(/AprsRfTimer\.plan\(/.test(sched) && /settings\.aprsRfBeaconIntervalMin/.test(sched));
+  const due = fnBody(main, 'aprsRfTimerDue');
+  assert.ok(due.indexOf('AprsRfTimer.dueCheck(') < due.indexOf("aprsRfTransmit('timer')"), '2 m and listening, checked at the due time');
+  assert.ok(/aprsRfTimer\.lastTryAt = Date\.now\(\);/.test(due), 'a skipped round waits a full interval');
+  const tx = fnBody(main, 'aprsRfTransmit');
+  assert.ok(tx.indexOf('AprsRfGate.readiness(aprsRfGateState())') < tx.indexOf('aprsRfRunner()'), 'the timed beacon passes the same gate');
+  assert.ok(/settings\.aprsRfBeaconLastAt = aprsRfUi\.lastAt;/.test(tx), 'only a confirmed beacon sets the time a restart counts from');
+  const open = main.slice(main.indexOf("aprsBeaconSchedule({ arm: true }); // phase 5"), main.indexOf("aprsBeaconSchedule({ arm: true }); // phase 5") + 300);
+  assert.ok(/aprsRfTimerStop\(\); aprsRfTimerSchedule\(\);/.test(open), 'opening the window starts it one interval on');
+  assert.ok(/aprsRfTimerStop\(\); \/\/ and the 2 m radio timer/.test(main), 'closing the window stops it');
+  assert.ok(/aprsRfTimerSchedule\(\); \/\/ picking never sends/.test(fnBody(main, 'aprsBeaconSet')));
 });
 
 // Was: "the press only asks: the confirmation line carries band, frequency,
@@ -169,7 +188,7 @@ test('the radio\'s own readbacks feed the runner (no new poll): Flex interlock a
   assert.ok(/smartSdr\.on\('interlock', \(kv\) => \{ if \(kv\.state === 'TRANSMITTING'\) aprsRfNoteRadioTx\(\); \}\);/.test(main));
   assert.ok(/smartSdr\.on\('radio-message', \(m\) => aprsRfNoteRadioRefusal\(m && m\.text\)\);/.test(main));
   assert.ok(/smartSdr\.on\('cmd-error', \(\{ status, line \}\) => \{[^\n]*aprsRfNoteRadioRefusal\(t\)/.test(main));
-  assert.ok(/controller\.on\('ptt', \(on\) => \{ if \(on && controller === cat\) aprsRfNoteRadioTx\(\); \}\);/.test(main));
+  assert.ok(/controller\.on\('ptt-readback', \(on\) => \{ if \(on && controller === cat\) aprsRfNoteRadioTx\(\); \}\);/.test(main));
   assert.ok(/txProof: aprsRfTxProof,/.test(fnBody(main, 'aprsRfRunner')));
   assert.ok(/AprsRfBeacon\.txProofFor\(/.test(fnBody(main, 'aprsRfTxProof')));
   assert.ok(!/setInterval|setTimeout/.test(fnBody(main, 'aprsRfTxProof') + fnBody(main, 'aprsRfNoteRadioTx') + fnBody(main, 'aprsRfNoteRadioRefusal')), 'no poll of its own');

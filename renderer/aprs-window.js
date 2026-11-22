@@ -194,7 +194,7 @@
     show('aprs-air-banner', !!a);
     if (a) { setText('aprs-air-title', a.title); setText('aprs-air-time', a.time); }
   }
-  $('aprs-timer-stop').addEventListener('click', function () { api.beaconSet({ intervalMin: 0 }); });
+  $('aprs-timer-stop').addEventListener('click', function () { api.beaconSet({ intervalMin: 0, rfIntervalMin: 0 }); }); // one Stop ends both timers
   // Main aborts the beacon in flight: the same aprsRfAbort closing the window uses. PTT drops at once.
   $('aprs-rf-stop').addEventListener('click', function () { api.rfStop(); });
 
@@ -290,6 +290,15 @@
     renderSymbols();
     var iv = $('aprs-beacon-interval');
     if (document.activeElement !== iv) iv.value = String(beacon.settings.intervalMin || 0);
+    // The 2 m radio timer: off on 30 m (every 30 m beacon is a click), and it says why.
+    var rv = $('aprs-rf-interval');
+    if (document.activeElement !== rv) rv.value = String(beacon.settings.rfIntervalMin || 0);
+    var on30 = beacon.rfBand === '30m';
+    rv.disabled = on30 && !(beacon.settings.rfIntervalMin > 0);
+    var rn = $('aprs-rf-timer-note');
+    var rnText = beacon.settings.rfIntervalMin > 0 ? (beacon.rfTimerOn && beacon.rfNextAt ? '' : (beacon.rfTimerSentence || '')) : (on30 ? 'The radio timer runs on 2 m only. On 30 m every beacon is a click.' : '');
+    rn.textContent = rnText;
+    rn.classList.toggle('hidden', !rnText);
     var cm = $('aprs-beacon-comment');
     if (document.activeElement !== cm) cm.value = beacon.settings.comment;
     $('aprs-beacon-activation').checked = !!beacon.settings.activation;
@@ -355,6 +364,7 @@
 
   $('aprs-beacon-now').addEventListener('click', function () { api.beaconNow(); });
   $('aprs-beacon-interval').addEventListener('change', function (e) { api.beaconSet({ intervalMin: Number(e.target.value) || 0 }); });
+  $('aprs-rf-interval').addEventListener('change', function (e) { api.beaconSet({ rfIntervalMin: Number(e.target.value) || 0 }); });
   $('aprs-beacon-comment').addEventListener('change', function (e) { api.beaconSet({ comment: e.target.value }); });
   $('aprs-rf-ssid').addEventListener('change', function (e) { api.beaconSet({ rfSsid: e.target.value === '' ? null : Number(e.target.value) }); });
   $('aprs-beacon-activation').addEventListener('change', function (e) { api.beaconSet({ activation: e.target.checked }); });

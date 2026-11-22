@@ -5,6 +5,7 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('api', {
+  platform: process.platform, // popout-theme-boot.js: macOS hides the drawn buttons for the traffic lights (#866)
   minimize: () => ipcRenderer.send('js8-map-minimize'),
   maximize: () => ipcRenderer.send('js8-map-maximize'),
   close: () => ipcRenderer.send('js8-map-close'),

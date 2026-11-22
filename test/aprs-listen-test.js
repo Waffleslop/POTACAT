@@ -91,6 +91,21 @@ test('the frequency took when the readback is within 1 kHz', () => {
   assert.strictEqual(L.tuneAccepted(144390000, 0), false);
 });
 
+// #842: the 300 baud decoder holds about 100 Hz of offset, so 1 kHz on 30 m
+// took a radio a few hundred hertz off as tuned, and it never decoded.
+test('#842: on 30 m the readback must be within 50 Hz; 2 m keeps 1 kHz', () => {
+  assert.strictEqual(L.tuneTolHz('30m'), 50);
+  assert.strictEqual(L.tuneTolHz('2m'), 1000);
+  assert.strictEqual(L.tuneAccepted(10147600, 10147600, '30m'), true);
+  assert.strictEqual(L.tuneAccepted(10147600, 10147610, '30m'), true, '10 Hz steps');
+  assert.strictEqual(L.tuneAccepted(10147600, 10147650, '30m'), true);
+  assert.strictEqual(L.tuneAccepted(10147600, 10147900, '30m'), false, '300 Hz off: the decoder hears nothing');
+  assert.strictEqual(L.tuneAccepted(10147600, 10147100, '30m'), false);
+  assert.strictEqual(L.tuneAccepted(144390000, 144390500, '2m'), true);
+  const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+  assert.strictEqual((main.match(/AprsListen\.tuneAccepted\(hz, _currentFreqHz, aprsListen\.band\)/g) || []).length, 2, 'the start waits with the tolerance of the band');
+});
+
 test('the mode comes from the packet rule: Icom FM-D, FT-857 PKT, plain FM elsewhere, by hand left alone', () => {
   const icom = PacketRigMode.resolvePacketRigMode({ choice: 'auto', family: 'icom', brand: 'Icom', protocol: 'civ' });
   assert.deepStrictEqual(L.listenModePlan(icom), { tuneMode: 'FM', dataMode: 'DIGFM' });
@@ -317,12 +332,30 @@ test('the 30 m setup line is rig-setup-notes\' own sideband step, verbatim', () 
   assert.strictEqual(L.setupLine(N.resolveSetupNotes({ model: 'IC-7300', radioType: 'serialcat' }), '30m'), '');
 });
 
-test('a digital filter narrower than 1 kHz gets one plain sentence on 30 m; filters are never changed', () => {
-  assert.strictEqual(L.filterSentence('30m', 500), 'Your digital filter is 500 Hz wide. APRS on 30 m needs 1500 to 1900 Hz to pass.');
+test('a digital filter that would cut a 30 m tone gets one plain sentence; filters are never changed', () => {
+  assert.strictEqual(L.filterSentence('30m', 500), 'Your digital filter is 500 Hz wide. APRS on 30 m needs 1450 to 1950 Hz to pass.');
   assert.strictEqual(L.filterSentence('30m', 0), '');      // the radio's own filter: nothing known, nothing said
   assert.strictEqual(L.filterSentence('30m', 2400), '');
-  assert.strictEqual(L.filterSentence('30m', 1000), '');
   assert.strictEqual(L.filterSentence('2m', 500), '');      // FM has a fixed bandwidth
+});
+
+// #839: a Flex DIGU filter of width w passes 100 to 100 + w Hz, so 1000 to
+// 1800 Hz cut the 1800 Hz tone while only a filter under 1000 Hz was named.
+test('#839: the warning follows the real passband edges, not a 1 kHz threshold', () => {
+  assert.strictEqual(L.filterSentence('30m', 1000), 'Your digital filter is 1000 Hz wide. APRS on 30 m needs 1450 to 1950 Hz to pass.');
+  assert.strictEqual(L.filterSentence('30m', 1500), 'Your digital filter is 1500 Hz wide. APRS on 30 m needs 1450 to 1950 Hz to pass.');
+  assert.ok(L.filterSentence('30m', 1800) !== '', '100 to 1900 Hz still trims the upper sideband of the 1800 Hz tone');
+  assert.strictEqual(L.filterSentence('30m', 1850), '');    // 100 to 1950 Hz passes both tones
+  assert.strictEqual(L.filterSentence('30m', 3000), '');
+});
+
+test('#839: the radio\'s own filter edges decide when POTACAT has them', () => {
+  assert.strictEqual(L.filterSentence('30m', 0, { lo: 100, hi: 2900 }), '');
+  assert.strictEqual(L.filterSentence('30m', 3000, { lo: 1500, hi: 2700 }), 'Your receive filter passes 1500 to 2700 Hz. APRS on 30 m needs 1450 to 1950 Hz to pass.');
+  assert.strictEqual(L.filterSentence('30m', 0, { lo: 200, hi: 1700 }), 'Your receive filter passes 200 to 1700 Hz. APRS on 30 m needs 1450 to 1950 Hz to pass.');
+  assert.strictEqual(L.filterSentence('2m', 0, { lo: 200, hi: 1700 }), '');
+  assert.strictEqual(L.HF_NEED_LO_HZ, 1450);
+  assert.strictEqual(L.HF_NEED_HI_HZ, 1950);
 });
 
 test('the 30 m refusal names 10.1476 MHz', () => {
@@ -350,6 +383,27 @@ test('the window offers each band the rig has, from the payload (the band select
   assert.ok(/l\.bands/.test(lib) && /api\.listenBand\(/.test(glue));
   const pre = fs.readFileSync(path.join(__dirname, '..', 'preload-aprs-popout.js'), 'utf8');
   assert.ok(/listenBand:\s*\(b\)\s*=>\s*ipcRenderer\.send\('aprs-listen-band'/.test(pre));
+});
+
+// #841: a monitor that never opened, or closed later, left the window saying
+// Listening while nothing Dire Wolf decoded could reach POTACAT.
+test('#841: the modem starts again when its lane changed, it exited, or its monitor closed', () => {
+  assert.strictEqual(L.modemRestartWhy({ laneChanged: false, procAlive: true, monitorLost: false }), '');
+  assert.strictEqual(L.modemRestartWhy({ laneChanged: true, procAlive: true }), 'lane');
+  assert.strictEqual(L.modemRestartWhy({ procAlive: false }), 'process');
+  assert.strictEqual(L.modemRestartWhy({ procAlive: true, monitorLost: true }), 'monitor');
+});
+
+test('#841: main refuses a start whose AGW port never opened, and marks a monitor that closes on its own', () => {
+  const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+  const spawnFn = main.slice(main.indexOf('async function aprsSpawnDirewolf('), main.indexOf('function aprsDevFeed('));
+  assert.ok(/if \(!ready\) \{[\s\S]*?throw new Error\(/.test(spawnFn), 'no open port: the start fails with a reason');
+  assert.ok(/onClose: \(code\) => \{[\s\S]*?aprsListen\.monitorLost = true/.test(spawnFn), 'a lost monitor is noted');
+  assert.ok(!/onClose: \(\) => \{\}/.test(spawnFn), 'the monitor closing is no longer ignored');
+  const stopFn = main.slice(main.indexOf('function aprsStopModem('), main.indexOf('function aprsLaneNeededByOthers('));
+  assert.ok(/aprsListen\.monitorToken = null/.test(stopFn) && /aprsListen\.monitorLost = false/.test(stopFn), 'a monitor closed on purpose is not lost');
+  const tick = main.slice(main.indexOf('function aprsListenTick('), main.indexOf('function aprsRadioReturnOnDial('));
+  assert.ok(/AprsListen\.modemRestartWhy\(\{[^}]*monitorLost: !!aprsListen\.monitorLost/.test(tick), 'the tick restarts on a lost monitor');
 });
 
 console.log(`\n${pass} passed, ${fail} failed`);

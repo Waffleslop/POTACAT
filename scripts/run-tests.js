@@ -9,11 +9,23 @@
 // 433 hid the other 225), then a summary names each failure and the run exits
 // non-zero if any file failed. `node scripts/run-tests.js <substr>...` runs
 // only the files whose path contains one of the substrings.
-const { spawnSync } = require('child_process');
+//
+// 2026-11-21: the files run in parallel (every core but one; --jobs N or
+// POTACAT_TEST_JOBS to change it, --jobs 1 for the old one-at-a-time run).
+// Each file is still its own Node process; its output is buffered and printed
+// whole when it ends. Files in SERIAL (below the list) run alone afterwards.
+// `--changed [base]` runs only the tests for what changed (scripts/changed-tests.js).
+// `--help` lists the options.
+const { spawn } = require('child_process');
+const os = require('os');
 const path = require('path');
 
 const TESTS = [
   'test/syntax-check-test.js', // every source file parses (a main.js syntax error passed every other test)
+  'test/icom-civ-address-learn-test.js', // sweep 3c: a USB Icom at another CI-V address is found from its own replies, used and saved
+  'test/icom-usb-data-mod-test.js', // sweep 1a: over USB CI-V, DATA MOD to USB for a data session and put back (IC-7300, MK II, IC-7100, IC-7610 DATA1/2/3)
+  'test/icom-network-data-mod-test.js', // #853: over the network the IC-7610's LAN source follows the DATA number in use (DATA1/2/3 MOD 00 92/93/94)
+  'test/icom-filter-readback-test.js', // NJ2DX 2026-11-21: an Icom's IF filter width is read back (1A 03), also right after a mode change, so the VFO shows the real width
   'test/rig-test.js',
   'test/icom-baud-list-test.js', // #238: every baud select offers 4800-115200; Icom path accepts each
   'test/cat-port-presence-test.js',
@@ -44,7 +56,17 @@ const TESTS = [
   'test/serial-callout-twin-test.js',
   'test/clock-offset-test.js',
   'test/require-exports-test.js',
+  'test/scope-no-frames-log-test.js', // K3SBP 2026-11-21: a scope that shows nothing says so in the log (no frames vs misaligned)
+  'test/cloud-signup-tidy-test.js', // ECHOCAT ask 2026-11-21: trial-first form, one tunnel label, BMAC for existing members, phone sign-up syncs
+  'test/cloud-tunnel-enable-remote-test.js', // ECHOCAT ask 2026-11-21: an owner device turns the Cloud Tunnel on with Cloud access; never a Guest Pass
+  'test/cloud-tunnel-auto-test.js', // ECHOCAT ask 2026-11-21: the Cloud Tunnel turns on when the account gets access; never after the operator turned it off
+  'test/cloud-state-test.js', // ECHOCAT ask 2026-11-21: auth-ok carries the shack's Cloud state and cloud-state follows it; never to a Guest Pass
+  'test/scan-run-test.js', // #37: a phone-started scan run on the desktop: the phone's 13 filter vectors, the desktop's exclusions, start/step/end rules, wire and glue
+  'test/clock-platform-test.js', // NJ2DX 2026-11-21: each OS gets only the clock buttons it can honour; Time settings opens on a Mac
+  'test/main-ismac-scope-test.js', // K3SBP 2026-11-21: isMac is not defined (opening APRS crashed); every isMac in main.js is declared in its own function
+  'test/aprs-rf-phone-test.js', // ECHOCAT ask 2026-11-21: one radio beacon per press from the owner's phone; the window's gate and caps; Listen off is set up and put back
   'test/smartsdr-meter-test.js',
+  'test/smartsdr-udpport-reconnect-test.js', // K3SBP 2026-11-21: after a network drop the new Flex connection is told client udpport again (pan FFT, meters)
   'test/flex-slice-filter-test.js',
   'test/smartsdr-dax-tx-claim-test.js',
   'test/vfo-ptt-race-test.js',
@@ -83,6 +105,7 @@ const TESTS = [
   'test/echocat-protocol.test.js',
   'test/protocol-demux-parity-test.js',
   'test/jtcat-test.js',
+  'test/jtcat-qso-view-test.js',     // #807: an older phone sees the RR73 step only once the QSO is logged
   'test/jtcat-parser-test.js',
   'test/jtcat-qso-card-test.js',     // QSO logged is a centred card in theme colours
   'test/ft8-engine-rebaseline-test.js',
@@ -225,6 +248,8 @@ const TESTS = [
   'test/aprs-rf-frequency-test.js', // APRS phase 2: the 2 m APRS frequency by grid square, each entry from a published band plan
   'test/aprs-radio-return-test.js', // APRS phase 2: the radio goes back on stop, after a crash and after a quit
   'test/aprs-listen-test.js', // APRS phase 2: the refusal sentences, the packet mode, and the main.js wiring (receive only)
+  'test/aprs-rx-filter-test.js', // #840: 30 m listening widens a narrow Flex receive filter to pass 1450-1950 Hz and puts it back (fake Flex left narrow); RIT warned, never changed
+  'test/aprs-beacon-tx-readback-test.js', // #856: the radio beacon hears the radio's TX readback while POTACAT holds PTT (IC-7300 over CI-V), not only TX-state changes
   'test/aprs-listen-moved-test.js', // APRS listening pauses when the radio moves off the APRS frequency (any cause), the return is dropped; the once-a-minute audio line
   'test/aprs-auto-listen-test.js', // APRS window: listen on open (receive only), once per open, every switch refusal plus TX / JTCAT QSO / owner / Guest Pass, off stays off
   'test/tune-link-pending-test.js', // a potacat://tune link that launches POTACAT waits for the radio (link up + a readback), tunes once; 60 s then a notice; only the latest link counts
@@ -233,7 +258,7 @@ const TESTS = [
   'test/aprs-show-last-test.js', // APRS window: "Show the last" 15 min to 6 h (per profile, list and map), the 6 h store with a row cap, two-step age fading (ring at full colour), Clear local to the window (no IPC, ECHOCAT untouched)
   'test/aprs-rf-frames-test.js', // APRS phase 2: recorded Dire Wolf AGW frames -> APRS packets, direct or via a digipeater
   'test/aprs-rf-merge-test.js', // APRS phase 2: a station heard on the radio and on APRS-IS is one row with both marks
-  'test/direwolf-aprs-hf-config-test.js', // APRS phase 3: the 30 m config is MODEM 300 1600:1800 A- 7@30 with no PTT; 2 m and Winlink configs byte-identical
+  'test/direwolf-aprs-hf-config-test.js', // APRS phase 3: the 30 m receive config is MODEM 300 1600:1800 A- 9@30 (the beacon keeps 7@30) with no PTT; 2 m and Winlink configs byte-identical
   'test/direwolf-aprs-hf-decode-test.js', // APRS phase 3: generated 300-baud AFSK decoded by the bundled Dire Wolf, on tune and 70 Hz off (skips without the build)
   'test/aprs-passcode-test.js', // APRS phase 4: the APRS-IS passcode against published callsign/passcode pairs
   'test/aprs-igate-test.js', // APRS phase 4: the receive-only iGate's rules, one test each (aprs-is.net IGating, q construct, dupes, login)
@@ -255,12 +280,15 @@ const TESTS = [
   'test/direwolf-aprs-tx-config-test.js', // APRS phase 7: the transmit config (PTT via the shim, channel access per band); listen and Winlink configs byte-identical
   'test/direwolf-aprs-tx-offline-test.js', // APRS phase 7: the bundled Dire Wolf keys a fake shim once and its audio decodes back (skips without the build)
   'test/aprs-echocat-test.js', // APRS phase 6: ECHOCAT devices: snapshot, 1.5 s deltas, feed and listen ownership, Guest Pass, aprs-state
+  'test/aprs-find-band-test.js', // ECHOCAT 2026-11-21: rf.band on aprs-stations rows, aprs-find (follow one call beyond range, budlist, validated, guest allowed)
   'test/aprs-echocat-wire-test.js', // APRS phase 6: the 'aprs' capability on the wire (old clients untouched), guest refusals, main.js glue, ECHOCAT Web
   'test/aprs-message-test.js', // APRS A1: message, ack, rej and reply-ack formats (APRS 1.0.1 ch. 14), the 67-character limit, ours by SSID, the g/ filter
   'test/aprs-messenger-test.js', // APRS A1: retries 30 s/60 s/120 s/5 min (5 tries), stop on ack/rej/Stop, acks owed, 30 s duplicates, unread, bounds, the saved file
   'test/aprs-templates-test.js', // APRS A2: message templates: each built-in's fill and 67-character fit, activation/radio fields, the held-back gateways, my templates' round trip
   'test/aprs-templates-wiring-test.js', // APRS A2: templates as wired in main.js (context, per-profile list), the preload and the Messages view (nothing sends until Send)
   'test/aprs-messages-wiring-test.js', // APRS A1: messages end to end against a fake APRS-IS server, and the main.js/preload/window wiring (internet only)
+  'test/aprs-rf-message-test.js', // APRS A3: messages over the radio: one press per try (automatic retries and radio acks only with their default-off settings, 2 m only), refusals in plain words, heard on radio, the frame and cap, end to end through the radio run and gate on a fake shim
+  'test/aprs-rf-timer-test.js', // APRS: the timed radio beacon, 2 m only, off by default, 10 min floor, never on a pick or open, a skipped round waits a full interval, the same gate as the click
   'test/log-comment-test.js',
   'test/raw-cat-command-test.js',
   'test/rigctld-stderr-test.js',
@@ -550,6 +578,8 @@ const TESTS = [
   'test/page-script-globals-test.js', // one top-level scope per page: a second const of the same name stops a script (WB3EGD, the dead 1.13.5 audio heal)
   'test/window-min-size-test.js',     // N0KAH: no window shrinks past its own controls
   'test/window-rules-test.js',        // every window opens in the theme and remembers its place
+  'test/mac-frameless-windows-test.js', // #866: every visible frameless window keeps the macOS traffic lights; the APRS and JTCAT map title bars keep their own controls on a Mac
+  'test/meter-box-test.js', // NJ2DX 2026-11-21: the S-meter box is clamped on screen as it appears, and draws with the theme's colours
   'test/yaesu-fa-digits-test.js',
   'test/yaesu-audit-ft891-test.js', // Yaesu CAT audit: FT-891 preamp, AGC, PROC, CW text, RTTY
   'test/log-as-test.js',
@@ -635,6 +665,7 @@ const TESTS = [
   'test/amp-drive-limit-test.js', // B10 row 10: a per-rig amplifier drive limit, enforced in every radio client
   'test/remote-multi-client-test.js',
   'test/remote-bridge-test.js',
+  'test/aprs-remote-shack-test.js', // #868: a desktop driving a remote shack starts APRS listening there (aprs-listen), shows the shack's aprs-state and the stations its radio heard
   'test/sstv-context-test.js',
   'test/tailscale-detect-test.js',
   'test/yaesu-legacy-codec-test.js',
@@ -675,6 +706,8 @@ const TESTS = [
   'test/sculan10-read-first-test.js', // FT-710 scope Enable reads SCU-LAN10 (EX030126) before writing: already ON is left alone and not turned off at close; no answer means no blind write (#113 item 7)
   'test/sculan10-scope-test.js', // SCU-LAN10 band scope: spec-shaped frames, inverted amplitude, the line is the first 850 bytes of a 4096-byte frame (#143), the boundary marker and its lock, 850-point resampling, bin-to-frequency
   'test/rig-full-power-test.js', // a radio's real full power (rig.fullPowerW): W5LEE's 5 W Hermes Lite behind deskHPSDR's 100 W TS-2000 emulation, slider, PC command, readback and log in real watts
+  'test/cat-rts-advice-test.js', // #849: no surface says to set the radio's CAT RTS menu to Enable; the network-link tune warning says what it saw
+  'test/kenwood-ts890-om-test.js', // #850: the TS-890S sets and reads its mode with OM (USB-D = OM0D;), never MD/DA (TS-890S reference rev1 p.51)
   'test/kenwood-pc-power-test.js', // the TCP Kenwood client (deskHPSDR, Zeus) sends PC on the model's scale, Full power included (6 W = PC100, not PC006), never drops the last slider level, and a radio that cannot report its power gets it again after a band change (#184)
   'test/zeus-cat-digu-test.js', // #185: Zeus through its TS-2000-style CAT port: FT8/FT4 go out as MD9 (DIGU), DIGL as plain LSB, no DA; other Kenwoods unchanged
   'test/power-restore-test.js', // the external-tuner / test restore: never a 100 W guess, never against the operator's own knob (GitHub #111, 1.13.10 regression)
@@ -720,7 +753,8 @@ const TESTS = [
   'test/guest-pass-full-power-test.js', // a Guest Pass cap on a rig with Full power (W): real watts throughout; a 5 W rig transmits, a 100 W rig is capped
   'test/pacing-vs-mode-note-test.js', // a radio that drops replies gets only the pacing line; a wrong-model radio only the mode note
   'test/jtcat-tx-refused-test.js', // #190: a refused JS8 tx-start is not "fully transmitted"; FT8 refusal events identical to master; HALT never hidden by mode
-  'test/run-tests-runner-test.js', // #175: this runner keeps going past a failing file, names every failure, exits non-zero
+  'test/run-tests-runner-test.js', // #175: this runner keeps going past a failing file, names every failure, exits non-zero; parallel output never interleaves
+  'test/run-tests-changed-test.js', // --changed picks the tests that mention a changed file; main.js narrowed by changed function names and strings
   'test/update-check-feedback-test.js', // #186: a manual Check for Updates always ends in a visible message (checking, up to date, found, or the error + download page)
   'test/startup-prefetch-test.js', // the first window sooner: startup read-ahead, electron-updater on first use
   'test/tls-der-int-test.js', // ECHOCAT self-signed cert: the random serial is minimal DER (a leading 0x00 made OpenSSL reject ~1 in 512 certs)
@@ -732,34 +766,184 @@ const TESTS = [
   'test/tune-link-guard-test.js', // a potacat://tune link stops Run, Hunt, the WSPR beacon, the Spot Target, a QSO and TX before it tunes; notice in the main and JTCAT windows
 ];
 
+
+// Files that must run alone, after the parallel pool. Each was seen to fail
+// only when other files ran beside it (fixed ports, shared temp files, timing).
+// A file goes here with the reason; better to fix the test and take it out.
+const SERIAL = new Set([
+  'test/atu-wizard-test.js', // runs the wizard on a 40x clock over real timers; under load a point times out (K3SBP run 1 case)
+  'test/tci-audio-test.js', // 2 s budgets for a loopback TCI server to answer; missed in 2 of 9 parallel runs on a loaded machine, never alone
+  'test/paddle-bounce-test.js', // web keyer element timing in real milliseconds; a dash was cut short once under load
+]);
+
+// The longest files, started first so the pool does not wait on one that began
+// late (sstv-quality alone is about 6 minutes under load). Order only, never results.
+const SLOW_FIRST = [
+  'test/sstv-quality-test.js',
+  'test/sstv-lock-test.js',
+  'test/sstv-realistic-rx-test.js',
+  'test/sstv-e2e-test.js',
+  'test/jtty-decoder-test.js',
+  'test/external-atu-carrier-test.js',
+  'test/sculan10-test.js',
+  'test/flrig-codec-test.js',
+  'test/sstv-spec-timing-test.js',
+];
+
 const root = path.join(__dirname, '..');
 
-function runAll(list) {
-  const failed = [];
-  let n = 0;
-  for (const f of list) {
-    const r = spawnSync(process.execPath, [f], { cwd: root, stdio: 'inherit' });
-    n++;
-    if (r.status !== 0) {
-      const why = `exit ${r.status}${r.signal ? ', ' + r.signal : ''}`;
-      failed.push(`${f} (${why})`);
-      console.error(`
-[run-tests] FAILED: ${f} (${why}) — ${n} of ${list.length} run, continuing`);
-    }
-  }
+// Workers: --jobs N, then POTACAT_TEST_JOBS, then every core but one (at least 2).
+function defaultJobs() {
+  const env = parseInt(process.env.POTACAT_TEST_JOBS, 10);
+  if (env > 0) return env;
+  return Math.max(2, os.cpus().length - 1);
+}
+
+function why(code, signal) {
+  return `exit ${code}${signal ? ', ' + signal : ''}`;
+}
+
+function finish(list, failed) {
   if (failed.length) {
-    console.error(`
-[run-tests] ${list.length - failed.length} of ${list.length} test files passed, ${failed.length} failed:`);
+    console.error(`\n[run-tests] ${list.length - failed.length} of ${list.length} test files passed, ${failed.length} failed:`);
     for (const f of failed) console.error(`[run-tests]   ${f}`);
     process.exit(1);
   }
-  console.log(`
-[run-tests] all ${list.length} test files passed`);
+  console.log(`\n[run-tests] all ${list.length} test files passed`);
+  process.exit(0);
 }
 
-module.exports = { TESTS, runAll };
+// One file, its own Node process. inherit = live output (a file running alone);
+// otherwise stdout and stderr are kept in one buffer, in arrival order.
+function runFile(f, inherit) {
+  return new Promise((resolve) => {
+    const t0 = Date.now();
+    const child = spawn(process.execPath, [f], {
+      cwd: root,
+      stdio: inherit ? 'inherit' : ['ignore', 'pipe', 'pipe'],
+    });
+    const chunks = [];
+    if (!inherit) {
+      child.stdout.on('data', (c) => chunks.push(c));
+      child.stderr.on('data', (c) => chunks.push(c));
+    }
+    let done = false;
+    const end = (code, signal) => {
+      if (done) return;
+      done = true;
+      resolve({ f, code, signal, out: Buffer.concat(chunks), ms: Date.now() - t0 });
+    };
+    child.on('error', (e) => { chunks.push(Buffer.from(String(e && e.stack || e) + '\n')); end(-1, null); });
+    child.on('close', end);
+  });
+}
+
+// --jobs 1: today's behaviour exactly. One file after another, live output.
+async function runSerial(list) {
+  const failed = [];
+  let n = 0;
+  for (const f of list) {
+    const r = await runFile(f, true);
+    n++;
+    if (r.code !== 0) {
+      const w = why(r.code, r.signal);
+      failed.push(`${f} (${w})`);
+      console.error(`\n[run-tests] FAILED: ${f} (${w}) — ${n} of ${list.length} run, continuing`);
+    }
+  }
+  finish(list, failed);
+}
+
+async function runParallel(list, jobs) {
+  const order = new Map(list.map((f, i) => [f, i]));
+  const slow = SLOW_FIRST.filter((f) => order.has(f) && !SERIAL.has(f));
+  const pool = slow.concat(list.filter((f) => !SERIAL.has(f) && !slow.includes(f)));
+  const alone = list.filter((f) => SERIAL.has(f));
+  const failed = [];
+  let n = 0;
+  const report = (r) => {
+    n++;
+    process.stdout.write(`\n[run-tests] ${r.f} (${(r.ms / 1000).toFixed(1)} s)\n`);
+    if (r.out && r.out.length) process.stdout.write(r.out);
+    if (r.code !== 0) {
+      const w = why(r.code, r.signal);
+      failed.push({ i: order.get(r.f), s: `${r.f} (${w})` });
+      console.error(`\n[run-tests] FAILED: ${r.f} (${w}) — ${n} of ${list.length} run, continuing`);
+    }
+  };
+  let next = 0;
+  const worker = async () => {
+    while (next < pool.length) report(await runFile(pool[next++], false));
+  };
+  await Promise.all(Array.from({ length: Math.min(jobs, pool.length) }, worker));
+  if (alone.length) console.log(`\n[run-tests] ${alone.length} file(s) that run alone (SERIAL):`);
+  for (const f of alone) {
+    process.stdout.write(`\n[run-tests] ${f} (alone)\n`);
+    const r = await runFile(f, true);
+    r.out = null;
+    r.ms = 0;
+    n++;
+    if (r.code !== 0) {
+      const w = why(r.code, r.signal);
+      failed.push({ i: order.get(f), s: `${f} (${w})` });
+      console.error(`\n[run-tests] FAILED: ${f} (${w}) — ${n} of ${list.length} run, continuing`);
+    }
+  }
+  failed.sort((a, b) => a.i - b.i);
+  finish(list, failed.map((x) => x.s));
+}
+
+// Runs every file in the list, continues past failures, prints the summary and
+// exits (non-zero when any file failed). opts.jobs: worker count (1 = serial).
+function runAll(list, opts = {}) {
+  const jobs = opts.jobs > 0 ? opts.jobs : defaultJobs();
+  if (jobs <= 1 || list.length <= 1) return runSerial(list);
+  return runParallel(list, jobs);
+}
+
+const HELP = `node scripts/run-tests.js [options] [substring...]
+
+  (no options)      every file in the TESTS list, in parallel (${defaultJobs()} workers here);
+                    files in SERIAL run alone after the pool. Continues past failures.
+  substring...      only the files whose path contains one of the substrings.
+  --jobs N, -j N    N workers (also POTACAT_TEST_JOBS=N). --jobs 1 runs one file at a
+                    time with live output, the way the runner always worked.
+  --changed [base]  a quick filter for while you work: the tests that mention a file
+                    changed since 'git merge-base HEAD <base>' (default origin/master)
+                    or in the working tree, the changed test files, and this runner's
+                    own checks. Prints each pick and why. It is NOT the full run: the
+                    whole suite runs before every push (scripts/git-hooks/pre-push) and in CI.
+  --help            this text.`;
+
+function parseArgs(argv) {
+  const o = { jobs: 0, changed: false, base: 'origin/master', filters: [], help: false };
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (a === '--help' || a === '-h') o.help = true;
+    else if (a === '--jobs' || a === '-j') o.jobs = parseInt(argv[++i], 10) || 0;
+    else if (a.startsWith('--jobs=')) o.jobs = parseInt(a.slice(7), 10) || 0;
+    else if (a === '--changed') {
+      o.changed = true;
+      if (argv[i + 1] && !argv[i + 1].startsWith('-')) o.base = argv[++i];
+    } else if (a.startsWith('--changed=')) { o.changed = true; o.base = a.slice(10); }
+    else o.filters.push(a);
+  }
+  return o;
+}
+
+module.exports = { TESTS, SERIAL, SLOW_FIRST, runAll, parseArgs, defaultJobs };
 
 if (require.main === module) {
-  const only = process.argv.slice(2);
-  runAll(only.length ? TESTS.filter((f) => only.some((o) => f.includes(o))) : TESTS);
+  const o = parseArgs(process.argv.slice(2));
+  if (o.help) { console.log(HELP); process.exit(0); }
+  let list = TESTS;
+  if (o.changed) {
+    const { pickChangedTests } = require('./changed-tests');
+    const picked = pickChangedTests({ root, tests: TESTS, base: o.base, log: console.log });
+    list = TESTS.filter((f) => picked.has(f));
+    console.log(`[run-tests] --changed: ${list.length} of ${TESTS.length} test files (a quick filter, not the full run)`);
+    if (!list.length) process.exit(0);
+  }
+  if (o.filters.length) list = list.filter((f) => o.filters.some((s) => f.includes(s)));
+  runAll(list, { jobs: o.jobs });
 }

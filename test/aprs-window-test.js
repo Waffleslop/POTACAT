@@ -169,6 +169,16 @@ test('the timer banner appears only with an interval, says the next time and tha
   assert.strictEqual(W.timerBanner({ beacon: null }), null);
 });
 
+test('the 2 m radio timer in the banner: when the next one goes, or why it waits', () => {
+  const at = new Date(2026, 10, 21, 16, 20).getTime();
+  const rf = W.timerBanner({ beacon: { settings: { intervalMin: 0, rfIntervalMin: 10 }, rfCall: 'K3SBP-6', rfTimerOn: true, rfNextAt: at }, band: '2m' });
+  assert.strictEqual(rf.title, 'Beaconing on your radio (2 m) every 10 min as K3SBP-6.');
+  assert.strictEqual(rf.detail, 'Next on the radio at 16:20.');
+  const both = W.timerBanner({ beacon: { settings: { intervalMin: 30, rfIntervalMin: 20 }, timerOn: true, nextAt: at, rfTimerOn: false, rfTimerSentence: 'The radio timer runs on 2 m only. On 30 m every beacon is a click.' }, band: '30m' });
+  assert.strictEqual(both.title, 'Beaconing over the internet every 30 min and on your radio (2 m) every 20 min.');
+  assert.strictEqual(both.detail, 'Next on the internet at 16:20. The radio timer runs on 2 m only. On 30 m every beacon is a click.');
+});
+
 test('the on-air banner appears only while keyed: elapsed of expected seconds, and Stop transmitting', () => {
   assert.strictEqual(W.onAirBanner({ rf: RF_READY }), null);
   assert.strictEqual(W.onAirBanner({ rf: { ...RF_READY, phase: 'waiting', sending: true } }), null, 'not while waiting for the channel');
@@ -491,7 +501,7 @@ test('glue: the timer banner shows only with an interval; Stop the timer sets it
   assert.strictEqual(w.els['aprs-timer-title'].textContent, 'Beaconing over the internet every 20 min as K3SBP-10.');
   assert.ok(/The radio only sends when you press Beacon on 30 m\./.test(w.els['aprs-timer-detail'].textContent));
   w.els['aprs-timer-stop'].fire('click');
-  assert.strictEqual(JSON.stringify(w.calls[w.calls.length - 1]), JSON.stringify(['beaconSet', { intervalMin: 0 }]));
+  assert.strictEqual(JSON.stringify(w.calls[w.calls.length - 1]), JSON.stringify(['beaconSet', { intervalMin: 0, rfIntervalMin: 0 }]), 'one Stop ends both timers');
   assert.ok(!w.calls.some((c) => c[0] === 'beaconNow' || c[0] === 'rfSend'), 'nothing is sent by showing or stopping the timer');
 });
 
@@ -546,7 +556,7 @@ test('glue: My APRS SSID picks the radio beacon\'s ending; the header shows both
 
 // ── APRS settings (Casey 2026-11-20: "iGate should be a setting on the APRS window ... not hidden in idle mode") ──
 test('APRS settings: a plain-text, labelled button top right opens a panel inside the window, no browser dialog', () => {
-  const tb = html.slice(html.indexOf('<div class="titlebar-controls">'), html.indexOf('id="tb-min"'));
+  const tb = html.slice(html.indexOf('<div class="titlebar-controls'), html.indexOf('id="tb-min"'));
   assert.ok(/id="aprs-settings-btn" aria-haspopup="dialog" aria-controls="aprs-settings" aria-label="APRS settings[^"]*">APRS settings<\/button>/.test(tb), 'in the title bar, before the window buttons');
   assert.ok(/<section class="aprs-settings hidden" id="aprs-settings" role="dialog"/.test(html));
   const panel = html.slice(html.indexOf('id="aprs-settings" role="dialog"'));

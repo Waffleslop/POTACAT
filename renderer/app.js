@@ -2222,7 +2222,7 @@ async function loadPrefs() {
     meterBoxVisible = settings.showMeterBox;
     try { localStorage.setItem('meterBoxVisible', meterBoxVisible); } catch {}
     if (typeof meterBox !== 'undefined' && meterBox) {
-      meterBox.classList.toggle('hidden', !meterBoxVisible);
+      syncMeterBoxShown();
     }
     if (typeof quickShowMeter !== 'undefined' && quickShowMeter) {
       quickShowMeter.checked = meterBoxVisible;
@@ -3755,6 +3755,13 @@ function syncTxAudioInputRow() {
   if (blank) blank.textContent = ok && window.TxAudioInput.MODELS[model] == null ? 'Ask on first transmit' : 'Rear (data / ACC2 socket), the default';
 }
 if (rigModelSelect) rigModelSelect.addEventListener('change', syncTxAudioInputRow);
+// Sweep 1a: the DATA MOD to USB box, only for the Icoms POTACAT can set it on (lib/icom-usb-data-mod.js).
+function syncIcomUsbDataModRow() {
+  const row = document.getElementById('rig-icom-usb-data-mod');
+  if (!row || !window.IcomUsbDataMod) return;
+  row.classList.toggle('hidden', !window.IcomUsbDataMod.hasChoice(rigModelSelect ? rigModelSelect.value : ''));
+}
+if (rigModelSelect) rigModelSelect.addEventListener('change', syncIcomUsbDataModRow);
 {
   const reset = document.getElementById('rig-bands-reset');
   if (reset) reset.addEventListener('click', () => { rigBandsState.touched = false; loadRigBandsForModel(); });
@@ -3780,6 +3787,7 @@ async function openRigEditor(mode, rigId) {
       if (rigModelSelect) { rigModelSelect.value = rig.model || ''; syncYaesuLanMuteMonitorRow(); }
       { const t = document.getElementById('set-tx-audio-input'); if (t) t.value = rig.txAudioInput === 'front' || rig.txAudioInput === 'rear' ? rig.txAudioInput : ''; syncTxAudioInputRow(); }
       { const t = document.getElementById('set-tx-channel'); if (t) t.value = rig.txChannel === 'left' ? 'left' : 'both'; } // #654
+      { const t = document.getElementById('set-icom-usb-data-mod'); if (t) t.checked = !rig.icomUsbDataModOff; syncIcomUsbDataModRow(); } // sweep 1a: absent = on
       await populateRadioSection(rig.catTarget);
       // Per-rig audio source — populateRadioSection just rebuilt the options
       // for this rig's radio type, so the stored value (validated) sticks.
@@ -3844,6 +3852,7 @@ async function openRigEditor(mode, rigId) {
     fillSdrScopeForm(null);
     { const v = document.getElementById('set-voice-as-data'); if (v) v.checked = false; }
     { const v = document.getElementById('set-allow-power-off'); if (v) v.checked = false; }
+    { const v = document.getElementById('set-icom-usb-data-mod'); if (v) v.checked = true; syncIcomUsbDataModRow(); } // sweep 1a: a new rig starts on
     { const v = document.getElementById('set-amp-drive-on'); if (v) v.checked = false; }
     { const v = document.getElementById('set-amp-drive-w'); if (v) v.value = 10; }
     { const v = document.getElementById('set-packet-mode'); if (v) v.value = 'auto'; }
@@ -4001,6 +4010,8 @@ async function saveRigEditor() {
   const txAudioInputEl = document.getElementById('set-tx-audio-input');
   const rigTxAudioInput = txAudioInputEl && (txAudioInputEl.value === 'front' || txAudioInputEl.value === 'rear')
     && window.TxAudioInput && window.TxAudioInput.hasChoice(model) ? txAudioInputEl.value : ''; // #594
+  const icomUsbDataModEl = document.getElementById('set-icom-usb-data-mod');
+  const rigIcomUsbDataModOff = !!(icomUsbDataModEl && !icomUsbDataModEl.checked); // sweep 1a: stored only when off
   const txChannelEl = document.getElementById('set-tx-channel');
   const rigTxLeftOnly = !!(txChannelEl && txChannelEl.value === 'left'); // #654: absent = both channels
   const lanVoiceSsbEl = document.getElementById('set-lan-voice-ssb');
@@ -4038,6 +4049,7 @@ async function saveRigEditor() {
       if (rigAmpDriveW > 0) rig.ampDriveLimitW = rigAmpDriveW; else delete rig.ampDriveLimitW;
       if (rigTxAudioInput) rig.txAudioInput = rigTxAudioInput; else delete rig.txAudioInput;
       if (rigTxLeftOnly) rig.txChannel = 'left'; else delete rig.txChannel;
+      if (rigIcomUsbDataModOff) rig.icomUsbDataModOff = true; else delete rig.icomUsbDataModOff;
       if (rigLanVoiceInSsb) rig.lanVoiceInSsb = true; else delete rig.lanVoiceInSsb;
       if (rigPacketMode) rig.packetMode = rigPacketMode; else delete rig.packetMode; // absent = Automatic
       rig.flexBandAntennaMap = flexBandAntennaMap;
@@ -4071,6 +4083,7 @@ async function saveRigEditor() {
       ...(rigAmpDriveW > 0 ? { ampDriveLimitW: rigAmpDriveW } : {}),
       ...(rigTxAudioInput ? { txAudioInput: rigTxAudioInput } : {}),
       ...(rigTxLeftOnly ? { txChannel: 'left' } : {}),
+      ...(rigIcomUsbDataModOff ? { icomUsbDataModOff: true } : {}),
       ...(rigLanVoiceInSsb ? { lanVoiceInSsb: true } : {}),
       ...(rigPacketMode ? { packetMode: rigPacketMode } : {}),
       flexBandAntennaMap,
@@ -6749,22 +6762,28 @@ async function _gpRevokeFromOwnerBanner() {
       console.warn('[Guest Pass] blocked:', info);
     });
   }
-  // Serial CAT connected but the radio isn't honoring tune commands — point the
-  // user at the usual culprit (CAT RTS / Disable DTR/RTS) with a sticky warning
-  // rather than letting them assume "connected" means tuning works. (FTDX3000)
+  // A network CAT link (Flex / TS-2000 emulation over TCP, a K4 on the network:
+  // the only links lib/cat.js CatClient drives) answers but does not follow
+  // tune commands. Say what POTACAT saw, and where the cause can be. No serial
+  // RTS or DTR is involved on a network link, so no radio CAT RTS menu (#849:
+  // the old toast told the operator to turn the CAT RTS menu on, the opposite of the setup notes;
+  // a direct-serial radio that waits for RTS is tried with RTS/CTS by POTACAT
+  // itself, main.js serial handshake trial).
   if (window.api && window.api.onCatTuneUnconfirmed) {
     window.api.onCatTuneUnconfirmed((info) => {
-      const yaesuHint = info && info.isYaesu
-        ? ' On Yaesu (FTDX1200/3000/5000), set the radio’s CAT RTS menu to Enable.'
-        : '';
-      showLogToast(
-        'Radio connected but not responding to frequency changes. ' +
-        'Check your radio’s CAT settings and uncheck "Disable DTR/RTS on connect" in rig setup.' +
-        yaesuHint,
-        { warn: true, sticky: true });
+      showLogToast(catTuneUnconfirmedText(info), { warn: true, sticky: true });
     });
   }
 })();
+
+/** The sticky warning when a network CAT link answers but never moves to the frequency asked (#849). */
+function catTuneUnconfirmedText(info) {
+  const khz = info && info.targetHz ? (info.targetHz / 1000).toFixed(1) + ' kHz' : 'the frequency asked';
+  const tries = info && info.attempts ? ' after ' + info.attempts + ' tries' : '';
+  return 'The radio answers but did not move to ' + khz + tries + '. ' +
+    'This is a network CAT link, so it is not a cable or RTS setting: check that the program at the other end ' +
+    '(SmartSDR CAT, the TS-2000 emulation, the K4) lets POTACAT change the frequency.';
+}
 
 // ── Settings → ECHOCAT → Guest Pass generate form ──
 
@@ -9991,7 +10010,7 @@ function _buildEchocatCardHTML(tunnel, tail, devices, web) {
     detail = (tail.notReady || 'Tailscale is installed but not signed in.') + ' Or enable POTACAT Cloud Tunnel.';
   }
   if (pillCls === '' && !detail) {
-    detail = 'Available only on the local network. Enable POTACAT Cloud Tunnel or connect to your tailnet for remote access.';
+    detail = 'Available only on the local network. Turn on Cloud Tunnel, or connect to your tailnet, for remote access.';
   }
   // ECHOCAT access (lib/remote-access.js) overrides the reachability story:
   // Off = nothing listens; Cloud only = the LAN and tailnet see a closed port.
@@ -10343,7 +10362,7 @@ function _pairRenderState() {
       '<span class="pair-state-title">POTACAT Cloud Tunnel</span>' +
       '<span class="pair-state-body">' + statusText + ' Enable it for one-tap remote pairing.</span>' +
       '<div class="pair-state-actions">' +
-        '<button type="button" id="pair-enable-tunnel-btn" class="btn btn-primary btn-sm">Enable POTACAT Cloud Tunnel</button>' +
+        '<button type="button" id="pair-enable-tunnel-btn" class="btn btn-primary btn-sm">Turn on Cloud Tunnel</button>' +
       '</div>';
     const enableBtn = document.getElementById('pair-enable-tunnel-btn');
     if (enableBtn) {
@@ -17713,7 +17732,7 @@ quickShowMeter.addEventListener('change', () => {
   // (Electron session partition), which made the checkbox spring back to
   // enabled for users who disabled it. Reported by bjh 2026-04-23.
   window.api.saveSettings({ showMeterBox: meterBoxVisible });
-  meterBox.classList.toggle('hidden', !meterBoxVisible);
+  syncMeterBoxShown();
   document.getElementById('set-show-meter').checked = meterBoxVisible;
 });
 
@@ -18366,7 +18385,7 @@ async function openSettingsDialog(tab) {
     meterBoxVisible = s.showMeterBox;
     localStorage.setItem('meterBoxVisible', meterBoxVisible);
     quickShowMeter.checked = meterBoxVisible;
-    meterBox.classList.toggle('hidden', !meterBoxVisible);
+    syncMeterBoxShown();
   }
   document.getElementById('set-show-meter').checked = meterBoxVisible;
   setEnableBandActivity.checked = s.enableBandActivity === true;
@@ -19068,7 +19087,7 @@ settingsSave.addEventListener('click', async () => {
   meterBoxVisible = document.getElementById('set-show-meter').checked;
   localStorage.setItem('meterBoxVisible', meterBoxVisible);
   quickShowMeter.checked = meterBoxVisible;
-  meterBox.classList.toggle('hidden', !meterBoxVisible);
+  syncMeterBoxShown();
   const bandActivityEnabled = setEnableBandActivity.checked;
   const showBearingEnabled = setShowBearing.checked;
   const enableSplitViewVal = setEnableSplitView.checked;
@@ -22782,6 +22801,24 @@ function clampFloatingBox(box, storageKey) {
   box.style.right = 'auto';
   box.style.bottom = 'auto';
 }
+/**
+ * Show the meter box, and when it was hidden, put it inside the window first.
+ * It stays hidden until the radio's first reading, and clampFloatingBox skips
+ * a hidden box, so a box saved on a bigger window used to appear wherever it
+ * was saved: off the edge of a smaller one, with nothing pulling it back
+ * (NJ2DX 2026-11-21, IC-7300: "the S-meter floating panel disappeared";
+ * making the window bigger brought it back). Every way the box appears runs
+ * through here, so it always lands where it can be seen.
+ */
+function syncMeterBoxShown() {
+  if (!meterBox) return;
+  const wasHidden = meterBox.classList.contains('hidden');
+  meterBox.classList.toggle('hidden', !meterBoxVisible);
+  if (meterBoxVisible && wasHidden) clampFloatingBox(meterBox, 'meterBoxPos');
+}
+function showMeterBox() {
+  if (meterBoxVisible && meterBox && meterBox.classList.contains('hidden')) syncMeterBoxShown();
+}
 let _floatingBoxResizeTimer = null;
 window.addEventListener('resize', () => {
   clearTimeout(_floatingBoxResizeTimer);
@@ -22836,6 +22873,7 @@ window.addEventListener('resize', () => {
       left: parseInt(meterBox.style.left, 10),
       top: parseInt(meterBox.style.top, 10),
     }));
+    clampFloatingBox(meterBox, 'meterBoxPos'); // dropped past an edge: shown inside, the drop point kept
   });
 })();
 const smeterBarCanvas = document.getElementById('smeter-bar');
@@ -22845,27 +22883,40 @@ const swrTextEl = document.getElementById('swr-text');
 const alcBarCanvas = document.getElementById('alc-bar');
 const alcTextEl = document.getElementById('alc-text');
 
+// The meter's colours come from the theme (styles.css roles, which every
+// design-system theme points at its own through ds-bridge.css): the track is
+// the window's background, the ticks a border line, and a reading is ok /
+// warn / bad. Read when drawn, so a theme change shows at the next reading.
+function meterThemeColor(name, fallback) {
+  try { const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim(); return v || fallback; } catch { return fallback; }
+}
+function meterLevelColor(kind) {
+  if (kind === 'bad') return meterThemeColor('--bad', '#e94560');
+  if (kind === 'warn') return meterThemeColor('--warn', '#f0a500');
+  if (kind === 'idle') return meterThemeColor('--border-primary', '#333');
+  return meterThemeColor('--ok', '#4ecca3');
+}
 function drawMeterBar(canvas, level, color) {
   if (!canvas) return;
   const ctx = canvas.getContext('2d');
   const w = canvas.width, h = canvas.height;
   ctx.clearRect(0, 0, w, h);
-  ctx.fillStyle = '#1a1a2e';
+  ctx.fillStyle = meterThemeColor('--bg-primary', '#1a1a2e');
   ctx.fillRect(0, 0, w, h);
   const barW = Math.round(Math.max(0, Math.min(1, level)) * w);
   ctx.fillStyle = color;
   ctx.fillRect(0, 0, barW, h);
   // Tick marks
-  ctx.fillStyle = 'rgba(255,255,255,0.15)';
+  ctx.fillStyle = meterThemeColor('--border-secondary', 'rgba(255,255,255,0.15)');
   for (let i = 1; i <= 9; i++) {
     ctx.fillRect(Math.round(i * w / 12), 0, 1, h);
   }
 }
 
 window.api.onCatSmeter((val) => {
-  if (meterBoxVisible) meterBox.classList.remove('hidden');
+  showMeterBox();
   const level = val / 255;
-  const color = val < 80 ? '#4ecca3' : val < 160 ? '#ffd740' : '#e94560';
+  const color = meterLevelColor(val < 80 ? 'ok' : val < 160 ? 'warn' : 'bad');
   drawMeterBar(smeterBarCanvas, level, color);
   if (val <= 120) {
     smeterTextEl.textContent = 'S' + Math.round(val * 9 / 120);
@@ -22877,15 +22928,15 @@ window.api.onCatSmeter((val) => {
 
 window.api.onCatSwr((val) => {
   if (val <= 0) {
-    drawMeterBar(swrBarCanvas, 0, '#333');
+    drawMeterBar(swrBarCanvas, 0, meterLevelColor('idle'));
     swrTextEl.textContent = '—';
-    swrTextEl.style.color = '#666';
+    swrTextEl.style.color = meterThemeColor('--text-dim', '#666');
     return;
   }
-  if (meterBoxVisible) meterBox.classList.remove('hidden');
+  showMeterBox();
   const swr = 1.0 + (val / 60);
   const level = Math.min(1, (swr - 1) / 4);
-  const color = swr <= 1.5 ? '#4ecca3' : swr <= 2.0 ? '#ffd740' : swr <= 3.0 ? '#f0a500' : '#e94560';
+  const color = meterLevelColor(swr <= 1.5 ? 'ok' : swr <= 3.0 ? 'warn' : 'bad');
   drawMeterBar(swrBarCanvas, level, color);
   swrTextEl.textContent = swr < 10 ? swr.toFixed(1) : '>10';
   swrTextEl.style.color = color;
@@ -22900,36 +22951,36 @@ if (window.api.onCatFwdPower && pwrBarCanvas) {
   window.api.onCatFwdPower((watts) => {
     const w = Number(watts) || 0;
     if (w <= 0) {
-      drawMeterBar(pwrBarCanvas, 0, '#333');
+      drawMeterBar(pwrBarCanvas, 0, meterLevelColor('idle'));
       pwrTextEl.textContent = '—';
-      pwrTextEl.style.color = '#666';
+      pwrTextEl.style.color = meterThemeColor('--text-dim', '#666');
       return;
     }
-    if (meterBoxVisible) meterBox.classList.remove('hidden');
+    showMeterBox();
     const full = radioPower > 0 ? radioPower : 100;
     const level = Math.min(1, w / full);
-    drawMeterBar(pwrBarCanvas, level, '#4ecca3');
+    drawMeterBar(pwrBarCanvas, level, meterLevelColor('ok'));
     pwrTextEl.textContent = (w < 10 ? w.toFixed(1) : Math.round(w)) + ' W';
-    pwrTextEl.style.color = '#4ecca3';
+    pwrTextEl.style.color = meterLevelColor('ok');
   });
 }
 
 // Direct SWR ratio from FlexRadio vita49 (bypasses RM1 conversion)
 window.api.onCatSwrRatio((swr) => {
-  if (meterBoxVisible) meterBox.classList.remove('hidden');
+  showMeterBox();
   const level = Math.min(1, (swr - 1) / 4);
-  const color = swr <= 1.5 ? '#4ecca3' : swr <= 2.0 ? '#ffd740' : swr <= 3.0 ? '#f0a500' : '#e94560';
+  const color = meterLevelColor(swr <= 1.5 ? 'ok' : swr <= 3.0 ? 'warn' : 'bad');
   drawMeterBar(swrBarCanvas, level, color);
   swrTextEl.textContent = swr < 10 ? swr.toFixed(1) : '>10';
   swrTextEl.style.color = color;
 });
 
 window.api.onCatAlc((val) => {
-  if (meterBoxVisible) meterBox.classList.remove('hidden');
+  showMeterBox();
   // Radios report ALC on 0..255 scale (Kenwood RM3 / Yaesu RM2). Anything
   // above ~40% ALC is into compression — color accordingly.
   const pct = Math.min(1, val / 255);
-  const color = pct <= 0 ? '#666' : pct < 0.4 ? '#4ecca3' : pct < 0.7 ? '#ffd740' : pct < 0.9 ? '#f0a500' : '#e94560';
+  const color = pct <= 0 ? meterThemeColor('--text-dim', '#666') : meterLevelColor(pct < 0.4 ? 'ok' : pct < 0.9 ? 'warn' : 'bad');
   drawMeterBar(alcBarCanvas, pct, pct <= 0 ? '#333' : color);
   // A reading of ZERO is a reading. Rendering it as an em dash made it
   // identical to "this rig reports no ALC at all", so a K3 running with
@@ -33034,6 +33085,9 @@ function fmtJtcatOffset(ms) {
 
 function applyJtcatClock(d) {
   if (!jtcatSyncStatus) return;
+  // Only the buttons this OS can honour (main's canFix / canOpenSettings, lib/ntp.js).
+  if (d && jtcatClockSyncBtn) jtcatClockSyncBtn.style.display = d.canFix === false ? 'none' : '';
+  if (d && jtcatClockSetBtn) jtcatClockSetBtn.style.display = d.canOpenSettings === false ? 'none' : '';
   jtcatSyncStatus.classList.remove('jtcat-synced');
   jtcatSyncStatus.style.color = '';
   if (jtcatClockBanner) jtcatClockBanner.classList.add('hidden');

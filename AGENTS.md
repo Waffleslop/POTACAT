@@ -22,8 +22,10 @@ specific to this repo. This repo is public; nothing private goes in here.
 
 ## Run, test, build
 - `npm start` (dev), `npm start -- --headless` (no GUI, ECHOCAT server only; packaged: `POTACAT --headless`).
-- `npm test` = `node scripts/run-tests.js`. Add a new test file to that list. Layout and decode-contract
-  tests need Electron plus a native build; they skip locally and run in CI (`layout-tests` job).
+- `npm test` = `node scripts/run-tests.js`, in parallel (`--jobs 1` for one at a time). Add a new test file to that list.
+  `node scripts/run-tests.js --changed` runs only the tests for what you changed (quick, not the full run);
+  the full suite runs before every push (`node scripts/install-hooks.js` once per clone sets the pre-push hook).
+  Layout and decode-contract tests need Electron plus a native build; they skip locally and run in CI (`layout-tests` job).
 - `npm run build-natives` before anything that touches lib/*_native. `npm run dist:win` for a local installer.
 - Node 22. The Windows main checkout is CRLF; worktrees are LF. Source-text tests must pass on both.
 
