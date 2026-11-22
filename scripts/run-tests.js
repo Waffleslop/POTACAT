@@ -481,6 +481,7 @@ const TESTS = [
   'test/mercury-client-test.js',
   'test/radio-owner-test.js',
   'test/mercury-radio-bridge-test.js',
+  'test/mercury-listen-no-idle-lock-test.js',
   'test/mercury-audio-bridge-test.js',
   'test/mercury-app-protocol-test.js',
   'test/echocat-web-gate-test.js',

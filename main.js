@@ -6766,7 +6766,7 @@ async function runStationSetupTxTest(rigId, opts) {
   }
   _stationSetupTxBusy = true;
   try { return await _runStationSetupTxTest(rigId, opts); }
-  finally { _stationSetupTxBusy = false; }
+  finally { _stationSetupTxBusy = false; releaseRadio('setup-test'); }
 }
 
 async function _runStationSetupTxTest(rigId, { keepPower = false, voice = false } = {}) {
@@ -6782,7 +6782,17 @@ async function _runStationSetupTxTest(rigId, { keepPower = false, voice = false 
   const live = stationSetupLive(rig);
   if (!live.catConnected) return done({ result: 'error', message: 'Radio control is not working yet.' });
   if (_swrTripped) return done({ result: 'error', message: 'Transmit is blocked by the SWR guard. Run the antenna tuner or change bands, then test again.' });
-  if (jtcatTuneState.active || radioOwner !== 'none') return done({ result: 'error', message: 'Something else is transmitting right now (FT8, JS8 or a data mode). Stop it, then test again.' });
+  // Name whoever holds the radio, on screen and in session.log (#919): a bare
+  // "something else is transmitting" with no log line looked like broken CAT.
+  const heldBy = radioOwnerLib.txTestRefusal(radioOwner, { tuneActive: jtcatTuneState.active });
+  if (heldBy) { sendCatLog(heldBy.log); return done({ result: 'error', message: heldBy.message }); }
+  // Hold the radio for the whole test (released by runStationSetupTxTest), so
+  // an inbound Mercury call cannot key in the middle of it.
+  if (!acquireRadio('setup-test')) {
+    const late = radioOwnerLib.txTestRefusal(radioOwner);
+    if (late) sendCatLog(late.log);
+    return done({ result: 'error', message: late ? late.message : 'The radio is busy. Try again in a moment.' });
+  }
   // The test sends an AUDIO tone. In CW the radio keys but ignores audio, so
   // it transmits nothing — 0.0 W, SWR 1.0 — and the result blamed the audio
   // (K3SBP's 8600, 2026-09-25). Say so instead of keying. Never switch the
@@ -11221,7 +11231,12 @@ function openMercuryClient() {
   // state so disconnectMercury / the failsafe timer can see it.
   attachMercuryRadioBridge(mercuryClient, {
     keyPtt: (on) => { mercuryTxActive = on; handleRemotePtt(on, on ? { audio: true, emission: 'DATA', txKind: 'winlink' } : {}); },
-    acquire: () => acquireRadio('mercury'),
+    // A tune (the Tune button, the Transmit Test's tone) keys the radio
+    // without owning it; Mercury yields to it like to any owner (#919).
+    acquire: () => {
+      if (jtcatTuneState.active) { sendCatLog('[radio] mercury could not take the radio — a tune is in progress'); return false; }
+      return acquireRadio('mercury');
+    },
     release: () => releaseRadio('mercury'),
     abort: () => { try { mercuryClient.abort(); } catch {} },
     armFailsafe: armMercuryTxFailsafe,
@@ -11253,9 +11268,13 @@ function openMercuryClient() {
 }
 
 // Register the callsign + bandwidth, and (opt-in) put Mercury in LISTEN so it
-// answers inbound calls. LISTEN claims the radio up-front because an inbound
-// CALL will key PTT — Part 97 wants that attended, so it's default-OFF and the
-// operator opts in. Runs on every control (re)connect and after a session ends.
+// answers inbound calls. An inbound CALL will key PTT — Part 97 wants that
+// attended, so it's default-OFF and the operator opts in. LISTEN takes no radio
+// lock (#919): an idle listener held it for hours and refused FT8 and the
+// Transmit Test. The bridge takes the radio when a session actually starts
+// (CONNECTED or Mercury's PTT ON) and yields — ABORT, no PTT — when FT8, a tune
+// or the Transmit Test has it. Runs on every control (re)connect and after a
+// session ends.
 function onMercuryReady() {
   if (!mercuryClient || !mercuryClient.connected) return;
   const call = (settings.myCallsign || '').trim();
@@ -11263,14 +11282,8 @@ function onMercuryReady() {
   const bw = parseInt(settings.mercuryBw, 10);
   if (bw === 500 || bw === 2300 || bw === 2750) mercuryClient.setBandwidth(bw);
   if (settings.mercuryListen && call) {
-    if (acquireRadio('mercury')) {
-      mercuryClient.listen('ON');
-      sendCatLog(`[Mercury] LISTEN ON as ${call}`);
-    } else {
-      // Radio busy (JTCAT) — don't listen; we'd only collide on an inbound call.
-      mercuryClient.listen('OFF');
-      sendCatLog(`[Mercury] LISTEN deferred — radio in use by ${radioOwner}`);
-    }
+    mercuryClient.listen('ON');
+    sendCatLog(`[Mercury] LISTEN ON as ${call}`);
   }
 }
 
@@ -24079,8 +24092,9 @@ function startJtcat(mode) {
     // Mercury holds the radio, refuse this transmission and unwind the engine
     // cleanly. tx-end is guarded to NOT drop Mercury's PTT in this case.
     if (radioOwner === 'mercury') {
-      sendCatLog('[JTCAT] TX blocked — Mercury (HF data) owns the radio. Stop Mercury to transmit FT8.');
-      jtcatRefuseTx('Mercury (HF data) owns the radio');
+      const held = radioOwnerLib.describeRadioHolder(radioOwner);
+      sendCatLog(`[JTCAT] TX blocked — ${held.busy} ${held.fix} to transmit FT8.`);
+      jtcatRefuseTx(held.busy.replace(/\.$/, ''));
       return;
     }
     // Receiving from the WebSDR (#243): it cannot hear us and is not on the
@@ -48829,12 +48843,12 @@ function cloudShackNotice(text, kind) {
   ipcMain.on('mercury-cmd-listen', (_e, on) => {
     settings.mercuryListen = !!on; saveSettings(settings);
     if (!mercuryClient) return mercuryNotReady();
+    // LISTEN takes no radio lock (#919); a session takes it in the bridge.
     if (on) {
-      const got = acquireRadio('mercury');
-      if (got) { mercuryClient.myCall(onAirCall()); mercuryClient.listen('ON'); sendCatLog('[Mercury] LISTEN ON'); }
-      mercuryPopoutSend('mercury-link', { listening: got });
+      mercuryClient.myCall(onAirCall()); mercuryClient.listen('ON'); sendCatLog('[Mercury] LISTEN ON');
+      mercuryPopoutSend('mercury-link', { listening: true });
     } else {
-      mercuryClient.listen('OFF'); releaseRadio('mercury'); sendCatLog('[Mercury] LISTEN OFF');
+      mercuryClient.listen('OFF'); sendCatLog('[Mercury] LISTEN OFF');
       mercuryPopoutSend('mercury-link', { listening: false });
     }
   });
