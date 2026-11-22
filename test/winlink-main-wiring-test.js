@@ -429,7 +429,7 @@ test('the gateway reply says how it is ordered, on every surface', () => {
   const fn = fnBody(main, 'winlinkGateways');
   assert.ok(/const predicted = list\.some\(\(g\) => g\.quality != null\);/.test(fn));
   assert.ok(/WinlinkPat\.rankingNote\(\{ predicted, count: list\.length, hf \}\)/.test(fn));
-  assert.ok(/return \{ ok: true, mode, band: band \|\| '', list, predicted, note, leftOut \};/.test(fn));
+  assert.ok(/return \{ ok: true, mode, band: band \|\| '', list, predicted, note, leftOut(, \.\.\.\(listNote \? \{ listNote \} : \{\}\))? \};/.test(fn));
   assert.ok(/type: 'winlink-gateways', mode: r\.mode, band: r\.band, list: r\.list, predicted: !!r\.predicted, note: r\.note \|\| '', leftOut: r\.leftOut \|\| 0/.test(main), 'ECHOCAT gets predicted, note and leftOut');
   const proto = read('lib/echocat-protocol.js');
   assert.ok(/'winlink-gateways': \{[^}]*predicted: f\.optBoolean, note: f\.optString/.test(proto), 'declared on the wire');

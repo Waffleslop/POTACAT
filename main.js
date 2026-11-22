@@ -12102,6 +12102,8 @@ function writePatConfig({ varaAddr } = {}) {
     gpsdAddr: _winlinkGpsd ? `127.0.0.1:${_winlinkGpsd.port}` : '',
     // MERCURY gateways only when the operator has chosen Mercury (Settings, own VARA HF, Mercury box).
     mercury: WinlinkPat.mercuryChosen(settings),
+    // Settings' Other service codes: a club's own gateways (plan docs/winlink-custom-gateways-plan.md 2.2).
+    serviceCodes: settings.winlinkServiceCodes || '',
   });
   _patServiceCodes = cfg.service_codes;
   // Written owner-only where the OS honours it: it holds the Winlink password.
@@ -17105,7 +17107,7 @@ function winlinkRmslistSafe(opts) {
   return p;
 }
 
-async function winlinkGateways(mode, band) {
+async function winlinkGateways(mode, band, { refresh = false } = {}) {
   if (!patClient) return { ok: false, error: 'Pat is not running' };
   // Winlink lists Mercury-capable gateways under VARA (Mercury speaks VARA's
   // TNC protocol); the operator's own tagged list rides on top.
@@ -17115,14 +17117,39 @@ async function winlinkGateways(mode, band) {
   const predicting = !WinlinkModes.isFmMode(mode) && settings.winlinkPrediction !== false;
   const timeoutMs = predicting ? WINLINK_PREDICTED_LIST_MS : 30000;
   const t0 = Date.now();
+  let listNote = '';
   try {
-    // Pat's list file was fetched with other service codes (Mercury chosen or
-    // not since): download it once with the codes Pat has now.
-    const fresh = WinlinkPat.listNeedsDownload({ codes: _patServiceCodes, lastCodes: settings.winlinkListCodes });
-    let list = await winlinkRmslistSafe({ mode: patMode, band, timeoutMs, ...(fresh ? { forceDownload: true } : {}) });
-    if (fresh) {
+    // Pat never downloads its list file again by itself (plan 2.1). Download it
+    // when the operator pressed Refresh, when the service codes changed, and
+    // when the last download (per profile) is over 24 hours old. Always through
+    // winlinkRmslistSafe: its chain keeps list requests one at a time.
+    const listNow = Date.now();
+    let why = WinlinkPat.listDownloadReason({
+      codes: _patServiceCodes, lastCodes: settings.winlinkListCodes,
+      fetchedAt: settings.winlinkListFetchedAt, now: listNow, refresh, failedAt: _winlinkListFailedAt,
+    });
+    // A download already queued for the same automatic reason: this request
+    // waits behind it in the chain and gets the fresh file without a second one.
+    if (why && why !== 'refresh' && _winlinkListForcing) why = '';
+    const logOpts = { codeCount: _patServiceCodes.length, fetchedAt: settings.winlinkListFetchedAt, now: listNow };
+    if (why) _winlinkListForcing++;
+    let list = await winlinkRmslistSafe({ mode: patMode, band, timeoutMs, ...(why ? { forceDownload: true } : {}) })
+      .catch((e) => {
+        if (!why) throw e;
+        // Pat writes nothing when a forced download fails: its own list is still there.
+        _winlinkListFailedAt = Date.now();
+        const fellBack = WinlinkPat.listFallsBackToCache(e && e.message);
+        winlinkLog(WinlinkPat.listDownloadLogLine(why, { ...logOpts, ok: false, error: e && e.message, fellBack }));
+        if (!fellBack) throw e;
+        listNote = 'Winlink could not be reached, so this is the list downloaded before.';
+        return winlinkRmslistSafe({ mode: patMode, band, timeoutMs });
+      })
+      .finally(() => { if (why) _winlinkListForcing--; });
+    if (why && !listNote) {
+      _winlinkListFailedAt = 0;
       settings.winlinkListCodes = _patServiceCodes.join(',');
-      winlinkLog(`gateway list: downloaded again for service codes ${settings.winlinkListCodes}`);
+      settings.winlinkListFetchedAt = Date.now();
+      winlinkLog(WinlinkPat.listDownloadLogLine(why, { ...logOpts, ok: true }));
       try { saveSettings(settings); } catch {}
     }
     // MERCURY gateways only in the VARA HF list and only when Mercury is chosen;
@@ -17159,7 +17186,7 @@ async function winlinkGateways(mode, band) {
     const note = WinlinkMailView.gridNote(settings.grid) || WinlinkPat.rankingNote({ predicted, count: list.length, hf });
     const tell = `gateways (${mode}${band ? ', ' + band : ''})${WinlinkMailView.hasGrid(settings.grid) ? '' : ' with no grid square set'}: ${list.length} listed${onBands.dropped ? ' (' + onBands.dropped + ' the radio cannot call left out)' : ''}, ${predicted ? list.filter((g) => g.quality != null).length + ' with a propagation prediction' : 'nearest first' + (hf && settings.winlinkPrediction !== false && list.length ? (_voacapService.up === false ? ` — POTACAT's VOACAP service is not available (${_voacapService.why})` : ' — no prediction came back') : '')}`;
     if (tell !== _winlinkGatewaysLogged) { _winlinkGatewaysLogged = tell; winlinkLog(tell); }
-    return { ok: true, mode, band: band || '', list, predicted, note, leftOut };
+    return { ok: true, mode, band: band || '', list, predicted, note, leftOut, ...(listNote ? { listNote } : {}) };
   } catch (e) {
     // Said in the log: a list that never arrives was invisible in every bug
     // report (i5ekx: VARA HF, "it no longer downloads the list of gateways").
@@ -17168,6 +17195,10 @@ async function winlinkGateways(mode, band) {
   }
 }
 let _winlinkGatewaysLogged = '';
+/** When a forced list download last failed (the automatic reasons then wait an hour; lib/winlink-pat.js LIST_RETRY_MS). */
+let _winlinkListFailedAt = 0;
+/** Forced list downloads queued or running (an automatic reason does not queue a second). */
+let _winlinkListForcing = 0;
 const WINLINK_PREDICTED_LIST_MS = 120000;
 
 /**
@@ -17344,8 +17375,9 @@ async function winlinkHandleRemote({ type, req = {}, reply, clientId }) {
         result('recovery-email', await winlinkRecoveryEmailSet(req.email));
         return;
       case 'winlink-gateways-get': {
-        const r = await winlinkGateways(String(req.mode || 'ardop'), req.band || '');
-        if (r.ok) reply({ type: 'winlink-gateways', mode: r.mode, band: r.band, list: r.list, predicted: !!r.predicted, note: r.note || '', leftOut: r.leftOut || 0 });
+        // refresh (optional): the client's Refresh, a fresh download from Winlink.
+        const r = await winlinkGateways(String(req.mode || 'ardop'), req.band || '', { refresh: req.refresh === true });
+        if (r.ok) reply({ type: 'winlink-gateways', mode: r.mode, band: r.band, list: r.list, predicted: !!r.predicted, note: r.note || '', leftOut: r.leftOut || 0, ...(r.listNote ? { listNote: r.listNote } : {}) });
         else result('gateways', r);
         return;
       }
@@ -49094,7 +49126,7 @@ function cloudShackNotice(text, kind) {
     saveSettings(settings);
   });
   ipcMain.on('winlink-cmd-prompt', (_e, { id, value } = {}) => { winlinkAnswerPrompt(String(id), String(value)); });
-  ipcMain.handle('winlink-cmd-gateways', (_e, { mode, band } = {}) => winlinkGateways(String(mode || 'ardop'), band ? String(band) : ''));
+  ipcMain.handle('winlink-cmd-gateways', (_e, { mode, band, refresh } = {}) => winlinkGateways(String(mode || 'ardop'), band ? String(band) : '', { refresh: refresh === true }));
   ipcMain.handle('winlink-cmd-history', () => winlinkHistoryGet());
   ipcMain.handle('winlink-cmd-contact', (_e, { op, c } = {}) => winlinkContact(String(op || ''), c && typeof c === 'object' ? c : {}));
   ipcMain.handle('winlink-cmd-contact-group', (_e, { op, g } = {}) => winlinkContactGroup(String(op || ''), g && typeof g === 'object' ? g : {}));
@@ -54909,6 +54941,8 @@ function cloudShackNotice(text, kind) {
     if (newSettings && 'winlinkDeletedDays' in newSettings) setImmediate(() => { try { winlinkPush(); } catch {} });
     // APRS phase 4: the iGate switch and the callsign decide whether the uplink runs, and as whom.
     if (newSettings && 'aprsIgate' in newSettings) newSettings.aprsIgate = newSettings.aprsIgate === true;
+    // Other service codes: saved normalised, so a change of spacing is no change (lib/winlink-pat.js).
+    if (newSettings && 'winlinkServiceCodes' in newSettings) newSettings.winlinkServiceCodes = WinlinkPat.serviceCodesText(newSettings.winlinkServiceCodes);
     if (newSettings && ('aprsIgate' in newSettings || 'myCallsign' in newSettings)) setImmediate(() => { try { aprsUplinkWant(null); aprsIgateSync(); aprsIgatePush(); aprsBeaconPush(); } catch {} });
     if (newSettings && 'jtcatFakeIt' in newSettings) setImmediate(() => { fakeItSyncEngine(); sendCatLog(`[JTCAT] Split operation Fake It: ${fakeItEnabled() ? 'on' : 'off'}`); });
     // An always-on feature has no off: a stale window's false never lands.
@@ -54993,7 +55027,7 @@ function cloudShackNotice(text, kind) {
     // The password is in pat-config.json, so a new one needs a relaunch too.
     if (['enableLoggerCat', 'loggerCatPort'].some((k) => has(k) && newSettings[k] !== settings[k])) setTimeout(startLoggerCat, 0);
     const winlinkChanged = ['enableWinlink', 'winlinkPassword', 'winlinkPatPath', 'winlinkArdopPort', 'winlinkVaraPort', 'winlinkVaraFmPort', 'winlinkVaraHost', 'winlinkVaraFmHost',
-      'winlinkArdopBw', 'winlinkArdopArqTimeout', 'winlinkVaraBw', 'winlinkAgwPort', 'winlinkPrediction', 'winlinkPredictionUrl', 'myCallsign', 'grid']
+      'winlinkServiceCodes', 'winlinkArdopBw', 'winlinkArdopArqTimeout', 'winlinkVaraBw', 'winlinkAgwPort', 'winlinkPrediction', 'winlinkPredictionUrl', 'myCallsign', 'grid']
       .some((k) => has(k) && JSON.stringify(newSettings[k]) !== JSON.stringify(settings[k]))
       // Mercury chosen or not: Pat's service codes change (lib/winlink-pat.js mercuryChosen).
       || WinlinkPat.mercuryChosen(settings) !== WinlinkPat.mercuryChosen({ ...settings, ...newSettings });

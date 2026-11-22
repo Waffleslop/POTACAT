@@ -396,6 +396,7 @@ const TESTS = [
   'test/mercury-process-test.js',
   'test/mercury-offer-test.js', // Mercury experimental: no 2750 bandwidth; the chat window hidden until on-air use (Casey 2026-11-22)
   'test/winlink-pat-test.js',
+  'test/winlink-list-refresh-test.js', // the gateway list downloads again on Refresh and daily; Other service codes (plan docs/winlink-custom-gateways-plan.md 1-2)
   'test/winlink-reach-test.js',      // a radio session goes only where this radio can transmit
   'test/winlink-units-test.js',
   'test/winlink-spectrum-test.js',

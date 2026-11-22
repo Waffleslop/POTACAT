@@ -1199,7 +1199,8 @@
 
   var loadSeq = 0;
   var gwLoading = false;   // a list is being fetched or ranked (#435)
-  function loadGateways() {
+  // refresh = the round arrow: Pat downloads a fresh list from Winlink first.
+  function loadGateways(refresh) {
     var m = currentMode();
     if (m.id === 'telnet' || !m.available) return;
     var sel = $('wl-gateway');
@@ -1218,7 +1219,7 @@
     if (hf && state && state.predictionOn) predictStart(m.id); else predictStop();
     renderDial();
     renderFavBtn();
-    window.api.gateways(m.id, band).then(function (r) {
+    window.api.gateways(m.id, band, refresh === true).then(function (r) {
       if (seq !== loadSeq) return;
       gwLoading = false;
       // The "Ranking gateways" line from a Connect pressed early gives way to the session line.
@@ -1232,6 +1233,8 @@
       }
       // No grid square: no distances and no ranking; say what to set (#435).
       if (note) note.textContent = r.note && r.note === WinlinkMailView.gridNote('') ? r.note : '';
+      // Refresh pressed and Winlink could not be reached: say the list is the one from before.
+      if (note && !note.textContent && refresh === true && r.listNote) note.textContent = r.listNote;
       gateways = r.list || [];
       // The ranking is said on hover, not as a sentence beside the list (#254).
       sel.title = r.note || 'Gateways';

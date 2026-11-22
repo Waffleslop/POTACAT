@@ -1,6 +1,6 @@
 # Add your own Winlink gateways (plan)
 
-Status: plan, 2026-11-22. No code yet. Casey: "please plan for this."
+Status: plan, 2026-11-22. Casey: "please plan for this." Pieces 2.1 (list refresh on Refresh and daily) and 2.2 (Other service codes) built 2026-11-22 (feat/938); 2.3 (Add a gateway) held by Casey. The codes stay out of session.log (only their count is logged) until Casey answers whether they belong in logs and bug reports.
 
 The ask, from an operator: "Also would there be a way to add custom winlink gateways for digital
 section. There is a few on Long Island to my clubs winlink gateways that aren't populating that
