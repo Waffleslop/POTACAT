@@ -176,6 +176,7 @@ const TESTS = [
   'test/halt-tx-test.js',
   'test/refused-key-audio-test.js', // #214: a refused key-down plays no radio audio (Tune, SSTV, voice macro); a Tune stop during start-up wins
   'test/own-licence-tx-test.js',
+  'test/guest-pass-owner-class-test.js',
   'test/privileges-one-source-test.js', // #250: lib/privileges.js is the one table (renderer loads it); unverified classes never refuse TX; no change vs master
   'test/privileges-verified-gate-test.js', // #250: the ATU wizard and Guest Pass never refuse for an unverified licence class
   'test/rigctld-power-scale-test.js',
