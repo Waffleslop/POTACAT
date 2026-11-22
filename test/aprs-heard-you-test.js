@@ -295,7 +295,7 @@ test('the window draws it with theme tokens only', () => {
 console.log('\nmain.js glue');
 const main = readSrc(path.join(__dirname, '..', 'main.js'));
 test('a confirmed radio beacon starts the watch with the source call that went out', () => {
-  const at = main.indexOf('async function aprsRfTransmit()');
+  const at = main.indexOf('async function aprsRfTransmit('); // takes (why) since the 2 m timer (#885)
   const fn = main.slice(at, main.indexOf('\n}\n', at));
   const ok = fn.indexOf('if (res.ok && res.confirmed) {');
   const hook = fn.indexOf('aprsEcho.beaconSent(b.source)');

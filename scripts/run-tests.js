@@ -9,7 +9,15 @@
 // 433 hid the other 225), then a summary names each failure and the run exits
 // non-zero if any file failed. `node scripts/run-tests.js <substr>...` runs
 // only the files whose path contains one of the substrings.
-const { spawnSync } = require('child_process');
+//
+// 2026-11-21: the files run in parallel (every core but one; --jobs N or
+// POTACAT_TEST_JOBS to change it, --jobs 1 for the old one-at-a-time run).
+// Each file is still its own Node process; its output is buffered and printed
+// whole when it ends. Files in SERIAL (below the list) run alone afterwards.
+// `--changed [base]` runs only the tests for what changed (scripts/changed-tests.js).
+// `--help` lists the options.
+const { spawn } = require('child_process');
+const os = require('os');
 const path = require('path');
 
 const TESTS = [
@@ -281,6 +289,7 @@ const TESTS = [
   'test/aprs-templates-wiring-test.js', // APRS A2: templates as wired in main.js (context, per-profile list), the preload and the Messages view (nothing sends until Send)
   'test/aprs-messages-wiring-test.js', // APRS A1: messages end to end against a fake APRS-IS server, and the main.js/preload/window wiring (internet only)
   'test/aprs-rf-message-test.js', // APRS A3: messages over the radio: one press per try (automatic retries and radio acks only with their default-off settings, 2 m only), refusals in plain words, heard on radio, the frame and cap, end to end through the radio run and gate on a fake shim
+  'test/aprs-rf-timer-test.js', // APRS: the timed radio beacon, 2 m only, off by default, 10 min floor, never on a pick or open, a skipped round waits a full interval, the same gate as the click
   'test/log-comment-test.js',
   'test/raw-cat-command-test.js',
   'test/rigctld-stderr-test.js',
@@ -745,7 +754,8 @@ const TESTS = [
   'test/guest-pass-full-power-test.js', // a Guest Pass cap on a rig with Full power (W): real watts throughout; a 5 W rig transmits, a 100 W rig is capped
   'test/pacing-vs-mode-note-test.js', // a radio that drops replies gets only the pacing line; a wrong-model radio only the mode note
   'test/jtcat-tx-refused-test.js', // #190: a refused JS8 tx-start is not "fully transmitted"; FT8 refusal events identical to master; HALT never hidden by mode
-  'test/run-tests-runner-test.js', // #175: this runner keeps going past a failing file, names every failure, exits non-zero
+  'test/run-tests-runner-test.js', // #175: this runner keeps going past a failing file, names every failure, exits non-zero; parallel output never interleaves
+  'test/run-tests-changed-test.js', // --changed picks the tests that mention a changed file; main.js narrowed by changed function names and strings
   'test/update-check-feedback-test.js', // #186: a manual Check for Updates always ends in a visible message (checking, up to date, found, or the error + download page)
   'test/startup-prefetch-test.js', // the first window sooner: startup read-ahead, electron-updater on first use
   'test/tls-der-int-test.js', // ECHOCAT self-signed cert: the random serial is minimal DER (a leading 0x00 made OpenSSL reject ~1 in 512 certs)
@@ -757,34 +767,184 @@ const TESTS = [
   'test/tune-link-guard-test.js', // a potacat://tune link stops Run, Hunt, the WSPR beacon, the Spot Target, a QSO and TX before it tunes; notice in the main and JTCAT windows
 ];
 
+
+// Files that must run alone, after the parallel pool. Each was seen to fail
+// only when other files ran beside it (fixed ports, shared temp files, timing).
+// A file goes here with the reason; better to fix the test and take it out.
+const SERIAL = new Set([
+  'test/atu-wizard-test.js', // runs the wizard on a 40x clock over real timers; under load a point times out (K3SBP run 1 case)
+  'test/tci-audio-test.js', // 2 s budgets for a loopback TCI server to answer; missed in 2 of 9 parallel runs on a loaded machine, never alone
+  'test/paddle-bounce-test.js', // web keyer element timing in real milliseconds; a dash was cut short once under load
+]);
+
+// The longest files, started first so the pool does not wait on one that began
+// late (sstv-quality alone is about 6 minutes under load). Order only, never results.
+const SLOW_FIRST = [
+  'test/sstv-quality-test.js',
+  'test/sstv-lock-test.js',
+  'test/sstv-realistic-rx-test.js',
+  'test/sstv-e2e-test.js',
+  'test/jtty-decoder-test.js',
+  'test/external-atu-carrier-test.js',
+  'test/sculan10-test.js',
+  'test/flrig-codec-test.js',
+  'test/sstv-spec-timing-test.js',
+];
+
 const root = path.join(__dirname, '..');
 
-function runAll(list) {
-  const failed = [];
-  let n = 0;
-  for (const f of list) {
-    const r = spawnSync(process.execPath, [f], { cwd: root, stdio: 'inherit' });
-    n++;
-    if (r.status !== 0) {
-      const why = `exit ${r.status}${r.signal ? ', ' + r.signal : ''}`;
-      failed.push(`${f} (${why})`);
-      console.error(`
-[run-tests] FAILED: ${f} (${why}) — ${n} of ${list.length} run, continuing`);
-    }
-  }
+// Workers: --jobs N, then POTACAT_TEST_JOBS, then every core but one (at least 2).
+function defaultJobs() {
+  const env = parseInt(process.env.POTACAT_TEST_JOBS, 10);
+  if (env > 0) return env;
+  return Math.max(2, os.cpus().length - 1);
+}
+
+function why(code, signal) {
+  return `exit ${code}${signal ? ', ' + signal : ''}`;
+}
+
+function finish(list, failed) {
   if (failed.length) {
-    console.error(`
-[run-tests] ${list.length - failed.length} of ${list.length} test files passed, ${failed.length} failed:`);
+    console.error(`\n[run-tests] ${list.length - failed.length} of ${list.length} test files passed, ${failed.length} failed:`);
     for (const f of failed) console.error(`[run-tests]   ${f}`);
     process.exit(1);
   }
-  console.log(`
-[run-tests] all ${list.length} test files passed`);
+  console.log(`\n[run-tests] all ${list.length} test files passed`);
+  process.exit(0);
 }
 
-module.exports = { TESTS, runAll };
+// One file, its own Node process. inherit = live output (a file running alone);
+// otherwise stdout and stderr are kept in one buffer, in arrival order.
+function runFile(f, inherit) {
+  return new Promise((resolve) => {
+    const t0 = Date.now();
+    const child = spawn(process.execPath, [f], {
+      cwd: root,
+      stdio: inherit ? 'inherit' : ['ignore', 'pipe', 'pipe'],
+    });
+    const chunks = [];
+    if (!inherit) {
+      child.stdout.on('data', (c) => chunks.push(c));
+      child.stderr.on('data', (c) => chunks.push(c));
+    }
+    let done = false;
+    const end = (code, signal) => {
+      if (done) return;
+      done = true;
+      resolve({ f, code, signal, out: Buffer.concat(chunks), ms: Date.now() - t0 });
+    };
+    child.on('error', (e) => { chunks.push(Buffer.from(String(e && e.stack || e) + '\n')); end(-1, null); });
+    child.on('close', end);
+  });
+}
+
+// --jobs 1: today's behaviour exactly. One file after another, live output.
+async function runSerial(list) {
+  const failed = [];
+  let n = 0;
+  for (const f of list) {
+    const r = await runFile(f, true);
+    n++;
+    if (r.code !== 0) {
+      const w = why(r.code, r.signal);
+      failed.push(`${f} (${w})`);
+      console.error(`\n[run-tests] FAILED: ${f} (${w}) — ${n} of ${list.length} run, continuing`);
+    }
+  }
+  finish(list, failed);
+}
+
+async function runParallel(list, jobs) {
+  const order = new Map(list.map((f, i) => [f, i]));
+  const slow = SLOW_FIRST.filter((f) => order.has(f) && !SERIAL.has(f));
+  const pool = slow.concat(list.filter((f) => !SERIAL.has(f) && !slow.includes(f)));
+  const alone = list.filter((f) => SERIAL.has(f));
+  const failed = [];
+  let n = 0;
+  const report = (r) => {
+    n++;
+    process.stdout.write(`\n[run-tests] ${r.f} (${(r.ms / 1000).toFixed(1)} s)\n`);
+    if (r.out && r.out.length) process.stdout.write(r.out);
+    if (r.code !== 0) {
+      const w = why(r.code, r.signal);
+      failed.push({ i: order.get(r.f), s: `${r.f} (${w})` });
+      console.error(`\n[run-tests] FAILED: ${r.f} (${w}) — ${n} of ${list.length} run, continuing`);
+    }
+  };
+  let next = 0;
+  const worker = async () => {
+    while (next < pool.length) report(await runFile(pool[next++], false));
+  };
+  await Promise.all(Array.from({ length: Math.min(jobs, pool.length) }, worker));
+  if (alone.length) console.log(`\n[run-tests] ${alone.length} file(s) that run alone (SERIAL):`);
+  for (const f of alone) {
+    process.stdout.write(`\n[run-tests] ${f} (alone)\n`);
+    const r = await runFile(f, true);
+    r.out = null;
+    r.ms = 0;
+    n++;
+    if (r.code !== 0) {
+      const w = why(r.code, r.signal);
+      failed.push({ i: order.get(f), s: `${f} (${w})` });
+      console.error(`\n[run-tests] FAILED: ${f} (${w}) — ${n} of ${list.length} run, continuing`);
+    }
+  }
+  failed.sort((a, b) => a.i - b.i);
+  finish(list, failed.map((x) => x.s));
+}
+
+// Runs every file in the list, continues past failures, prints the summary and
+// exits (non-zero when any file failed). opts.jobs: worker count (1 = serial).
+function runAll(list, opts = {}) {
+  const jobs = opts.jobs > 0 ? opts.jobs : defaultJobs();
+  if (jobs <= 1 || list.length <= 1) return runSerial(list);
+  return runParallel(list, jobs);
+}
+
+const HELP = `node scripts/run-tests.js [options] [substring...]
+
+  (no options)      every file in the TESTS list, in parallel (${defaultJobs()} workers here);
+                    files in SERIAL run alone after the pool. Continues past failures.
+  substring...      only the files whose path contains one of the substrings.
+  --jobs N, -j N    N workers (also POTACAT_TEST_JOBS=N). --jobs 1 runs one file at a
+                    time with live output, the way the runner always worked.
+  --changed [base]  a quick filter for while you work: the tests that mention a file
+                    changed since 'git merge-base HEAD <base>' (default origin/master)
+                    or in the working tree, the changed test files, and this runner's
+                    own checks. Prints each pick and why. It is NOT the full run: the
+                    whole suite runs before every push (scripts/git-hooks/pre-push) and in CI.
+  --help            this text.`;
+
+function parseArgs(argv) {
+  const o = { jobs: 0, changed: false, base: 'origin/master', filters: [], help: false };
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (a === '--help' || a === '-h') o.help = true;
+    else if (a === '--jobs' || a === '-j') o.jobs = parseInt(argv[++i], 10) || 0;
+    else if (a.startsWith('--jobs=')) o.jobs = parseInt(a.slice(7), 10) || 0;
+    else if (a === '--changed') {
+      o.changed = true;
+      if (argv[i + 1] && !argv[i + 1].startsWith('-')) o.base = argv[++i];
+    } else if (a.startsWith('--changed=')) { o.changed = true; o.base = a.slice(10); }
+    else o.filters.push(a);
+  }
+  return o;
+}
+
+module.exports = { TESTS, SERIAL, SLOW_FIRST, runAll, parseArgs, defaultJobs };
 
 if (require.main === module) {
-  const only = process.argv.slice(2);
-  runAll(only.length ? TESTS.filter((f) => only.some((o) => f.includes(o))) : TESTS);
+  const o = parseArgs(process.argv.slice(2));
+  if (o.help) { console.log(HELP); process.exit(0); }
+  let list = TESTS;
+  if (o.changed) {
+    const { pickChangedTests } = require('./changed-tests');
+    const picked = pickChangedTests({ root, tests: TESTS, base: o.base, log: console.log });
+    list = TESTS.filter((f) => picked.has(f));
+    console.log(`[run-tests] --changed: ${list.length} of ${TESTS.length} test files (a quick filter, not the full run)`);
+    if (!list.length) process.exit(0);
+  }
+  if (o.filters.length) list = list.filter((f) => o.filters.some((s) => f.includes(s)));
+  runAll(list, { jobs: o.jobs });
 }

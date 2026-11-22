@@ -128,6 +128,19 @@
             </select>
           </div>
         </div>
+        <!-- The 2 m radio timer (Casey 2026-11-21): off by default, 10 min at the least, never on 30 m. -->
+        <div class="aprs-field aprs-rf-timer">
+          <span class="aprs-field-head"><label for="aprs-rf-interval">Radio timer (2 m only)</label>
+            <span class="aprs-help-wrap"><button type="button" class="aprs-help" id="aprs-rf-timer-help-btn" aria-label="What is the radio timer?" aria-describedby="aprs-rf-timer-help">?</button><span class="aprs-tip" role="tooltip" id="aprs-rf-timer-help">Sends your position on your radio every 10, 20 or 30 minutes, on 2 m only, while this window is open and Listen on my radio is on. The first one goes one full interval after you pick it. On 30 m every beacon is a click.</span></span>
+          </span>
+          <select id="aprs-rf-interval" aria-describedby="aprs-rf-timer-help aprs-rf-timer-note">
+            <option value="0">Off</option>
+            <option value="10">10 min</option>
+            <option value="20">20 min</option>
+            <option value="30">30 min</option>
+          </select>
+          <div class="aprs-note hidden" id="aprs-rf-timer-note"></div>
+        </div>
         <div class="aprs-note hidden" id="aprs-beacon-sends"></div>
 
         <!-- While a radio beacon goes out: live power and SWR. -->
