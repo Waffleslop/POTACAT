@@ -11774,6 +11774,12 @@ async function winlinkVaraReady(mode, { configured } = {}) {
       : ' on that computer';
     throw new Error(`${name} is not answering at ${where} — start ${name}${how} with its TCP port set to ${port} and its PTT set to VOX, then try again`);
   }
+  // Mercury in VARA HF's place (Settings, own VARA HF, the Mercury box;
+  // lib/winlink-pat.js mercuryChosen): POTACAT never starts or sets up VARA for it.
+  if (!probe.ok && kind === 'hf' && WinlinkPat.mercuryChosen(settings)) {
+    _winlinkSessionErrorKind = 'vara-not-answering';
+    throw new Error(`Mercury (experimental) is not answering at ${where} — start Mercury on this computer with its TCP port ${port} and -P none, then try again`);
+  }
   if (!probe.ok) {
     const bin = findVara(kind);
     if (settings.winlinkVaraAutoLaunch !== false && bin.found) {
@@ -12089,6 +12095,8 @@ function stopWinlinkGpsd() {
   _winlinkGpsd = null;
 }
 
+/** The service codes in the config Pat was last given (winlinkGateways downloads again when they changed). */
+let _patServiceCodes = ['PUBLIC'];
 /** Write Pat's config for this launch / this session. Returns the varahf address written. */
 function writePatConfig({ varaAddr } = {}) {
   const p = winlinkPaths();
@@ -12112,7 +12120,10 @@ function writePatConfig({ varaAddr } = {}) {
     prediction: winlinkPredictionConfig(),
     // #346: the Settings grid's centre for Pat's forms, from POTACAT's GPSd stand-in (lib/winlink-gpsd.js).
     gpsdAddr: _winlinkGpsd ? `127.0.0.1:${_winlinkGpsd.port}` : '',
+    // MERCURY gateways only when the operator has chosen Mercury (Settings, own VARA HF, Mercury box).
+    mercury: WinlinkPat.mercuryChosen(settings),
   });
+  _patServiceCodes = cfg.service_codes;
   // Written owner-only where the OS honours it: it holds the Winlink password.
   fs.writeFileSync(p.config, JSON.stringify(cfg, null, 2), { mode: 0o600 });
   _patVaraAddr = addr;
@@ -17125,7 +17136,18 @@ async function winlinkGateways(mode, band) {
   const timeoutMs = predicting ? WINLINK_PREDICTED_LIST_MS : 30000;
   const t0 = Date.now();
   try {
-    let list = await winlinkRmslistSafe({ mode: patMode, band, timeoutMs });
+    // Pat's list file was fetched with other service codes (Mercury chosen or
+    // not since): download it once with the codes Pat has now.
+    const fresh = WinlinkPat.listNeedsDownload({ codes: _patServiceCodes, lastCodes: settings.winlinkListCodes });
+    let list = await winlinkRmslistSafe({ mode: patMode, band, timeoutMs, ...(fresh ? { forceDownload: true } : {}) });
+    if (fresh) {
+      settings.winlinkListCodes = _patServiceCodes.join(',');
+      winlinkLog(`gateway list: downloaded again for service codes ${settings.winlinkListCodes}`);
+      try { saveSettings(settings); } catch {}
+    }
+    // MERCURY gateways only in the VARA HF list and only when Mercury is chosen;
+    // then that list is Mercury gateways only. Before anything sees the list.
+    list = WinlinkPat.gatewaysForChoice(list, { mode, mercury: WinlinkPat.mercuryChosen(settings) });
     const secs = Math.round((Date.now() - t0) / 1000);
     if (secs >= 20) winlinkLog(`gateway list (${mode}): Pat took ${secs} s to rank ${list.length} gateways by propagation`);
     if (predicting && list.some((g) => g.quality != null)) {
@@ -54994,7 +55016,9 @@ function cloudShackNotice(text, kind) {
     if (['enableLoggerCat', 'loggerCatPort'].some((k) => has(k) && newSettings[k] !== settings[k])) setTimeout(startLoggerCat, 0);
     const winlinkChanged = ['enableWinlink', 'winlinkPassword', 'winlinkPatPath', 'winlinkArdopPort', 'winlinkVaraPort', 'winlinkVaraFmPort', 'winlinkVaraHost', 'winlinkVaraFmHost',
       'winlinkArdopBw', 'winlinkArdopArqTimeout', 'winlinkVaraBw', 'winlinkAgwPort', 'winlinkPrediction', 'winlinkPredictionUrl', 'myCallsign', 'grid']
-      .some((k) => has(k) && JSON.stringify(newSettings[k]) !== JSON.stringify(settings[k]));
+      .some((k) => has(k) && JSON.stringify(newSettings[k]) !== JSON.stringify(settings[k]))
+      // Mercury chosen or not: Pat's service codes change (lib/winlink-pat.js mercuryChosen).
+      || WinlinkPat.mercuryChosen(settings) !== WinlinkPat.mercuryChosen({ ...settings, ...newSettings });
     const winlinkAutoCheckChanged = ['winlinkTelnetAutoCheck', 'winlinkTelnetAutoCheckMin']
       .some((k) => has(k) && newSettings[k] !== settings[k]);
     const mercuryChanged = (has('enableMercury') && newSettings.enableMercury !== settings.enableMercury) ||

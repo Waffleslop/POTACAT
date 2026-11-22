@@ -1496,6 +1496,7 @@ const setVaraFmPort = document.getElementById('set-vara-fm-port');
 const setVaraHfHost = document.getElementById('set-vara-hf-host');
 const setVaraFmHost = document.getElementById('set-vara-fm-host');
 const setVaraAutoLaunch = document.getElementById('set-vara-autolaunch');
+const setVaraHfMercury = document.getElementById('set-vara-hf-mercury');
 const setVaraCableIn = document.getElementById('set-vara-cable-in');
 const setVaraCableOut = document.getElementById('set-vara-cable-out');
 const setWinlinkCap = document.getElementById('set-winlink-cap');
@@ -18758,6 +18759,7 @@ async function openSettingsDialog(tab) {
       setVaraFmPath.value = s.winlinkVaraFmPath || '';
       setVaraFmPort.value = s.winlinkVaraFmPort || 8310;
       setVaraAutoLaunch.checked = s.winlinkVaraAutoLaunch !== false;
+      if (setVaraHfMercury) setVaraHfMercury.checked = s.winlinkVaraIsMercury === true;
       const cab = ((s.rigs || []).find((x) => x.id === s.activeRigId) || {}).modemCable || {};
       if (window.fillVaraCableDevices) window.fillVaraCableDevices(cab.inputId || '', cab.outputId || '');
     }
@@ -19661,6 +19663,7 @@ settingsSave.addEventListener('click', async () => {
         ...(setVaraHfHost ? { winlinkVaraHost: setVaraHfHost.value.trim() } : {}),
         ...(setVaraFmHost ? { winlinkVaraFmHost: setVaraFmHost.value.trim() } : {}),
         winlinkVaraAutoLaunch: setVaraAutoLaunch.checked,
+        ...(setVaraHfMercury ? { winlinkVaraIsMercury: setVaraHfMercury.checked } : {}),
       } : {}),
       winlinkSessionCapMin: Math.max(10, Math.min(60, parseInt(setWinlinkCap.value, 10) || 30)),
       winlinkPrediction: setWinlinkPrediction ? setWinlinkPrediction.checked : true,

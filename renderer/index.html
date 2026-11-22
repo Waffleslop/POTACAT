@@ -3520,6 +3520,8 @@
             <label>Bandwidth: <select id="set-winlink-vara-bw" style="width:80px;"><option value="500">500</option><option value="2300" selected>2300</option><option value="2750">2750</option></select></label>
             <span class="help-text" id="vara-hf-status"></span>
           </div>
+          <!-- In a div: .checkbox-label forces display:flex !important. Mercury phase 0 (docs/mercury-phase0-tester-guide.md). -->
+          <div><label class="checkbox-label" style="margin-top:4px;" title="For a Mercury modem you run yourself on this port in VARA HF's place. Mercury cannot call a VARA gateway."><input type="checkbox" id="set-vara-hf-mercury"> The modem on this port is Mercury (experimental): the VARA HF gateway list shows Mercury gateways only</label></div>
           <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:4px;">
             <label class="checkbox-label"><input type="checkbox" id="set-vara-fm-enable"> Use VARA FM</label>
             <label class="vara-win-only">Program: <input type="text" id="set-vara-fm-path" placeholder="C:\VARA FM\VARAFM.exe (found for you)" style="width:210px;"> <button type="button" id="vara-fm-browse">Browse&hellip;</button> <button type="button" id="vara-fm-find">Find / test</button></label>

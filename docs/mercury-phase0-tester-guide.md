@@ -1,6 +1,7 @@
 # Mercury phase 0: one Winlink session over Mercury (tester guide)
 
-Written 2026-11-22 for Mercury 1.9.25 and POTACAT 1.14.7 on Windows. Part of
+Written 2026-11-22 for Mercury 1.9.25 and a POTACAT test build after 1.14.7
+that has the Mercury box in step 5 (PR #929), on Windows. Part of
 `docs/mercury-winlink-modem-plan.md`, phase 0.
 
 Mercury is experimental. It is a young open-source HF modem by Rhizomatica
@@ -15,7 +16,8 @@ sound.
 
 It takes about an hour the first time. You need:
 
-- Windows, POTACAT 1.14.7 (or the test build you were sent), and a radio with
+- Windows, the POTACAT test build you were sent (1.14.7 does not have the
+  Mercury box in step 5), and a radio with
   a USB sound card that POTACAT already controls (CAT), for example an
   IC-7300, FT-710, FT-991A or TS-590.
 - A Winlink account that already works in POTACAT. If you have never sent
@@ -123,7 +125,12 @@ settings** and set:
 | **Host** | blank (this computer) |
 | **Port** | 8300 |
 | **Bandwidth** | 2300 |
-| **Start VARA for me when a session needs it** | unticked |
+| **The modem on this port is Mercury (experimental)** | ticked |
+
+The Mercury box tells POTACAT that the program on port 8300 is Mercury.
+POTACAT then asks Winlink for Mercury gateways too, the VARA HF gateway list
+shows Mercury gateways only, and POTACAT never starts or sets up the real VARA
+for this port. With the box unticked, nothing about Mercury shows anywhere.
 
 Do not press **Set up VARA HF for me** or **Find / test**: those are for the
 real VARA program.
@@ -139,29 +146,14 @@ Press Save.
 Open **More**, then **Winlink Mail**. Set **Send via** to **VARA HF (radio,
 your own VARA)**.
 
-**With a POTACAT test build that lists Mercury gateways:** Mercury gateways
-appear in the **Gateway** list with **MERCURY** after the call. Pick the one
-you chose in step 4. POTACAT sets the dial for you.
+The **Gateway** list shows only Mercury gateways, each with **MERCURY** after
+the call. Pick the one you chose in step 4. POTACAT sets the dial for you.
+The first list after you tick the box can take a little longer: POTACAT has
+Winlink's gateway list downloaded again with the Mercury gateways in it.
 
-**With POTACAT 1.14.7:** the Gateway list does not show Mercury gateways,
-because POTACAT asks Winlink for PUBLIC gateways only. Add the gateway as a
-favourite by hand:
-
-1. With the Winlink Mail window in front, press F12. A developer panel opens.
-   Click its **Console** tab.
-2. If the console says pasting is blocked, type `allow pasting` and press
-   Enter.
-3. Paste this line, with your gateway's call and its dial frequency in kHz
-   (the map's frequency minus 1.5), and press Enter:
-
-   ```
-   window.api.favourite('add', { call: 'GATEWAY-10', mode: 'vara', dialKhz: 7101.3 })
-   ```
-
-4. Close the developer panel and press the refresh button beside the
-   Gateway list (its tooltip says "Fetch the gateway list again"). The
-   gateway appears under **Favorites** (or **Favorites not in this list**).
-   Pick it.
+If the gateway you chose is not in the list, check that the radio is set up
+for that band (Settings > Radio) and press the refresh button beside the
+Gateway list (its tooltip says "Fetch the gateway list again").
 
 ## 7. Send and receive
 
@@ -189,7 +181,9 @@ favourite by hand:
 
 Press **Abort** in Winlink Mail at any time to stop the session and release
 the radio. When you are done, close the Mercury window (or press Ctrl+C in it),
-untick **Use VARA HF** if you do not use VARA, and Save.
+untick **The modem on this port is Mercury (experimental)** (and **Use VARA
+HF** if you do not use VARA), and Save. Your VARA HF gateway list is then as
+it was before.
 
 ## 9. What to send back
 
@@ -222,9 +216,10 @@ Mercury in.
   Mercury docs/WINLINK.md.
 - TNC ports 8300/8301, one client at a time, VERSION reply for Pat: Mercury
   docs/TNC.md.
-- POTACAT 1.14.7: `renderer/index.html` (labels), `lib/winlink-modes.js` (the
+- POTACAT: `renderer/index.html` (labels), `lib/winlink-modes.js` (the
   VARA HF mode and the Mercury port clash), `lib/winlink-pat.js` (Pat's
-  `service_codes` and the VARA HF address), `lib/vara-process.js` and main.js
+  `service_codes`, `mercuryChosen` and `gatewaysForChoice`: the Mercury box,
+  and the VARA HF address), `lib/vara-process.js` and main.js
   `winlinkVaraReady` (with Mercury already answering on 8300, POTACAT starts
-  no program), `lib/winlink-favourites.js` and `preload-winlink-popout.js`
-  (the favourite call in step 6).
+  no program; with the Mercury box ticked it never starts or sets up VARA for
+  that port).
