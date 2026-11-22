@@ -6,6 +6,8 @@
 <!-- Shared TX EQ chain (Phase 1). Also loaded by vfo-popout.html so
      both audio sources apply identical DSP. -->
 <script src="tx-eq-chain.js"></script>
+<script src="../lib/mac-mic-access.js"></script>
+<script src="../lib/freedv-speech-level.js"></script>
 <script>
 // Hidden BrowserWindow — WebRTC audio bridge between radio USB audio and phone
 let pc = null;
@@ -123,9 +125,9 @@ window.api.onStartAudio(async (config) => {
           error: isAlsaId
             ? 'The radio audio input is a raw ALSA device ("' + config.inputDeviceId + '"), which the audio bridge cannot open — '
               + 'no audio was captured (the microphone was NOT used). Pick the PulseAudio/PipeWire entry for the same '
-              + 'card in Settings > My Rigs > Audio, not the one under "ALSA hardware (raw)".'
+              + 'card in Settings > Radio, Edit the rig, Audio Devices, RX audio in, not the one under "ALSA hardware (raw)".'
             : 'Radio audio input not found, so no audio was captured (the microphone was NOT used). '
-              + 'Pick the radio\'s input again in Settings > My Rigs > Audio. Reason: ' + why,
+              + 'Pick the radio\'s input again in Settings > Radio, Edit the rig, Audio Devices, RX audio in. Reason: ' + why,
         });
         return; // no capture at all — see above
       }
@@ -149,7 +151,7 @@ window.api.onStartAudio(async (config) => {
       if (twinId) {
         localStream = await navigator.mediaDevices.getUserMedia({ audio: { ...baseAudio, deviceId: { exact: twinId } } });
         window.api.sendAudioStatus({
-          warning: 'No radio audio input is configured; used the input of the radio\'s sound card (the same device as its output). Set it in Settings > My Rigs > Audio to make this explicit.',
+          warning: 'No radio audio input is configured; used the input of the radio\'s sound card (the same device as its output). Set it in Settings > Radio, Edit the rig, Audio Devices, RX audio in, to make this explicit.',
         });
       } else if (config.daxTxDirect) {
         // No input configured on a route whose receive audio comes from main
@@ -161,7 +163,7 @@ window.api.onStartAudio(async (config) => {
         localStream = await navigator.mediaDevices.getUserMedia({ audio: baseAudio });
         window.api.sendAudioStatus({
           warning: 'No radio audio input is configured, so the system DEFAULT recording device was opened. '
-            + 'If that is a microphone, set the radio\'s input in Settings > My Rigs > Audio.',
+            + 'If that is a microphone, set the radio\'s input in Settings > Radio, Edit the rig, Audio Devices, RX audio in.',
         });
       }
     }
@@ -251,12 +253,12 @@ window.api.onStartAudio(async (config) => {
       // IC-7300 on Linux, 2026-10-20). Label resolved by id; an unset id is
       // the system default output, which is rarely the radio.
       try {
-        let label = 'the system default output (set the rig\'s audio Output in Settings > My Rigs)';
-        if (config.daxTxDirect) label = config.audioSource === 'icom-network' ? 'the radio over the LAN (Icom Network)' : 'SmartSDR direct (dax_tx stream)';
+        let label = 'the system default output (set it in Settings > Radio, Edit the rig, Audio Devices, TX audio out)';
+        if (config.daxTxDirect) label = config.audioSource === 'tci' ? 'the radio over TCI (Zeus)' : config.audioSource === 'icom-network' ? 'the radio over the LAN (Icom Network)' : config.audioSource === 'yaesu-lan' ? 'the radio over the LAN (Yaesu SCU-LAN10)' : 'SmartSDR direct (dax_tx stream)';
         else if (config.outputDeviceId) {
           const devs = await navigator.mediaDevices.enumerateDevices();
           const d = devs.find((x) => x.kind === 'audiooutput' && x.deviceId === config.outputDeviceId);
-          label = d ? (d.label || config.outputDeviceId) : ('an output device that is not present (' + config.outputDeviceId.slice(0, 12) + '…) — re-pick it in Settings > My Rigs');
+          label = d ? (d.label || config.outputDeviceId) : ('an output device that is not present (' + config.outputDeviceId.slice(0, 12) + '…) — pick it again in Settings > Radio, Edit the rig, Audio Devices, TX audio out');
         }
         window.api.sendAudioStatus({ txOutputLabel: label });
       } catch {}
@@ -431,12 +433,110 @@ window.api.onSignal(async (data) => {
   }
 });
 
-// FreeDV mute — disable radio audio track so ECHOCAT hears silence instead of raw USB
+// FreeDV mute: the raw radio audio (modem noise) is disabled while FreeDV
+// runs, and the decoded speech takes its place on the sender (below).
 window.api.onFreedvMute((muted) => {
   freedvMuted = muted;
   if (localStream) {
     localStream.getAudioTracks().forEach(t => { t.enabled = !muted; });
   }
+  if (!muted) restoreFromFreedvTrack();
+});
+
+// --- Decoded FreeDV speech to the phone (FDV1) ---
+// Same pattern as Kiwi/SmartSDR: main sends PCM frames, they are scheduled
+// back to back into a MediaStreamDestination, and the WebRTC sender's track
+// is swapped onto it. The phone plays it with no FreeDV code of its own, over
+// LAN, Cloud and Tailscale, and Guest Pass listeners hear it too. The level
+// is brought to about that of SSB receive audio (lib/freedv-speech-level.js),
+// and RX Level and the TX mute apply as on the radio track.
+let freedvCtx = null;
+let freedvDest = null;
+let freedvStream = null;
+let freedvGain = null;
+let freedvOnSender = false;
+let freedvNextPlayTime = 0;
+let freedvLeveller = null;
+
+function ensureFreedvTrack() {
+  if (freedvStream && freedvDest) {
+    const tracks = freedvStream.getAudioTracks();
+    if (tracks.length) return tracks[0];
+  }
+  if (!freedvCtx) freedvCtx = new AudioContext();
+  if (!freedvGain) {
+    freedvGain = freedvCtx.createGain();
+    freedvGain.gain.value = kiwiTxMuted ? 0 : _rxLevelLinear();
+  }
+  if (!freedvDest) {
+    freedvDest = freedvCtx.createMediaStreamDestination();
+    freedvGain.connect(freedvDest);
+  }
+  if (!freedvLeveller && window.FreedvSpeechLevel) freedvLeveller = window.FreedvSpeechLevel.createLeveller();
+  freedvStream = freedvDest.stream;
+  return freedvStream.getAudioTracks()[0] || null;
+}
+
+function tearDownFreedvGraph() {
+  freedvNextPlayTime = 0;
+  freedvOnSender = false;
+  if (freedvLeveller) freedvLeveller.reset();
+  if (freedvGain) { try { freedvGain.disconnect(); } catch {} freedvGain = null; }
+  if (freedvDest) { try { freedvDest.disconnect(); } catch {} freedvDest = null; }
+  if (freedvCtx) { freedvCtx.close().catch(() => {}); freedvCtx = null; }
+  freedvStream = null;
+}
+
+// FreeDV stopped: put the sender back on whatever carried audio before
+// (Kiwi/WebSDR, SmartSDR direct, or the rig / sidetone-mix track).
+function restoreFromFreedvTrack() {
+  if (!freedvOnSender) { tearDownFreedvGraph(); return; }
+  freedvOnSender = false;
+  if (pc && audioSender) {
+    let track = null;
+    let monitor = null;
+    if (kiwiActive) { track = ensureKiwiTrack(); monitor = kiwiStream; }
+    else if (smartActive && smartStream) { track = smartStream.getAudioTracks()[0] || null; monitor = smartStream; }
+    else { track = rigSenderTrack(); monitor = (mixActive && mixStream) ? mixStream : localStream; }
+    if (track) {
+      audioSender.replaceTrack(track).catch((e) => {
+        window.api.sendAudioStatus({ error: 'Restoring the radio audio after FreeDV failed: ' + e.message });
+      });
+      try { startHealthMonitor(monitor); } catch {}
+    }
+  }
+  tearDownFreedvGraph();
+}
+
+window.api.onFreedvSpeech((frame) => {
+  if (!freedvMuted) return;          // FreeDV not running for ECHOCAT
+  if (!frame || !frame.samples || !frame.samples.length) return;
+  if (kiwiActive) return;            // the phone is listening to an SDR, not the radio
+  const track = ensureFreedvTrack();
+  if (!track || !freedvCtx) return;
+  if (!freedvOnSender && pc && audioSender) {
+    freedvOnSender = true;
+    audioSender.replaceTrack(track).catch((e) => {
+      freedvOnSender = false;
+      window.api.sendAudioStatus({ error: 'FreeDV speech track replace failed: ' + e.message });
+    });
+    try { startHealthMonitor(freedvStream); } catch {}
+  }
+  if (freedvCtx.state === 'suspended') freedvCtx.resume().catch(() => {});
+  const samples = frame.samples instanceof Int16Array ? frame.samples : new Int16Array(frame.samples);
+  const pcm = freedvLeveller ? freedvLeveller.process(samples) : Float32Array.from(samples, (v) => v / 32768);
+  const rate = Number(frame.rate) || 8000;
+  const buf = freedvCtx.createBuffer(1, pcm.length, rate);
+  buf.getChannelData(0).set(pcm);
+  const src = freedvCtx.createBufferSource();
+  src.buffer = buf;
+  src.connect(freedvGain || freedvDest);
+  // Back to back, never more than 500 ms ahead of now.
+  const now = freedvCtx.currentTime;
+  if (freedvNextPlayTime < now) freedvNextPlayTime = now + 0.02;
+  if (freedvNextPlayTime > now + 0.5) freedvNextPlayTime = now + 0.02;
+  src.start(freedvNextPlayTime);
+  freedvNextPlayTime += buf.duration;
 });
 
 // --- DAX TX direct tap (bypasses Windows DAX TX device) ---
@@ -493,6 +593,7 @@ function _applyRxLevel() {
   const g = _rxLevelLinear();
   if (_rxGain) _rxGain.gain.value = g;
   if (smartGain) smartGain.gain.value = kiwiTxMuted ? 0 : g;
+  if (freedvGain) freedvGain.gain.value = kiwiTxMuted ? 0 : g;
 }
 window.api.onRxLevelUpdate((db) => {
   _rxLevelDb = Number(db) || 0;
@@ -778,9 +879,13 @@ const HEALTH_POST_TX_GRACE_MS = 1500; // suppress detection after PTT release
                                       // tripping a false silent flag. K3SBP
                                       // 2026-05-13 saw FT8 trip this mid-QSO.
 
+// #463: on a Mac that refuses the microphone, the rig's input is exact zeros
+// from the first buffer. lib/mac-mic-access.js watches; main decides what to say.
+let _micWatch = null;
 function startHealthMonitor(stream) {
   stopHealthMonitor();
   if (!stream || !window.api.sendAudioHealth) return;
+  _micWatch = (window.MacMicAccess && window.api.macMicSilence) ? new window.MacMicAccess.SilenceWatch(Date.now()) : null;
   _healthCtx = new AudioContext();
   const source = _healthCtx.createMediaStreamSource(stream);
   _healthAnalyser = _healthCtx.createAnalyser();
@@ -818,11 +923,23 @@ function startHealthMonitor(stream) {
       _healthSilentCount = 0;
       return;
     }
+    // FreeDV: the radio track is muted and decoded speech is silent between
+    // overs and when not in sync. Silence is the normal state, not a fault,
+    // and flagging it made the phone restart its audio over and over.
+    if (freedvMuted) {
+      _healthSilentCount = 0;
+      return;
+    }
     _healthAnalyser.getFloatTimeDomainData(buf);
     let peak = 0;
     for (let i = 0; i < buf.length; i++) {
       const v = Math.abs(buf[i]);
       if (v > peak) peak = v;
+    }
+    if (_micWatch) {
+      const now = Date.now();
+      const ev = _micWatch.note(peak, now);
+      if (ev) window.api.macMicSilence({ surface: 'echocat', silent: ev === 'silent', silentMs: _micWatch.silentFor(now) });
     }
     if (peak < HEALTH_PEAK_FLOOR) {
       _healthSilentCount++;
@@ -857,6 +974,7 @@ window.api.onStopAudio(() => {
   tearDownRxLevelGraph();
   tearDownStandIn();
   tearDownKiwiGraph();
+  tearDownFreedvGraph();
   tearDownLocalMixGraph();
   stopDaxTxTap();
   stopSinkTxGraph();
@@ -998,6 +1116,7 @@ window.api.onTxState((state) => {
   // SmartSDR-direct path needs the same TX-mute so the mobile listener
   // doesn't hear their own TX echoed back through the Flex receiver.
   if (smartGain) smartGain.gain.value = kiwiTxMuted ? 0 : _rxLevelLinear();
+  if (freedvGain) freedvGain.gain.value = kiwiTxMuted ? 0 : _rxLevelLinear();
   // Stamp the TX→RX transition so the audio-health detector can apply
   // its post-TX grace window. Without this, the detector would resume
   // counting silent samples the instant PTT released and false-fire on

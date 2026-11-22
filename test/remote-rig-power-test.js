@@ -90,7 +90,7 @@ test('RigController.setPowerState says whether it sent', () => {
 
 test('the shack applies both rules in the one dispatcher and tells the asker', () => {
   const off = caseBody(main, 'power-off');
-  assert.ok(/RigPower\.powerOffRefusal\(\{ source, transmitting: _isEffectivelyTransmitting\(\) \}\)/.test(off), 'rule 1 checked');
+  assert.ok(/RigPower\.powerOffRefusal\(\{\s*source, transmitting: _isEffectivelyTransmitting\(\),/.test(off), 'rule 1 checked');
   assert.ok(off.indexOf('powerOffRefusal') < off.indexOf('cat.setPowerState(false)'), 'checked before sending');
   assert.ok(/remoteServer\.sendToAsker\(\{ type: 'tune-blocked', reason: /.test(off), 'the asker hears why');
   const on = caseBody(main, 'power-on');

@@ -25,6 +25,13 @@ contextBridge.exposeInMainWorld('api', {
   // POTA self-spot by email (spot@pota.tdod.org), filled from the live activation.
   potaSpotTemplate: (o) => ipcRenderer.invoke('winlink-pota-spot-template', o || {}),
   onComposePrefill: (cb) => ipcRenderer.on('winlink-compose-prefill', (_e, m) => cb(m || {})),
+  // Winlink forms (#346): Pat's catalog, Pat's download of the standard forms, the form window,
+  // and the filled form coming back for the compose pane. send() carries its formId.
+  formsCatalog: () => ipcRenderer.invoke('winlink-forms-catalog'),
+  formsUpdate: () => ipcRenderer.invoke('winlink-forms-update'),
+  formOpen: (o) => ipcRenderer.invoke('winlink-form-open', o),
+  formInfo: (o) => ipcRenderer.invoke('winlink-form-info', o), // #346 phase 2: does this received form name a reply form?
+  onFormResult: (cb) => ipcRenderer.on('winlink-form-result', (_e, m) => cb(m || {})),
 
   // Sessions — Connect is the only way a radio session starts.
   connect: (o) => ipcRenderer.invoke('winlink-cmd-connect', o),
@@ -41,7 +48,7 @@ contextBridge.exposeInMainWorld('api', {
   // rig this window is the only thing hearing the radio, so it relays its
   // magnitudes to main (which decides Busy/Clear and pushes the frames).
   onRemoteWatch: (cb) => ipcRenderer.on('winlink-remote-watch', (_e, on) => cb(!!on)),
-  spectrumMags: (mags) => ipcRenderer.send('winlink-spectrum-mags', mags),
+  spectrumMags: (mags, inputPeak) => ipcRenderer.send('winlink-spectrum-mags', mags, inputPeak),
   onAudioFrame: (cb) => {
     // main sends frames through audioSafeSend, which bounds its backlog on
     // ACKs from here (batched, with a periodic flush). Without them main
@@ -77,7 +84,7 @@ contextBridge.exposeInMainWorld('api', {
   audioSave: (o) => ipcRenderer.invoke('winlink-audio-save', o),
   audioList: () => ipcRenderer.invoke('winlink-list-ardop-devices'),
   openSettings: () => ipcRenderer.send('winlink-open-settings'),
-  openFolder: () => ipcRenderer.send('winlink-open-folder'),
+  openFolder: () => ipcRenderer.invoke('winlink-open-folder'),
 
   // The radio: RF power setting (same payload as the JTCAT window), the
   // measured forward power and SWR, and the ONE dispatcher every surface

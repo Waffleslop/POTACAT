@@ -22,8 +22,10 @@ specific to this repo. This repo is public; nothing private goes in here.
 
 ## Run, test, build
 - `npm start` (dev), `npm start -- --headless` (no GUI, ECHOCAT server only; packaged: `POTACAT --headless`).
-- `npm test` = `node scripts/run-tests.js`. Add a new test file to that list. Layout and decode-contract
-  tests need Electron plus a native build; they skip locally and run in CI (`layout-tests` job).
+- `npm test` = `node scripts/run-tests.js`, in parallel (`--jobs 1` for one at a time). Add a new test file to that list.
+  `node scripts/run-tests.js --changed` runs only the tests for what you changed (quick, not the full run);
+  the full suite runs before every push (`node scripts/install-hooks.js` once per clone sets the pre-push hook).
+  Layout and decode-contract tests need Electron plus a native build; they skip locally and run in CI (`layout-tests` job).
 - `npm run build-natives` before anything that touches lib/*_native. `npm run dist:win` for a local installer.
 - Node 22. The Windows main checkout is CRLF; worktrees are LF. Source-text tests must pass on both.
 
@@ -55,6 +57,19 @@ assistant attribution.
 - `npm ci` in the worktree. Never link node_modules from the main checkout.
 - Rebase on origin/master before the PR. Small commits. Do not reorder or reformat main.js outside the change.
 - After merge: `git worktree remove`, delete the remote branch.
+
+## The main checkout follows master (Casey, 2026-11-15)
+Casey tests every merge by restarting POTACAT with `npm start` in the main desktop checkout
+(D:\Projects\potacat\desktop). After every merge into master, the merging agent updates it in the same step:
+1. `git -C <main checkout> pull --ff-only origin master`.
+2. If package-lock.json changed: `npm ci` there. If anything under lib/*_native or the native build
+   scripts changed: `npm run build-natives`. Both fail while POTACAT runs (Windows locks the files);
+   ask Casey to close it, then run them. Never stop his POTACAT yourself.
+3. Tell Casey in one line what merged and "restart POTACAT to test it".
+
+The main checkout never holds uncommitted work and is never used for feature work. Anything found
+there goes to a branch first; it is never discarded or stashed. If the fast-forward fails, stop and
+tell Casey; never reset or force. Full rule: the workspace docs/COORDINATION.md, Rule 4.
 
 ## ECHOCAT and Cloud
 The ECHOCAT protocol is ours: a change here means a handoff to the ECHOCAT repo (docs/handoffs/).

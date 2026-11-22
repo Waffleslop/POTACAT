@@ -161,15 +161,11 @@
     if (m.id === 'mercury') note = 'Experimental: few gateways run Mercury yet.';
     if (m.id === 'vara' || m.id === 'varafm') note = 'Your own ' + (m.id === 'varafm' ? 'VARA FM' : 'VARA HF') + ', with its PTT set to VOX — POTACAT starts it if needed and keys the radio.';
     if (m.note) note = m.note;   // a radio mode that runs with a caveat: no CAT control, the operator sets the dial (NA4DQ)
-    if (m.id === 'telnet') {
-      // Say WHY the radio modes are greyed — a tooltip on a disabled option
-      // is invisible on most systems. One line per distinct reason.
-      var seen = {};
-      var reasons = ((state && state.modes) || []).filter(function (x) { return !x.available && x.reason && !seen[x.reason] && (seen[x.reason] = 1); })
-        .map(function (x) { return x.reason; });
-      if (reasons.length) note = 'Radio: ' + reasons.join(' · ');
-    }
-    $('wl-mode-note').textContent = note;
+    // Say WHY the other modes are greyed, whichever mode is picked (#435) —
+    // a tooltip on a disabled option is invisible on most systems. One line
+    // per distinct reason, as ECHOCAT Web says it.
+    var why = WinlinkMailView.modeNoteLines((state && state.modes) || []);
+    $('wl-mode-note').textContent = [note].concat(why).filter(Boolean).join(' ');
     if (radio && !gateways.length) loadGateways(false);
     renderFavBtn();
     renderDial();
@@ -328,7 +324,12 @@
       var left = acts.filter(function (a) { return !a.danger; });
       var right = acts.filter(function (a) { return a.danger; });
       var deleted = openBox === WMA.DELETED;
+      // A Winlink form attachment (#346): Pat renders it in the form window.
+      var formAtt = !deleted && window.WinlinkForms ? window.WinlinkForms.formAttachment(m.attachments) : null;
       var html = '<div class="wl-reader-actions">'
+        + (formAtt ? '<button class="wl-btn" id="wl-view-form" title="Open the form this message carries, the way the sender filled it in">View form</button>' : '')
+        // Reply with form (#346 phase 2): shown once Pat's copy of the form says it names a reply form.
+        + (formAtt && (openBox === 'in' || openBox === 'archive') ? '<button class="wl-btn" id="wl-reply-form" hidden title="Answer with the reply form this form names, already linked to it">Reply with form</button>' : '')
         + left.map(btn).join('')
         + (!deleted && m.from && !contactFor(m.from) && WC.normalizeAddress(m.from) ? '<button class="wl-btn" id="wl-addbook">Add to address book</button>' : '')
         + '<span class="wl-spacer"></span>' + right.map(btn).join('') + '</div>'
@@ -336,6 +337,8 @@
         + (deleted ? '<div class="wl-del-note">' + esc(WMA.deletedNote(m, state && state.deletedDays, Date.now())) + '</div>' : '')
         + '<div class="wl-hdr"><b>' + esc(m.subject || '(no subject)') + '</b><br>From <b>' + esc(m.from) + '</b> · ' + esc(new Date(m.date).toLocaleString()) + '<br>To ' + esc((m.to || []).join(', '))
         + (m.cc && m.cc.length ? '<br>Cc ' + esc(m.cc.join(', ')) : '') + '</div>'
+        // How it went out (#442): gateway, dial and mode, or the internet; only when POTACAT kept it.
+        + (WMA.sentRouteLine(m.sentRoute) ? '<div class="wl-route" id="wl-route">' + esc(WMA.sentRouteLine(m.sentRoute)) + '</div>' : '')
         + '<div class="wl-body">' + esc(m.body || '') + '</div>'
         + (m.attachments && m.attachments.length ? '<div class="wl-attach">' + m.attachments.map(function (a) {
           // Pat cannot read its Deleted folder: an attachment there is named, and saved after Restore.
@@ -355,6 +358,24 @@
       // Reply all: never the default; To = the sender, Cc = everyone else but this station.
       on('wl-reply-all', function () { var ra = WMA.replyAll(m, mycall); compose({ to: ra.to.join(', '), cc: ra.cc.join(', '), subject: WMA.replySubject(m.subject), body: quoteBody(m) }); });
       on('wl-addbook', function () { openBook({ address: m.from }); });
+      if ($('wl-reply-form') && window.api.formInfo) window.api.formInfo({ box: openBox, mid: mid, file: formAtt.file }).then(function (r) {
+        var b = $('wl-reply-form');
+        if (b && openMid === mid && r && r.ok && r.reply) { b.hidden = false; b.title = 'Answer with the reply form ' + r.replyName + ', already linked to this message'; }
+      });
+      on('wl-reply-form', function () {
+        say('Opening the reply form...');
+        window.api.formOpen({ kind: 'reply', box: openBox, mid: mid, file: formAtt.file }).then(function (r) {
+          if (!r || !r.ok) say((r && r.error) || 'Could not open the reply form.', true);
+          else say('The reply form is open in its own window. Fill it in and press its Submit button; the reply comes back here for you to put in the Outbox.');
+        });
+      });
+      on('wl-view-form', function () {
+        say('Opening the form...');
+        window.api.formOpen({ kind: 'view', box: openBox, mid: mid, file: formAtt.file }).then(function (r) {
+          if (!r || !r.ok) say((r && r.error) || 'Could not open the form.', true);
+          else say('The form is open in its own window.');
+        });
+      });
       // #wl-forward, not #wl-fwd: that id is the PWR meter, which took the click.
       on('wl-forward', function () { compose({ subject: 'Fwd: ' + m.subject, body: '\n\n--- Forwarded from ' + m.from + ':\n' + (m.body || '') }); });
       acts.forEach(function (a) {
@@ -422,6 +443,11 @@
       $('wl-reader').style.display = 'none';
       $('wl-compose').classList.add('show');
       setTemplateMode(pre.template ? { id: pre.id || null } : null);
+      // A form's message (#346): Pat adds the form's data when it goes in the
+      // Outbox. A read-only form's body cannot be changed (the template says so).
+      composeForm = pre.form || null;
+      $('wl-c-body').readOnly = !!(composeForm && composeForm.readOnly);
+      $('wl-c-save-tpl').hidden = !!pre.template || !!composeForm;
       $('wl-c-name').value = pre.name || '';
       setChips('to', pre.to || '');
       setChips('cc', pre.cc || '');
@@ -432,7 +458,8 @@
       $('wl-c-err').textContent = '';
       // A template's instructions go in their own panel above the body.
       $('wl-c-hint').textContent = pre.note || '';
-      $('wl-c-hint').hidden = !pre.note;
+      if (composeForm) $('wl-c-hint').textContent = formNote(composeForm);
+      $('wl-c-hint').hidden = !$('wl-c-hint').textContent;
       (pre.template ? $('wl-c-name') : pre.to ? $('wl-c-body') : chipFields.to.input).focus();
     };
     if (pre && pre.template) go(); else requireNotice(go);
@@ -453,9 +480,10 @@
     $('wl-c-err').textContent = '';
     if (tplEdit) { saveTemplate(); return; }
     $('wl-c-send').disabled = true;
-    window.api.send({ to: chipValue('to'), cc: chipValue('cc'), subject: $('wl-c-subj').value, body: $('wl-c-body').value, attachments: pendingFiles }).then(function (r) {
+    window.api.send({ to: chipValue('to'), cc: chipValue('cc'), subject: $('wl-c-subj').value, body: $('wl-c-body').value, attachments: pendingFiles, formId: composeForm ? composeForm.id : undefined }).then(function (r) {
       $('wl-c-send').disabled = false;
       if (!r || !r.ok) { $('wl-c-err').textContent = (r && r.error) || 'Could not queue it'; return; }
+      composeForm = null;
       showReader('<div class="wl-empty">In the Outbox. It goes out on the next Send / Receive.</div>');
     });
   });
@@ -568,6 +596,88 @@
     $('wl-c-name').focus();
   });
 
+  // ── Winlink forms (#346) ─────────────────────────────────────────────────
+  // Pat's forms (lib/winlink-forms.js): favourites first, then every form,
+  // with a search. A form opens in its own window (Pat's own page); its
+  // Submit brings the message back to the compose pane above. Offered only
+  // with Pat 1.0.1 or newer; otherwise the panel says why in one sentence.
+  var composeForm = null;   // { id, name, readOnly } while the compose pane holds a form's message
+  var formsCat = null;      // main's answer: { ok, allowed, why, installed, version, count, favourites, forms }
+  function formNote(f) {
+    return 'Made with the Winlink form "' + f.name + '". Pat adds the form\'s data as an attachment, so Winlink Express and Pat show it as the form.'
+      + (f.readOnly ? ' This form\'s message may not be changed; fill the form in again to change it.' : '');
+  }
+  function formsSay(t, bad) { var el = $('wl-forms-msg'); el.textContent = t || ''; el.classList.toggle('bad', !!bad); }
+  function formItem(f) {
+    if (f.missing) return '<button type="button" class="wl-tpl-item" data-form-find="' + esc(f.search) + '"><span class="wl-tpl-main">' + esc(f.name) + '<span class="wl-tpl-sub">Not in this forms set by that name. Click to search for it.</span></span></button>';
+    return '<button type="button" class="wl-tpl-item" data-form-path="' + esc(f.path) + '"><span class="wl-tpl-main">' + esc(f.name) + '<span class="wl-tpl-sub">' + esc(f.folder) + '</span></span></button>';
+  }
+  function renderFormsPanel() {
+    var c = formsCat || {};
+    var usable = !!(c.ok && c.allowed);
+    var status = !c.allowed && c.why ? c.why
+      : !c.ok ? (c.error || 'Pat did not answer.')
+      : c.installed ? c.count + ' forms, Winlink Standard Forms version ' + (c.version || 'unknown') + '.'
+      : 'No forms on this computer yet. Pat gets the Winlink Standard Forms (about 3 MB) from getpat.io.';
+    $('wl-forms-status').textContent = status;
+    $('wl-forms-get').hidden = !usable;
+    $('wl-forms-get').textContent = c.installed ? 'Check for newer forms' : 'Get the standard forms';
+    $('wl-forms-find-row').hidden = !(usable && c.installed);
+    var favs = usable && c.installed ? (c.favourites || []) : [];
+    $('wl-forms-favs-wrap').hidden = !favs.length;
+    $('wl-forms-favs').innerHTML = favs.map(formItem).join('');
+    var q = String($('wl-forms-find').value || '').trim();
+    var list = !(usable && c.installed) ? [] : q ? window.WinlinkForms.searchForms(c.forms, q, 60) : (c.forms || []);
+    $('wl-forms-list-wrap').hidden = !(usable && c.installed);
+    $('wl-forms-list-head').textContent = q ? (list.length ? 'Found ' + list.length + (list.length === 60 ? ' (the first 60)' : '') : 'No form has those words') : 'All forms';
+    $('wl-forms-list').innerHTML = list.map(formItem).join('');
+  }
+  function openFormsPanel() {
+    requireNotice(function () {
+      showForm('wl-form-forms');
+      formsSay('');
+      formsCat = null;
+      $('wl-forms-status').textContent = 'Asking Pat for its forms...';
+      $('wl-forms-get').hidden = true;
+      $('wl-forms-find-row').hidden = true;
+      $('wl-forms-favs-wrap').hidden = true;
+      $('wl-forms-list-wrap').hidden = true;
+      window.api.formsCatalog().then(function (c) {
+        formsCat = c || { ok: false, allowed: true, error: 'Pat did not answer.' };
+        renderFormsPanel();
+        if (!$('wl-forms-find-row').hidden) $('wl-forms-find').focus();
+      });
+    });
+  }
+  $('wl-forms-btn').addEventListener('click', function () { closeTemplateMenu(); openFormsPanel(); });
+  $('wl-forms-close').addEventListener('click', function () { showReader('<div class="wl-empty">Pick a message.</div>'); });
+  $('wl-forms-find').addEventListener('input', renderFormsPanel);
+  $('wl-forms-get').addEventListener('click', function () {
+    var b = $('wl-forms-get');
+    b.disabled = true;
+    formsSay('Pat is getting the Winlink Standard Forms from getpat.io (about 3 MB)...');
+    window.api.formsUpdate().then(function (r) {
+      b.disabled = false;
+      formsSay((r && r.text) || 'That did not work. Try again.', !(r && r.ok));
+      return window.api.formsCatalog();
+    }).then(function (c) { if (c) { formsCat = c; renderFormsPanel(); } });
+  });
+  $('wl-form-forms').addEventListener('click', function (e) {
+    var find = e.target.closest('[data-form-find]');
+    if (find) { $('wl-forms-find').value = find.getAttribute('data-form-find'); renderFormsPanel(); $('wl-forms-find').focus(); return; }
+    var it = e.target.closest('[data-form-path]');
+    if (!it) return;
+    formsSay('Opening the form...');
+    window.api.formOpen({ kind: 'new', path: it.getAttribute('data-form-path') }).then(function (r) {
+      if (!r || !r.ok) { formsSay((r && r.error) || 'Could not open the form.', true); return; }
+      formsSay('The form is open in its own window. Fill it in and press its Submit button; the message comes back here for you to put in the Outbox.');
+    });
+  });
+  if (window.api.onFormResult) window.api.onFormResult(function (m) {
+    if (!m || m.error) { showForm('wl-form-forms'); formsSay((m && m.error) || 'The form did not come back.', true); return; }
+    compose({ to: m.to, cc: m.cc, subject: m.subject, body: m.body, form: { id: m.id, name: m.name, readOnly: !!m.readOnly } });
+  });
+
   // ── waterfall: is the gateway frequency in use? ──────────────────────────
   // 0–3000 Hz of the receiver's passband, from main's direct-audio frames
   // (Flex Direct / Icom Network) or, on a sound-device rig, the rig's own
@@ -603,6 +713,44 @@
     el.title = v.busy ? 'A signal in the modem’s band, ' + v.peakDb + ' dB over the noise — wait, or pick another gateway' : 'Nothing above the noise in the modem’s band';
   }
   var wfCtx = null, wfStream = null, wfAnalyser = null, wfTimer = null;
+  // Why the waterfall is black (lib/winlink-wf-audio.js): when no radio audio,
+  // or only exact zeros, reaches POTACAT, one plain line says so (N5XHI 2026-11-15).
+  var wfStartedAt = 0, wfLastFrameAt = 0, wfLastSoundAt = 0, wfCaptureErr = '', wfNoAudioTimer = null;
+  function wfListenStart() {
+    wfStartedAt = Date.now(); wfLastFrameAt = 0; wfLastSoundAt = 0; wfCaptureErr = '';
+    if (!wfNoAudioTimer) wfNoAudioTimer = setInterval(wfNoAudioRender, 1000);
+  }
+  // The modem's receive input level beside Busy/Clear (lib/winlink-wf-audio.js
+  // inputLevel): the same frames the waterfall draws, peak held 0.5 s, shown
+  // ~3 times a second; held still while we transmit (that is our own audio).
+  var inHold = new WinlinkWfAudio.PeakHold(), inLastRender = 0;
+  function inputLevelRender(peak) {
+    var v = WinlinkWfAudio.inputLevel(peak);
+    var el = $('wl-wf-input');
+    el.className = 'wl-input ' + v.state;
+    if (el.textContent !== v.text) el.textContent = v.text;
+    el.title = v.title;
+    el.hidden = !v.text;
+  }
+  function wfNoteFrame(pcm) {
+    var now = Date.now();
+    wfLastFrameAt = now;
+    if (WinlinkWfAudio.hasSound(pcm)) wfLastSoundAt = now;
+    if (state && state.session && state.session.ptt) return;
+    var pk = inHold.note(WinlinkWfAudio.framePeak(pcm), now);
+    if (now - inLastRender >= 300) { inLastRender = now; inputLevelRender(pk); }
+  }
+  function wfNoAudioRender() {
+    var el = $('wl-wf-noaudio');
+    var a = (state && state.audio) || {};
+    var text = WinlinkWfAudio.noAudioText({
+      mode: wfMode, now: Date.now(), startedAt: wfStartedAt, lastFrameAt: wfLastFrameAt, lastSoundAt: wfLastSoundAt,
+      bridge: a.bridge || null, captureError: wfCaptureErr,
+    });
+    if (el.textContent !== text) el.textContent = text;
+    el.hidden = !text;
+    if (text) inputLevelRender(0); // no audio: the line above says why, the readout steps aside
+  }
   var wfRe = new Float32Array(WF_N), wfIm = new Float32Array(WF_N), wfWin = null, wfMags = new Float32Array(WF_BINS);
 
   function fft(re, im) {
@@ -648,7 +796,7 @@
     fft(wfRe, wfIm);
     for (var b = 0; b < WF_BINS; b++) wfMags[b] = Math.log(wfRe[b] * wfRe[b] + wfIm[b] * wfIm[b] + 1e-12);
     busyUpdate(wfMags); // on every line, before any averaging
-    if (wfRemote && wfMode === 'capture') window.api.spectrumMags(Array.from(wfMags));
+    if (wfRemote && wfMode === 'capture') window.api.spectrumMags(Array.from(wfMags), inHold.peak); // + the held input peak for the devices' readout
     if (!wf || !$('wl-wf').classList.contains('show')) return;
     if (wfSpeed >= 60) { wf.pushFrame(wfMags); return; }
     for (var k = 0; k < WF_BINS; k++) wfAvg[k] += wfMags[k];
@@ -710,12 +858,13 @@
     }
     if (a.viaPotacat) {
       // Frames from main (the same ones the modem gets).
-      if (wfMode !== 'frames') { wfStopCapture(); wfMode = 'frames'; window.api.watchAudio(true); }
+      if (wfMode !== 'frames') { wfStopCapture(); wfMode = 'frames'; wfListenStart(); window.api.watchAudio(true); }
       return;
     }
     // A sound-device rig: capture its input here (the rig's FT8 input device).
     if (wfMode === 'capture') return;
     wfMode = 'capture';
+    wfListenStart();
     window.api.watchAudio(false);
     window.api.audioRig().then(function (rig) {
       var c = { audio: rig && rig.ok && rig.inputId ? { deviceId: { exact: rig.inputId }, echoCancellation: false, noiseSuppression: false, autoGainControl: false } : { echoCancellation: false, noiseSuppression: false, autoGainControl: false } };
@@ -732,9 +881,10 @@
       wfTimer = setInterval(function () {
         if (!wfAnalyser) return;
         wfAnalyser.getFloatTimeDomainData(buf);
+        wfNoteFrame(buf);
         wfAccLen = 0; wfPush(buf, wfCtx.sampleRate);
       }, 90);
-    }).catch(function (e) { $('wl-wf-note').textContent = 'No radio audio: ' + (e && e.message || e); });
+    }).catch(function (e) { wfCaptureErr = String(e && e.message || e); $('wl-wf-note').textContent = 'No radio audio: ' + wfCaptureErr; wfNoAudioRender(); });
   }
   function wfStopCapture() {
     if (wfTimer) { clearInterval(wfTimer); wfTimer = null; }
@@ -746,6 +896,9 @@
     wfStopCapture();
     if (wfMode === 'frames') window.api.watchAudio(false);
     wfMode = 'none';
+    if (wfNoAudioTimer) { clearInterval(wfNoAudioTimer); wfNoAudioTimer = null; }
+    $('wl-wf-noaudio').hidden = true;
+    inputLevelRender(0);
     $('wl-wf').classList.remove('show');
     if (!keepShowButton) $('wl-wf-show').classList.remove('show');
   }
@@ -753,6 +906,7 @@
   window.api.onAudioFrame(function (d) {
     if (wfMode !== 'frames' || !d || !d.pcm) return;
     var pcm = d.pcm instanceof Float32Array ? d.pcm : new Float32Array(d.pcm);
+    wfNoteFrame(pcm);
     wfPush(pcm, d.sampleRate || 24000);
   });
   function wfSync() {
@@ -932,7 +1086,7 @@
       if (hit) picked = true;
       return favOption(f, i, hit);
     }).join('') + '</optgroup>' : '';
-    var more = r.leftOut ? '<option value="" disabled>' + esc(r.leftOut + ' more this radio cannot call (outside the amateur bands, or bands not set up in Settings > My Rigs > Bands)') + '</option>' : '';
+    var more = r.leftOut ? '<option value="" disabled>' + esc(r.leftOut + ' more this radio cannot call (outside the amateur bands, or not ticked under Check all bands in Settings > Radio, Edit the rig)') + '</option>' : '';
     sel.innerHTML = '<optgroup label="' + (r.predicted ? 'Best path now' : 'Nearest first') + '">' + rows + '</optgroup>' + extra + more;
     if (pendingPick && !picked) {
       // A History row not in today's list is still callable: a row of its own at the top.
@@ -949,6 +1103,7 @@
   }
 
   var loadSeq = 0;
+  var gwLoading = false;   // a list is being fetched or ranked (#435)
   function loadGateways() {
     var m = currentMode();
     if (m.id === 'telnet' || !m.available) return;
@@ -957,6 +1112,7 @@
     var hf = m.id !== 'packet' && m.id !== 'varafm';
     var band = $('wl-band').value;
     var seq = ++loadSeq;
+    gwLoading = true;
     lastList = null;
     // Favorites are usable at once, while the list and its prediction load.
     favRows = favs().filter(function (f) { return f.mode === m.id && (!band || f.band === band); })
@@ -969,8 +1125,18 @@
     renderFavBtn();
     window.api.gateways(m.id, band).then(function (r) {
       if (seq !== loadSeq) return;
+      gwLoading = false;
+      // The "Ranking gateways" line from a Connect pressed early gives way to the session line.
+      if ($('wl-text').textContent === WinlinkMailView.connectWaitText(m.id, state && state.predictionOn)) renderSession((state && state.session) || {});
       predictStop();
-      if (!r || !r.ok) { sel.innerHTML = favHtml + '<option value="">' + esc((r && r.error) || 'No list') + '</option>'; pendingPick = null; renderDial(); renderFavBtn(); return; }
+      if (!r || !r.ok) {
+        sel.innerHTML = favHtml + '<option value="">' + esc(WinlinkMailView.gatewaysFailed().option) + '</option>';
+        // The reason in words, and where Try again is (#435).
+        if (note) note.textContent = WinlinkMailView.gatewaysFailed(r && r.error).text + ' Press the round arrow beside the list to try again.';
+        pendingPick = null; renderDial(); renderFavBtn(); return;
+      }
+      // No grid square: no distances and no ranking; say what to set (#435).
+      if (note) note.textContent = r.note && r.note === WinlinkMailView.gridNote('') ? r.note : '';
       gateways = r.list || [];
       // The ranking is said on hover, not as a sentence beside the list (#254).
       sel.title = r.note || 'Gateways';
@@ -1148,7 +1314,8 @@
       var o = { mode: m.id };
       if (m.id !== 'telnet') {
         var g = pickedGateway();
-        if (!g) { $('wl-text').textContent = 'Pick a gateway first'; return; }
+        // Still being fetched or ranked (up to about two minutes): say so, not "pick one" (#435).
+        if (!g) { $('wl-text').textContent = gwLoading ? WinlinkMailView.connectWaitText(m.id, state && state.predictionOn) : 'Pick a gateway first'; return; }
         o.gateway = g.call; o.dialKhz = g.dialKhz; o.url = g.url;
       }
       window.api.connect(o).then(function (r) {
@@ -1540,6 +1707,7 @@
 
   // ── the forms share the reading pane with the reader and compose ────────
   function hideForms() {
+    $('wl-form-forms').hidden = true;
     $('wl-form-pos').hidden = true;
     $('wl-form-spot').hidden = true;
     closeBook();

@@ -93,6 +93,13 @@
     } catch (_) { /* don't recurse */ }
   }
 
+  function pageHref() {
+    try { return (location && location.href) || ''; } catch (_) { return ''; }
+  }
+  function warnIgnored(txt) {
+    try { console.warn('[ECHOCAT banner] ignored, not our script:', txt); } catch (_) { /* no console */ }
+  }
+
   window.addEventListener('error', (e) => {
     // Suppress Safari's "Script error." cross-origin mask. When an async
     // error fires from a script Safari can't fully introspect (CORS-less
@@ -107,12 +114,31 @@
     const filename = e.filename || '';
     const msg = e.message || '';
     if (!filename && !e.lineno && msg === 'Script error.') return;
-    show((e.error && (e.error.stack || e.error.message)) || msg || 'unknown',
+    // Name and message first, then the stack: Safari's stack has no
+    // message in it (#806). lib/error-banner-text.js, inlined above.
+    const EBT = window.ErrorBannerText;
+    if (EBT) {
+      const r = EBT.formatErrorEvent(e);
+      // Line 1 of the page is "<!doctype html>": an error there is a
+      // browser-injected script (Brave for iOS), not ours. Log, no banner.
+      if (EBT.isForeignErrorEvent(e, pageHref())) { warnIgnored(r.src + ' ' + r.text); return; }
+      show(r.text, r.src);
+      return;
+    }
+    const err = e.error;
+    show((err && (String(err) + '\n' + (err.stack || ''))) || msg || 'unknown',
          filename + ':' + (e.lineno || '?'));
   });
   window.addEventListener('unhandledrejection', (e) => {
+    const EBT = window.ErrorBannerText;
+    if (EBT) {
+      const r = EBT.formatRejection(e.reason);
+      if (EBT.isForeignRejection(e.reason, pageHref())) { warnIgnored(r.src + ' ' + r.text); return; }
+      show(r.text, r.src);
+      return;
+    }
     const r = e.reason || {};
-    show(r.stack || r.message || String(r), 'unhandledrejection');
+    show(String(r) + '\n' + (r.stack || ''), 'unhandledrejection');
   });
 })();
 
@@ -187,6 +213,7 @@
   let clubMember = null;  // { callsign, firstname, role, licenseClass }
   let pingInterval = null;
   let lastPingSent = 0;
+  const wsLiveness = WsLiveness.create();
 
   // WebRTC
   let pc = null;
@@ -357,7 +384,7 @@
       logFreqPinnedKhz = 0;
     }
     if (!logFreqDirty && currentFreqKhz) {
-      logFreq.value = String(Math.round(currentFreqKhz * 10) / 10);
+      LogFreqField.fill(logFreq, currentFreqKhz); // shows 100 Hz, logs the hertz (#794)
     }
     if (!logTimeDirty) logStampNow();
   }
@@ -504,6 +531,13 @@
   // VFO Lock — mirrors desktop _vfoLocked, synced via WS.
   let vfoLocked = false;
   var qrzNameCache = {}; // callsign -> first name / nickname from QRZ
+  // Base callsign -> { name, state } from every qrz-result. CW macros take
+  // {op_firstname} and {state} from here for the call {call} sends, never from
+  // the tuned spot: with two spots on one frequency the tuned spot and the
+  // call being worked can be different stations (GitHub #524).
+  var qrzOpByCall = {};
+  var qrzOpPending = {};
+  var qrzOpWarmTimer = null;
   let tunedState = '';
   let currentNb = false;
   let currentAtu = false;
@@ -878,6 +912,7 @@
   // ended up blank. Defer the TX row from tx-status to the cycle-decode
   // handler so it lands AFTER the cycle separator instead of before.
   let ft8PendingTxMsg = '';
+  let ft8PendingTxHz = 0; // the offset that pending TX went out on (#503)
   let ft8QsoState = null;       // {mode, call, grid, phase, txMsg, report, sentReport} or null
   let ft8CycleSlot = '--';
   let ft8CountdownTimer = null;
@@ -1855,29 +1890,61 @@
           // jtcat-qso-logged: this page says which parks a JTCAT contact was
           // logged at when some were read from the activator's spot comment.
           // mail-folders-v2: this page shows the Deleted folder (#475), so the shack may push it.
-          capabilities: ['chunked-all-qsos', 'qso-delta', 'chunked-worked-qsos', 'local-cw-sidetone', 'jtcat-qso-logged', 'mail-folders-v2'],
+          // pass-state: on a Guest Pass, the shack sends pass-state {state,
+          // reason, ...} and lets a second device of the same guest wait
+          // instead of taking the radio (#541 step 2).
+          // worked-incremental: the full worked list comes once per connection;
+          // each logged QSO arrives in worked-today, merged below (#731).
+          // aprs: the shack sends aprs-state and, while the APRS tab (or the
+          // Map's APRS layer) is open, aprs-stations (APRS phase 6).
+          capabilities: ['chunked-all-qsos', 'qso-delta', 'chunked-worked-qsos', 'local-cw-sidetone', 'jtcat-qso-logged', 'mail-folders-v2', 'pass-state', 'worked-incremental', 'aprs'],
         }));
       } catch {}
       onOpen();
     };
     ws.onmessage = function(event) {
+      wsLiveness.messageReceived(Date.now());
       var msg;
       try { msg = JSON.parse(event.data); } catch { return; }
       handleMessage(msg);
     };
-    ws.onclose = function() {
-      clearInterval(pingInterval);
-      pingInterval = null;
-      if (bc) { try { bc.postMessage({ kind: 'connection', online: false, reason: wasKicked ? 'kicked' : 'closed' }); } catch {} }
-      if (wasKicked) return;
-      if (mainUI.classList.contains('hidden')) {
-        connectBtn.textContent = 'Connect';
-        connectBtn.disabled = false;
-      } else {
-        scheduleReconnect();
-      }
-    };
+    ws.onclose = onWsClosed;
     ws.onerror = function() {};
+  }
+
+  function onWsClosed() {
+    clearInterval(pingInterval);
+    pingInterval = null;
+    // The shack stops keying when it loses this page; the page's own keyer
+    // and sidetone stop too, so neither goes on without the other (#244).
+    if (cwKeyStreamOk && window.__echocatReleasePaddles) { try { window.__echocatReleasePaddles(false); } catch (e) {} }
+    if (bc) { try { bc.postMessage({ kind: 'connection', online: false, reason: wasKicked ? 'kicked' : 'closed' }); } catch {} }
+    if (wasKicked) return;
+    if (mainUI.classList.contains('hidden')) {
+      connectBtn.textContent = 'Connect';
+      connectBtn.disabled = false;
+    } else {
+      scheduleReconnect();
+    }
+  }
+
+  // A socket that died while the screen was off can still read OPEN, and
+  // anything sent on it is lost (lib/ws-liveness.js decides when). Detach it
+  // first so its late onclose cannot tear down the next socket, then take the
+  // normal close path; `now` skips the reconnect delay unless a retry is
+  // already scheduled (a Guest Pass wait keeps its own backoff).
+  function dropDeadSocket(now) {
+    var retryPending = !!reconnectTimer;
+    var dead = ws;
+    if (dead) {
+      dead.onopen = null; dead.onmessage = null; dead.onclose = null; dead.onerror = null;
+      try { dead.close(); } catch {}
+    }
+    onWsClosed();
+    if (now && !retryPending && !wasKicked && !mainUI.classList.contains('hidden')) {
+      if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+      reconnectNow();
+    }
   }
 
   function connect(token) {
@@ -1980,6 +2047,7 @@
         break;
 
       case 'auth-ok':
+        try { aprsOnReconnect(); } catch { /* pre-init */ }
         connectScreen.classList.add('hidden');
         mainUI.classList.remove('hidden');
         tabBar.classList.remove('hidden');
@@ -1995,6 +2063,7 @@
         vfoLocked = !!msg.vfoLocked;
         updateVfoLockUi();
         // ECHOCAT Web session (POTACAT Cloud): pass banner + Sign out row
+        passAuthRetries = 0;
         renderPassBanner(msg.passSession);
         renderWebSessionRow(msg.passSession);
         try { sessionStorage.removeItem('echocat-web-reload'); } catch {}
@@ -2128,7 +2197,7 @@
       // Pass, anything outside the pass (lib/guest-pass-authority.js). Said
       // out loud, never a silent dead control.
       case 'refused':
-        showToast(msg.text || ('Not available on a Guest Pass: ' + (msg.of || 'that control')), 4000, true);
+        showToast(msg.text || 'That is not available on a Guest Pass.', 4000, true);   // never msg.of: an internal name
         break;
 
       case 'voice-tx-hint':
@@ -2160,6 +2229,28 @@
         break;
 
       case 'auth-fail':
+        // The owner or another guest has the radio, the shack could not check
+        // a Guest Pass with Cloud, or the pass has not started: the pass is
+        // fine, so say which and ask again on a timer. Never "revoked" (#541).
+        if (window.PassWording && PassWording.isRetryableAuthFail(msg.code, msg.passReason)) {
+          var waitWords = (msg.passState && PassWording.describeState)
+            ? PassWording.describeState(msg.passState, { owner: passOwnerCall() })
+            : PassWording.describe({ kind: 'auth-fail', code: msg.code, by: msg.by, reason: msg.passReason, at: msg.passAt, owner: passOwnerCall() });
+          var waitText = [waitWords.title, waitWords.line].filter(Boolean).join(' ');
+          var waitMs = PassWording.retryDelayMs(msg.code, passAuthRetries, { reason: msg.passReason, at: msg.passAt });
+          passAuthRetries++;
+          if (reconnectTimer) clearTimeout(reconnectTimer);
+          reconnectTimer = setTimeout(function() { reconnectTimer = null; reconnectNow(); }, waitMs);
+          if (mainUI.classList.contains('hidden')) {
+            connectError.textContent = waitText;
+            connectError.classList.remove('hidden');
+            connectBtn.textContent = waitWords.action || 'Connect';
+            connectBtn.disabled = false;
+          } else {
+            showToast(waitText, 8000);
+          }
+          break;
+        }
         if (webCookieMode()) {
           // The cookie the server pre-authenticated on was refused after
           // all (expired device row, Guest Pass no longer valid). Nothing
@@ -2167,7 +2258,14 @@
           webSignOutAndReload('link-expired');
           break;
         }
-        connectError.textContent = msg.reason || 'Authentication failed';
+        if (msg.code === 'pass_not_valid' && window.PassWording) {
+          var overWords = (msg.passState && PassWording.describeState)
+            ? PassWording.describeState(msg.passState, { owner: passOwnerCall() })
+            : PassWording.describe({ kind: 'auth-fail', code: msg.code, reason: msg.passReason, at: msg.passAt, owner: passOwnerCall() });
+          connectError.textContent = [overWords.title, overWords.line].filter(Boolean).join(' ');
+        } else {
+          connectError.textContent = msg.reason || 'Authentication failed';
+        }
         connectError.classList.remove('hidden');
         connectBtn.textContent = authMode === 'club' ? 'Log In' : 'Connect';
         connectBtn.disabled = false;
@@ -2192,8 +2290,24 @@
       case 'pass-ended':
         // The owner ended or revoked the Guest Pass, or it expired.
         if (webCookieMode()) { webSignOutAndReload('pass-ended'); break; }
+        var endWords = window.PassWording ? PassWording.describe({ kind: 'pass-ended', reason: msg.reason, owner: passOwnerCall() }) : null;
         renderPassBanner(null);
-        showToast('Guest Pass ended' + (msg.reason ? ': ' + msg.reason : ''), 6000, true);
+        showToast(endWords ? [endWords.title, endWords.line].filter(Boolean).join(' ') : ('Guest Pass ended' + (msg.reason ? ': ' + msg.reason : '')), 8000, !endWords || endWords.terminal);
+        break;
+
+      case 'pass-paused':
+        // The owner took the radio back. The guest keeps listening and is
+        // back on the air when the owner hands it over (#541).
+        renderPassHold(true);
+        break;
+
+      case 'pass-resumed':
+        renderPassHold(false);
+        break;
+
+      case 'pass-state':
+        // The guest's state and why (#541 step 2), in the shared words.
+        renderPassState(msg);
         break;
 
       case 'audio-devices':
@@ -2210,6 +2324,10 @@
 
       case 'typed-call':
         sharedTypedCall = String(msg.call || '').trim().toUpperCase();
+        // Fetch the name/state for the call being worked once typing settles,
+        // so the first macro already has them (#524).
+        if (qrzOpWarmTimer) clearTimeout(qrzOpWarmTimer);
+        qrzOpWarmTimer = setTimeout(function() { qrzOpWarmTimer = null; requestQrzOp(sharedTypedCall); }, 800);
         break;
 
       case 'swr-ratio':
@@ -2359,6 +2477,11 @@
       }
 
       case 'qrz-result':
+        if (msg.callsign) {
+          var qrzKey = String(msg.callsign).toUpperCase();
+          qrzOpByCall[qrzKey] = { name: msg.nickname || msg.fname || '', state: msg.state || '' };
+          delete qrzOpPending[qrzKey];
+        }
         if (msg.callsign && msg.callsign.toUpperCase() === JtcatParser.baseCall(tunedCallsign)) {
           // Prefer nickname over fname (matches desktop QRZ display logic)
           tunedOpName = msg.nickname || msg.fname || '';
@@ -2539,6 +2662,13 @@
         break;
 
       case 'log-ok':
+        // A follow-up (#732): the QSO was confirmed and counted already; this
+        // only says how the re-spot went. It never touches the form, the
+        // contact list or the counts, and only a failure is shown.
+        if (msg.followUp) {
+          if (msg.respotError) showLogToast((msg.callsign || '') + ': re-spot failed', true);
+          break;
+        }
         logSaveBtn.disabled = false;
         ltSave.disabled = false;
         if (msg.success) {
@@ -2817,6 +2947,14 @@
           logbookQsos.push(msg.data);
           lbTotal = msg.total || logbookQsos.length;
           renderLogbook();
+          // worked-incremental (#731): the full worked list is not re-sent per
+          // QSO, so merge this one (back-dated ones too) with the same entry
+          // rule as the full list; a same-QSO last entry is replaced, not doubled.
+          if (typeof WorkedEntry !== 'undefined' && WorkedEntry.mergeRecord(workedQsos, msg.data)) {
+            ddPanel(spotsDropdown).querySelector('.rc-hide-worked-row').style.display = '';
+            renderSpots();
+            if (activeTab === 'map') renderMapSpots();
+          }
         }
         break;
 
@@ -2975,6 +3113,8 @@
           // the time the cycle decode arrives (~14s later), live append
           // would land in the *previous* cycle's section.
           ft8PendingTxMsg = ft8TxMsg;
+          // Its offset, kept with it: the slider may move before the row draws.
+          ft8PendingTxHz = msg.txFreq || 0;
         }
         // JTTY has no cycles: our transmission is a row in its list right now.
         if (ft8Mode === 'JTTY') jttyOnTxStatus(msg);
@@ -2989,8 +3129,20 @@
           const toast = document.createElement('div');
           toast.className = 'ft8-error-toast';
           toast.textContent = msg.error || 'Error';
+          // The retry cap stopped a QSO whose RR73 never came: not logged
+          // (#807). Send 73 puts the 73 on the air, which logs it.
+          if (msg.send73) {
+            toast.classList.add('ft8-error-toast-action');
+            const b = document.createElement('button');
+            b.type = 'button';
+            b.className = 'ft8-qso-skip-btn';
+            b.textContent = 'Send 73';
+            b.addEventListener('click', () => { ft8Send({ type: 'jtcat-skip-phase', unconfirmed: true }); toast.remove(); });
+            toast.appendChild(document.createTextNode(' '));
+            toast.appendChild(b);
+          }
           ft8View.appendChild(toast);
-          setTimeout(() => toast.remove(), 4000);
+          setTimeout(() => toast.remove(), msg.send73 ? 60000 : 4000);
           break;
         }
         ft8QsoState = (msg.phase && msg.phase !== 'idle') ? msg : null;
@@ -3013,6 +3165,13 @@
         break;
       case 'scope-state':
         scopeApplyState(msg);
+        break;
+      // APRS phase 6 (capability 'aprs'): the shack's APRS window on this page.
+      case 'aprs-state':
+        aprsApplyState(msg);
+        break;
+      case 'aprs-stations':
+        aprsApplyStations(msg);
         break;
 
       case 'jtcat-auto-cq-state':
@@ -3134,6 +3293,27 @@
   }
 
   // --- Status ---
+  // WSJT-X Mode at the shack (#547): status.wsjtxMode / wsjtxHeard. A chip in
+  // the header and an explain-only note; turning it off happens at the shack.
+  var wsjtxModeChip = document.getElementById('wsjtx-mode-chip');
+  var wsjtxModeNote = document.getElementById('wsjtx-mode-note');
+  var wsjtxModeOn = false;
+  var wsjtxNoteHidden = false; // the chip toggles the note for this page load
+  function applyWsjtxMode(on, heard) {
+    if (!wsjtxModeChip || !wsjtxModeNote) return;
+    if (on && !wsjtxModeOn) wsjtxNoteHidden = false;
+    wsjtxModeOn = on;
+    wsjtxModeChip.classList.toggle('hidden', !on);
+    wsjtxModeChip.title = on ? ('The shack is in WSJT-X Mode' + (heard ? '; WSJT-X is talking to POTACAT' : '; WSJT-X not heard')) : '';
+    var W = window.WsjtxModeNotice;
+    wsjtxModeNote.textContent = W ? W.remoteNote() : '';
+    wsjtxModeNote.classList.toggle('hidden', !on || wsjtxNoteHidden);
+  }
+  if (wsjtxModeChip) wsjtxModeChip.addEventListener('click', function () {
+    wsjtxNoteHidden = !wsjtxNoteHidden;
+    if (wsjtxModeNote) wsjtxModeNote.classList.toggle('hidden', !wsjtxModeOn || wsjtxNoteHidden);
+  });
+
   function updateStatus(s) {
     // Merged copy for custom toggles that follow the radio (fields a push
     // leaves out keep their last value).
@@ -3171,7 +3351,7 @@
       quickLogFollowRadio();
       // Display friendly name for FreeDV modes
       const mUp = s.mode.toUpperCase();
-      modeBadge.textContent = mUp.startsWith('FREEDV') ? (mUp.includes('RADE') ? 'RADE' : 'FreeDV') : s.mode;
+      modeBadge.textContent = FreedvDisplayMode.freedvBadge(s.mode); // lib/freedv-display-mode.js
       // PKTUSB / PKTLSB / DIGU / DIGL are SSB sub-band positions used for
       // FT8/FT4/FreeDV — they're voice-capable carriers, not CW. Without
       // these, FreeDV (which lands the rig on PKTLSB on lower bands and
@@ -3196,6 +3376,7 @@
       catDot.title = s.catConnected ? 'Radio connected' : 'Radio disconnected';
       settingsOverlay.classList.toggle('disabled', !s.catConnected);
     }
+    if (s.wsjtxMode !== undefined) applyWsjtxMode(!!s.wsjtxMode, !!s.wsjtxHeard);
     if (s.txState !== undefined) {
       txState = s.txState;
       txBanner.classList.toggle('hidden', !s.txState);
@@ -3282,10 +3463,23 @@
       if (rcSplitBtn) rcSplitBtn.classList.toggle('hidden', !s.capabilities.split);
       // Rig On/Off — show wherever the radio's CAT set supports PS0/PS1, 0x18, or equivalent.
       // Applies to both the Settings-overlay group and the VFO widget row.
+      // #485: powerOn false = off over CAT but not on (FTX-1): no On.
+      // #293: powerOff false = the shack could not switch it back on: no Off.
+      const offOnly = s.capabilities.powerOn === false;
+      const noOff = s.capabilities.powerOff === false;
+      const anyPower = !!s.capabilities.power && !(offOnly && noOff);
       const rcPowerGroup = document.getElementById('rc-power');
-      if (rcPowerGroup) rcPowerGroup.classList.toggle('hidden', !s.capabilities.power);
+      if (rcPowerGroup) rcPowerGroup.classList.toggle('hidden', !anyPower);
       const vfPowerRow = document.getElementById('vf-power-row');
-      if (vfPowerRow) vfPowerRow.classList.toggle('hidden', !s.capabilities.power);
+      if (vfPowerRow) vfPowerRow.classList.toggle('hidden', !anyPower);
+      const rcPowerOn = document.getElementById('rc-power-on');
+      if (rcPowerOn) rcPowerOn.classList.toggle('hidden', offOnly);
+      const vfPowerOn = document.getElementById('vf-power-on-btn');
+      if (vfPowerOn) vfPowerOn.classList.toggle('hidden', offOnly);
+      const rcPowerOff = document.getElementById('rc-power-off');
+      if (rcPowerOff) rcPowerOff.classList.toggle('hidden', noOff);
+      const vfPowerOff = document.getElementById('vf-power-off-btn');
+      if (vfPowerOff) vfPowerOff.classList.toggle('hidden', noOff);
       // Clamp TX power slider to radio's min/max
       if (s.capabilities.minPower != null) rcTxPowerSlider.min = s.capabilities.minPower;
       if (s.capabilities.maxPower != null) rcTxPowerSlider.max = s.capabilities.maxPower;
@@ -3727,8 +3921,7 @@
       currentFreqKhz = parseFloat(freqKhz);
     }
     if (mode) {
-      const mu = mode.toUpperCase();
-      modeBadge.textContent = mu.startsWith('FREEDV') ? (mu.includes('RADE') ? 'RADE' : 'FreeDV') : mode;
+      modeBadge.textContent = FreedvDisplayMode.freedvBadge(mode); // lib/freedv-display-mode.js
     }
     tunedFreqKhz = freqKhz;
     tunedCallsign = callsign;
@@ -3773,6 +3966,7 @@
         updateBandFreqs();
         if (ft8Running) ft8Send({ type: 'jtcat-set-mode', mode: ft8Mode });
         if (typeof applyDigitalPanes === 'function') applyDigitalPanes();
+        ft8ClearForModeChange('Switching to ' + ft8Mode + '...'); // #517, before the hunt below
       }
       ft8HuntCall = callsign.toUpperCase();
       // Clear decode log for fresh start
@@ -6392,12 +6586,16 @@
   // --- Ping / Latency ---
   function startPing() {
     if (pingInterval) clearInterval(pingInterval);
+    wsLiveness.reset(Date.now());
     pingInterval = setInterval(() => {
       if (ws && ws.readyState === WebSocket.OPEN) {
+        // No pong (or anything else) for about 10 s: the shack is gone.
+        if (wsLiveness.isDead(Date.now())) { dropDeadSocket(false); return; }
         lastPingSent = Date.now();
+        wsLiveness.pingSent(lastPingSent);
         ws.send(JSON.stringify({ type: 'ping', ts: lastPingSent }));
       }
-    }, 3000);
+    }, WsLiveness.PING_INTERVAL_MS);
   }
 
   // --- ECHOCAT Web session (POTACAT Cloud) ---
@@ -6457,7 +6655,66 @@
   }
   // Guest Pass banner under the status bar: who issued it and what it
   // allows, so a guest is never surprised by a refused mode or power.
+  var lastPassSession = null;
+  var passAuthRetries = 0;
+  function passOwnerCall() {
+    return (lastPassSession && lastPassSession.ownerCallsign) || '';
+  }
+  // The owner holds the radio (pass-paused): the banner says so, in the
+  // words POTACAT uses (lib/pass-wording.js). pass-resumed puts the
+  // normal Guest Pass line back.
+  function renderPassHold(held) {
+    var el = document.getElementById('pass-banner');
+    if (!el) return;
+    if (!held || !window.PassWording) { el.classList.remove('pass-held'); renderPassBanner(lastPassSession); return; }
+    var w = PassWording.describe({ kind: 'paused', owner: passOwnerCall() });
+    el.textContent = w.title + ' ' + w.line;
+    el.classList.add('pass-held');
+    el.classList.remove('hidden');
+  }
+  // The station's pass-state (#541 step 2): on the air with nothing to say
+  // shows the normal Guest Pass line; anything else is a wrapping notice in
+  // the shared words, with "Use it here instead" when another of this guest's
+  // devices has the radio (pass-claim, no redial), and "Take the radio" when
+  // the owner has not used it for 5 minutes (pass-take-back).
+  function renderPassState(ps) {
+    var el = document.getElementById('pass-banner');
+    if (!el || !window.PassWording || !PassWording.describeState) return;
+    if (!ps || (ps.state === 'on-air' && ps.reason === 'none')) {
+      el.classList.remove('pass-held');
+      el.classList.remove('pass-over');
+      renderPassBanner(lastPassSession);
+      return;
+    }
+    var w = PassWording.describeState(ps, { owner: passOwnerCall() });
+    if (!w.title) return;
+    el.textContent = '';
+    var span = document.createElement('span');
+    span.textContent = w.text;
+    el.appendChild(span);
+    // "Use it here instead" claims from this guest's other device; "Take the
+    // radio" (waiting/owner-idle, #200 step 4) takes it back after the
+    // owner's 5 idle minutes. The station answers both with pass-state.
+    var ask = null;
+    if (w.action === 'Use it here instead') ask = { type: 'pass-claim' };
+    else if (w.action === 'Take the radio') ask = { type: 'pass-take-back' };
+    if (ask) {
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'pass-state-btn';
+      btn.textContent = w.action;
+      btn.addEventListener('click', function() {
+        btn.disabled = true;
+        try { ws.send(JSON.stringify(ask)); } catch (e) {}
+      });
+      el.appendChild(btn);
+    }
+    el.classList.add('pass-held');
+    el.classList.toggle('pass-over', !!w.terminal);
+    el.classList.remove('hidden');
+  }
   function renderPassBanner(ps) {
+    if (ps && ps.code) lastPassSession = ps;
     // A Guest Pass session must never see the owner's billing (Cloud section
     // + top banner read this flag).
     window.__echoGuestPass = !!(ps && ps.code);
@@ -6494,18 +6751,21 @@
 
   // --- Reconnect ---
   let noTokenMode = false;
+  function reconnectNow() {
+    if (authMode === 'club') {
+      var call = clubCallInput.value.trim().toUpperCase();
+      var pass = clubPassInput.value;
+      if (call && pass) connectClub(call, pass);
+    } else {
+      connect(storedToken || '');
+    }
+  }
   function scheduleReconnect() {
     if (reconnectTimer) return;
     latencyEl.textContent = '--ms';
     reconnectTimer = setTimeout(function() {
       reconnectTimer = null;
-      if (authMode === 'club') {
-        var call = clubCallInput.value.trim().toUpperCase();
-        var pass = clubPassInput.value;
-        if (call && pass) connectClub(call, pass);
-      } else {
-        connect(storedToken || '');
-      }
+      reconnectNow();
     }, 3000);
   }
 
@@ -6583,7 +6843,7 @@
   function refreshLogTabFields() {
     // Pre-fill freq/mode from radio state
     if (currentFreqKhz && !ltFreq.value) {
-      ltFreq.value = String(Math.round(currentFreqKhz * 10) / 10);
+      LogFreqField.fill(ltFreq, currentFreqKhz); // shows 100 Hz, logs the hertz (#794)
     }
     if (currentMode && ltMode.value === 'SSB') {
       ltMode.value = currentMode;
@@ -6668,7 +6928,7 @@
 
   function submitLogTab() {
     const raw = ltCall.value.trim().toUpperCase();
-    const freq = ltFreq.value.trim();
+    const freq = LogFreqField.value(ltFreq);
     if (!raw) { ltCall.focus(); return; }
     if (!freq || isNaN(parseFloat(freq))) { ltFreq.focus(); return; }
 
@@ -6830,7 +7090,7 @@
     logCall.value = p.callsign || '';
     reportTypedCall('log', logCall.value); // a value set in code counts too
     webRenderWorkedMatrix(logCall, 'log-worked-matrix');
-    logFreq.value = p.freqKhz || (currentFreqKhz ? String(Math.round(currentFreqKhz * 10) / 10) : '');
+    LogFreqField.fill(logFreq, p.freqKhz ? parseFloat(p.freqKhz) : (currentFreqKhz || 0)); // shows 100 Hz, logs the hertz (#794)
     // INVARIANT: passing freqKhz means "this frequency is NOT the dial's" —
     // a spot's, a decode's — so it is treated as the operator's choice and
     // frozen. A caller whose frequency IS just the current dial must pass
@@ -6913,7 +7173,7 @@
   logForm.addEventListener('submit', (e) => {
     e.preventDefault();
     const rawCall = logCall.value.trim().toUpperCase();
-    const freq = logFreq.value.trim();
+    const freq = LogFreqField.value(logFreq);
     if (!rawCall) { logCall.focus(); return; }
     if (!freq || isNaN(parseFloat(freq))) { logFreq.focus(); return; }
 
@@ -7016,6 +7276,174 @@
   }
 
   // =============================================
+  // APRS (phase 6): the shack's APRS window on this page. Only with a shack
+  // that lists the 'aprs' capability (the tab appears with the first
+  // aprs-state). Rows come parsed from the desktop (lib/aprs-echocat.js); the
+  // icons are the APRS window's own (renderer/aprs-icons.js) and the ages and
+  // compass points are lib/aprs-stations.js, both inlined. The internet beacon
+  // only: the radio beacon is not reachable from here.
+  // =============================================
+  const aprsView = document.getElementById('aprs-view');
+  const aprsTabBtn = document.getElementById('aprs-tab-btn');
+  const aprsRows = new Map();          // key -> row
+  let aprsState = null;
+  let aprsSubscribedSent = false;
+  let aprsSnapshotParts = null;        // rows of a snapshot still arriving
+  let aprsMapOn = false;
+  try { aprsMapOn = localStorage.getItem('echocat-aprs-map') === '1'; } catch { /* private window */ }
+  let aprsMapLayer = null;
+  const aprsMarkers = new Map();       // key -> L.marker
+  let aprsMapFitted = false;           // the layer's first stations bring the map to them, once
+  let aprsListTimer = null;
+
+  function aprsSendMsg(m) {
+    try { if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(m)); } catch { /* not connected */ }
+  }
+  /** Watching while the APRS tab is open, or the Map tab with its APRS layer on. */
+  function aprsSyncSubscription(tab) {
+    const want = !!aprsState && (tab === 'aprs' || (tab === 'map' && aprsMapOn));
+    if (want === aprsSubscribedSent) return;
+    aprsSubscribedSent = want;
+    if (!want) { aprsRows.clear(); aprsSnapshotParts = null; aprsMapClear(); }
+    aprsSendMsg({ type: 'aprs-subscribe', on: want });
+  }
+  /** A new connection: the shack starts from nothing, so ask again if watching. */
+  function aprsOnReconnect() { aprsSubscribedSent = false; aprsRows.clear(); aprsMapClear(); }
+
+  function aprsApplyState(st) {
+    aprsState = st;
+    if (aprsTabBtn) aprsTabBtn.classList.remove('hidden');
+    aprsSyncSubscription(activeTab); // the first state, or the first after a reconnect
+    aprsRenderControls();
+  }
+
+  function aprsApplyStations(m) {
+    if (m.op === 'snapshot') {
+      if (m.chunk === 0) aprsSnapshotParts = [];
+      if (!aprsSnapshotParts) return;
+      for (const r of m.stations || []) aprsSnapshotParts.push(r);
+      if (m.chunk + 1 < m.totalChunks) return;
+      aprsRows.clear();
+      for (const r of aprsSnapshotParts) aprsRows.set(r.key, r);
+      aprsSnapshotParts = null;
+      aprsMapClear();
+    } else if (m.op === 'delta') {
+      for (const r of (m.add || []).concat(m.update || [])) aprsRows.set(r.key, r);
+      for (const k of m.gone || []) aprsRows.delete(k);
+    }
+    aprsScheduleRender();
+  }
+
+  function aprsScheduleRender() {
+    if (aprsListTimer) return;
+    aprsListTimer = setTimeout(() => { aprsListTimer = null; if (activeTab === 'aprs') aprsRenderList(); aprsMapSync(); }, 120);
+  }
+
+  function aprsAge(ms) { return window.AprsStations ? window.AprsStations.formatAge(Date.now() - ms) : ''; }
+  function aprsIcon(r, px) { return window.AprsIcons ? window.AprsIcons.svg(r.cls, px, r.course) : ''; }
+  function aprsDist(r) {
+    if (r.distanceKm == null) return '';
+    const mi = distUnit === 'km' ? false : true;
+    const d = mi ? r.distanceKm * 0.621371 : r.distanceKm;
+    const pt = window.AprsStations ? window.AprsStations.compass(r.bearing) : '';
+    return Math.round(d) + (mi ? ' mi' : ' km') + (pt ? ' ' + pt : '');
+  }
+
+  function aprsRenderControls() {
+    const st = aprsState;
+    if (!st || !aprsView) return;
+    const l = st.listen || {}, ig = st.igate || {}, b = st.beacon || {}, f = st.feed || {};
+    const feedWords = { connected: 'Internet: connected', connecting: 'Internet: connecting', waiting: 'Internet: reconnecting', refused: 'Internet: APRS-IS refused the connection', off: 'Internet: off', stopped: 'Internet: off', 'no-grid': 'Set your grid in Settings to see stations near you.' };
+    document.getElementById('aprs-feed').textContent = feedWords[f.state] || ('Internet: ' + (f.state || 'off'));
+    const sw = document.getElementById('aprs-listen');
+    sw.checked = !!l.on;
+    const chips = document.getElementById('aprs-bands');
+    chips.innerHTML = (l.bands || []).map((bd) => '<button type="button" class="aprs-chip' + (bd === l.band ? ' active' : '') + '" data-band="' + esc(bd) + '">' + esc(bd.replace('m', ' m')) + '</button>').join('');
+    let line = '';
+    if (l.on && l.state === 'listening') line = 'Listening on ' + (l.mhz ? l.mhz + ' MHz' : l.band) + (l.modeLabel ? ' ' + l.modeLabel : '') + ' · ' + (l.heard || 0) + ' heard' + (l.lastAt ? ', last ' + aprsAge(l.lastAt) : '');
+    else if (l.on && l.state === 'starting') line = 'Setting up the radio...';
+    document.getElementById('aprs-listen-line').textContent = line;
+    const igRow = document.getElementById('aprs-igate-row');
+    igRow.classList.toggle('hidden', st.mayIgate === false);
+    document.getElementById('aprs-igate').checked = !!ig.on;
+    document.getElementById('aprs-igate-line').textContent = ig.on ? (ig.paused ? ig.paused : (ig.active ? 'Reporting as ' + (ig.call || '') : 'On when the radio listens') + ' · ' + (ig.gated || 0) + ' sent') : '';
+    const bRow = document.getElementById('aprs-beacon-row');
+    bRow.classList.toggle('hidden', st.mayBeacon === false);
+    const bb = document.getElementById('aprs-beacon');
+    bb.disabled = !!b.sending;
+    bb.textContent = b.sending ? 'Sending...' : 'Beacon now (internet)';
+    document.getElementById('aprs-beacon-line').textContent = b.lastAt ? 'Last beacon ' + aprsAge(b.lastAt) + ' ago' + (b.backAt >= b.lastAt ? ', seen on APRS-IS' : '') : '';
+    document.getElementById('aprs-map-on').checked = aprsMapOn;
+    const ref = document.getElementById('aprs-refusal');
+    ref.textContent = st.refusal || '';
+    ref.classList.toggle('hidden', !st.refusal);
+  }
+
+  function aprsRenderList() {
+    const el = document.getElementById('aprs-list');
+    if (!el) return;
+    const q = (document.getElementById('aprs-search').value || '').trim().toUpperCase();
+    const mine = document.getElementById('aprs-mine').checked;
+    let rows = [...aprsRows.values()];
+    if (mine) rows = rows.filter((r) => r.heardByMe);
+    if (q) rows = rows.filter((r) => (r.label || '').toUpperCase().includes(q) || (r.comment || '').toUpperCase().includes(q));
+    rows.sort((a, b) => (a.distanceKm == null ? 1e9 : a.distanceKm) - (b.distanceKm == null ? 1e9 : b.distanceKm));
+    document.getElementById('aprs-count').textContent = rows.length + (rows.length === 1 ? ' station' : ' stations');
+    if (!rows.length) { el.innerHTML = '<div class="dir-empty">' + (aprsRows.size ? 'No station matches.' : 'No stations yet.') + '</div>'; return; }
+    el.innerHTML = rows.slice(0, 300).map((r) => {
+      const heard = r.heardByMe ? '<span class="aprs-heard">' + (r.rf && r.rf.kind === 'digi' ? 'Heard via ' + esc(r.rf.digi || 'digi') : 'Heard direct') + '</span>' : '';
+      const sp = r.speed ? ' · ' + Math.round(r.speed * (distUnit === 'km' ? 1.852 : 1.15078)) + (distUnit === 'km' ? ' km/h' : ' mph') : '';
+      return '<div class="aprs-row' + (r.heardByMe ? ' mine' : '') + '">' + aprsIcon(r, 26)
+        + '<div class="aprs-row-main"><div class="aprs-row-top"><span class="aprs-call">' + esc(r.label) + '</span>' + heard + '<span class="aprs-age">' + esc(aprsAge(r.lastHeard)) + '</span></div>'
+        + '<div class="aprs-row-sub">' + esc(aprsDist(r)) + esc(sp) + (r.comment || r.status ? ' · ' + esc(r.comment || r.status) : '') + '</div></div></div>';
+    }).join('');
+  }
+
+  // The Map tab's APRS layer: one marker per station, the window's icons.
+  function aprsMapClear() {
+    if (aprsMapLayer) aprsMapLayer.clearLayers();
+    aprsMarkers.clear();
+  }
+  function aprsMapSync() {
+    if (!spotMap || typeof L === 'undefined') return;
+    if (!aprsMapOn) { aprsMapFitted = false; if (aprsMapLayer) { spotMap.removeLayer(aprsMapLayer); aprsMapLayer = null; aprsMarkers.clear(); } return; }
+    if (!aprsMapLayer) aprsMapLayer = L.layerGroup().addTo(spotMap);
+    for (const [k, mk] of aprsMarkers) if (!aprsRows.has(k)) { aprsMapLayer.removeLayer(mk); aprsMarkers.delete(k); }
+    const pts = [];
+    for (const r of aprsRows.values()) {
+      if (r.lat == null || r.lon == null) continue;
+      pts.push([r.lat, r.lon]);
+      const icon = L.divIcon({ className: 'aprs-pin' + (r.heardByMe ? ' mine' : ''), html: aprsIcon(r, 22), iconSize: [22, 22], iconAnchor: [11, 11] });
+      let mk = aprsMarkers.get(r.key);
+      if (!mk) {
+        mk = L.marker([r.lat, r.lon], { icon, keyboard: false });
+        mk.addTo(aprsMapLayer);
+        aprsMarkers.set(r.key, mk);
+      } else { mk.setLatLng([r.lat, r.lon]); mk.setIcon(icon); }
+      mk.bindPopup('<b>' + esc(r.label) + '</b><br>' + esc(aprsDist(r)) + (r.comment ? '<br>' + esc(r.comment) : '') + '<br>' + esc(aprsAge(r.lastHeard)) + (r.heardByMe ? ' · heard on my radio' : ''));
+    }
+    if (!aprsMapFitted && pts.length) { aprsMapFitted = true; try { spotMap.fitBounds(pts, { maxZoom: 9, padding: [20, 20] }); } catch { /* map not sized yet */ } }
+  }
+
+  if (aprsView) {
+    document.getElementById('aprs-listen').addEventListener('change', (e) => aprsSendMsg({ type: 'aprs-listen', on: !!e.target.checked }));
+    document.getElementById('aprs-bands').addEventListener('click', (e) => {
+      const b = e.target.closest('.aprs-chip');
+      if (!b) return;
+      aprsSendMsg({ type: 'aprs-listen', on: !!(aprsState && aprsState.listen && aprsState.listen.on), band: b.dataset.band });
+    });
+    document.getElementById('aprs-igate').addEventListener('change', (e) => aprsSendMsg({ type: 'aprs-igate', on: !!e.target.checked }));
+    document.getElementById('aprs-beacon').addEventListener('click', () => aprsSendMsg({ type: 'aprs-beacon-is' }));
+    document.getElementById('aprs-map-on').addEventListener('change', (e) => {
+      aprsMapOn = !!e.target.checked;
+      try { localStorage.setItem('echocat-aprs-map', aprsMapOn ? '1' : '0'); } catch { /* private window */ }
+      aprsMapSync();
+    });
+    document.getElementById('aprs-search').addEventListener('input', () => aprsRenderList());
+    document.getElementById('aprs-mine').addEventListener('change', () => aprsRenderList());
+  }
+
+  // =============================================
   // ACTIVATOR MODE
   // =============================================
 
@@ -7057,6 +7485,7 @@
       }
     } catch { /* pre-init switch — nothing subscribed yet */ }
     try { scopeSyncSubscription(tab); } catch { /* pre-init */ }
+    try { aprsSyncSubscription(tab); } catch { /* pre-init */ }
     // Leaving Mail: a radio moved to a gateway for a look goes back (W1).
     try { if (activeTab === 'mail' && tab !== 'mail') mailOnLeave(); } catch { /* pre-init */ }
     // Leaving FT8: remember where it was, to come back to it (item 15).
@@ -7080,15 +7509,16 @@
     if (sstvView) { sstvView.classList.add('hidden'); sstvView.style.display = 'none'; }
     if (scopeView) { scopeView.classList.add('hidden'); scopeView.style.display = 'none'; }
     if (mailView) { mailView.classList.add('hidden'); mailView.style.display = 'none'; }
+    try { if (aprsView) { aprsView.classList.add('hidden'); aprsView.style.display = 'none'; } } catch { /* pre-init */ }
     // Popout trigger: visible only on the Map tab, and only in non-popout windows
     if (mapPopoutBtn) mapPopoutBtn.classList.toggle('hidden', isPopout || tab !== 'map');
     if (scanning) stopScan();
     // Show/hide PTT button — hide when FT8/SSTV tab is active
-    pttBtn.style.display = (tab === 'ft8' || tab === 'sstv' || tab === 'scope' || tab === 'mail') ? 'none' : '';
+    pttBtn.style.display = (tab === 'ft8' || tab === 'sstv' || tab === 'scope' || tab === 'mail' || tab === 'aprs') ? 'none' : '';
     // Hide entire bottom bar on FT8/SSTV tab
-    bottomBar.style.display = (tab === 'ft8' || tab === 'sstv' || tab === 'scope' || tab === 'mail') ? 'none' : '';
+    bottomBar.style.display = (tab === 'ft8' || tab === 'sstv' || tab === 'scope' || tab === 'mail' || tab === 'aprs') ? 'none' : '';
     // Hide Scan button and freq step arrows on FT8/SSTV tab
-    scanBtn.style.display = (tab === 'ft8' || tab === 'sstv' || tab === 'scope' || tab === 'mail') ? 'none' : '';
+    scanBtn.style.display = (tab === 'ft8' || tab === 'sstv' || tab === 'scope' || tab === 'mail' || tab === 'aprs') ? 'none' : '';
     var freqStepBtns = document.getElementById('freq-step-btns');
     if (freqStepBtns) freqStepBtns.style.display = tab === 'ft8' ? 'none' : '';
     // Hide CW/SSB panels on tabs where they're not relevant
@@ -7116,6 +7546,11 @@
       }
       setTimeout(() => spotMap.invalidateSize(), 100);
       renderMapSpots();
+      try { aprsMapSync(); } catch { /* pre-init */ } // the APRS layer, when it is on (APRS tab)
+    } else if (tab === 'aprs') {
+      if (aprsView) { aprsView.classList.remove('hidden'); aprsView.style.display = 'flex'; }
+      aprsRenderControls();
+      aprsRenderList();
     } else if (tab === 'log') {
       logTabView.classList.remove('hidden');
       refreshLogTabFields();
@@ -7724,7 +8159,8 @@
       var rec = '';
       rec += af('CALL', c.callsign);
       if (c.freq) rec += af('FREQ', c.freq);
-      rec += af('MODE', c.mode);
+      // adifMode + submode: the record's own pair (main.js getPastActivations).
+      rec += afMode(c.adifMode || c.mode, c.adifMode ? c.submode : '');
       rec += af('BAND', c.band);
       rec += af('QSO_DATE', act.date);
       rec += af('TIME_ON', c.timeOn);
@@ -7877,7 +8313,7 @@
       let rec = '';
       rec += af('CALL', c.callsign);
       if (c.freqKhz) rec += af('FREQ', (parseFloat(c.freqKhz) / 1000).toFixed(6));
-      if (c.mode) rec += af('MODE', c.mode);
+      if (c.mode) rec += afMode(c.mode, c.submode);
       if (c.band) rec += af('BAND', c.band);
       if (c.timeUtc) {
         const d = new Date();
@@ -7897,7 +8333,7 @@
       let rec = '';
       rec += af('CALL', c.callsign);
       if (c.freqKhz) rec += af('FREQ', (parseFloat(c.freqKhz) / 1000).toFixed(6));
-      if (c.mode) rec += af('MODE', c.mode);
+      if (c.mode) rec += afMode(c.mode, c.submode);
       if (c.rstSent) rec += af('RST_SENT', c.rstSent);
       if (c.rstRcvd) rec += af('RST_RCVD', c.rstRcvd);
       if (c._ts) {
@@ -7925,6 +8361,14 @@
   function af(name, val) {
     if (!val) return '';
     return `<${name}:${val.length}>${val}\n`;
+  }
+
+  /** MODE (+ SUBMODE) of an app mode, the desktop writer's rule
+   *  (lib/adif-mode.js): JS8 -> MFSK/JS8, PSK31 -> PSK/PSK31 (#381). */
+  function afMode(mode, submode) {
+    if (!mode) return '';
+    const ms = AdifMode.adifModeSubmode(String(mode), submode ? String(submode) : '');
+    return af('MODE', String(ms.mode || '')) + af('SUBMODE', String(ms.submode || ''));
   }
 
   // Refresh spot ages every 30s
@@ -8108,9 +8552,7 @@
    * PSK31/63 are PSK.
    */
   function lbModeFamily(q) {
-    const sub = String(q.SUBMODE || '').toUpperCase();
-    const m = String(q.MODE || '').toUpperCase();
-    const v = (m === 'MFSK' && sub) ? sub : m;
+    const v = AdifMode.recordMode(q);
     if (v === 'USB' || v === 'LSB') return 'SSB';
     if (/^PSK/.test(v)) return 'PSK';
     return v;
@@ -8130,7 +8572,7 @@
       if (from && d < from) return false;
       if (to && d > to) return false;
       if (!query) return true;
-      return [q.CALL, q.SIG_INFO, q.COMMENT, q.MODE, q.BAND].some(v => String(v || '').toUpperCase().includes(query));
+      return [q.CALL, q.SIG_INFO, q.COMMENT, AdifMode.recordMode(q), q.MODE, q.BAND].some(v => String(v || '').toUpperCase().includes(query));
     });
   }
 
@@ -8171,7 +8613,7 @@
       const idx = q.idx;
       const call = esc(q.CALL || '');
       const freqMhz = q.FREQ ? FreqDots.fromMhz(q.FREQ) : '';
-      const mode = esc(q.MODE || '');
+      const mode = esc(AdifMode.recordMode(q));
       const ref = esc(q.SIG_INFO || '');
       const date = formatLbDate(q.QSO_DATE || '');
       const time = formatLbTime(q.TIME_ON || '');
@@ -8197,7 +8639,7 @@
             <div class="log-field"><label>Freq MHz</label><input type="text" data-field="FREQ" value="${esc(q.FREQ || '')}"></div>
           </div>
           <div class="log-row">
-            <div class="log-field"><label>Mode</label><input type="text" data-field="MODE" value="${esc(q.MODE || '')}"></div>
+            <div class="log-field"><label>Mode</label><input type="text" data-field="MODE" value="${mode}"></div>
             <div class="log-field"><label>Band</label><input type="text" data-field="BAND" value="${band}"></div>
           </div>
           <div class="log-row">
@@ -8348,9 +8790,10 @@
         // next quiet cycle shows "No decodes" again.
         const row = document.createElement('div');
         row.className = 'ft8-row ft8-tx';
-        row.innerHTML = DecodeRow.txRowInner(ft8PendingTxMsg, 'ft8');
+        row.innerHTML = DecodeRow.txRowInner(ft8PendingTxMsg, 'ft8', ft8PendingTxHz);
         log.appendChild(row);
         ft8PendingTxMsg = '';
+        ft8PendingTxHz = 0;
       } else {
         const row = document.createElement('div');
         row.className = 'ft8-row';
@@ -8462,26 +8905,40 @@
   // My Activity is an append-only view of decodes directed at us; over a long
   // session it becomes a wall. Clearing is a VIEW action only — the log, the
   // QSO state machine and Band Activity are untouched (LZ3AW 2026-08-29).
+  function ft8ClearMyActivity() {
+    const myLog = document.getElementById('ft8-my-activity');
+    const myHeader = document.getElementById('ft8-my-activity-header');
+    if (myLog) myLog.innerHTML = '';
+    // Re-hide the empty pane so the layout returns to its pre-activity
+    // state; the next directed decode unhides both again.
+    if (myLog) myLog.classList.add('hidden');
+    if (myHeader) myHeader.classList.add('hidden');
+  }
   (function initMyActivityClear() {
     const btn = document.getElementById('ft8-my-activity-clear');
     if (!btn) return;
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
-      const myLog = document.getElementById('ft8-my-activity');
-      const myHeader = document.getElementById('ft8-my-activity-header');
-      if (myLog) myLog.innerHTML = '';
-      // Re-hide the empty pane so the layout returns to its pre-activity
-      // state; the next directed decode unhides both again.
-      if (myLog) myLog.classList.add('hidden');
-      if (myHeader) myHeader.classList.add('hidden');
+      ft8ClearMyActivity();
     });
   })();
 
-  function ft8AddTxRow(message) {
+  // The operator changed mode (#517): the shack stops TX and drops its decode
+  // replay; this page clears its decode history and the stations calling us
+  // (My Activity). The hunt call is NOT cleared: a spot click sets it right
+  // after its own mode change.
+  function ft8ClearForModeChange(note) {
+    ft8DecodeLog = [];
+    ft8DecodeLogEl.innerHTML = '<div class="ft8-empty">' + esc(note) + '</div>';
+    ft8UserScrolled = false;
+    ft8ClearMyActivity();
+  }
+
+  function ft8AddTxRow(message, txHz) {
     const log = ft8DecodeLogEl;
     const row = document.createElement('div');
     row.className = 'ft8-row ft8-tx';
-    row.innerHTML = DecodeRow.txRowInner(message, 'ft8');
+    row.innerHTML = DecodeRow.txRowInner(message, 'ft8', txHz);
     log.appendChild(row);
     log.scrollTop = log.scrollHeight;
   }
@@ -9190,6 +9647,7 @@
     ft8OwnMode = ft8Mode;
     updateBandFreqs();
     ft8Send({ type: 'jtcat-set-mode', mode: ft8Mode });
+    ft8ClearForModeChange('Switching to ' + ft8Mode + '...'); // #517: decodes and callers go with the old mode
     ft8StartCountdown(); // restart with new cycle duration
     applyDigitalPanes(); // WSPR/PSK panes replace the decode log for those modes
     // Retune to the active band's new frequency for the selected mode
@@ -10192,20 +10650,21 @@
     // a new press; 15 ms is a whole dot at 80 WPM. Same rule in lib/keyer.js.
     var BOUNCE_MS = 15;
     var ditReleaseAt = -1e9, dahReleaseAt = -1e9;
-    // A held paddle's next element is chosen when the space ends, but it is
-    // only HEARD a scheduling lead later (schedulePaddleElement, 20 ms) plus
-    // the device's output latency, and the release reaches this page after
-    // the contact opens (MIDI and keyboard events arrive late). The operator
-    // releases on what he hears, so at 25 wpm (48 ms dit and space) his
-    // release could miss the choice and the keyer sent one more element:
-    // LZ3AW (#244, 1.13.8) measured 54 ms from choice to speaker and paddle
-    // input up to 24 ms late. A release of the contact whose HOLD chose the
-    // element now withdraws it while it has not begun to sound. A latched
-    // element (a real press during the element) is never withdrawn.
+    // A held paddle's next element is chosen when the space ends, a lead
+    // before it sounds (schedulePaddleElement), and the operator releases on
+    // what he hears, so at 25 wpm a release can come after that choice
+    // (LZ3AW, #244). A release of the contact whose HOLD chose the element
+    // asks to withdraw it (a latched element, a real press during the
+    // element, is never withdrawn). The page grants it only while the
+    // element's sidetone has not started (lib/cw-sidetone-commit.js, Casey
+    // 2026-11-19): once it sounds, it is committed and keyed on the air in
+    // full, so the sidetone and the air always agree. Until 1.14.6 a release
+    // could withdraw an element after its tone had started (judged by when
+    // the release happened and what he could have heard): the page cut its
+    // tone into a blip while the shack dropped the element, the extra
+    // elements LZ3AW heard only in his own sidetone.
     var heldBy = null;   // 'dit' | 'dah': the held contact that chose this element
     var undoState = null; // the keyer before that choice
-    var soundAt = 0;     // performance.now() when this element starts to sound
-    var RETRACT_MARGIN_MS = 2;
     function ditMs() { return Math.round(1200 / wpm); }
     function dahMs() { return ditMs() * 3; }
     function clearTimers() {
@@ -10218,8 +10677,7 @@
       bothAtStart = ditPressed && dahPressed;
       ditLatch = false; dahLatch = false;
       heldBy = null; undoState = null;
-      var lead = onKey(true, isDit ? ditMs() : dahMs(), { continued: !!continued, spaceMs: ditMs() });
-      soundAt = performance.now() + (Number(lead) > 0 ? Number(lead) : 0);
+      onKey(true, isDit ? ditMs() : dahMs(), { continued: !!continued, spaceMs: ditMs() });
       clearTimers();
       timerDue = performance.now() + (isDit ? ditMs() : dahMs());
       toneTimer = setTimeout(onToneEnd, isDit ? ditMs() : dahMs());
@@ -10266,15 +10724,18 @@
       }
       state = IDLE;
     }
-    // The contact whose hold chose the element now sounding-soon opened: take
-    // the element back and choose again as if the release had come in time.
+    // The contact whose hold chose the element about to sound opened: ask for
+    // the element back and, if it has not started to sound, choose again as
+    // if the release had come in time.
     function retractHeldBy(contact) {
-      if (state !== TONE || heldBy !== contact || !undoState) return;
-      if (performance.now() >= soundAt - RETRACT_MARGIN_MS) return; // already sounding
+      // TONE or the space after it (a dit can be over in the keyer's own time
+      // before its tone starts); heldBy is cleared when the next element starts.
+      if ((state !== TONE && state !== IES) || heldBy !== contact || !undoState) return;
       var u = undoState;
-      clearTimers();
       heldBy = null; undoState = null;
-      onKey(false, undefined, { cancel: true, retract: true });
+      // true only while its sidetone has not started (lib/cw-sidetone-commit.js)
+      if (onKey(false, undefined, { cancel: true, retract: true }) !== true) return;
+      clearTimers();
       currentIsDit = u.isDit;
       ditLatch = ditLatch || u.ditLatch;
       dahLatch = dahLatch || u.dahLatch;
@@ -10431,46 +10892,82 @@
   // second keyer at the shack meant network jitter decided the elements:
   // a dit release that arrived late became two dits (LZ3AW, 400 km from his
   // TS-480, 2026-09-29: "errors ... especially with the dots").
+  //
+  // An iambic element goes to the shack when its sidetone STARTS (#244,
+  // lib/cw-sidetone-commit.js), not when the keyer chooses it: before that
+  // the keyer may still withdraw it, after it nothing is withdrawn, so a
+  // withdrawal never goes on the wire and the air keys exactly what was heard.
   var cwStreamNextAt = 0, cwStreamLastAt = 0;
-  function sendCwKeyStream(down, durMs, info) {
+  // The stream time (`at`) of an iambic element, fixed when it is chosen.
+  function cwStreamElementAt(durMs, info) {
+    // A continued element starts exactly one space after the previous
+    // one, whatever this page's timers did; a new streak starts now.
+    var at = (info && info.continued && cwStreamNextAt) ? cwStreamNextAt : performance.now();
+    cwStreamNextAt = at + durMs + ((info && info.spaceMs) || 0);
+    cwStreamLastAt = at;
+    return at;
+  }
+  // Straight-key edges, and the cancelling key-up of a stop (atMs: where it cuts).
+  function sendCwKeyStream(down, info, atMs) {
     if (!cwKeyStreamOk || !ws || ws.readyState !== WebSocket.OPEN) return;
     var now = performance.now();
     var msg;
-    if (down && durMs) {
-      // A continued element starts exactly one space after the previous
-      // one, whatever this page's timers did; a new streak starts now.
-      var at = (info && info.continued && cwStreamNextAt) ? cwStreamNextAt : now;
-      cwStreamNextAt = at + durMs + ((info && info.spaceMs) || 0);
-      cwStreamLastAt = at;
-      msg = { type: 'cw-key', at: at, down: true, ms: durMs };
-    } else if (down) {
+    if (down) {
       cwStreamNextAt = 0;
       msg = { type: 'cw-key', at: now, down: true };
     } else {
       cwStreamNextAt = 0;
-      msg = { type: 'cw-key', at: now, down: false };
+      msg = { type: 'cw-key', at: (atMs != null ? atMs : now), down: false };
       if (info && info.cancel) msg.cancel = true;
     }
     ws.send(JSON.stringify(msg));
   }
-  // The keyer withdrew an element that has not begun to sound (its held
-  // contact opened in time, #244): drop its tone and, in stream mode, its
-  // keying at the shack (a cancelling key-up just before its start; the
-  // playout drops what is scheduled after that), and give its slot back.
+  // The gate between this keyer and the shack: an element is committed, and
+  // sent, when its sidetone starts on the audio clock.
+  var cwCommit = window.CwSidetoneCommit.createGate({
+    now: function() { return cwAudioCtx ? cwAudioCtx.currentTime * 1000 : 0; },
+    send: function(msg) {
+      if (!cwKeyStreamOk) return true; // an older shack keys from the contacts
+      if (!ws || ws.readyState !== WebSocket.OPEN) return false;
+      ws.send(JSON.stringify(msg));
+      return true;
+    },
+    setTimer: function(fn, ms) { return setTimeout(fn, ms); },
+    clearTimer: function(h) { clearTimeout(h); },
+    // It could not reach the shack (the socket is gone): its tone has not
+    // started, so silence it and stop the keyer; nothing more sounds.
+    onLost: function() { try { localCwKeyer.stop(); } catch (e) { cancelPaddleTones(); } },
+  });
+  // The keyer asks for an element back (its held contact opened). Granted
+  // only while its sidetone has not started: drop its tone and give its slot
+  // back; it was never sent. Once it sounds it is keyed in full (#244).
   function retractPaddleElement() {
+    if (!cwCommit.withdraw()) return false;
     if (paddleGain && cwAudioCtx && paddleLastAt) paddleGain.gain.cancelScheduledValues(paddleLastAt);
     paddleNextAt = paddleLastAt;
-    if (cwKeyStreamOk && cwStreamLastAt && ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ type: 'cw-key', at: cwStreamLastAt - 1, down: false, cancel: true }));
-      cwStreamNextAt = cwStreamLastAt;
-    }
+    cwStreamNextAt = cwStreamLastAt;
+    return true;
+  }
+  // A stop (STOP, mode change, paddle keying lost, the socket closed): the
+  // tone stops now, an element not yet sounding is dropped on both sides, and
+  // the shack cuts the element now sounding at the same point (cutAt).
+  function stopPaddleElements(info) {
+    var cut = cwCommit.stop();
+    cancelPaddleTones();
+    sendCwKeyStream(false, info, cut);
   }
   var localCwKeyer = createLocalCwKeyer(function(down, durMs, info) {
-    if (durMs) { sendCwKeyStream(true, durMs, info); var lead = schedulePaddleElement(durMs); cwDiagNote('ahead', lead); return lead; } // iambic element
+    if (durMs) { // iambic element: sounds `lead` ms from now, is sent when it does
+      var at = cwStreamElementAt(durMs, info);
+      var lead = schedulePaddleElement(durMs); cwDiagNote('ahead', lead);
+      cwCommit.element(at, durMs, paddleLastAt * 1000);
+      return lead;
+    }
     if (durMs === 0) return;                              // its end is already scheduled
-    if (info && info.retract) { retractPaddleElement(); return; }
-    // Straight key, or a keyer stop/mode change.
-    sendCwKeyStream(down, 0, info);
+    if (info && info.retract) return retractPaddleElement(); // true: withdrawn before it sounded
+    if (!down && info && info.cancel) { stopPaddleElements(info); handleCwSidetone(false); return; }
+    // Straight key.
+    sendCwKeyStream(down, info);
     if (!down) cancelPaddleTones();
     handleCwSidetone(down);
   });
@@ -10836,14 +11333,26 @@
     return tunedCallsign || '';
   }
 
+  /** Ask main for a callsign's QRZ name/state (once per call) for CW macros. */
+  function requestQrzOp(call) {
+    var base = call ? String(JtcatParser.baseCall(String(call).toUpperCase()) || '').toUpperCase() : '';
+    if (!base || qrzOpByCall[base] || (qrzOpPending[base] && Date.now() - qrzOpPending[base] < 30000)) return;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    qrzOpPending[base] = Date.now();
+    ws.send(JSON.stringify({ type: 'qrz-lookup', callsign: base }));
+  }
+
   function sendCwText(text) {
     if (!text || !ws || ws.readyState !== WebSocket.OPEN) return;
-    // Expand macros: {op_firstname} -> operator name or "OM", {call} -> the
-    // callsign being worked (typed in the log form, else the tuned spot).
-    var expanded = text
-      .replace(/\{op_firstname\}/gi, tunedOpName || '')
-      .replace(/\{call\}/gi, macroCallsign())
-      .replace(/\{state\}/gi, tunedState || '');
+    // Expand macros: {call} -> the callsign being worked (typed in any
+    // callsign field, else the tuned spot); see macroCallsign().
+    // {op_firstname} and {state} belong to that same callsign: they are looked
+    // up for it in qrzOpByCall, never taken from the tuned spot (#524). No
+    // name known yet -> 'OM', as main uses for device text; the lookup is
+    // asked for so the next macro has it. CW never waits on the network.
+    var call = macroCallsign();
+    var expanded = CwRemoteExpand.expandForCall(text, call, qrzOpByCall, JtcatParser.baseCall).text;
+    if (/\{(op_firstname|state)\}/i.test(text)) requestQrzOp(call);
     ws.send(JSON.stringify({ type: 'cw-text', text: expanded }));
     playCwTextSidetone(expanded);
   }
@@ -11230,7 +11739,7 @@
         'kernel driver rejects DTR control; (b) connecting via Hamlib / rigctld, which has ' +
         'no per-element CW command in its protocol — only mic PTT. ' +
         'Workaround for either case: wire an external USB-UART adapter (FTDI / CH340) to the ' +
-        'radio’s CW KEY jack and set it as <i>CW Key Port</i> in Settings → Rig. ' +
+        'radio’s CW KEY jack and set it as <i>CW Key Port</i> in Settings &gt; ECHOCAT. ' +
         'CW macros and text-send still work without it — only paddle is affected.'
       );
       helpEl.innerHTML = bits.join('<br>');
@@ -12564,6 +13073,16 @@ var _paddleHoldTimer = { dit: null, dah: null };
     if (document.visibilityState === 'visible' && !mainUI.classList.contains('hidden')) {
       requestWakeLock();
     }
+  });
+
+  // Screen back on: a socket that went quiet while it was off is replaced at
+  // once instead of waiting for the pong timeout or the reconnect timer.
+  document.addEventListener('visibilitychange', function() {
+    // A pop-out has no socket of its own (it talks to the main page over BC).
+    if (isPopout || document.visibilityState !== 'visible' || wasKicked || mainUI.classList.contains('hidden')) return;
+    var state = !ws || ws.readyState === WebSocket.CLOSED || ws.readyState === WebSocket.CLOSING ? 'closed'
+      : ws.readyState === WebSocket.CONNECTING ? 'connecting' : 'open';
+    if (wsLiveness.reconnectOnWake(Date.now(), state)) dropDeadSocket(true);
   });
 
   // ── Cloud Sync UI (ECHOCAT) ──────────────────────────────────────
@@ -15658,7 +16177,8 @@ var _paddleHoldTimer = { dit: null, dah: null };
         break;
       case 'winlink-result':
         if (msg.op === 'account-check' || msg.op === 'register' || msg.op === 'set-password') { mailAcctResult(msg); break; }
-        if (msg.op === 'gateways') { if (!msg.ok) mailGatewaysFailed(msg); break; }
+        // 'gateways-get' is the shack's answer when the request itself threw (#435).
+        if (msg.op === 'gateways' || msg.op === 'gateways-get') { if (!msg.ok) mailGatewaysFailed(msg); break; }
         // The shack tuned to the picked gateway: this page now owes it a restore.
         if (msg.op === 'qsy' && msg.ok) { mailQsyMoved = true; mailRenderBar(); }
         if (!msg.ok && msg.error) showToast(msg.error, 5000, true);
@@ -16078,6 +16598,13 @@ var _paddleHoldTimer = { dit: null, dah: null };
     var note = mailEl('mail-read-note');
     note.textContent = deleted ? MailActions.deletedNote(m, mailState && mailState.deletedDays, Date.now()) : '';
     note.classList.toggle('hidden', !deleted);
+    // How it went out (#442): message.sentRoute, from a shack that kept it; nothing otherwise.
+    var route = mailEl('mail-read-route');
+    if (route) {
+      var routeText = MailActions.sentRouteLine(m.sentRoute);
+      route.textContent = routeText;
+      route.classList.toggle('hidden', !routeText);
+    }
     mailEl('mail-read-body').textContent = m.body || '';
     var atts = mailEl('mail-read-atts');
     atts.textContent = '';
@@ -16223,13 +16750,14 @@ var _paddleHoldTimer = { dit: null, dah: null };
     mailRenderGateways();
     mailGwStatus(MailView.gatewayNote(msg), false);
   }
-  function mailGatewaysFailed(msg) {
+  function mailGatewaysFailed(msg, f) {
     if (msg.reqId && msg.reqId !== mailGwReqId) return;
     mailGwStopTimer();
     mailGwLoaded = true;
+    mailGwReqId = '';   // a late answer to the request given up on is not drawn
     mailGateways = [];
     mailPick = -1;
-    var f = MailView.gatewaysFailed(msg.error);
+    f = f || MailView.gatewaysFailed(msg.error);
     mailGwMessage(f.option);
     mailEl('mail-gw-retry').textContent = f.button;
     mailGwStatus(f.text, true);
@@ -16245,13 +16773,24 @@ var _paddleHoldTimer = { dit: null, dah: null };
     mailGwLoaded = false;
     var head = mailEl('mail-gw-head');
     if (head) head.textContent = 'Gateway';
+    mailGwReqId = 'gw' + (++mailGwSeq);
+    // No link to the shack: the request would be dropped and the list would
+    // say Loading for ever. Say so, with Try again (#435).
+    if (!(ws && ws.readyState === WebSocket.OPEN)) {
+      mailGatewaysFailed({}, { option: MailView.gatewaysTimedOut().option, text: MailView.NOT_CONNECTED, button: MailView.TRY_AGAIN });
+      return;
+    }
     mailGwMessage(MailView.loadingText(mode, s.predictionOn));
     // How long the ranking has run, and about how long the last one took.
+    // The same tick gives up when the shack has not answered in time (#435).
     var t0 = Date.now();
-    var tick = function () { mailGwStatus(MailView.predictText({ mode: mode, predictionOn: s.predictionOn, predictMs: s.predictMs, elapsedMs: Date.now() - t0 }), false); };
+    var waitMs = MailView.gatewayWait(mode, s.predictionOn);
+    var tick = function () {
+      if (Date.now() - t0 > waitMs) { mailGatewaysFailed({}, MailView.gatewaysTimedOut()); return; }
+      mailGwStatus(MailView.predictText({ mode: mode, predictionOn: s.predictionOn, predictMs: s.predictMs, elapsedMs: Date.now() - t0 }), false);
+    };
     tick();
-    if (mailEl('mail-gw-note').textContent) mailGwTimer = setInterval(tick, 1000);
-    mailGwReqId = 'gw' + (++mailGwSeq);
+    mailGwTimer = setInterval(tick, 1000);
     mailRenderBar();
     mailSend({ type: 'winlink-gateways-get', mode: mode, band: mailBand, reqId: mailGwReqId });
   }
@@ -16278,7 +16817,8 @@ var _paddleHoldTimer = { dit: null, dah: null };
     var line = mailEl('mail-radio-line');
     var text = '';
     if (!active && mode !== 'telnet') {
-      if (!g) text = mailGwLoaded ? 'No gateway to call on this band.' : 'Waiting for the gateway list.';
+      // While the list is fetched or ranked (up to about two minutes) the line says so (#435).
+      if (!g) text = mailGwLoaded ? 'No gateway to call on this band.' : MailView.connectWaitText(mode, (mailState || {}).predictionOn);
       else if (mailQsyMoved) text = 'The radio is set for ' + g.call + (g.dialKhz ? ' on ' + FreqDots.khzMhz(g.dialKhz) : '') + '. It goes back when you leave Mail.';
       else text = 'Tap a gateway to tune the radio to it, or connect now.';
     }
@@ -16292,7 +16832,7 @@ var _paddleHoldTimer = { dit: null, dah: null };
       var o = { type: 'winlink-connect', mode: mode };
       if (mode !== 'telnet') {
         var g = mailGateways[mailPick];
-        if (!g) { showToast('Pick a gateway first', 3000, true); return; }
+        if (!g) { showToast(mailGwLoaded ? 'Pick a gateway first' : MailView.connectWaitText(mode, (mailState || {}).predictionOn), 3000, true); return; }
         o.gateway = g.call; o.dialKhz = g.dialKhz; o.url = g.url;
       }
       mailSend(o);

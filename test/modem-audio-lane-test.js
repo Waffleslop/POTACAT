@@ -157,6 +157,21 @@ t('every chunk from the modem is measured for the over\'s log line, and the leve
   assert.ok(sent.pcm[0] > 0.45, 'seeded gain 2 applied');
 });
 
+t('VARA through the cable (txIn) counts on the over\'s meter too, each chunk once (K8MRD: "sent NO audio" on every cable over)', () => {
+  const r = rig();
+  r.lane.key(true, { bridge: true });
+  const cable = new Float32Array(480); cable.fill(0.3);
+  r.lane.txIn(cable);
+  let n = r.evts('tx-note');
+  assert.strictEqual(n.length, 1, 'one note per cable chunk');
+  assert.strictEqual(n[0].data.samples, 480);
+  assert.ok(Math.abs(n[0].data.peak - 0.3) < 1e-6);
+  r.modem(20, 0.2); // a socket modem's chunk: still one note, not two
+  n = r.evts('tx-note');
+  assert.strictEqual(n.length, 2);
+  assert.strictEqual(n.reduce((a, e) => a + e.data.samples, 0), 480 + Math.round(TX_RATE * 20 / 1000));
+});
+
 t('receive from the capture worklet goes straight to the modem; skipped frames are counted', () => {
   const fed = [];
   const lane = new LaneCore({ feedRx: (pcm, rate) => fed.push([pcm.length, rate]) });

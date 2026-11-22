@@ -34,7 +34,30 @@ const DECODES = [
   { id: 'long-free-text', d: { db: 9, dt: -0.3, df: 3001, text: 'K1ABC W2XYZ R-08 THIS IS A LONG FREE TEXT LINE' } },
   // Wanted-state badge (WAS): a straddling grid shows every candidate with a ?
   { id: 'state-badge', d: { db: -3, dt: 0.4, df: 1210, text: 'CQ K2ABC FN20' }, badges: '<span class="ft8-badge ft8-badge-state">NJ/NY/PA?</span><span class="ft8-badge ft8-badge-call">C</span>', entity: 'United States' },
-  { id: 'tx', tx: true, text: 'W2XYZ K1ABC -12' },
+  { id: 'tx', tx: true, text: 'W2XYZ K1ABC -12', txHz: 1523 },
 ];
 
-module.exports = { SPOTS, COLUMN_SETS, DECODES };
+// JTCAT Stations view rows (#557): entries as lib/jtcat-stations.js makes
+// them, rendered at NOW. Long calls and countries must cut off with an
+// ellipsis, never push the later columns along or wrap.
+const NOW = 1800000000000;
+const STATIONS = [
+  { id: 'cq-plain', e: { call: 'K1ABC', calling: 'CQ', grid: 'FN42', entity: 'United States', state: '', db: -12, df: 1500, lastHeard: NOW - 12000 },
+    marks: { entity: 'confirmed', state: '', grid: false, call: false } },
+  // A spotted POTA activator: the Park column, a worked state.
+  { id: 'cq-pota-state', e: { call: 'KN5YVJ', calling: 'CQ POTA', grid: 'EM20', entity: 'United States', state: 'TX', db: -14, df: 892, lastHeard: NOW - 27000, park: { sig: 'POTA', ref: 'US-12345', from: 'spot' } },
+    marks: { entity: 'confirmed', state: 'worked', grid: false, call: true, needed: true } },
+  // The native FT4 decoder's float dB and a fractional Hz, as they arrive.
+  { id: 'float-db-df', e: { call: 'KF8FTQ', calling: 'KF6JXM', grid: 'EN74', entity: 'United States', state: '', db: 10.9874995727539, df: 232.73, lastHeard: NOW - 3000 } },
+  // Every mark at once (the widest Need cell) and a SOTA summit, the longest reference.
+  { id: 'all-marks', e: { call: 'KL7ABC', calling: 'CQ SOTA', grid: 'BP51', entity: 'Alaska', state: 'AK', db: -3, df: 2210, lastHeard: NOW - 45000, park: { sig: 'SOTA', ref: 'KL7/AN-001', from: 'cq' } },
+    marks: { entity: 'new', state: 'new', grid: true, call: true, needed: true } },
+  { id: 'long-everything', e: { call: 'KH6/W1ABCD/P', calling: 'VE3/K1ABCDE/QRP', grid: 'BL11', entity: 'South Sandwich Islands and a very long name', state: '', db: -24.4, df: 3001, lastHeard: NOW - 599000 },
+    marks: { entity: 'new', state: '', grid: true, call: true, needed: true } },
+  { id: 'no-grid-no-db', e: { call: 'JA1XYZ', calling: 'W2XYZ', grid: '', entity: '', state: '', db: null, df: null, lastHeard: NOW - 125000 } },
+  { id: 'cq-dx', e: { call: '9K2YM', calling: 'CQ DX', grid: 'LL39', entity: 'Kuwait', state: '', db: 0, df: 1384, lastHeard: NOW, park: { sig: 'WWFF', ref: '9KFF-0001', from: 'cq' } },
+    marks: { entity: 'worked', state: '', grid: false, call: false } },
+];
+const STATION_SCOPE_TEXT = 'on 20m digital';
+
+module.exports = { SPOTS, COLUMN_SETS, DECODES, STATIONS, STATION_SCOPE_TEXT, NOW };

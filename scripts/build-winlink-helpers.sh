@@ -14,7 +14,7 @@
 # pinned commit is what the NOTICE and third_party/*/VERSION.txt promise.
 #
 # Usage: scripts/build-winlink-helpers.sh [pat] [ardop] [direwolf]   (default: all)
-# Needs: git, go >= 1.24 for pat; make + gcc/clang (+ libasound2-dev on Linux,
+# Needs: git, go >= 1.26 for pat (its go.mod says 1.26.0 from v1.0.1); make + gcc/clang (+ libasound2-dev on Linux,
 #        MSYS2 MINGW64 on Windows, nothing extra on macOS — the ALSA calls are
 #        compiled against helpers/alsa-stub) for ardop; + cmake, Hamlib
 #        (libhamlib-dev on Linux; the official zip on Windows; `brew install
@@ -26,8 +26,8 @@
 set -euo pipefail
 
 PAT_REPO=https://github.com/la5nta/pat
-PAT_TAG=v1.0.0
-PAT_SHA=2e6a8d14baf0268f4e2aa4d01784a54ca935cf52
+PAT_TAG=v1.0.1
+PAT_SHA=2ad31e8fc1f1748ac1b00cac9d88da54e3e0efe2
 # The wl2k-go Pat's go.mod pins at that tag (its ARDOP transport is what
 # third_party/pat/potacat-arq-timeout.patch builds on).
 WL2K_GO_VERSION=v1.0.1

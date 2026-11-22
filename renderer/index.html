@@ -156,7 +156,7 @@
               <label class="spots-toggle" id="spots-hide-callref-label" title="Hide a spot only if you've already worked the same call AT THE SAME park today on the same band/mode. A roving activator at a new park stays visible."><input type="checkbox" id="spots-hide-callref"> Hide worked CALL+park combos</label>
               <label class="spots-toggle" id="spots-prioritize-new-label"><input type="checkbox" id="spots-prioritize-new"> Show NEW parks at top</label>
               <label class="spots-toggle" id="spots-strict-atno-label" title="Mark parks NEW unless they're in your imported POTA hunter CSV. Local-only QSOs that haven't reached pota.app won't suppress the NEW flag (K0OTC)."><input type="checkbox" id="spots-strict-atno"> Strict ATNO (POTA-credited only)</label>
-              <label class="spots-toggle" title="Hide spots your license class can't operate (and any truly out-of-band frequencies). Needs your License Class set in Settings → Operator — if it's None, nothing is hidden."><input type="checkbox" id="spots-hide-oob"> Hide out-of-privilege</label>
+              <label class="spots-toggle" title="Hide spots your license class can't operate (and any truly out-of-band frequencies). Needs your License Class set in Settings &gt; Station — if it's None, nothing is hidden."><input type="checkbox" id="spots-hide-oob"> Hide out-of-privilege</label>
               <label class="spots-toggle"><input type="checkbox" id="spots-hide-qrt" checked> Hide QRT spots</label>
               <label class="spots-toggle" id="spots-dx-only-label" title="Only stations that count as DX: a different country from yours, or farther than your DX distance (Settings)."><input type="checkbox" id="spots-dx-only"> DX only</label>
               <label class="spots-toggle"><input type="checkbox" id="spots-show-hidden"> Show hidden spots <span id="spots-hidden-count" class="spots-hidden-badge hidden">0</span></label>
@@ -223,6 +223,8 @@
             <button class="view-menu-item hidden" id="view-mercury-btn">Mercury HF Data</button>
             <button class="view-menu-item hidden" id="view-winlink-btn">Winlink Mail <span id="winlink-unread-badge" class="hidden" style="color:var(--accent-green,#4ecca3);font-weight:700;"></span></button>
             <button class="view-menu-item" id="view-sstv-btn">SSTV</button>
+            <!-- APRS phase 1: a read-only map and list of APRS-IS stations near your grid. -->
+            <button class="view-menu-item" id="view-aprs-btn" title="APRS stations near you, from the APRS-IS internet feed (read-only)">APRS &#x2197;</button>
             <!-- Shown only for a rig whose capabilities declare nativeScope
                  (the FT-710's scope over USB) — see rigApplyCapabilities. -->
             <button class="view-menu-item hidden" id="view-scope-btn" title="The radio's own band scope: over its USB cable (FT-710), the network (SCU-LAN10, Flex, Icom LAN) or CI-V">Band Scope &#x2197;</button>
@@ -246,6 +248,10 @@
     </div>
     <div class="status-bar">
       <span id="utc-clock" class="utc-clock"></span>
+      <!-- WSJT-X Mode flag (#547, lib/wsjtx-mode-notice.js): first among the chips,
+           amber, shown whenever WSJT-X Mode is on. Click = the CAT menu with the
+           WSJT-X Mode panel at the top. -->
+      <span id="wsjtx-status" class="status wsjtx-mode-chip hidden" role="button" tabindex="0" title="WSJT-X Mode is on: WSJT-X has the radio. Click for details.">WSJT-X Mode</span>
       <span id="cat-status" class="status disconnected">CAT</span>
       <!-- Active remote shack indicator (v1.9 desktop-to-desktop).
            Hidden when activeTargetId is null; shown when this desktop
@@ -266,7 +272,6 @@
            do use split legitimately). KQ4MHD report 2026-04-30. -->
       <span id="split-indicator" class="status hidden" style="background:#f0a500;color:#1a1a2e;font-weight:bold;cursor:pointer;" title="Split mode is ON — RX and TX are on different VFOs. Click to disable.">SPLIT</span>
       <span id="jtcat-tx-indicator" class="status hidden" style="background:var(--accent-red, #e94560);color:#fff;font-weight:bold;animation:tx-blink 1s ease-in-out infinite;">JTCAT TX</span>
-      <span id="wsjtx-status" class="status disconnected hidden">WSJT-X</span>
       <span id="cw-keyer-status" class="status hidden" style="background:#b8860b;color:#fff;cursor:pointer;">CW</span>
       <div id="cw-popover" class="cw-popover hidden">
         <div class="cw-popover-row">
@@ -486,6 +491,18 @@
   </header>
 
   <div id="cat-popover" class="cat-popover hidden">
+    <!-- WSJT-X Mode panel (#547): shown at the top while the mode is on. The
+         words come from lib/wsjtx-mode-notice.js. Turn off = unticking the box below. -->
+    <div id="cat-popover-wsjtx-panel" class="wsjtx-mode-panel hidden" role="status">
+      <div class="wsjtx-mode-title" id="wsjtx-panel-title">WSJT-X Mode is on</div>
+      <div class="wsjtx-mode-line" id="wsjtx-panel-line"></div>
+      <div class="wsjtx-mode-state" id="wsjtx-panel-state"></div>
+      <div class="wsjtx-mode-line" id="wsjtx-panel-hint"></div>
+      <div class="wsjtx-mode-buttons">
+        <button type="button" id="wsjtx-panel-off" class="wsjtx-mode-btn">Turn off WSJT-X Mode</button>
+        <button type="button" id="wsjtx-panel-keep" class="wsjtx-mode-btn">Keep it on</button>
+      </div>
+    </div>
     <div class="cat-popover-rigs" id="cat-popover-rigs"></div>
     <div class="cat-popover-divider"></div>
     <label class="cat-popover-wsjtx">
@@ -495,12 +512,6 @@
       <label>UDP Port:
         <input type="number" id="cat-popover-wsjtx-port-input" min="1024" max="65535" style="width:70px;">
       </label>
-    </div>
-    <div id="cat-popover-wsjtx-warning" class="cat-popover-wsjtx-warning hidden">
-      WSJT-X Mode is on but POTACAT isn't receiving heartbeats on
-      port <span id="cat-popover-wsjtx-warn-port">2237</span>. If
-      WSJT-X isn't running, uncheck the box above to take direct CAT
-      control.
     </div>
   </div>
 
@@ -626,7 +637,7 @@
       <span id="activator-op-name" class="activator-op-name"></span>
       <input type="text" id="activator-state" placeholder="State" maxlength="6" spellcheck="false" autocomplete="off" title="State (auto-filled from QRZ, editable)" style="text-transform:uppercase;">
       <div class="activator-hunter-park-wrap">
-        <input type="text" id="activator-hunter-park" placeholder="P2P ref" maxlength="12" spellcheck="false" autocomplete="off" title="Hunter's park ref (park-to-park)">
+        <input type="text" id="activator-hunter-park" placeholder="P2P ref" maxlength="80" spellcheck="false" autocomplete="off" title="Hunter's park ref (park-to-park)">
         <span id="activator-hunter-park-extra" class="activator-park-extra hidden"></span>
         <div id="activator-hunter-dropdown" class="activator-dropdown hidden"></div>
       </div>
@@ -779,7 +790,7 @@
             <option value="llota">LLOTA</option>
             <option value="wwbota">WWBOTA</option>
           </select>
-          <input type="text" id="bl-ref" class="bl-field bl-ref hidden" placeholder="Ref" maxlength="60" spellcheck="false" autocomplete="off" style="text-transform:uppercase;">
+          <input type="text" id="bl-ref" class="bl-field bl-ref hidden" placeholder="Ref" maxlength="80" spellcheck="false" autocomplete="off" style="text-transform:uppercase;">
           <input type="text" id="bl-callsign" class="bl-field bl-callsign" placeholder="Callsign" maxlength="20" spellcheck="false" autocomplete="off" autocapitalize="characters">
           <span id="bl-dupe" class="bl-dupe hidden" title="">DUPE</span>
           <!-- Two-part readout: QRZ name (ellipsized when long) + right-justified
@@ -1039,7 +1050,7 @@
           </select>
         </label>
         <span class="dxcc-progress">
-          <span id="dxcc-count">0 / 100</span>
+          <span id="dxcc-count">0 / 100 worked</span>
           <span id="dxcc-award-label"></span>
         </span>
         <span id="dxcc-challenge" class="dxcc-challenge hidden"></span>
@@ -1701,6 +1712,9 @@
       <label>Owner callsign (optional): <input type="text" id="set-owner-callsign" maxlength="12" placeholder="same as My Callsign"></label>
       <span class="help-text" style="margin-left:12px;margin-bottom:6px;display:block;">ADIF OWNER_CALLSIGN — the station licensee, when that is not you. Left blank, nothing is written.</span>
       <label>QTH Grid Square: <input type="text" id="set-grid" maxlength="6"></label>
+      <!-- A FlexRadio with a GPS fix (lib/flex-gps.js): offered, never set by itself.
+           The operator presses it, then Save. -->
+      <button type="button" id="set-grid-from-gps" class="hidden" style="margin-left:12px;margin-bottom:6px;">Use my radio's GPS grid</button>
       <!-- The operator's own state and county (ADIF MY_STATE / MY_CNTY;
            lib/station-county.js). AE5JE 2026-10-27. -->
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
@@ -1761,7 +1775,7 @@
         </select>
       </label>
       <label class="checkbox-label"><input type="checkbox" id="set-enable-freedv"> FreeDV Digital Voice</label>
-      <span class="help-text" style="margin-left:12px;display:block;">Enables FreeDV digital voice. Click a FreeDV spot to auto-decode; PTT encodes FreeDV. No extra setup — works over any SSB radio's USB audio.</span>
+      <span class="help-text" style="margin-left:12px;display:block;">Receives FreeDV digital voice: click a FreeDV spot to decode it. Transmit is coming in a later update; until then PTT is off in FreeDV modes.</span>
       <label class="checkbox-label" style="margin-left:12px;"><input type="checkbox" id="set-freedv-use-data-mode" checked> Switch radio to DATA mode (DIGU/DIGL) for FreeDV</label>
       <span class="help-text" style="margin-left:24px;display:block;">Uncheck for older Yaesu rigs (FTDX3000, FT-450, etc.) where DATA mode caps IF bandwidth at 2.4 kHz — FreeDV needs ~3 kHz. Off keeps the radio in plain USB/LSB; route USB CODEC audio at the rig.</span>
       <label style="margin-left:12px;display:block;margin-top:6px;">FreeDV sideband:
@@ -1778,7 +1792,7 @@
       </div>
       <label class="checkbox-label" style="margin-top:8px;"><input type="checkbox" id="set-enable-auto-sstv"> Idle Mode</label>
       <span class="help-text" style="margin-left:12px;display:block;">
-        When this station is idle for the defined time, POTACAT opens your chosen program — WSPR, PSK31, JTTY, SSTV, or JS8 (heartbeat net, auto-replies, mailbox, and APRS gateway keep running while you are away).
+        When this station is idle for the defined time, POTACAT opens your chosen program — WSPR, PSK31, JTTY, SSTV, JS8 (heartbeat net, auto-replies, mailbox, and APRS gateway keep running while you are away), or APRS.
         <label style="display:inline-flex;align-items:center;gap:4px;margin-left:8px;">Timeout: <input type="number" id="set-auto-sstv-min" min="5" max="1440" value="90" style="width:50px;font-size:12px;padding:2px 4px;background:var(--bg-secondary);color:var(--text-primary);border:1px solid var(--border-primary);border-radius:3px;text-align:center;"> min</label>
       </span>
       <div id="idle-rx-opts" style="margin-left:24px;margin-top:4px;display:none;">
@@ -1789,6 +1803,7 @@
             <option value="psk31">PSK31</option>
             <option value="jtty">JTTY</option>
             <option value="js8">JS8</option>
+            <option value="aprs">APRS</option>
           </select>
         </label>
         <div id="idle-psk-opts" style="margin-top:6px;display:none;align-items:center;gap:8px;flex-wrap:wrap;">
@@ -1820,6 +1835,12 @@
           </label>
         </div>
         <span id="idle-sstv-note" class="help-text" style="display:block;margin-top:4px;">SSTV: POTACAT flips to 20m (14.230 MHz) in the daytime and 40m (7.171 MHz) at night, based on your grid square.</span>
+        <div id="idle-aprs-opts" style="display:none;margin-top:6px;">
+          <span class="help-text" style="display:block;">APRS: the radio listens on the APRS frequency, 2 m if it has 2 m, else 30 m. Receive only: nothing is transmitted.</span>
+          <!-- The iGate is set in the APRS window's settings (Casey 2026-11-20); this line only shows it. -->
+          <span id="idle-aprs-igate-line" class="help-text" style="display:block;margin-top:6px;font-weight:600;">iGate: off, set in the APRS window</span>
+          <span id="idle-aprs-igate-marks" class="help-text" style="display:block;margin-top:4px;"></span>
+        </div>
         <span id="idle-jtty-note" class="help-text" style="display:none;margin-top:4px;">JTTY: receive on 20m (14.090 MHz) in the daytime and 40m (7.090 MHz) at night, based on your grid square. Each band change is marked in the JTTY feed.</span>
       </div>
       <label class="checkbox-label" style="margin-top:8px;"><input type="checkbox" id="set-sstv-post-process" checked> Polish decoded SSTV images (MMSSTV-style)</label>
@@ -1913,6 +1934,13 @@
           <label style="margin-top:4px;display:block;">TX audio out (to radio):
             <select id="rig-remote-audio-output" style="width:100%;margin-top:2px;"><option value="">-- system default --</option></select>
           </label>
+          <label style="margin-top:4px;display:block;" id="rig-tx-channel-row">Transmit on:
+            <select id="set-tx-channel" style="margin-top:2px;">
+              <option value="both">Both channels (left and right)</option>
+              <option value="left">Left channel only</option>
+            </select>
+            <span class="help-text" style="display:block;">Which side of the TX audio out carries transmit audio for FT8, Tune and Winlink (ARDOP, packet). Leave it on Both unless your interface uses the right channel for something else: a Digirig DR-891 can key the radio from the right channel, so it needs Left channel only.</span>
+          </label>
           <label style="margin-top:6px;display:block;" id="rig-rx-level-row">Receive level to ECHOCAT devices: <span id="rig-rx-level-val">0 dB</span>
             <input type="range" id="rig-rx-level" min="-20" max="20" step="1" value="0" style="width:100%;margin-top:2px;">
             <span class="help-text" style="display:block;">Gain on the radio's audio before it goes to the phone or browser (0 dB = as captured). Raise it when the radio's line output ignores its volume knob, such as a fixed-level ACC jack into a sound-card interface. The TX Drive slider on the device is the transmit twin; JTCAT's own RX gain is separate.</span>
@@ -1979,9 +2007,22 @@
             </div>
           </details>
         </div>
+        <label class="radio-label"><input type="radio" name="radio-type" value="tci"> Zeus or Thetis (TCI server)</label>
+        <div id="rig-tci-config" class="radio-sub hidden">
+          <label>Program: <select id="rig-tci-server">
+            <option value="zeus">Zeus</option>
+            <option value="thetis">Thetis</option>
+          </select></label>
+          <label>Host: <input type="text" id="rig-tci-host" value="127.0.0.1" placeholder="127.0.0.1"></label>
+          <label>TCI port: <input type="number" id="rig-tci-port" value="40001" min="1" max="65535"></label>
+          <label class="checkbox-label"><input type="checkbox" id="rig-tci-auto-start" checked> Start the receiver when POTACAT connects</label>
+          <button type="button" id="rig-tci-check" class="rig-action-btn">Test connection</button>
+          <span id="rig-tci-result" role="status" aria-live="polite" style="font-size:12px;"></span>
+          <span class="help-text">POTACAT tunes the radio, follows its dial and sets its receive controls through TCI. With Zeus it also transmits FT8 and the other digital modes from JTCAT, and voice from ECHOCAT; the PTT button and CW here do not key it yet. Thetis is receive only until a Thetis owner has confirmed transmit.</span>
+        </div>
         <label class="radio-label"><input type="radio" name="radio-type" value="tcpcat"> IP Radio (TCP CAT)</label>
         <div id="tcpcat-config" class="radio-sub hidden">
-          <span class="help-text" style="font-size:12px;">Connect to any radio with TCP CAT — Flex on a custom port, or other radios that speak raw Kenwood-style ASCII over TCP with no authentication. For an Elecraft K4 over the network use "K4 Remote (network)" below instead — the K4 uses a different framed + authenticated protocol.</span>
+          <span class="help-text" style="font-size:12px;">Connect to any radio with TCP CAT — Flex on a custom port, or other radios that speak raw Kenwood-style ASCII over TCP with no authentication. For an Elecraft K4 over the network use "K4 Remote (network)" below instead — the K4 uses a different framed + authenticated protocol. For Zeus, also pick Radio Model "Zeus SDR (TS-2000 CAT)", so FT8 and FT4 go out in DIGU.</span>
           <label>Host:
             <input type="text" id="set-tcpcat-host" placeholder="127.0.0.1" value="127.0.0.1">
           </label>
@@ -2025,7 +2066,7 @@
           <label class="checkbox-label" style="margin-top:6px;display:flex;align-items:center;gap:6px;">
             <input type="checkbox" id="set-serialcat-dtr-off"> Disable DTR/RTS on connect
           </label>
-          <span class="help-text" style="margin-top:2px;display:block;">Required for QRPLabs QMX/QDX (uses DTR for PTT). Also check for Digirig, SignaLink, and similar USB interfaces. <b>Leave this unchecked for most Yaesu radios</b> — if a Yaesu connects but won't change frequency, uncheck this and set the radio's "CAT RTS" menu (e.g. FTDX3000 menu 040) to Enable.</span>
+          <span class="help-text" style="margin-top:2px;display:block;">Required for QRPLabs QMX/QDX (uses DTR for PTT). Also check for Digirig, SignaLink, and similar USB interfaces. <b>Leave this unchecked for most Yaesu radios.</b> A radio that does not answer with RTS held low is tried with RTS/CTS flow control by POTACAT itself (RTS line, below), so there is no radio menu to change for that.</span>
           <label style="margin-top:6px;">RTS line:
             <select id="set-serialcat-handshake">
               <option value="auto" selected>Auto (by radio model)</option>
@@ -2043,6 +2084,13 @@
               <option value="vox">The audio interface keys it (SignaLink, the radio's VOX)</option>
             </select>
           </label>
+          <div id="serialcat-ptt-conflict" class="rig-ptt-conflict hidden" role="alert">
+            <span id="serialcat-ptt-conflict-text"></span>
+            <div class="rig-ptt-conflict-actions">
+              <button type="button" data-ptt-fix="rts-held-low">Hold RTS low</button>
+              <button type="button" data-ptt-fix="ptt-over-cat">Key over CAT instead</button>
+            </div>
+          </div>
           <span class="help-text" style="margin-top:2px;display:block;">CAT still tunes and changes mode. Choose <b>The audio interface keys it</b> when a SignaLink or similar on the radio's data jack (TS-2000 ACC2) does the keying: over CAT some radios transmit from the front microphone, so the interface's audio never goes out.</span>
           <div style="margin-top:6px;display:flex;align-items:center;gap:8px;">
             <button type="button" id="serialcat-test-btn">Test Connection</button>
@@ -2198,9 +2246,9 @@
           </div>
           <span class="help-text" style="margin-top:6px;display:block;">CAT plus RS-BA1 receive/transmit audio. With Audio source set to Icom Network audio, POTACAT receives radio audio over UDP for JTCAT/SSTV decoding and can send JTCAT FT8/FT4 audio directly over the radio's RS-BA1 TX stream. Network TX gain scales the IP audio drive before it reaches the radio; use it with the JTCAT TX Pwr slider and the radio's LAN MOD gain to get clean output with little or no ALC.</span>
         </div>
-        <label class="radio-label"><input type="radio" name="radio-type" value="yaesu-lan"> Yaesu LAN (SCU-LAN10), experimental <span style="font-size:10px;color:var(--text-tertiary);">— CAT + receive audio</span></label>
+        <label class="radio-label"><input type="radio" name="radio-type" value="yaesu-lan"> Yaesu LAN (SCU-LAN10), experimental <span style="font-size:10px;color:var(--text-tertiary);">— CAT + receive and transmit audio</span></label>
         <div id="yaesu-lan-config" class="radio-sub hidden">
-          <span class="help-text" style="font-size:12px;">For the FTDX10, FT-710 and FTDX101D/MP with a Yaesu SCU-LAN10. Pick the radio in Radio Model above. One program at a time: close PCC-LAN10 first. For use away from home, reach the unit through Tailscale or a VPN, because the link is not really encrypted. Transmit audio over the LAN is not supported yet. New and untested on real units: after you try it, please send a report with Report a Bug in the Settings sidebar.</span>
+          <span class="help-text" style="font-size:12px;">For the FTDX10, FT-710, FTDX101D and FTDX101MP with a Yaesu SCU-LAN10. Pick the radio in Radio Model above. One program at a time: close PCC-LAN10 first. For use away from home, reach the unit through Tailscale or a VPN, because the link is not really encrypted. Voice from the VFO window's PTT or ECHOCAT is transmitted over the LAN, and so are voice macros, JTCAT (FT8/FT4), Tune and SSTV (the radio's menu setting for it is under Setup instructions); Winlink needs the radio's USB sound card on this computer for now. New and untested on real units: after you try it, please send a report with Report a Bug in the Settings sidebar.</span>
           <label>Address:
             <input type="text" id="set-yaesu-lan-host" placeholder="192.168.49.1" value="192.168.49.1">
           </label>
@@ -2213,11 +2261,14 @@
           <label>Password:
             <input type="password" id="set-yaesu-lan-password" autocomplete="off" placeholder="defaultuser">
           </label>
+          <label class="checkbox-label" id="yaesu-lan-mute-monitor-row" title="FT-710 and FTDX10 for now: the monitor is known to be set per mode there. The radio's monitor and CW sidetone play on its own speaker while you transmit from afar. POTACAT sets them to off and 0 in each mode you use and puts them back when it disconnects.">
+            <input type="checkbox" id="set-yaesu-lan-mute-monitor"> Mute the radio's speaker monitor and CW sidetone while POTACAT has the radio
+          </label>
           <div style="margin-top:6px;display:flex;align-items:center;gap:8px;">
             <button type="button" id="yaesu-lan-test-btn">Test Connection</button>
             <span id="yaesu-lan-test-result" style="font-size:12px;"></span>
           </div>
-          <span class="help-text" style="margin-top:6px;display:block;">The base port is the first of four UDP ports (CAT, audio and scope follow it). Blank user and password use the unit's factory login. With Audio source set to Yaesu LAN audio, JTCAT and SSTV decode the radio's audio over the network; to transmit FT8, SSTV or voice from POTACAT, set Audio source to the radio's USB sound card on this computer instead.</span>
+          <span class="help-text" style="margin-top:6px;display:block;">The base port is the first of four UDP ports (CAT, audio and scope follow it). Blank user and password use the unit's factory login. With Audio source set to Yaesu LAN audio, receive and transmit audio both go over the network (Winlink excepted). The monitor option (FT-710, FTDX10) sets the radio's monitor off and its level to 0 (the CW sidetone follows the level) in each mode you use, and puts every mode back when POTACAT disconnects or quits.</span>
         </div>
         <label class="radio-label"><input type="radio" name="radio-type" value="hamlib"> Other Rig (Hamlib)</label>
         <div id="hamlib-config" class="radio-sub hidden">
@@ -2324,7 +2375,7 @@
         </div>
         <label class="radio-label"><input type="radio" name="radio-type" value="nocat"> No CAT control (VOX)</label>
         <div id="nocat-config" class="radio-sub hidden">
-          <span class="help-text" style="font-size:12px;">For radios with no computer control at all — VOX-keyed kits such as the <b>Pebble HF</b> or a uSDX without a CAT port, a handheld such as a Baofeng on a sound-card interface, or a mobile FM radio such as the <b>Yaesu FTM-510D</b> through its DATA jack. You tune the radio by hand (spot clicks and band buttons show you the frequency to set). Set the audio Input and Output below to the sound card that connects to the radio.</span>
+          <span class="help-text" style="font-size:12px;">For radios with no computer control at all — VOX-keyed kits such as the <b>Pebble HF</b> or a uSDX without a CAT port, a handheld such as a Baofeng on a sound-card interface, or a mobile FM radio such as the <b>Yaesu FTM-510D</b> or <b>FTM-100D</b> through its DATA jack. You tune the radio by hand (spot clicks and band buttons show you the frequency to set). Set the audio Input and Output below to the sound card that connects to the radio.</span>
           <label style="display:block;margin-top:6px;">Transmit (PTT):
             <select id="set-nocat-ptt">
               <option value="vox">The radio's VOX keys on POTACAT's audio</option>
@@ -2366,6 +2417,32 @@
             <span class="help-text" style="margin-left:24px;display:block;">For a Yaesu with a tuner on its TUNER jack (FT-710 + mAT-30): the radio runs the tune, then switches the tuner off. With this on, POTACAT watches the cycle and sends AC001; the moment the radio reports the tuner off, so it stays online.</span>
           </div>
         </details>
+        <div id="rig-power-off-allow" style="margin-top:8px;">
+          <label class="checkbox-label"><input type="checkbox" id="set-allow-power-off"> Show Power Off for this radio</label>
+          <span class="help-text" id="power-off-wake-note" style="display:block;margin:2px 0 4px 24px;"></span>
+          <span class="help-text" style="display:block;margin:2px 0 0 24px;">When this box is ticked, POTACAT, ECHOCAT and a guest get a Power Off button for this radio. It starts ticked where POTACAT can turn the radio back on and unticked where it cannot, and your own choice is kept. Power On only works if the radio keeps its computer connection alive while it is off. If yours does not, untick this box or keep the radio's power button within reach.</span>
+        </div>
+        <div id="rig-amp-drive" style="margin-top:8px;">
+          <label class="checkbox-label"><input type="checkbox" id="set-amp-drive-on"> An amplifier is connected: limit the drive power</label>
+          <label style="display:block;margin:4px 0 0 24px;">Never drive above (W):
+            <input type="number" id="set-amp-drive-w" min="0.1" max="2000" step="0.1" value="10" style="width:70px;">
+          </label>
+          <span class="help-text" style="display:block;margin:2px 0 0 24px;">For an amplifier that needs little drive. POTACAT, ECHOCAT, a guest, FT8, WSPR, Winlink and Tune never set this radio's power above this, and every power slider stops there. If the radio reports more (from its own knob or another program), POTACAT turns it back down. Commands you type yourself in the rig panel's Commands tab are sent as written.</span>
+        </div>
+        <div id="rig-tx-audio-input" class="hidden" style="margin-top:8px;">
+          <label>Transmit audio input:
+            <select id="set-tx-audio-input" style="margin-top:2px;">
+              <option value="">Ask on first transmit</option>
+              <option value="rear">Rear (data / ACC2 socket)</option>
+              <option value="front">Front (microphone jack)</option>
+            </select>
+          </label>
+          <span class="help-text" style="display:block;margin:2px 0 0 0;">The socket your sound card interface is plugged into. POTACAT tells the radio which one to send each time it transmits; the wrong one puts a carrier on the air with no audio.</span>
+        </div>
+        <div id="rig-icom-usb-data-mod" class="hidden" style="margin-top:8px;">
+          <label class="checkbox-label"><input type="checkbox" id="set-icom-usb-data-mod" checked> Set DATA MOD to USB while POTACAT sends data</label>
+          <span class="help-text" style="display:block;margin:2px 0 0 24px;">For FT8, Winlink and SSTV over the USB cable. When POTACAT puts the radio in a data mode it sets the radio's DATA MOD to USB, says so, and puts your setting back afterwards. Untick this if your sound card interface is on the ACC socket (a SignaLink, for example).</span>
+        </div>
         <div id="rig-voice-as-data" style="margin-top:8px;">
           <label class="checkbox-label"><input type="checkbox" id="set-voice-as-data"> Voice in DATA mode (USB-D / LSB-D)</label>
           <span class="help-text" style="display:block;margin:2px 0 0 24px;">For radios whose data port is silent in USB and LSB, such as the Xiegu G90: POTACAT puts the radio in USB-D or LSB-D for voice, so receive audio reaches your sound card interface and ECHOCAT. Contacts are still logged as SSB. The radio's own microphone is off in these modes, so voice has to come in through the data port.</span>
@@ -2409,7 +2486,15 @@
                 </select>
               </label>
               <label title="Frequency correction for the dongle's crystal">PPM: <input type="number" id="set-sdr-scope-ppm" min="-200" max="200" value="0" style="width:60px;"></label>
-              <label title="Added to the radio's dial before the SDR tunes: an upconverter (e.g. 125000000), or a radio's IF output">Offset (Hz): <input type="number" id="set-sdr-scope-offset" value="0" style="width:110px;"></label>
+              <label title="Where the SDR's antenna input is connected">The SDR is connected to:
+                <select id="set-sdr-scope-tap">
+                  <option value="follow">An antenna, or the radio's RX OUT (moves with the dial)</option>
+                  <option value="fixedIf">The radio's IF output (stays on one frequency)</option>
+                </select>
+              </label>
+              <label id="sdr-scope-offset-wrap" title="Added to the radio's dial before the SDR tunes, for an upconverter (e.g. 125000000)">Offset (Hz): <input type="number" id="set-sdr-scope-offset" value="0" style="width:110px;"></label>
+              <label id="sdr-scope-if-wrap" title="The frequency of the radio's IF output, from the radio's manual (for example 9005000 on an FTDX101)">IF frequency (Hz): <input type="number" id="set-sdr-scope-if" min="0" value="0" style="width:110px;"></label>
+              <span id="sdr-scope-invert-wrap"><label class="checkbox-label" title="Tick this if signals above the dial show below it on the scope"><input type="checkbox" id="set-sdr-scope-invert"> The radio's IF is upside down (mirror the picture)</label></span>
               <label class="checkbox-label" id="sdr-scope-prefer-wrap" title="The FT-710 has its own USB band scope; tick this to show the SDR instead"><input type="checkbox" id="set-sdr-scope-prefer"> Use the SDR instead of the FT-710's own scope</label>
             </div>
           </div>
@@ -2517,7 +2602,7 @@
           <span class="help-text" style="display:inline;margin-left:4px;">(0 = no limit)</span>
         </div>
       </div>
-      <label class="checkbox-label"><input type="checkbox" id="set-enable-wsjtx"> WSJT-X Integration</label>
+      <label class="checkbox-label"><input type="checkbox" id="set-enable-wsjtx"> WSJT-X Mode</label>
       <div id="wsjtx-config" class="radio-sub hidden">
         <span class="help-text" style="font-size:12px;">Connect to WSJT-X via UDP. POTA activators are highlighted in the decode window and decodes appear in POTACAT.</span>
         <label>UDP Port:
@@ -2573,7 +2658,7 @@
         </span>
       </label>
       <label class="checkbox-label" title="Hide spots your license class can't operate, plus any truly out-of-band frequencies."><input type="checkbox" id="set-hide-out-of-band"> Hide spots outside my license privileges</label>
-      <span class="help-text" style="display:block;margin:-2px 0 6px;">Uses your <strong>License Class</strong> (Settings → Operator). If that's set to None, nothing is hidden.</span>
+      <span class="help-text" style="display:block;margin:-2px 0 6px;">Uses your <strong>License Class</strong> (Settings &gt; Station). If that's set to None, nothing is hidden.</span>
       <label class="checkbox-label"><input type="checkbox" id="set-hide-worked"> Hide already-worked stations</label>
       <label>Watchlist (callsigns or states, comma-separated, optional band:mode filter):
         <input type="text" id="set-watchlist" placeholder="K3SBP, K4SWL:CW, K0BUF:20m, W1AW:40m:SSB, US-NJ, WY:20m">
@@ -2699,7 +2784,7 @@
       <label class="checkbox-label"><input type="checkbox" id="set-enable-split"> Enable split mode</label>
       <span class="help-text" style="margin-left:12px;margin-bottom:6px;display:block;">Send split on/off with each tune command (VFO A = RX, VFO B = TX)</span>
       <label class="checkbox-label"><input type="checkbox" id="set-enable-atu"> Auto-tune ATU on band change</label>
-      <span class="help-text" style="margin-left:12px;margin-bottom:6px;display:block;">Trigger the antenna tuner when tuning to a different band. Supports Yaesu, Kenwood, Elecraft, Hamlib rigctld, and FlexRadio. <b>This is the rig's internal ATU command.</b> For external RF-sensing tuners (LDG, MFJ, etc.) that need a tune-up signal: open the FT8 view and use its <b>Tune</b> button (90s steady tone via USB audio), or configure a Custom CAT Command in Settings → Rig if you want a one-click tune from any view.</span>
+      <span class="help-text" style="margin-left:12px;margin-bottom:6px;display:block;">Trigger the antenna tuner when tuning to a different band. Supports Yaesu, Kenwood, Elecraft, Hamlib rigctld, and FlexRadio. <b>This is the rig's internal ATU command.</b> For external RF-sensing tuners (LDG, MFJ, etc.) that need a tune-up signal: open the FT8 view and use its <b>Tune</b> button (90s steady tone via USB audio), or add a custom CAT command on the Rig button's Custom tab if you want a one-click tune from any view.</span>
       <label class="checkbox-label"><input type="checkbox" id="set-tune-click"> Tune confirmation sound</label>
       <span class="help-text" style="margin-left:12px;margin-bottom:6px;display:block;">Play a click when the radio confirms it has changed frequency</span>
     </fieldset>
@@ -2878,8 +2963,9 @@
           <span class="help-text" style="display:block;margin-top:4px;">Import QSOs from N3FJP, HRD Logbook, HAMRS, Log4OM, or any other ADIF (.adi) or SQLite (.sqlite) export. Imported QSOs are merged into your POTACAT log; any park references they carry (POTA_REF or SIG=POTA + SIG_INFO) populate the <strong>worked-parks</strong> filter — that's what drives "Hide worked parks" / "Show NEW parks at top" in the spots table.</span>
         </div>
         <label style="margin-top:10px;">Default TX Power (W):
-          <input type="number" id="set-default-power" min="1" max="5000" value="100">
+          <input type="number" id="set-default-power" min="1" max="5000" placeholder="none">
         </label>
+        <span class="help-text" style="margin-left:12px;margin-bottom:6px;display:block;">Logged only when the radio's power cannot be read and POTACAT has not set it. Blank: the contact is logged with no power.</span>
         <label class="checkbox-label"><input type="checkbox" id="set-n1mm-rst"> N1MM-style RST logging</label>
         <span class="help-text" style="margin-left:12px;margin-bottom:6px;display:block;">On: one box per digit of each report. Off: one field per report; a full report moves the cursor to RST Rcvd by itself, and a Tab pressed straight after stays there.</span>
         <label class="checkbox-label"><input type="checkbox" id="set-log-comment-tags" checked> Auto park/club tags in comment</label>
@@ -2959,7 +3045,12 @@
           <label class="checkbox-label"><input type="checkbox" id="set-lotw-enable"> Upload to ARRL Logbook of the World (via TQSL)</label>
           <span class="help-text" style="margin-left:12px;display:block;">Signs and uploads your POTACAT log with your own TrustedQSL install and callsign certificate. QSOs already at LoTW are skipped automatically.</span>
           <div id="lotw-config" class="hidden" style="margin-left:12px;margin-top:6px;">
-            <div id="lotw-missing" class="hidden help-text" style="margin-bottom:6px;">TQSL was not found. Install <a href="https://www.arrl.org/tqsl-download" id="lotw-tqsl-link" data-external>TrustedQSL</a>, create your callsign certificate and a Station Location in it, then reopen Settings.</div>
+            <div id="lotw-missing" class="hidden help-text" style="margin-bottom:6px;">TQSL was not found. Install <a href="https://www.arrl.org/tqsl-download" id="lotw-tqsl-link" data-external>TrustedQSL</a> and create your callsign certificate and a Station Location in it. If it is installed somewhere else, choose it under TQSL program below.</div>
+            <label style="display:block;margin-bottom:4px;">TQSL program:
+              <input type="text" id="set-lotw-tqsl-path" placeholder="found for you; leave blank" style="width:230px;" autocomplete="off" spellcheck="false">
+              <button type="button" id="lotw-tqsl-browse">Browse&hellip;</button>
+            </label>
+            <span id="lotw-tqsl-found" class="help-text" style="display:block;margin-bottom:6px;">Leave blank and POTACAT looks in the usual places, including a Flatpak install on Linux.</span>
             <label>Station Location:
               <select id="set-lotw-location" style="min-width:180px;"><option value="">Select...</option></select>
             </label>
@@ -2981,9 +3072,10 @@
               <span class="help-text" style="display:block;margin-top:4px;">Your lotw.arrl.org website login — used only to download which QSOs LoTW has confirmed. This is not the certificate password above.</span>
               <div style="margin-top:6px;">
                 <button type="button" id="lotw-download-btn">Download confirmations</button>
+                <button type="button" id="lotw-download-all-btn" style="margin-left:6px;">Download all confirmations again</button>
                 <span id="lotw-download-result" class="help-text" style="margin-left:8px;"></span>
               </div>
-              <span class="help-text" style="display:block;margin-top:4px;">Confirmed QSOs get the L&#10003; mark in the QSO log window and count as confirmed in the DXCC Tracker. The first download pulls your full history; later ones fetch only new confirmations.</span>
+              <span class="help-text" style="display:block;margin-top:4px;">Confirmed QSOs get the L&#10003; mark in the QSO log window. The DXCC Tracker counts entities worked from an ADIF log, confirmed or not. The first download pulls your full history; later ones fetch only new confirmations. Imported an older log since? Use Download all confirmations again.</span>
             </div>
           </div>
         </div>
@@ -3359,7 +3451,7 @@
         <span class="help-text" style="display:block;">Internet only, never the radio. A radio session always starts from your Send / Receive.</span>
 
         <div style="margin-top:10px;font-weight:600;">Over the radio</div>
-        <span class="help-text" style="display:block;margin-bottom:4px;">ARDOP (HF) and packet (VHF/UHF, through Dire Wolf) are open and built into POTACAT on Windows, macOS and Linux. Their audio goes through POTACAT on every radio, using the Audio devices set for the radio in My Rigs — nothing to pick.</span>
+        <span class="help-text" style="display:block;margin-bottom:4px;">ARDOP (HF) and packet (VHF/UHF, through Dire Wolf) are open and built into POTACAT on Windows, macOS and Linux. Their audio goes through POTACAT on every radio, using the Audio Devices set for the radio in Settings &gt; Radio — nothing to pick.</span>
         <span class="help-text hidden" id="winlink-audio-via" style="display:block;margin-bottom:4px;color:var(--accent-green,#4ecca3);"></span>
         <div id="winlink-audio-pick" class="hidden" style="margin-top:4px;">
         <span class="help-text" style="display:block;margin-bottom:4px;">Sound devices for a modem you built yourself (the bundled ones never open a sound card).</span>
@@ -3479,7 +3571,7 @@
     <fieldset class="source-toggles collapsible" data-settings-tab="station">
       <legend>WebSDR</legend>
       <span class="help-text">Listen through a remote receiver (KiwiSDR or WebSDR.org) while transmitting on your local radio. Useful for local QRM. Click <b>Browse</b> to pick from a curated list, or type a host manually. Port 8073 = KiwiSDR, other ports = WebSDR.org.</span>
-      <span class="help-text" style="display:block;margin-top:4px;">An <b>rtl_tcp</b> server works here too: an RTL-SDR running rtl_tcp, or an SDRplay running rsp_tcp, on this PC or a Pi by your antenna (for example <b>192.168.1.50:1234</b>). POTACAT recognises it when it connects and does the receiving itself. It sends about 4 Mbit/s, so use it on your own network. If that SDR is also your band scope (Settings &gt; My Rigs &gt; Band scope from an SDR), its gain and direct sampling settings are used, and listening shares the scope's connection.</span>
+      <span class="help-text" style="display:block;margin-top:4px;">An <b>rtl_tcp</b> server works here too: an RTL-SDR running rtl_tcp, or an SDRplay running rsp_tcp, on this PC or a Pi by your antenna (for example <b>192.168.1.50:1234</b>). POTACAT recognises it when it connects and does the receiving itself. It sends about 4 Mbit/s, so use it on your own network. If that SDR is also your band scope (Settings &gt; Radio, Edit the rig, Band scope from an SDR), its gain and direct sampling settings are used, and listening shares the scope's connection.</span>
       <div style="display:flex;gap:6px;margin-top:8px;align-items:center;">
         <label style="flex:1;">Label: <input type="text" id="set-kiwi-label-1" placeholder="K3FEF" style="width:100%;max-width:80px;"></label>
         <label style="flex:3;">Host: <input type="text" id="set-kiwi-host-1" placeholder="host:port (e.g. k3fef.com:8073)" style="width:100%;max-width:260px;"></label>
@@ -3592,7 +3684,7 @@
       <!-- Voice Macros -->
       <div style="margin-top:12px;border-top:1px solid #333;padding-top:8px;">
         <span style="font-size:12px;font-weight:bold;color:var(--text);">Voice Macros</span>
-        <span class="help-text" style="display:block;margin-top:2px;">Record mic audio to play as voice macros during SSB/FM. Max 30s each. Plays through the rig's TX audio output.</span>
+        <span class="help-text" style="display:block;margin-top:2px;">Record mic audio to play as voice macros during SSB/FM. Max 30s each. Plays through the rig's TX audio output, or over the LAN on a Yaesu SCU-LAN10 with Yaesu LAN audio.</span>
         <div id="voice-macro-editor" style="margin-top:6px;display:flex;flex-direction:column;gap:4px;"></div>
       </div>
       <!-- Hotkeys -->
@@ -3883,7 +3975,7 @@
         <!-- Sign-in mode (default) -->
         <div id="cloud-signin-actions">
           <button type="button" id="cloud-email-signin" class="btn btn-primary" style="width:100%;">Sign In</button>
-          <p style="margin-top:8px;font-size:12px;color:var(--text-secondary);">New to POTACAT Cloud? <a href="#" id="cloud-show-register" style="color:var(--accent-green);">Create a free account</a></p>
+          <p style="margin-top:8px;font-size:12px;color:var(--text-secondary);">New to POTACAT Cloud? <a href="#" id="cloud-show-register" style="color:var(--accent-green);">Start a free 30-day trial</a></p>
         </div>
         <!-- Create-account mode (revealed by "Create a free account") -->
         <div id="cloud-register-actions" class="hidden">
@@ -4034,7 +4126,7 @@
         <span id="cloud-tunnel-host" style="font-size:12px;color:var(--text-secondary);"></span>
       </div>
       <div style="display:flex;gap:6px;">
-        <button type="button" id="cloud-tunnel-enable-btn" class="btn btn-primary">Enable POTACAT Cloud</button>
+        <button type="button" id="cloud-tunnel-enable-btn" class="btn btn-primary">Turn on Cloud Tunnel</button>
         <button type="button" id="cloud-tunnel-disable-btn" class="btn hidden">Disable</button>
       </div>
       <p id="cloud-tunnel-error" class="help-text hidden" style="color:var(--accent-red);margin-top:6px;"></p>
@@ -4337,6 +4429,18 @@
     </div>
   </dialog>
 
+  <dialog id="tx-audio-input-dialog">
+    <h3 id="tx-audio-input-title">Where is your audio interface plugged into the radio?</h3>
+    <p id="tx-audio-input-text" class="help-text" style="margin-bottom:12px;max-width:440px;"></p>
+    <div class="dialog-buttons" style="justify-content:flex-start;flex-wrap:wrap;margin-top:0;">
+      <button type="button" id="tx-audio-input-rear">Rear (data / ACC2 socket)</button>
+      <button type="button" id="tx-audio-input-front">Front (microphone jack)</button>
+    </div>
+    <div class="dialog-buttons">
+      <button type="button" id="tx-audio-input-later">Not now</button>
+    </div>
+  </dialog>
+
   <!-- Cloud Tunnel diagnostics dialog -->
   <dialog id="tunnel-diag-dialog">
     <h3 style="display:flex;justify-content:space-between;align-items:baseline;">Cloud Tunnel Diagnostics <span style="font-size:11px;font-weight:normal;color:#666;">ESC to close</span></h3>
@@ -4359,6 +4463,39 @@
        are obvious before issuing. -->
   <dialog id="share-rig-dialog">
     <h3 style="display:flex;justify-content:space-between;align-items:baseline;">Share Your Rig <span style="font-size:11px;font-weight:normal;color:#666;">ESC to close</span></h3>
+    <!-- While a guest holds a pass: who has the radio, and the owner's three
+         controls (#200): Take the radio (Now / In 5 minutes, with an optional
+         message), Give it back, Cancel pass (confirmed here, no browser
+         dialog). Filled by _shareRigLiveRender() from pass-owner-get. -->
+    <div id="share-rig-live" class="share-rig-live hidden" role="region" aria-label="Your guest">
+      <div class="share-rig-live-status" id="share-rig-live-status" role="status" aria-live="polite"></div>
+      <div class="share-rig-live-sub" id="share-rig-live-sub"></div>
+      <div class="share-rig-live-msg" id="share-rig-live-msg-row">
+        <label for="share-rig-live-message">Message to the guest (optional)</label>
+        <input type="text" id="share-rig-live-message" maxlength="140" autocomplete="off" placeholder="e.g. I need the radio for the club net">
+        <span class="share-rig-live-count" id="share-rig-live-count">0 / 140</span>
+      </div>
+      <div class="share-rig-live-actions" id="share-rig-live-take-row">
+        <span class="share-rig-live-label">Take the radio:</span>
+        <button type="button" class="primary" id="share-rig-take-now">Now</button>
+        <button type="button" id="share-rig-take-later">In 5 minutes</button>
+        <button type="button" id="share-rig-cancel-take" class="hidden">Let them keep it</button>
+      </div>
+      <div class="share-rig-live-actions hidden" id="share-rig-live-giveback-row">
+        <button type="button" class="primary" id="share-rig-give-back">Give it back</button>
+      </div>
+      <div class="share-rig-live-actions share-rig-live-end" id="share-rig-live-end-row">
+        <button type="button" class="danger" id="share-rig-cancel-pass">Cancel pass</button>
+      </div>
+      <div class="share-rig-live-confirm hidden" id="share-rig-live-confirm" role="alertdialog" aria-labelledby="share-rig-live-confirm-text">
+        <div id="share-rig-live-confirm-text">Cancel this pass for good? Your guest comes off the radio now and the link stops working.</div>
+        <div class="share-rig-live-actions">
+          <button type="button" class="danger" id="share-rig-cancel-pass-yes">Yes, cancel the pass</button>
+          <button type="button" id="share-rig-cancel-pass-no">Keep the pass</button>
+        </div>
+      </div>
+      <div class="share-rig-live-error" id="share-rig-live-error" role="alert"></div>
+    </div>
     <div id="share-rig-form-view">
       <!-- Network-reach notice. Always visible — leads the dialog so
            the operator sees the share-scope boundary BEFORE filling
@@ -4499,7 +4636,7 @@
 
       <div class="dialog-buttons">
         <button type="button" id="share-rig-issue-another">Issue another pass</button>
-        <button type="button" id="share-rig-revoke" class="danger">Revoke this pass</button>
+        <button type="button" id="share-rig-revoke" class="danger">Cancel pass</button>
         <button type="button" id="share-rig-done">Done</button>
       </div>
     </div>
@@ -4914,6 +5051,7 @@
       <button type="button" id="ss-close" class="log-dialog-x" title="Close">&times;</button>
     </div>
     <div id="ss-progress" class="ss-progress"></div>
+    <div id="ss-notice" class="ss-notice hidden" role="status"></div>
     <div id="ss-message" class="ss-message hidden"></div>
     <div id="ss-steps" class="ss-steps"></div>
     <div id="ss-share" class="ss-share hidden"></div>
@@ -4931,6 +5069,16 @@
     <div class="er-title">Enjoying ECHOCAT?</div>
     <div id="er-text" class="ss-card-text"></div>
     <div id="er-buttons" class="ss-card-buttons"></div>
+  </div>
+  <!-- WSJT-X Mode start notice (#547): 30 s after start, mode on, WSJT-X never
+       heard. Words from lib/wsjtx-mode-notice.js. Keep it on = until next start. -->
+  <div id="wsjtx-mode-card" class="station-setup-card wsjtx-mode-card hidden" role="alert">
+    <div class="wsjtx-mode-title" id="wsjtx-card-title"></div>
+    <div class="ss-card-text" id="wsjtx-card-text"></div>
+    <div class="ss-card-buttons">
+      <button type="button" id="wsjtx-card-off" class="wsjtx-mode-btn primary">Turn off WSJT-X Mode</button>
+      <button type="button" id="wsjtx-card-keep" class="wsjtx-mode-btn">Keep it on</button>
+    </div>
   </div>
   <div id="station-setup-card" class="station-setup-card hidden" role="status">
     <div id="ss-card-text" class="ss-card-text"></div>
@@ -5057,6 +5205,7 @@
         <option value="psk31">PSK31</option>
         <option value="jtty">JTTY</option>
         <option value="js8">JS8</option>
+        <option value="aprs">APRS</option>
       </select>
     </div>
     <div id="welcome-idle-psk-opts" style="margin-left:22px;margin-bottom:8px;display:none;align-items:center;gap:6px;font-size:13px;">
@@ -5188,6 +5337,19 @@
             <option value="5005">Slice D (TCP :5005)</option>
           </select></label>
         </div>
+        <label class="radio-label"><input type="radio" name="welcome-radio-type" value="tci"> Zeus or Thetis (TCI server)</label>
+        <div id="welcome-tci-config" class="radio-sub hidden">
+          <label>Program: <select id="welcome-tci-server">
+            <option value="zeus">Zeus</option>
+            <option value="thetis">Thetis</option>
+          </select></label>
+          <label>Host: <input type="text" id="welcome-tci-host" value="127.0.0.1" placeholder="127.0.0.1"></label>
+          <label>TCI port: <input type="number" id="welcome-tci-port" value="40001" min="1" max="65535"></label>
+          <label class="checkbox-label"><input type="checkbox" id="welcome-tci-auto-start" checked> Start the receiver when POTACAT connects</label>
+          <button type="button" id="welcome-tci-check" class="rig-action-btn">Test connection</button>
+          <span id="welcome-tci-result" role="status" aria-live="polite" style="font-size:12px;"></span>
+          <span class="help-text">POTACAT tunes the radio, follows its dial and sets its receive controls through TCI. With Zeus it also transmits FT8 and the other digital modes from JTCAT, and voice from ECHOCAT; the PTT button and CW here do not key it yet. Thetis is receive only until a Thetis owner has confirmed transmit.</span>
+        </div>
         <label class="radio-label"><input type="radio" name="welcome-radio-type" value="tcpcat"> IP Radio (TCP CAT)</label>
         <div id="welcome-tcpcat-config" class="radio-sub hidden">
           <span class="help-text" style="font-size:12px;">Connect to any radio with TCP CAT</span>
@@ -5297,13 +5459,13 @@
         </div>
         <label class="radio-label"><input type="radio" name="welcome-radio-type" value="dxlab-commander"> DXLab Commander</label>
         <div id="welcome-dxlab-commander-config" class="radio-sub hidden">
-          <span class="help-text">Control the radio through DXLab Commander's TCP port (Commander's Base Port + 2, default 52002). Commander must be running. Add command sequences later in Settings &gt; My Rigs.</span>
+          <span class="help-text">Control the radio through DXLab Commander's TCP port (Commander's Base Port + 2, default 52002). Commander must be running. Add command sequences later in Settings &gt; Radio, Edit the rig, Commander command sequences.</span>
           <label>Host: <input type="text" id="welcome-dxlab-commander-host" placeholder="127.0.0.1" value="127.0.0.1"></label>
           <label>Port: <input type="number" id="welcome-dxlab-commander-port" min="1" max="65535" value="52002"></label>
         </div>
         <label class="radio-label"><input type="radio" name="welcome-radio-type" value="nocat"> No CAT control (VOX)</label>
         <div id="welcome-nocat-config" class="radio-sub hidden">
-          <span class="help-text">For a radio with no computer control — a VOX-keyed kit such as the Pebble HF. You tune it by hand; POTACAT's audio keys it through its VOX. Choose the sound card that connects to the radio as the audio Input and Output afterwards (Settings &gt; My Rigs).</span>
+          <span class="help-text">For a radio with no computer control — a VOX-keyed kit such as the Pebble HF. You tune it by hand; POTACAT's audio keys it through its VOX. Choose the sound card that connects to the radio as RX audio in and TX audio out afterwards (Settings &gt; Radio, Edit the rig, Audio Devices).</span>
         </div>
         <div class="rig-editor-buttons">
           <button type="button" id="welcome-rig-save-btn">Save Rig</button>
@@ -5325,23 +5487,34 @@
 
   <script src="../node_modules/leaflet/dist/leaflet.js"></script>
   <script src="../lib/freq-dots.js"></script>
+  <script src="../lib/pass-wording.js"></script>
+  <script src="../lib/net-reminder-row.js"></script>
   <script src="../lib/rig-family.js"></script>
+  <script src="../lib/tci-target.js"></script>
+  <script src="../lib/tx-audio-input.js"></script>
+  <script src="../lib/icom-usb-data-mod.js"></script>
+  <script src="../lib/tx-channel.js"></script>
+  <script src="../lib/ptt-flow-conflict.js"></script>
   <script src="../lib/waterfall-palettes.js"></script>
   <script src="../lib/app-theme.js"></script>
   <script src="../lib/look-picker.js"></script>
   <script src="../lib/rig-bands.js"></script>
+  <script src="../lib/spot-band-filter.js"></script>
   <script src="../lib/listen-source.js"></script>
   <script src="../lib/channels.js"></script>
   <script src="../lib/favorites.js"></script>
   <script src="channels-view.js"></script>
   <script src="../lib/landmarks.js"></script>
+  <script src="../lib/directory-key-nav.js"></script>
   <script src="../lib/commander-sequences.js"></script>
   <script src="../lib/spot-row.js"></script>
+  <script src="../lib/jtcat-quiet-freq.js"></script>
   <script src="../lib/map-marker-reconcile.js"></script>
   <script src="../lib/privileges.js"></script>
   <script src="../lib/spot-programs.js"></script>
   <script src="../lib/cm108-ptt.js"></script>
   <script src="../lib/remote-features.js"></script>
+  <script src="../lib/wsjtx-mode-notice.js"></script>
   <script src="../lib/cloud-billing-ui.js"></script>
   <script src="../lib/custom-cat-follow.js"></script>
   <script src="../lib/rig-gain-steps.js"></script>
@@ -5351,21 +5524,28 @@
   <script src="../lib/spot-mute-rules.js"></script>
   <script src="../lib/spot-filter-presets.js"></script>
   <script src="../lib/spot-age.js"></script>
+  <script src="../lib/mic-label-probe.js"></script>
+  <script src="../lib/dxcc-progress.js"></script>
   <script src="../lib/call-filter.js"></script>
   <script src="../lib/dx-rule.js"></script>
   <script src="../lib/audio-device-heal.js"></script>
   <script src="../lib/log-freq.js"></script>
+  <script src="../lib/log-freq-field.js"></script>
+  <script src="../lib/log-tx-power.js"></script>
   <script src="../lib/release-notes-format.js"></script>
   <script src="../lib/watchlist-groups.js"></script>
   <script src="../lib/activation-program.js"></script>
   <script src="../lib/park-db-check.js"></script>
   <script src="../lib/park-grid.js"></script>
+  <script src="../lib/p2p-park-entry.js"></script>
   <script src="../lib/rst-advance.js"></script>
   <script src="../lib/prop-empty-state.js"></script>
   <script src="../lib/dxpedition-contests.js"></script>
   <script src="../lib/worked-roster.js"></script>
   <script src="../lib/worked-overlay.js"></script>
   <script src="../lib/capture-stall.js"></script>
+  <script src="../lib/winlink-mail-view.js"></script>
+  <script src="../lib/mac-mic-access.js"></script>
   <script src="../lib/jtcat-capture-gate.js"></script>
   <script src="../lib/diagnostic-snapshot.js"></script>
   <script src="was-view.js"></script>

@@ -152,7 +152,7 @@ check('PTT is refused while the SDR is live for a frequency the radio cannot rea
 });
 check('an operator\'s own SDR pick goes live at once; an automatic one waits for the arbiter', () => {
   assert.ok(/if \(kiwiManual\) kiwiGoLive\(false\);\s+else \{ broadcastKiwiStatus\(false, \{ available: true \}\); listenSdrResume\(\); \}/.test(main));
-  assert.ok(/\{ host: rawHost, port: rawPort, password, auto \}/.test(main));
+  assert.ok(/\{ host: rawHost, port: rawPort, password, auto(, tls: tlsAsked)? \}/.test(main));
 });
 check('the main window learns the SDR\'s reach, and Landmarks shows what it can hear', () => {
   assert.ok(/onKiwiStatus: \(cb\) => ipcRenderer\.on\('kiwi-status'/.test(preload));

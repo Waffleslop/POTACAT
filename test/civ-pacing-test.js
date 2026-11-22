@@ -137,7 +137,7 @@ test('the radio\'s own unasked frames (scope stream, transceive) do not count as
 test('the serial and CI-V-over-TCP Icom links ask for pacing per rig; Icom Network is not paced', () => {
   const main = readSrc(path.join(__dirname, '..', 'main.js'));
   const serial = main.slice(main.indexOf("} else if (target.type === 'icom') {"), main.indexOf("} else if (target.type === 'icom') {") + 900);
-  assert.ok(/new CivCodec\(model, \(data\) => transport\.write\(data\), \{ pace: civPaceFor\(target\) \}\);/.test(serial));
+  assert.ok(/new CivCodec\(model, \(data\) => transport\.write\(data\), \{ pace: civPaceFor\(target\)(, learnAddress: true)? \}\);/.test(serial)); // sweep 3c adds learnAddress on this path
   assert.ok(/codec = new CivCodec\(model, \(data\) => transport\.write\(data\), \{ pace: civPaceFor\(target\) \}\); \/\/ a real CI-V bus behind the bridge/.test(main));
   assert.ok(/transport = new RsBa1Transport\(\);[\s\S]{0,300}codec = new CivCodec\(model, \(data\) => transport\.write\(data\)\);/.test(main));
 });

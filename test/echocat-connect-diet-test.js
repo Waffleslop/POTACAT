@@ -24,7 +24,8 @@ test('Flex TX-bridge meters reach clients only on change, at most every 250 ms, 
   assert.ok(/if \(m\.v !== null && Math\.abs\(value - m\.v\) < step\) return;/.test(main), 'unchanged values are dropped');
   assert.ok(/if \(value !== 0 && now - m\.at < 250\) return;/.test(main), '250 ms floor, a return to 0 at once');
   assert.ok(!/sendToClient\(\{ type: 'fwd-power'/.test(main) && !/sendToClient\(\{ type: 'swr-ratio'/.test(main), 'no direct meter pushes remain');
-  assert.strictEqual((main.match(/remoteMeterPush\('(fwd-power|swr-ratio)'/g) || []).length, 3);
+  // Three Flex pushes, plus a TCI rig's SWR (#195), all through remoteMeterPush.
+  assert.strictEqual((main.match(/remoteMeterPush\('(fwd-power|swr-ratio)'/g) || []).length, 4);
   assert.ok(/'fwd-power', 'swr-ratio',/.test(server.slice(server.indexOf('PUSH_LOG_EXCLUDED = new Set'), server.indexOf('PUSH_LOG_EXCLUDED = new Set') + 400)));
 });
 

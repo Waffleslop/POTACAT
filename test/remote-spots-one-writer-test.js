@@ -50,10 +50,9 @@ test('the link test is the live link, not the remote mode (a dropped link falls 
 });
 
 test('the shack still ages CW/RBN and SOTA before relaying, and exempts POTA (why only those flickered)', () => {
+  // Since #502 through the table's own rule (lib/spot-age.js, spot-age-everywhere-test).
   const body = fnBody(main, 'sendMergedSpots');
-  assert.ok(/else if \(s\.source === 'sota'\) limit = sotaMaxAgeMs;/.test(body));
-  assert.ok(/spotAgeExempt\(s\)\) limit = Infinity/.test(body));
-  assert.ok(/remoteServer\.broadcastSpots\(echoSpots\)/.test(body));
+  assert.ok(/remoteServer\.broadcastSpots\(spotsWithinMaxAge\(merged\)\)/.test(body));
 });
 
 console.log(`\nRemote spots, one writer (#246): ${pass} passed, ${fail} failed`);

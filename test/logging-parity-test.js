@@ -50,7 +50,8 @@ test('main-side paths log through logContact: JTCAT, the WSJT-X bridge, ECHOCAT'
   assert.ok(/await logContact\(qsoData, \{ origin: 'wsjtx-bridge' \}\);/.test(wsx));
   assert.ok(!/saveQsoRecord\(/.test(wsx), 'the bridge writes no record itself');
   const echo = main.slice(main.indexOf("remoteServer.on('log-qso'"), main.indexOf('// --- JTCAT remote control'));
-  assert.ok(/await logContact\(entry, \{ origin: 'ws-log-qso' \}\);/.test(echo));
+  // replyOnWrite (#732): log-ok at the disk write; still one logContact call.
+  assert.ok(/await logContact\(entry, \{ origin: 'ws-log-qso'(, replyOnWrite: true)? \}\);/.test(echo));
   assert.ok(!/saveQsoRecord\(/.test(echo), 'ECHOCAT writes no record itself');
   const jtr = main.slice(main.indexOf("remoteServer.on('jtcat-log-qso'"), main.indexOf("remoteServer.on('signal-from-client'"));
   assert.ok(/await jtcatAutoLog\(q, \{ manual: true \}\);/.test(jtr), 'a JTCAT log from the device is the automatic one');

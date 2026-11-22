@@ -40,8 +40,9 @@ check('SOTA_REF and WWFF_REF are read the same way', () => {
 });
 check('every import goes through it, and the Logbook falls back to POTA_REF', () => {
   const main = readSrc(path.join(ROOT, 'main.js'));
-  const fn = main.slice(main.indexOf('function importQsoRecords('), main.indexOf('function importQsoRecords(') + 700);
+  const fn = main.slice(main.indexOf('function importQsoRecords('), main.indexOf('function importQsoRecords(') + 2000);
   assert.ok(/records = records\.map\(fillSigFromProgramRefs\);[\s\S]*planImport\(existing, records\)/.test(fn));
+  assert.ok(/records = records\.map\(fillSigFromProgramRefs\);[\s\S]*planImportWithConfirmations\(existing, records\)/.test(fn));
   const pop = readSrc(path.join(ROOT, 'renderer/qso-popout.js'));
   assert.ok(/label: 'Park'[^\n]*get: \(q\) => q\.SIG_INFO \|\| q\.POTA_REF \|\| ''/.test(pop));
   assert.ok(/q\.SIG_INFO \|\| q\.POTA_REF, q\.COMMENT/.test(pop), 'search finds it too');

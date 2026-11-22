@@ -30,7 +30,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.24'
+          go-version: '1.26'
           cache: false
       - name: Pat
         shell: bash
@@ -80,6 +80,13 @@ jobs:
           LOOPBACK_REQUIRED: '1'
         timeout-minutes: 15
         run: node test/modem-loopback/pat-session.js --out pat-session-results.json --logs pat-session-logs
+      - name: A packet link is closed before Dire Wolf stops, and a call on a held link is seen (#300; two Dire Wolfs, no radio)
+        if: always()
+        shell: bash
+        env:
+          LOOPBACK_REQUIRED: '1'
+        timeout-minutes: 8
+        run: node test/modem-loopback/packet-disc.js
       - name: Electron for the bridge checks
         if: always()
         shell: bash
@@ -123,7 +130,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.24'
+          go-version: '1.26'
           cache: false
       - name: Build all three
         run: |
@@ -160,6 +167,13 @@ jobs:
           LOOPBACK_REQUIRED: '1'
         timeout-minutes: 15
         run: node test/modem-loopback/pat-session.js --out pat-session-results.json --logs pat-session-logs
+      - name: A packet link is closed before Dire Wolf stops, and a call on a held link is seen (#300; two Dire Wolfs, no radio)
+        if: always()
+        shell: bash
+        env:
+          LOOPBACK_REQUIRED: '1'
+        timeout-minutes: 8
+        run: node test/modem-loopback/packet-disc.js
       - name: Electron for the bridge checks
         if: always()
         run: npm ci --no-audit --no-fund
@@ -201,7 +215,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.24'
+          go-version: '1.26'
           cache: false
       - name: Dire Wolf's build dependencies (PortAudio and hidapi are required by its CMake on macOS; Hamlib for PTT RIG)
         run: brew install portaudio hidapi hamlib
@@ -244,6 +258,13 @@ jobs:
           LOOPBACK_REQUIRED: '1'
         timeout-minutes: 15
         run: node test/modem-loopback/pat-session.js --out pat-session-results.json --logs pat-session-logs
+      - name: A packet link is closed before Dire Wolf stops, and a call on a held link is seen (#300; two Dire Wolfs, no radio)
+        if: always()
+        shell: bash
+        env:
+          LOOPBACK_REQUIRED: '1'
+        timeout-minutes: 8
+        run: node test/modem-loopback/packet-disc.js
       - name: Electron for the bridge check
         if: always()
         run: npm ci --no-audit --no-fund

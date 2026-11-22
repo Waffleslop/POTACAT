@@ -26,7 +26,7 @@ function make() {
   const codec = new EventEmitter();
   codec.onData = () => {};
   codec.setTransmit = () => {};
-  const ctl = new RigController(RIG_MODELS['FTDX101D/MP'], transport, codec);
+  const ctl = new RigController(RIG_MODELS['FTDX101MP'], transport, codec);
   const lines = [];
   ctl._debug = true; // _log() emits only in debug, which main.js turns on for the CAT panel
   ctl.on('log', (m) => lines.push(String(m)));

@@ -94,9 +94,11 @@ function makeSide({ name, what, where, rx, status }) {
     playNode.port.onmessage = (e) => { if (e.data && e.data.over) status({ txOver: e.data.over }); };
     playGain = playCtx.createGain();
     playGain.gain.value = (typeof c.txGain === 'number' && isFinite(c.txGain)) ? Math.max(0, Math.min(2, c.txGain)) : 1;
-    playNode.connect(playGain); playGain.connect(playCtx.destination);
+    playNode.connect(playGain);
+    // Left only or both channels, per rig (#654: a Digirig DR-891 keys its own VOX from the right).
+    if (window.TxChannel) window.TxChannel.connect(playCtx, playGain, c.txChannel); else playGain.connect(playCtx.destination);
     // The rate the output actually runs at after setSinkId (#295 L5: a Mac output at 44.1 kHz).
-    return { playbackLabel: (await labelFor('audiooutput', c.outputId)) || c.outputId, playbackSampleRate: playCtx.sampleRate };
+    return { playbackLabel: (await labelFor('audiooutput', c.outputId)) || c.outputId, playbackSampleRate: playCtx.sampleRate, playbackChannel: window.TxChannel ? window.TxChannel.normalize(c.txChannel) : 'both' };
   }
 
   function stopPlayback() {
@@ -172,7 +174,7 @@ function makeSide({ name, what, where, rx, status }) {
 }
 
 const radio = makeSide({
-  name: 'radio', what: 'radio', where: 'Settings > My Rigs > Audio',
+  name: 'radio', what: 'radio', where: 'Settings > Radio, Edit the rig, Audio Devices',
   rx: (pcm, sampleRate, peak) => window.bridge.rx(pcm, sampleRate, peak),
   status: (s) => window.bridge.status(s),
 });

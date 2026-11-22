@@ -111,7 +111,7 @@ test('main arms the limit for every PTT POTACAT asserts and disarms it on releas
 });
 
 test('each key-down names its kind', () => {
-  assert.ok(/handleRemotePtt\(true, \{ audio: true, emission: 'DATA', txKind: jtcatTxKind\(\) \}\)/.test(main), 'JTCAT');
+  assert.ok(/handleRemotePtt\(true, \{ audio: true, emission: 'DATA', txKind: jtcatTxKind\(\)(, lanOwner: [^}]+)? \}\)/.test(main), 'JTCAT');
   assert.ok(/emission: 'SSTV', txKind: 'sstv'/.test(main), 'SSTV');
   assert.ok(/noDataSwap: !!opts\.noDataSwap, txKind: 'tune'/.test(main), 'tune / Test transmit');
   assert.ok((main.match(/txKind: 'winlink'/g) || []).length >= 2, 'Winlink + Mercury');
@@ -130,6 +130,14 @@ test('a trip unkeys by every route: CAT TX0, the RTS/DTR line, the audio, and sa
 test('a radio that transmits when POTACAT did not key it is logged with the line state', () => {
   assert.ok(/controller\.on\('ptt', \(on\) => txNoteRadioPtt\(controller, on\)\)/.test(main));
   assert.ok(/function txNoteRadioPtt\(/.test(main) && /unsolicitedTxReport\(/.test(main));
+});
+
+test('an APRS beacon over the radio has its own ceiling per band, behind the beacon\'s own cap', () => {
+  assert.strictEqual(T.limitMsFor('aprs2m'), 4000);
+  assert.strictEqual(T.limitMsFor('aprs30m'), 8000);
+  assert.strictEqual(T.labelFor('aprs2m'), 'APRS beacon');
+  assert.strictEqual(T.labelFor('aprs30m'), 'APRS beacon');
+  assert.ok(/APRS beacon had kept the radio keyed for 8 s/.test(T.tripMessage('aprs30m', 8000)));
 });
 
 console.log(`\ntx limit: ${pass} passed, ${fail} failed`);

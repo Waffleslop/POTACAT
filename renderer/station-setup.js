@@ -73,7 +73,7 @@
       const msg = document.createElement('p');
       msg.className = 'ss-detail';
       // Driving a remote shack: the radio is not on this PC (main says why).
-      msg.textContent = (current && current.remote && current.reason) || 'Add your radio first: Settings, then My Rigs, then Add Rig.';
+      msg.textContent = (current && current.remote && current.reason) || 'Add your radio first: Settings > Radio, + Add Rig.';
       stepsEl.appendChild(msg);
       rigSel.classList.add('hidden');
       return;
@@ -96,6 +96,8 @@
       : `<strong>${s.requiredTotal - s.requiredLeft} of ${s.requiredTotal}</strong> essential steps are working. ` +
         (s.next ? 'The highlighted step is next.' : '');
 
+    renderNotice(current.notice);
+
     $('ss-hide').textContent = current.prefs && current.prefs.hidden
       ? 'Show reminders again for this radio' : 'Don\'t show this again for this radio';
 
@@ -112,6 +114,28 @@
       stepsEl.appendChild(renderStep(st, st.id === s.next));
     }
     renderShare();
+  }
+
+  // The top line (lib/station-setup.js notice): WSJT-X Mode is on, so the
+  // radio checks are skipped, with a button that turns it off (#547).
+  function renderNotice(n) {
+    const el = $('ss-notice');
+    if (!el) return;
+    el.innerHTML = '';
+    el.classList.toggle('hidden', !n);
+    if (!n) return;
+    const t = document.createElement('span');
+    t.className = 'ss-notice-text';
+    t.textContent = n.text;
+    el.appendChild(t);
+    if (n.action) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'wsjtx-mode-btn primary';
+      b.textContent = n.action.label;
+      b.addEventListener('click', () => runAction({ id: 'notice' }, n.action));
+      el.appendChild(b);
+    }
   }
 
   // --- "Share my working setup" (lib/setup-share.js) -------------------------
@@ -336,6 +360,8 @@
     if (!deviceId) return { result: 'error', error: 'no input chosen' };
     if (/^alsa:/.test(deviceId)) return { result: 'unsupported', error: 'This input is a Linux sound device POTACAT opens directly; it is checked when FT8 runs.' };
     let stream = null, ctx = null;
+    // #463: logs the macOS microphone permission and asks once if macOS never asked.
+    try { if (window.api.macMicCaptureStart) await window.api.macMicCaptureStart('listen-test'); } catch {}
     try {
       stream = await navigator.mediaDevices.getUserMedia({
         audio: { deviceId: { exact: deviceId }, echoCancellation: false, noiseSuppression: false, autoGainControl: false },
@@ -357,7 +383,8 @@
         if (rms > peak) peak = rms;
       }
       const dbfs = peak > 0 ? 20 * Math.log10(peak) : -120;
-      return { result: dbfs < -80 ? 'silent' : dbfs < -50 ? 'low' : 'ok', dbfs };
+      // zeros: every sample was exact digital zero (-120 dBFS), what a Mac that refuses the microphone delivers.
+      return { result: dbfs < -80 ? 'silent' : dbfs < -50 ? 'low' : 'ok', dbfs, zeros: peak === 0 };
     } catch (err) {
       return { result: 'error', error: (err && (err.message || err.name)) || 'could not open the input' };
     } finally {
@@ -400,6 +427,15 @@
     try { current = await window.api.stationSetupReport({ rigId, kind, result }); } catch {}
     delete busy[stepId];
     render();
+    // #463: three seconds of exact zeros on a Mac is the refused-microphone
+    // signature; say where to fix it (lib/mac-mic-access.js) and log it in main.
+    if (kind === 'rxTest' && result && result.zeros && window.MacMicAccess) {
+      const v = window.MacMicAccess.micVerdict({ platform: window.api.platform, silentMs: 3000, minSilentMs: 3000, heardSound: false });
+      if (v.say) {
+        showMessage(v.message);
+        if (window.api.macMicSilence) window.api.macMicSilence({ surface: 'listen-test', silent: true, silentMs: 3000, minSilentMs: 3000 });
+      }
+    }
     afterChange();
   }
 
@@ -414,6 +450,11 @@
       case 'voice-test':
         confirmTx = { step: st.id, action: a.id };
         return render();
+      case 'wsjtx-mode-off':
+        // Exactly what unticking WSJT-X Mode in the CAT menu does (app.js).
+        if (typeof turnOffWsjtxMode === 'function') await turnOffWsjtxMode();
+        setTimeout(refresh, 1500); // main reconnects the radio; then re-check
+        return refresh();
       case 'open-settings':
         dlg.close();
         if (typeof openSettingsDialog === 'function') openSettingsDialog('station');

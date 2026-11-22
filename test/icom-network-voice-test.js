@@ -114,13 +114,15 @@ const read = (f) => readSrc(path.join(ROOT, f)).replace(/\r\n/g, '\n');
   });
 
   await t('the VFO window never plays its mic on Icom Network, and its speaker plays the radio', () => {
-    assert.ok(/\(s\.audioSource === 'icom-network'\);/.test(vfo), 'PTT takes the direct branch');
+    assert.ok(/\(s\.audioSource === 'icom-network'\)( \|\||;)/.test(vfo), 'PTT takes the direct branch');
     assert.ok(/s\.audioSource === 'smartsdr' \|\| s\.audioSource === 'icom-network'/.test(vfo), 'monitor plays packets');
     assert.ok(/if \(pttDown\) return; \/\/ never play the radio back/.test(vfo));
   });
 
   await t('FM goes to FM-D on an Icom in the SSB-over-DATA switch', () => {
-    assert.ok(/_icomData && curMode === 'FM'\) \? 'DIGFM'/.test(main));
+    const S = require('../lib/ptt-mode-swap');
+    assert.deepStrictEqual(S.pttDataModeFor({ mode: 'FM', fmAmData: S.hasFmAmDataMode({ brand: 'Icom' }) }), { dataMode: 'DIGFM' });
+    assert.ok(/PttModeSwap\.pttDataModeFor\(/.test(main));
   });
 
   console.log(`\n${passed} passed`);

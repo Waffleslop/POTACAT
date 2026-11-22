@@ -36,6 +36,12 @@ gh run list --branch master --limit 3   # the Test workflow on HEAD is green, IN
 node .claude/skills/potacat-release/next-version.js     # dry run: prints last and next
 ```
 
+The release runs in the main desktop checkout, which follows master (AGENTS.md, "The main checkout
+follows master"). It must be on master, fast-forwarded to origin/master, with no uncommitted
+tracked changes. If it is behind, `git pull --ff-only origin master` (then `npm ci` if
+package-lock.json changed, `npm run build-natives` if native sources changed). If it holds work
+Casey did not ask to ship, move it to a branch first; never discard, stash, reset or force.
+
 Uncommitted work Casey asked for in the same message ("commit, push and release") is
 committed and pushed FIRST as its own commit(s), with explicit paths, never `git add -A`.
 Anything uncommitted that he did not mention stays out; say so.
@@ -155,6 +161,9 @@ macOS x64, Linux x64, Linux arm64 → `create-release` (uses the .md and .title)
 `update-website` (rewrites the DOWNLOAD-START/END block of potacat-website `index.html` and
 pushes). About 15 minutes. Installers are never built locally.
 
+After the push the main checkout sits on the release commit, the same as origin/master, so Casey's
+`npm start` runs exactly what shipped. Leave it there; any later merge fast-forwards it as usual.
+
 ### 6. Watch and verify
 
 ```bash
@@ -207,10 +216,25 @@ Verify all of these, and report any that fail:
 - `D:\alan\STATE.md`: update or add the POTACAT entry with the version, title and what is
   waiting on Casey.
 
-### 9. Tell Casey
+### 9. Discord release cards (every release, Casey 2026-11-14)
+
+Casey: "Give them to me every time. Make this easy for me." As soon as the GitHub release
+is published, SendMessage the POTACAT triage session one line: `Released v<version>`. Triage
+makes the cards and hands them to Casey. If the triage session is not live, make them
+yourself:
+
+```bash
+python -I D:\Projects\potacat\ops\release-cards\make_cards.py v<version>
+```
+
+It reads the GitHub release and writes up to 9 card PNGs, the full notes as text and a
+ready-to-paste Discord message to `D:\Projects\potacat\ops\release-cards\out-<version>\`.
+Give Casey those files with SendUserFile. Never post them to Discord yourself.
+
+### 10. Tell Casey
 
 Lead with the version and title and whether it is published. Then: the workflow run, the
-asset check, the website check, the handoffs sent, and what is owed. Short.
+asset check, the website check, the handoffs sent, the cards, and what is owed. Short.
 
 ## Rebuild (same version, new installers)
 

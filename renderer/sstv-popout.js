@@ -1495,7 +1495,7 @@ window.api.onSstvTxAudio(async (data) => {
   const gainLevel = window.SstvDrive.gainFromPct(txGainSlider.value);
 
   try {
-    // The radio's output (My Rigs > Audio) unless this window chose one; a
+    // The radio's output (Settings > Radio, Audio Devices) unless this window chose one; a
     // configured device that cannot be opened REFUSES the transmission (the
     // catch below unkeys) instead of playing the picture out of the PC
     // speakers with the radio keyed (lib/sstv-audio-device.js).
@@ -1814,7 +1814,14 @@ if (rxReplyBtnEl) {
   });
 }
 
-openFolderBtn.addEventListener('click', () => window.api.sstvOpenGalleryFolder());
+// Main makes a missing folder and opens it; a failure is said here, in the
+// status line, never swallowed (#546).
+async function openGalleryFolder() {
+  let r = null;
+  try { r = await window.api.sstvOpenGalleryFolder(); } catch (err) { r = { ok: false, error: 'Could not open the SSTV pictures folder: ' + ((err && err.message) || err) }; }
+  if (r && r.ok === false && statusBar) statusBar.textContent = r.error || 'Could not open the SSTV pictures folder.';
+}
+openFolderBtn.addEventListener('click', openGalleryFolder);
 
 // ===== AUDIO CAPTURE (RX) ==================================================
 
@@ -1822,9 +1829,9 @@ openFolderBtn.addEventListener('click', () => window.api.sstvOpenGalleryFolder()
 let _sstvAudioDevices = { inputs: [], outputs: [] };
 
 function _rigDeviceOptionLabel(list, rigId) {
-  if (!rigId) return 'From My Rigs (not set)';
+  if (!rigId) return 'From the radio (not set)';
   const d = list.find(x => x.deviceId === rigId);
-  return 'From My Rigs (' + (d ? (d.label || rigId.slice(0, 20)) : 'not connected') + ')';
+  return 'From the radio (' + (d ? (d.label || rigId.slice(0, 20)) : 'not connected') + ')';
 }
 
 async function populateAudioDevices() {
@@ -1834,7 +1841,7 @@ async function populateAudioDevices() {
     const outputs = devices.filter(d => d.kind === 'audiooutput');
     _sstvAudioDevices = { inputs, outputs };
 
-    // "" follows the radio's device (My Rigs > Audio), like FT8 and ECHOCAT.
+    // "" follows the radio's device (Settings > Radio, Audio Devices), like FT8 and ECHOCAT.
     audioInputSelect.innerHTML = '';
     { const o = document.createElement('option'); o.value = ''; o.textContent = _rigDeviceOptionLabel(inputs, settings.remoteAudioInput); audioInputSelect.appendChild(o); }
     for (const d of inputs) {
@@ -1933,6 +1940,7 @@ async function startRxAudio() {
       if (settings && settings.audioSource === 'smartsdr'
           && (Date.now() - _lastVitaAudioTs) < 3000) return;
       _markDecoderAudio(e.data, 'mic');
+      if (!isTx) sstvMicNote(e.data); // #463
       // Send audio samples to main process for SSTV decoder (skip during TX to avoid self-decode)
       if (!isTx) window.api.sstvAudio(e.data);
       // Feed waterfall
@@ -1947,6 +1955,7 @@ async function startRxAudio() {
     window.api.sstvSetSampleRate(actualRate);
 
     rxInfo.textContent = 'Listening...';
+    sstvMicArm(); // #463
     // Say WHICH device: "RX audio started" alone never showed that SSTV was
     // on the laptop microphone.
     const track = sstvStream.getAudioTracks()[0];
@@ -1991,6 +2000,32 @@ let _lastVitaAudioTs = 0; // for the smartsdr mic-fallback gate below
 const RX_LOW_DBFS = -50;
 let _rxLevelPeak = 0;   // peak |sample| since the last level tick
 let _rxLevelHold = 0;   // slow-decaying hold for the badge (no flicker between lines)
+// #463: on a Mac that refuses the microphone, the radio's input is exact
+// zeros from the first buffer (lib/mac-mic-access.js; main decides what to
+// say, and the status bar carries it until sound arrives).
+let _sstvMicWatch = null;
+function sstvMicArm() {
+  if (!window.MacMicAccess || window.api.platform !== 'darwin') return;
+  const now = Date.now();
+  if (_sstvMicWatch) _sstvMicWatch.started(now);
+  else _sstvMicWatch = new window.MacMicAccess.SilenceWatch(now);
+  if (window.api.macMicCaptureStart) window.api.macMicCaptureStart('sstv').catch(() => {});
+}
+function sstvMicNote(samples) {
+  if (!_sstvMicWatch) return;
+  const now = Date.now();
+  const ev = _sstvMicWatch.note(samples, now);
+  if (ev && window.api.macMicSilence) window.api.macMicSilence({ surface: 'sstv', silent: ev === 'silent', silentMs: _sstvMicWatch.silentFor(now) });
+}
+let _sstvMicMessage = '';
+if (window.api.onMacMicNotice) {
+  window.api.onMacMicNotice((d) => {
+    if (!statusBar) return;
+    if (d && d.show && d.message) { _sstvMicMessage = d.message; statusBar.textContent = d.message; }
+    else if (_sstvMicMessage && statusBar.textContent === _sstvMicMessage) { statusBar.textContent = 'Listening'; _sstvMicMessage = ''; }
+  });
+}
+
 function _markDecoderAudio(samples, source) {
   if (source === 'vita') _lastVitaAudioTs = Date.now();
   // Silence check: a live-but-muted feed is just as dead as no feed.
@@ -3174,7 +3209,7 @@ function openImageMenu(x, y, entry, galleryIdx) {
   } });
   if (entry.dataUrl) items.push({ label: 'View full size', action: () => viewImageFullscreen(entry.dataUrl) });
   if (galleryIdx < 0 && entry === lastRxImage) items.push({ label: 'Clear the receive picture', action: () => clearRxPicture() });
-  items.push({ label: 'Open the pictures folder', action: () => window.api.sstvOpenGalleryFolder() });
+  items.push({ label: 'Open the pictures folder', action: openGalleryFolder });
   if (galleryIdx >= 0) {
     items.push({ label: 'Delete', danger: true, action: async () => {
       if (entry.filename) await window.api.sstvDeleteImage(entry.filename);
@@ -3353,7 +3388,7 @@ function setStatusDevice(label, fromRigs) {
   el.textContent = '';
   el.append('Listening on ');
   const b = document.createElement('b'); b.textContent = label; el.appendChild(b);
-  el.append(fromRigs ? ' (from My Rigs)' : ' (chosen for SSTV)');
+  el.append(fromRigs ? ' (from the radio)' : ' (chosen for SSTV)');
 }
 
 // ---- Radio: meters, tuner, SWR trip ----------------------------------------------

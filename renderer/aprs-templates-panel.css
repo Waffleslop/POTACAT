@@ -1,0 +1,30 @@
+/* APRS window, A2: the Templates list in the Messages view
+   (renderer/aprs-templates-panel.js). Theme variables only. */
+#aprs-tpl-open.on { border-color: var(--accent-blue); color: var(--text-primary); }
+.aprs-tpl { flex: 1; overflow: auto; padding: 10px 16px 14px; display: flex; flex-direction: column; gap: 6px; }
+.aprs-tpl-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 4px; }
+.aprs-tpl-head h3 { margin: 0; font-size: 17px; font-weight: 800; }
+.aprs-tpl-head span { font-size: 14px; color: var(--text-secondary); }
+.aprs-tpl-group { margin-top: 8px; font-size: 13px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-secondary); }
+.aprs-tpl-row { display: flex; gap: 8px; align-items: stretch; }
+.aprs-tpl-item { flex: 1; min-width: 0; display: grid; grid-template-columns: minmax(150px, max-content) minmax(90px, max-content) 1fr; gap: 4px 14px; align-items: baseline;
+  text-align: left; font: inherit; padding: 8px 12px; border-radius: 8px; cursor: pointer;
+  background: var(--bg-secondary); color: var(--text-primary); border: 1px solid var(--border-primary); }
+.aprs-tpl-item:hover { border-color: var(--accent-blue); background: var(--bg-hover); }
+.aprs-tpl-item:focus-visible, .aprs-tpl-del:focus-visible { outline: 2px solid var(--accent-blue); outline-offset: 1px; }
+.aprs-tpl-name { font-weight: 700; }
+.aprs-tpl-to { font-size: 14px; color: var(--text-secondary); }
+.aprs-tpl-fmt { font-family: Consolas, 'Courier New', monospace; font-size: 14px; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.aprs-tpl-del { font: inherit; font-size: 14px; padding: 0 12px; border-radius: 8px; cursor: pointer;
+  background: none; color: var(--text-secondary); border: 1px solid var(--border-primary); }
+.aprs-tpl-del:hover { color: var(--accent-red-text, var(--accent-red)); border-color: var(--accent-red); }
+.aprs-tpl-empty { font-size: 14px; color: var(--text-secondary); padding: 4px 0; }
+.aprs-tpl-save { margin-top: 10px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.aprs-tpl-save label { color: var(--text-secondary); }
+#aprs-tpl-name { font: inherit; font-size: 15px; padding: 6px 9px; border-radius: 6px; width: 240px;
+  background: var(--bg-input); color: var(--text-primary); border: 1px solid var(--border-primary); }
+.aprs-tpl-save .aprs-btn-quiet:disabled { opacity: 0.55; cursor: default; }
+.aprs-tpl-note { font-size: 14px; color: var(--text-secondary); }
+.aprs-tpl-note.bad { color: var(--accent-red-text, var(--accent-red)); }
+@media (max-width: 760px) { .aprs-tpl-item { grid-template-columns: 1fr; } }
+.aprs-tpl-close { margin-left: auto; }

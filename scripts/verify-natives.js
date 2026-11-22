@@ -31,6 +31,7 @@ const REQUIRED = [
 ];
 const OPTIONAL = [
   { name: 'freedv_native', file: 'lib/freedv_native/build/Release/freedv_native.node' },
+  { name: 'rade_native', file: 'lib/rade_native/build/Release/rade_native.node' },
 ];
 
 let missing = [];

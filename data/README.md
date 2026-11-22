@@ -129,3 +129,12 @@ Rules to keep this maintainable:
 
 Contest scoring rules, exchanges beyond a short note, and log-submission
 deadlines.
+
+## `adif-dxcc-entities.json`
+
+The ADIF DXCC Entity Code enumeration: every entity's number and ADIF name,
+with deleted entities flagged. Copied from the ADIF Specification 3.1.8
+(updated 2026-10-12), section III.B.8, https://adif.org/318/ADIF_318.htm,
+on 2026-11-14. `lib/dxcc-codes.js` maps cty.dat entity names onto it so a
+logged contact carries DXCC as well as COUNTRY (#554). Refresh it from the
+same table when a new ADIF version changes an entity.

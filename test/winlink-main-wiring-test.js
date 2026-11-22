@@ -182,7 +182,7 @@ test('a gateway pick tunes the radio only outside a session, and the dial goes b
   assert.ok(/if \(isRemoteMode\(\)\) return \{ ok: false/.test(q));
   assert.ok(/tuneRadio\(khz, mode === 'packet' \? \(pickPm && pickPm\.byHand \? undefined : 'FM'\) : 'DIGU'/.test(q));
   assert.ok(/returnTo: radio \? \(_winlinkPreviewReturnTo \|\|/.test(fnBody(main, 'winlinkStartSession')), 'the session returns to the pre-pick dial');
-  assert.ok(/winlinkPreviewRestore\('window closed'\)/.test(main), 'closing the window with no session puts the dial back');
+  assert.ok(/winlinkMailViewClosed\('window closed'\)/.test(main), 'closing the window with no session puts the dial back');
 });
 
 test('the mail window acknowledges audio frames, or main pauses the waterfall every 120 frames', () => {
@@ -281,7 +281,7 @@ test('winlink-watch subscribes a device; the shack computes bins and the Busy ve
   assert.ok(/broadcastWinlinkSpectrum\(frame\)[\s\S]*?bufferedAmount > 8192\) continue/.test(server), 'frames are dropped, never queued');
   assert.ok(/_onClientGone\(ws\) \{\n\s*const watchedWinlink = !!ws\._winlinkWatch;/.test(server), 'a vanished watcher is recounted');
   assert.ok(/rs\.on\('winlink-watch', \(\{ count \} = \{\}\) => winlinkSetRemoteWatch\(count\)\);/.test(main), 'wired inside onRemoteServer');
-  assert.ok(/function winlinkSpectrumPublish\(mags\)[\s\S]*?WinlinkSpectrum\.markerBand\(mode, winlinkModemBw\(\)\)[\s\S]*?const v = _winlinkBusy\.update\(mags, now\);[\s\S]*?broadcastWinlinkSpectrum\(\{ bins: WinlinkSpectrum\.wireBins\(mags\), busy: v\.busy/.test(main), 'the verdict is decided on the shack, by the shared BusyDetector');
+  assert.ok(/function winlinkSpectrumPublish\(mags, inputPeak\)[\s\S]*?WinlinkSpectrum\.markerBand\(mode, winlinkModemBw\(\)\)[\s\S]*?const v = _winlinkBusy\.update\(mags, now\);[\s\S]*?broadcastWinlinkSpectrum\(\{ bins: WinlinkSpectrum\.wireBins\(mags\), busy: v\.busy/.test(main), 'the verdict is decided on the shack, by the shared BusyDetector');
   assert.ok(/modemBw: winlinkModemBw\(\),/.test(main), 'the mail window gets every modem\'s bandwidth');
   const popHtml = readSrc(path.join(__dirname, '..', 'renderer', 'winlink-popout.html'));
   const popJs = readSrc(path.join(__dirname, '..', 'renderer', 'winlink-popout.js'));
@@ -289,7 +289,7 @@ test('winlink-watch subscribes a device; the shack computes bins and the Busy ve
   assert.ok(/new WinlinkSpectrum\.BusyDetector\(/.test(popJs) && /WinlinkSpectrum\.markerBand\(mode, /.test(popJs), 'the mail window uses the shared rule for both the badge and the markers');
   assert.ok(/if \(key === wfMarkersKey\) return;/.test(popJs), 'an unchanged band never resets the badge (every state push passes through wfMarkers)');
   assert.ok(!/centre/.test(popJs) && !/centre/.test(popHtml) && !/centre/.test(readSrc(path.join(__dirname, '..', 'lib', 'winlink-spectrum.js'))), 'center, not centre (Casey 2026-10-23)');
-  assert.ok(/if \(_winlinkRemoteWatchers > 0\) winlinkSpecAcc\(\)\.push\(pcm, sampleRate\);/.test(main), 'fed from the socket routes only while watched');
+  assert.ok(/if \(_winlinkRemoteWatchers > 0\) \{[^}]*winlinkSpecAcc\(\)\.push\(pcm, sampleRate\);\r?\n\s*\}/.test(main), 'fed from the socket routes only while watched');
   assert.ok(/winlink-spectrum-mags[\s\S]*?winlinkSocketAudioRoute\(\)\) return;/.test(main), 'the window relays only on a sound-device rig');
 });
 
@@ -420,7 +420,8 @@ test('Pat gets a prediction engine on every config write, decided in one place',
   assert.ok(/C:\\\\itshfbc\\\\bin_win\\\\voacapw\.exe/.test(fn), 'the operator\'s own Windows VOACAP wins (and the path keeps its backslashes)');
   assert.ok(/'voacapl'/.test(fn), 'voacapl on PATH elsewhere');
   assert.ok(/WinlinkPat\.predictionConfig\(\{ enabled, localVoacap, serviceUrl: settings\.winlinkPredictionUrl, serviceUp: _voacapService\.up \}\)/.test(fn));
-  assert.ok(/'winlinkPredictionUrl',/.test(read('main.js').slice(0, 60000)), 'the service override is a machine key');
+  const globalKeys = (read('main.js').match(/const GLOBAL_KEYS = new Set\(\[([\s\S]*?)\]\);/) || [])[1] || '';
+  assert.ok(/'winlinkPredictionUrl',/.test(globalKeys), 'the service override is a machine key');
   assert.ok(/'winlinkPrediction', 'winlinkPredictionUrl', 'myCallsign', 'grid'\]/.test(main), 'a change relaunches Pat');
 });
 test('the gateway reply says how it is ordered, on every surface', () => {

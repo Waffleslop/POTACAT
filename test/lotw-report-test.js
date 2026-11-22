@@ -100,5 +100,19 @@ test('the other station\'s certified STATE / county / grid ride the confirmation
   assert.strictEqual(res3.detailed, 0);
 });
 
+test('#460: the download window never moves past an unmatched confirmation', () => {
+  const { nextLotwQslWindow } = require('../lib/lotw-report');
+  const now = Date.UTC(2026, 10, 13, 12);
+  const prev = Date.UTC(2026, 0, 1);
+  assert.strictEqual(nextLotwQslWindow({ previous: prev, now, unmatchedDates: [] }), now, 'all matched: advance to now');
+  assert.strictEqual(nextLotwQslWindow({ previous: null, now, unmatchedDates: ['2024-05-02', '2023-03-04'] }), Date.UTC(2023, 2, 4), 'oldest unmatched');
+  assert.strictEqual(nextLotwQslWindow({ previous: prev, now, unmatchedDates: ['20250102'] }), Date.UTC(2025, 0, 2), 'ADIF date form');
+  assert.strictEqual(nextLotwQslWindow({ previous: prev, now, unmatchedDates: [''] }), prev, 'no date: stay put');
+  assert.strictEqual(nextLotwQslWindow({ previous: null, now, unmatchedDates: [''] }), null, 'no date, first run: next run is full again');
+  const recs = [{ CALL: 'K1ABC', QSO_DATE: '20240101', TIME_ON: '1200', QSL_RCVD: 'Y', QSLRDATE: '2024-02-01' }];
+  const r = stampLotwConfirmations([], recs, lotwKey);
+  assert.deepStrictEqual(r.unmatchedDates, ['2024-02-01']);
+});
+
 console.log(`\nLoTW report: ${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

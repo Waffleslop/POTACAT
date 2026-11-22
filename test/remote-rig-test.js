@@ -352,7 +352,7 @@ test('band scope: the shack\'s, subscribed while watched, resubscribed after a r
   assert.ok(/case 'scope-frame':[\s\S]{0,400}scopePopoutWin\.webContents\.send\('scope-frame', f\)/.test(msg));
   assert.ok(/case 'scope-state':/.test(msg));
   const conn = handlerBody(main, "remoteClient.on('connected', (info) => {");
-  assert.ok(/if \(_remoteScopeWanted\) remoteClient\.sendRaw\(\{ type: 'scope-subscribe', on: true \}\);/.test(conn));
+  assert.ok(/if \(_remoteScopeWanted\) remoteClient\.sendRaw\(\{ type: 'scope-subscribe', on: true(, bins: YaesuScope\.BINS)? \}\);/.test(conn)); // bins: 850-point frames (#772)
   assert.ok(/type: 'scope-enable-radio'/.test(handlerBody(main, "ipcMain.on('scope-enable-on-radio', () => {")));
   assert.strictEqual(require('../lib/remote-features').check('scope').ok, true);
 });

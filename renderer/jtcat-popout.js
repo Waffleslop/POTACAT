@@ -44,6 +44,8 @@ function _applyPopoutTheme(payload) {
   var WANTED_CYCLE = ['', 'wanted', 'dxcc', 'grid'];
   var WANTED_LABELS = { '': 'Wanted', wanted: 'Wanted', dxcc: 'New DXCC', grid: 'New grid' };
   function wantedMatches(c) {
+    // A Stations view row (#557 part 2): the station's needed marks, not one decode.
+    if (c.stationMarks) return JtcatStations.wantedMatch(c.stationMarks, wantedFilter);
     if (wantedFilter === 'dxcc') return !!c.d.newDxcc;
     if (wantedFilter === 'grid') return !!c.d.newGrid;
     return !!c.isWanted;
@@ -115,7 +117,8 @@ function _applyPopoutTheme(payload) {
   // Load settings
   window.api.getSettings().then(function(s) {
     myCallsign = onAirCallPushed || (s.myCallsign || '').toUpperCase();
-    myGrid = (s.grid || '').toUpperCase().substring(0, 4);
+    // A remote desktop hears at the shack: its grid, not this computer's (#774).
+    myGrid = ((s.remoteShack && s.shackGrid) || s.grid || '').toUpperCase().substring(0, 4);
     updateCqPreview();
     applyUltracat(!!s.ultracat);
     chaseTarget = s.jtcatChaseTarget || '';
@@ -156,6 +159,7 @@ function _applyPopoutTheme(payload) {
     }
     if (typeof s.jtcatWaterfallSpeed === 'number') setWfSpeed(s.jtcatWaterfallSpeed, false);
     if (typeof s.jtcatWaterfallFloor === 'number') setWfFloor(s.jtcatWaterfallFloor, false);
+    if (s.jtcatStationsExpiryMin != null && typeof applyStationsExpiry === 'function') applyStationsExpiry(s.jtcatStationsExpiryMin, false);
     if (typeof s.jtcatShowBandScope === 'boolean') bsSetOn(s.jtcatShowBandScope, false);
     else updateWfSpeedHelp();
     fdMode = !!s.jtcatFdMode;
@@ -1258,7 +1262,163 @@ function _applyPopoutTheme(payload) {
       pruneCyclePanel(bandActivity, MAX_BA_CYCLES);
     }
     if (wasAtBottom) bandActivity.scrollTop = bandActivity.scrollHeight;
+    renderStations(); // the filters apply to the Stations view too
   }
+
+  // --- Stations view (#557) ---
+  // One line per station heard instead of the stream of decodes. The list
+  // is lib/jtcat-stations.js (pure), the rows lib/decode-row.js
+  // (stationRowInner, the copy the layout test renders). A double-click on a
+  // row is a double-click on that station's latest decode: the same
+  // onDecodeRowClick, given the same decode object. The view choice and sort
+  // are a property of this screen (localStorage, like the filters); how long
+  // a station stays is the jtcatStationsExpiryMin setting.
+  var stationsEl = document.getElementById('jp-stations');
+  var viewStreamBtn = document.getElementById('jp-view-stream');
+  var viewStationsBtn = document.getElementById('jp-view-stations');
+  var stationsExpirySelect = document.getElementById('jp-stations-expiry');
+  var VIEW_LS_KEY = 'jtcat-band-view';
+  var STATIONS_SORT_LS_KEY = 'jtcat-stations-sort';
+  var jpStations = JtcatStations.create();
+  var stationsView = false;
+  var stationsSort = 'last';
+  try {
+    stationsView = localStorage.getItem(VIEW_LS_KEY) === 'stations';
+    stationsSort = JtcatStations.normalizeSort(localStorage.getItem(STATIONS_SORT_LS_KEY));
+  } catch (e) {}
+
+  function jpStationsContext() {
+    var a = document.querySelector('.jp-band-opt.active');
+    return { band: a ? a.dataset.band : '', mode: modeSelect ? modeSelect.value : '', now: Date.now() };
+  }
+  // Needed marks (#557 part 2): countries and states from the worked roster
+  // under the map overlay's scope (main owns it: F8, the map's "Scope"), so
+  // the list and the map tints give the same answer. Read here even when the
+  // map was never opened.
+  var stationsRoster = null;
+  var stationsOverlay = { scope: 'band-mode', confirmedOnly: false };
+  function stationsTakeOverlay(st) {
+    if (!st) return;
+    stationsOverlay = { scope: st.scope || 'band-mode', confirmedOnly: !!st.confirmedOnly };
+    renderStations();
+  }
+  if (window.api.getWorkedRoster) Promise.resolve(window.api.getWorkedRoster()).then(function (r) { if (r) { stationsRoster = r; renderStations(); } }).catch(function () {});
+  if (window.api.onWorkedRoster) window.api.onWorkedRoster(function (r) { stationsRoster = r || null; renderStations(); });
+  if (window.api.workedOverlayGet) Promise.resolve(window.api.workedOverlayGet()).then(stationsTakeOverlay).catch(function () {});
+  if (window.api.onWorkedOverlayState) window.api.onWorkedOverlayState(stationsTakeOverlay);
+  function stationsMarksCtx() {
+    return { roster: stationsRoster, scope: stationsOverlay.scope, confirmedOnly: stationsOverlay.confirmedOnly };
+  }
+  // "on 20m digital": the scope at this window's band and mode, for the tooltips and the key.
+  function stationsScopeText() {
+    if (!window.WorkedOverlay || !stationsRoster) return '';
+    var c = jpStationsContext();
+    return WorkedOverlay.scopeText({ scope: stationsOverlay.scope, band: c.band, mode: c.mode }) +
+      (stationsOverlay.confirmedOnly ? ', confirmed only' : '');
+  }
+
+  // Band Activity was emptied (Clear, a band or mode change, Stop): so is the list.
+  function jpStationsClear() {
+    if (!jpStations) return;
+    JtcatStations.clear(jpStations);
+    renderStations();
+  }
+  // The Wanted filter keeps the stations with a needed mark (the button's
+  // cycle: any, new country, new grid). The stream's other filters run on the
+  // station's latest decode; the search also matches the columns the row
+  // shows (call, calling, park, grid, country, state).
+  function stationVisible(e, marks) {
+    if (!JtcatStations.wantedMatch(marks, wantedFilter)) return false;
+    if (!e.decode) return true;
+    var c = classifyDecode(e.decode);
+    c.upper = [e.call, e.calling, e.park ? e.park.ref : '', e.grid, e.entity, e.state, c.upper].join(' ').toUpperCase();
+    c.stationMarks = marks;
+    return decodeVisible(c);
+  }
+  function stationRowClass(e, marks) {
+    var me = (myCallsign || '').toUpperCase();
+    return 'jp-st-row' + (/^CQ\b/.test(e.calling) ? ' jp-st-cq' : '') + (me && e.calling === me ? ' jp-st-me' : '') +
+      (marks && marks.needed ? ' jp-st-needed' : '');
+  }
+  function renderStations() {
+    if (!stationsView || !stationsEl || !jpStations) return;
+    var now = Date.now();
+    var all = JtcatStations.list(jpStations, { sort: stationsSort, now: now });
+    var mctx = stationsMarksCtx();
+    var scopeText = stationsScopeText();
+    var shown = [];
+    for (var a = 0; a < all.length; a++) {
+      var marks = JtcatStations.marksOf(all[a], mctx);
+      if (stationVisible(all[a], marks)) shown.push({ e: all[a], marks: marks });
+    }
+    var html = '<div class="jp-st-row jp-st-head">' + DecodeRow.stationHeaderInner('jp', stationsSort) + '</div>';
+    if (!all.length) html += '<div class="jp-empty">No stations heard yet</div>';
+    else if (!shown.length) html += '<div class="jp-empty">' + (wantedFilter ? 'No station heard gives you anything new' : 'No stations match the current filter') + '</div>';
+    for (var i = 0; i < shown.length; i++) {
+      html += '<div class="' + stationRowClass(shown[i].e, shown[i].marks) + '" data-call="' + esc(shown[i].e.call) + '">' +
+        DecodeRow.stationRowInner(shown[i].e, now, 'jp', { marks: shown[i].marks, scopeText: scopeText }) + '</div>';
+    }
+    html += '<div class="jp-st-key" aria-label="What the marks mean">' + DecodeRow.stationKeyHtml('jp', scopeText) + '</div>';
+    var top = stationsEl.scrollTop;
+    stationsEl.innerHTML = html;
+    stationsEl.scrollTop = top;
+  }
+  // Once a second: drop the stations past the expiry, and move every Age on
+  // in place (a full redraw between the two clicks of a double-click would
+  // lose it).
+  setInterval(function() {
+    if (!stationsView || !jpStations) return;
+    var now = Date.now();
+    if (JtcatStations.expire(jpStations, now)) { renderStations(); return; }
+    var rows = stationsEl.querySelectorAll('.jp-st-row[data-call]');
+    for (var i = 0; i < rows.length; i++) {
+      var e = jpStations.byCall[rows[i].getAttribute('data-call')];
+      var age = rows[i].querySelector('.jp-st-age');
+      if (e && age) age.textContent = DecodeRow.formatAge(now - e.lastHeard);
+    }
+  }, 1000);
+  function stationFromEvent(ev) {
+    var row = ev.target && ev.target.closest ? ev.target.closest('.jp-st-row[data-call]') : null;
+    var e = row ? jpStations.byCall[row.getAttribute('data-call')] : null;
+    return e && e.decode ? e : null;
+  }
+  if (stationsEl) {
+    stationsEl.addEventListener('dblclick', function(ev) {
+      var e = stationFromEvent(ev);
+      if (e) onDecodeRowClick(e.decode);
+    });
+    stationsEl.addEventListener('contextmenu', function(ev) {
+      var e = stationFromEvent(ev);
+      if (e) openRowMenu(ev, e.decode);
+    });
+    stationsEl.addEventListener('click', function(ev) {
+      var h = ev.target && ev.target.closest ? ev.target.closest('.jp-st-head [data-sort]') : null;
+      if (!h) return;
+      stationsSort = JtcatStations.normalizeSort(h.getAttribute('data-sort'));
+      try { localStorage.setItem(STATIONS_SORT_LS_KEY, stationsSort); } catch (e) {}
+      renderStations();
+    });
+  }
+  function setBandView(toStations, save) {
+    stationsView = !!toStations;
+    bandActivity.hidden = stationsView;
+    if (stationsEl) stationsEl.hidden = !stationsView;
+    if (viewStreamBtn) viewStreamBtn.classList.toggle('active', !stationsView);
+    if (viewStationsBtn) viewStationsBtn.classList.toggle('active', stationsView);
+    if (save) { try { localStorage.setItem(VIEW_LS_KEY, stationsView ? 'stations' : 'stream'); } catch (e) {} }
+    if (stationsView) renderStations();
+    else bandActivity.scrollTop = bandActivity.scrollHeight;
+  }
+  if (viewStreamBtn) viewStreamBtn.addEventListener('click', function() { setBandView(false, true); });
+  if (viewStationsBtn) viewStationsBtn.addEventListener('click', function() { setBandView(true, true); });
+  function applyStationsExpiry(v, persist) {
+    var n = JtcatStations.setExpiryMin(jpStations, v);
+    if (stationsExpirySelect) stationsExpirySelect.value = String(n);
+    if (persist) window.api.saveSettings({ jtcatStationsExpiryMin: n });
+    renderStations();
+  }
+  if (stationsExpirySelect) stationsExpirySelect.addEventListener('change', function() { applyStationsExpiry(stationsExpirySelect.value, true); });
+  setBandView(stationsView, false);
 
   function renderDecodes(data) {
     var results = data.results || [];
@@ -1307,6 +1467,11 @@ function _applyPopoutTheme(payload) {
       plotDecode(d);
     });
 
+    // Stations view: fold this cycle in (after the slot is stamped on each
+    // decode, so a row click answers in the right slot).
+    JtcatStations.addDecodes(jpStations, results, jpStationsContext());
+    renderStations();
+
     clearOld();
     // Auto-scroll
     bandActivity.scrollTop = bandActivity.scrollHeight;
@@ -1320,6 +1485,8 @@ function _applyPopoutTheme(payload) {
     var n = 0;
     for (var i = 0; i < decodeLog.length; i++) n += DecodeRow.clearWorkedFlags(decodeLog[i].results, w);
     if (n) rebuildBandActivity();
+    // The Stations list holds decodes the stream may have dropped already.
+    if (jpStations) { DecodeRow.clearWorkedFlags(JtcatStations.decodesOf(jpStations), w); renderStations(); }
     // My Activity rows are not rebuilt from the log; drop their badges in place.
     var call = String(w.call || '').toUpperCase(), grid = String(w.grid || '').toUpperCase().slice(0, 4);
     myActivity.querySelectorAll('.jp-badge-call, .jp-badge-grid, .jp-badge-dxcc').forEach(function(b) {
@@ -1429,6 +1596,9 @@ function _applyPopoutTheme(payload) {
 
   function applyClock(d) {
     if (!syncEl) return;
+    // Only the buttons this OS can honour (main's canFix / canOpenSettings, lib/ntp.js).
+    if (d && clockSyncBtn) clockSyncBtn.style.display = d.canFix === false ? 'none' : '';
+    if (d && clockSetBtn) clockSetBtn.style.display = d.canOpenSettings === false ? 'none' : '';
     lastClockState = d; // remembered so engine-stop can keep a bad banner up
     syncEl.classList.remove('jtcat-synced');
     syncEl.style.color = '';
@@ -1558,6 +1728,7 @@ function _applyPopoutTheme(payload) {
     document.body.classList.toggle('jp-engine-stopped', on);
     if (on) {
       decodeLog = [];
+      jpStationsClear();
       bandActivity.innerHTML = '<div class="jp-empty">Stopped</div>';
     }
     syncBandMode();
@@ -1649,7 +1820,9 @@ function _applyPopoutTheme(payload) {
       // evict it like any decode cycle. Without the separator the row is
       // orphaned and accumulates forever (one per TX slot). (78hawkeye, PR #54.)
       var txTime = cycleBoundaryUtc();
-      var txRowHtml = DecodeRow.txRowInner(data.message, 'jp', '--');
+      // df = the offset THIS slot went out on (txFreq is stamped at key-down),
+      // not the slider now: a late reply after a move still lines up (#503).
+      var txRowHtml = DecodeRow.txRowInner(data.message, 'jp', data.txFreq, '--');
       var baEmpty = bandActivity.querySelector('.jp-empty');
       if (baEmpty) baEmpty.remove();
       var baSep = document.createElement('div');
@@ -1699,6 +1872,26 @@ function _applyPopoutTheme(payload) {
           qsoToast.classList.remove('error');
         });
         qsoToast.appendChild(fb);
+      }
+      // The retry cap stopped a QSO whose RR73 never came: not logged (#807).
+      // Send 73 puts the 73 on the air, which logs it. Stays up for a minute.
+      if (data.send73) {
+        var sb = document.createElement('button');
+        sb.className = 'jp-toast-action';
+        sb.textContent = 'Send 73';
+        sb.addEventListener('click', function(e) {
+          e.stopPropagation();
+          window.api.jtcatSkipPhase({ unconfirmed: true });
+          qsoToast.classList.remove('visible');
+          qsoToast.classList.remove('error');
+        });
+        qsoToast.appendChild(sb);
+        if (qsoToastTimer) clearTimeout(qsoToastTimer);
+        qsoToastTimer = setTimeout(function() {
+          qsoToast.classList.remove('visible');
+          qsoToast.classList.remove('error');
+          delete qsoToast.dataset.errorToast;
+        }, 60000);
       }
       renderQsoTracker();
       return;
@@ -1805,6 +1998,12 @@ function _applyPopoutTheme(payload) {
       delete qsoToast.dataset.errorToast;
     }, 6000);
   }
+  // #463: macOS refuses POTACAT the microphone (the main window keeps it until sound arrives).
+  if (window.api.onMacMicNotice) {
+    window.api.onMacMicNotice(function(d) {
+      if (d && d.show && d.message) showJtcatWarnToast(d.message);
+    });
+  }
   if (window.api.onJtcatDupeWarning) {
     window.api.onJtcatDupeWarning(function(data) {
       showJtcatWarnToast((data && data.message) || 'Already worked', data && data.sub);
@@ -1836,7 +2035,9 @@ function _applyPopoutTheme(payload) {
   // jtcatSetMode → persist → selectBand on the active button), which fixes
   // the long-standing "FT4 spot with popout already open in FT8" gap. All
   // checks are mismatch-gated so the heard-refresh broadcasts every cycle
-  // are no-ops here.
+  // are no-ops here. A stopped engine (a voice spot QSY stops it) also goes
+  // through selectBand, which starts it, even on the same band and mode
+  // (VK4KTW #804); once started, the refreshes are no-ops again.
   function spotTargetResync(data) {
     if (!data.mode || !data.freqKhz) return;
     // JS8 is its own window now — it was removed from this popout's mode
@@ -1856,7 +2057,7 @@ function _applyPopoutTheme(payload) {
       bestBtn.classList.add('active');
       modeSelect.value = data.mode;
       modeSelect.dispatchEvent(new Event('change'));
-    } else if (activeBtn !== bestBtn) {
+    } else if (activeBtn !== bestBtn || engineStopped) {
       selectBand(bestBtn, true);
     }
   }
@@ -2446,6 +2647,7 @@ function _applyPopoutTheme(payload) {
 
     // Clear decode log
     bandActivity.innerHTML = '<div class="jp-empty">Multi-slice decoding...</div>';
+    jpStationsClear();
     myActivity.innerHTML = '<div class="jp-empty">No activity yet</div>';
 
     // Auto-focus first slice for waterfall
@@ -2636,6 +2838,7 @@ function _applyPopoutTheme(payload) {
 
   document.getElementById('jp-clear').addEventListener('click', function() {
     bandActivity.innerHTML = '<div class="jp-empty">Waiting for decodes...</div>';
+    jpStationsClear();
     myActivity.innerHTML = '<div class="jp-empty">No activity yet</div>';
   });
 
@@ -3577,6 +3780,7 @@ function _applyPopoutTheme(payload) {
     if (btn) btn.classList.add('active');
     bandSelectFollowActive();
     decodeLog = [];
+    jpStationsClear();
     bandActivity.innerHTML = '<div class="jp-empty">Following the radio to ' + esc(d.band || FreqDots.khzMhz(khz)) + '...</div>';
     myActivity.innerHTML = '<div class="jp-empty">No activity yet</div>';
     markerLayer.clearLayers();
@@ -3610,6 +3814,7 @@ function _applyPopoutTheme(payload) {
     btn.classList.add('active');
     // Clear decodes
     decodeLog = [];
+    jpStationsClear();
     bandActivity.innerHTML = '<div class="jp-empty">' + (save ? 'Switching to ' + btn.dataset.band + '...' : 'Waiting for signals...') + '</div>';
     myActivity.innerHTML = '<div class="jp-empty">No activity yet</div>';
     markerLayer.clearLayers();
@@ -3912,6 +4117,7 @@ function _applyPopoutTheme(payload) {
       // band that suddenly went strange, so clear down exactly as a band
       // change does.
       decodeLog = [];
+      jpStationsClear();
       bandActivity.innerHTML = '<div class="jp-empty">' + (d.from || 'That mode') +
         ' was quiet — listening on ' + d.mode + '...</div>';
       myActivity.innerHTML = '<div class="jp-empty">No activity yet</div>';
@@ -5805,7 +6011,8 @@ function _applyPopoutTheme(payload) {
 
   function jpRfFormat(w) {
     var d = jpRfCaps.powerDecimals || 0;
-    return (d > 0 ? Number(w).toFixed(d) : String(Math.round(Number(w)))) + ' W';
+    // A TCI rig's level is its drive in percent, not watts.
+    return (d > 0 ? Number(w).toFixed(d) : String(Math.round(Number(w)))) + (jpRfCaps.powerUnit === '%' ? '%' : ' W');
   }
   function jpRfPaintValue(w, known) {
     if (!jpRfVal) return;
@@ -5814,7 +6021,7 @@ function _applyPopoutTheme(payload) {
     jpRfVal.textContent = jpRfFormat(w);
     // At the beacon cap in a non-WSPR mode = the exact state that hid a month
     // of unanswered CQs. Say so where the number is.
-    var lowForMode = w > 0 && w <= JP_WSPR_CAP_WATTS && modeSelect && modeSelect.value !== 'WSPR';
+    var lowForMode = jpRfCaps.powerUnit !== '%' && w > 0 && w <= JP_WSPR_CAP_WATTS && modeSelect && modeSelect.value !== 'WSPR';
     jpRfVal.style.color = lowForMode ? '#e94560' : '';
     jpRfVal.title = lowForMode
       ? 'The radio is at the WSPR beacon\u2019s ' + JP_WSPR_CAP_WATTS + ' W cap. Raise it here unless QRP is intended.'
@@ -5835,6 +6042,7 @@ function _applyPopoutTheme(payload) {
   function jpRfApply(p) {
     if (!p || !jpRfGroup) return;
     jpRfCaps = {
+      powerUnit: p.powerUnit === '%' ? '%' : 'W',
       minPower: p.minPower != null ? p.minPower : 0,
       maxPower: p.maxPower != null ? p.maxPower : 100,
       powerStep: p.powerStep != null ? p.powerStep : 1,
@@ -6050,8 +6258,22 @@ function _applyPopoutTheme(payload) {
   // does not.
   var _popoutStallWatch = null;
   var _popoutStallTimer = null;
+  // #463: on a Mac that refuses the microphone, the input is exact zeros from
+  // the first buffer (lib/mac-mic-access.js; main decides what to say).
+  var _popoutMicWatch = null;
+  function popoutMicNote(samples) {
+    if (!_popoutMicWatch) return;
+    var now = Date.now();
+    var ev = _popoutMicWatch.note(samples, now);
+    if (ev && window.api.macMicSilence) window.api.macMicSilence({ surface: 'jtcat', silent: ev === 'silent', silentMs: _popoutMicWatch.silentFor(now) });
+  }
   function popoutArmStallWatch(track) {
     var now = Date.now();
+    if (window.MacMicAccess && window.api.platform === 'darwin') {
+      if (_popoutMicWatch) _popoutMicWatch.started(now);
+      else _popoutMicWatch = new window.MacMicAccess.SilenceWatch(now);
+      if (window.api.macMicCaptureStart) window.api.macMicCaptureStart('jtcat').catch(function () {});
+    }
     if (_popoutStallWatch) _popoutStallWatch.started(now);
     else _popoutStallWatch = new window.CaptureStall.CaptureStallWatch(now);
     if (_popoutStallTimer) clearInterval(_popoutStallTimer);
@@ -6136,7 +6358,7 @@ function _applyPopoutTheme(payload) {
     try {
       // Yaesu SCU-LAN10 audio arrives the same way: main forwards it as
       // 'jtcat-vita49-audio' frames at 24 kHz (handleYaesuLanAudioFrame).
-      if (audioSource === 'smartsdr' || audioSource === 'yaesu-lan' || audioSource === 'websdr') {
+      if (audioSource === 'smartsdr' || audioSource === 'yaesu-lan' || audioSource === 'websdr' || audioSource === 'tci') {
         _audioStartStage = 'ctx-create';
         // SmartSDR Direct: audio is the VITA-49 dax_rx stream that main
         // forwards as 'jtcat-vita49-audio' frames. A single AudioWorkletNode
@@ -6161,7 +6383,7 @@ function _applyPopoutTheme(payload) {
           numberOfInputs: 0,
           numberOfOutputs: 1,
           outputChannelCount: [1],
-          processorOptions: audioSource === 'websdr'
+          processorOptions: (audioSource === 'websdr' || audioSource === 'tci')
             ? { sourceRate: 12000 }
             : { sourceRate: 24000 },
         });
@@ -6177,7 +6399,7 @@ function _applyPopoutTheme(payload) {
         // SmartSDR path sends to both windows and was unaffected, which is
         // why this hid for so long. (K3SBP 2026-08-05.)
         if (window.api.setJtcatIpAudioReady) window.api.setJtcatIpAudioReady(true);
-        console.log('[JTCAT popout] Audio source: ' + (audioSource === 'websdr' ? 'WebSDR' : 'SmartSDR Direct (VITA-49 dax_rx)') + ' via AudioWorklet');
+        console.log('[JTCAT popout] Audio source: ' + (audioSource === 'websdr' ? 'WebSDR' : audioSource === 'tci' ? 'TCI (Zeus / Thetis)' : 'SmartSDR Direct (VITA-49 dax_rx)') + ' via AudioWorklet');
       } else {
         var constraints = {
           channelCount: 1,
@@ -6209,14 +6431,14 @@ function _applyPopoutTheme(payload) {
                 // SmartSDR 4.2.18 (W4DLG 2026-10-25). Elsewhere the usual cause
                 // is the device coming back under a new ID ("2- USB Audio Device").
                 + (popoutIsFlex
-                  ? 'If you upgraded to SmartSDR 4.2.18+ (DAXv2), every DAX device changed: re-select your rig audio devices in Settings > My Rigs > Audio.'
-                  : 'The device may have been unplugged or moved to another USB port (Windows then renames it, e.g. "2- USB Audio Device"): re-select it in Settings > My Rigs > Audio.'));
+                  ? 'If you upgraded to SmartSDR 4.2.18+ (DAXv2), every DAX device changed: pick your rig audio devices again in Settings > Radio, Edit the rig, Audio Devices.'
+                  : 'The device may have been unplugged or moved to another USB port (Windows then renames it, e.g. "2- USB Audio Device"): pick it again in Settings > Radio, Edit the rig, Audio Devices, RX audio in.'));
           }
           // NEVER substitute the default input: on a Mac it is the built-in
           // microphone — decodes only with the radio's speaker up, and the room
           // audible to anyone listening (KF0WWL 2026-10-23). Same rule as the
           // ECHOCAT bridge (remote-audio.html). No audio beats the wrong audio.
-          throw new Error('The radio\'s audio input could not be opened, so nothing was captured (the microphone was NOT used). Pick the radio\'s input again in Settings > My Rigs > Audio.');
+          throw new Error('The radio\'s audio input could not be opened, so nothing was captured (the microphone was NOT used). Pick the radio\'s input again in Settings > Radio, Edit the rig, Audio Devices, RX audio in.');
         }
       }
       _audioStartStage = 'capture-ctx (state pending)';
@@ -6249,6 +6471,7 @@ function _applyPopoutTheme(payload) {
         });
         workletNode.port.onmessage = function(e) {
           if (_popoutStallWatch) _popoutStallWatch.noteSamples(e.data, Date.now());
+          popoutMicNote(e.data);
           window.api.jtcatAudio(e.data);
         };
         popoutRxGainNode.connect(workletNode);
@@ -6305,6 +6528,7 @@ function _applyPopoutTheme(payload) {
               samples = Array.from(rawSamples);
             }
             if (_popoutStallWatch) _popoutStallWatch.noteSamples(samples, Date.now());
+            popoutMicNote(samples);
             window.api.jtcatAudio(samples);
           } catch (err) {
             console.error('[JTCAT popout] Audio processor error:', err.message || err);
@@ -6323,7 +6547,7 @@ function _applyPopoutTheme(payload) {
       popoutWaterfallLoop();
       // Capture-stall watchdog (kc8zp_ryan 2026-11-03, lib/capture-stall.js):
       // sound-card capture only; the SmartSDR / Icom-network feed is main's.
-      if (window.CaptureStall && audioSource !== 'smartsdr' && audioSource !== 'icom-network' && audioSource !== 'yaesu-lan' && audioSource !== 'websdr') {
+      if (window.CaptureStall && audioSource !== 'smartsdr' && audioSource !== 'icom-network' && audioSource !== 'yaesu-lan' && audioSource !== 'websdr' && audioSource !== 'tci') {
         popoutArmStallWatch(popoutAudioStream && popoutAudioStream.getAudioTracks()[0]);
       }
       // Start finished — disarm the stall watchdog and restore the overlay
@@ -6341,7 +6565,7 @@ function _applyPopoutTheme(payload) {
         // and the label is the only way a bug report shows which one fed the
         // decoder. KB2UXB 2026-08-03.
         var capLabel = '';
-        if (audioSource !== 'smartsdr' && audioSource !== 'yaesu-lan') {
+        if (audioSource !== 'smartsdr' && audioSource !== 'yaesu-lan' && audioSource !== 'tci') {
           try {
             var capTrack = popoutAudioStream && popoutAudioStream.getAudioTracks()[0];
             if (capTrack && capTrack.label) capLabel = ' [' + capTrack.label + ']';
@@ -6349,6 +6573,7 @@ function _applyPopoutTheme(payload) {
         }
         window.api.jtcatLog('[JTCAT popout] Audio started: ' +
           (audioSource === 'smartsdr' ? 'SmartSDR Direct (VITA-49)' :
+           audioSource === 'tci' ? 'TCI (Zeus / Thetis)' :
            audioSource === 'websdr' ? 'WebSDR' :
            audioSource === 'icom-network' ? 'Icom network' :
            audioSource === 'yaesu-lan' ? 'Yaesu LAN (SCU-LAN10)' : 'device capture') +
@@ -6746,22 +6971,8 @@ function _applyPopoutTheme(payload) {
       // Auto-detect quietest TX frequency (~every 0.5s)
       popoutQuietFreqFrame++;
       if (!remoteShackMode && popoutQuietFreqFrame % 30 === 0) {
-        var binHz = nyquist / freqData.length;
-        var windowBins = Math.round(50 / binHz);
-        var startBin = Math.round(200 / binHz);
-        var endBin = Math.round(2800 / binHz);
-        var bestEnergy = Infinity;
-        var bestBin = Math.round(1500 / binHz);
-        for (var b = startBin; b <= endBin - windowBins; b++) {
-          var energy = 0;
-          for (var j = 0; j < windowBins; j++) energy += freqData[b + j];
-          if (energy < bestEnergy) {
-            bestEnergy = energy;
-            bestBin = b + Math.floor(windowBins / 2);
-          }
-        }
-        var quietHz = Math.round(bestBin * binHz / 10) * 10;
-        window.api.jtcatQuietFreq(Math.max(200, Math.min(2800, quietHz)));
+        // lib/jtcat-quiet-freq.js; main runs the same rule while this loop is paused.
+        window.api.jtcatQuietFreq(window.JtcatQuietFreq.pickQuietFreq(freqData, nyquist / freqData.length));
       }
 
       // Send spectrum to main process for remote/ECHOCAT (~10fps)

@@ -150,6 +150,14 @@
     .freq-display .fq-sub { font-size: 26px; color: var(--t2); }
     .freq-display .fq-unit { font-family: 'Segoe UI', system-ui, sans-serif; font-size: 13px; color: var(--t3); margin-left: 8px; }
     .freq-display:hover .fq-main { color: var(--blue); }
+    /* The Small VFO's frequency while it is being typed (#672): a box in the
+       accent, the typed digits with a caret, and what Enter will tune. */
+    .freq-display.entry { box-shadow: 0 0 0 2px var(--blue); border-radius: 6px; padding: 0 8px; background: var(--in); }
+    .freq-display.entry .fq-main { color: var(--t); min-width: 2ch; }
+    .freq-display.entry .fq-sub { color: var(--blue); margin-left: 10px; }
+    .fq-caret { display: inline-block; width: 2px; height: 0.85em; margin-left: 2px; background: var(--blue); vertical-align: -0.06em; animation: fq-caret-blink 1s steps(1) infinite; }
+    @keyframes fq-caret-blink { 50% { opacity: 0; } }
+    @media (prefers-reduced-motion: reduce) { .fq-caret { animation: none; } }
     /* The OTHER VFO while split is on (TX side), amber like every TX-adjacent accent. */
     .freq-other-row { display: none; align-items: baseline; gap: 6px; margin-top: -4px; }
     .freq-other-row.show { display: flex; }
@@ -908,18 +916,23 @@
 <!-- Shared TX EQ chain (Phase 1). Also loaded by remote-audio.html so
      both audio sources apply identical DSP. -->
 <script src="../lib/freq-dots.js"></script>
+<script src="../lib/freedv-display-mode.js"></script>
 <script src="tx-eq-chain.js"></script>
 <script src="../lib/custom-cat-follow.js"></script>
+<script src="../lib/custom-cat-slider.js"></script>
 <script src="../lib/rig-power-view.js"></script>
 <script src="../lib/rig-bands.js"></script>
 <script src="../lib/vfo-layout.js"></script>
 <script src="../lib/freq-paste.js"></script>
+<script src="../lib/vfo-freq-entry.js"></script>
 <script src="../lib/wheel-tune.js"></script>
 <script src="../lib/mono-upmix.js"></script>
 <script src="../lib/audio-device-heal.js"></script>
 <script src="../lib/vfo-audio-reattach.js"></script>
+<script src="../lib/vfo-monitor-tx-mute.js"></script>
 <script src="../lib/vfo-ptt-mic.js"></script>
 <script src="../lib/sdr-failure.js"></script>
+<script src="../lib/mic-label-probe.js"></script>
 <script>
 // --- State ---
 let currentFreqHz = 0;
@@ -1004,6 +1017,7 @@ vfoLockBtn.addEventListener('click', () => {
 updateLockBtn();
 window.api.onVfoLockState((locked) => {
   vfoLocked = locked;
+  if (locked) stripClose();
   updateLockBtn();
 });
 
@@ -1047,7 +1061,14 @@ const filterVal = document.getElementById('filter-val');
 function showPane(name) {
   document.querySelectorAll('.pane').forEach(p => p.classList.toggle('active', p.id === 'tab-' + name));
   if (name === 'keypad') { kpBuffer = ''; kpRender(); }
+  else if (kpFromMini) { kpFromMini = false; setMini(true, { save: false }); }
 }
+// The Small VFO's frequency (#672, lib/vfo-freq-entry.js). A click grows the
+// window to the Large VFO with the keypad, and Tune or Cancel takes it back to
+// the strip, as the gear does. Typing turns the strip's frequency into the
+// entry in place (stripEntry). A buffer nobody can see is never tuned.
+let kpFromMini = false;
+let stripEntry = false;
 const sheetEl = document.getElementById('tab-settings');
 const sheetBackdrop = document.getElementById('sheet-backdrop');
 // The gear on the Small VFO: the strip has no room for the sheet, so the
@@ -1104,10 +1125,13 @@ function renderFreqDisplay(hz) {
 }
 
 function updateDisplay() {
-  renderFreqDisplay(radioLinkUp ? currentFreqHz : 0);
-  freqDisplay.title = radioLinkUp ? 'Click to type a frequency' : 'The radio is not answering (switched off, or the cable is out)';
+  if (stripEntry) stripRender(); // the operator is typing here: the live dial waits
+  else {
+    renderFreqDisplay(radioLinkUp ? currentFreqHz : 0);
+    freqDisplay.title = radioLinkUp ? 'Click to type a frequency' : 'The radio is not answering (switched off, or the cable is out)';
+  }
   const m = (currentMode || '').toUpperCase();
-  modeBadge.textContent = !radioLinkUp ? '---' : m.startsWith('FREEDV') ? 'RADE' : (currentMode || '---');
+  modeBadge.textContent = !radioLinkUp ? '---' : (FreedvDisplayMode.freedvBadge(currentMode) || '---');
   if (currentFilterWidth > 0) {
     filterBadge.textContent = currentFilterWidth >= 1000
       ? (currentFilterWidth / 1000).toFixed(1) + ' kHz'
@@ -1181,9 +1205,24 @@ window.api.onRadioState((s) => {
   // inline display of '' fell back to the stylesheet's none, so the block
   // never appeared on any radio.
   if (s.power != null) {
+    // #293: a radio that shows neither button (off-only, and Power Off not
+    // allowed) gets no block at all.
+    const shown = !!s.power && !(s.powerOn === false && s.powerOff === false);
     const sec = document.getElementById('sec-power');
-    sec.style.display = s.power ? '' : 'none';
-    sec.classList.toggle('visible', !!s.power);
+    sec.style.display = shown ? '' : 'none';
+    sec.classList.toggle('visible', shown);
+  }
+  // #485: a radio that can be switched off over CAT but not on (the FTX-1)
+  // shows Power Off alone. Absent powerOn (an older main) keeps both.
+  if (s.powerOn != null) {
+    const onBtn = document.getElementById('vfo-power-on');
+    if (onBtn) onBtn.style.display = s.powerOn ? '' : 'none';
+  }
+  // #293: no Power Off where POTACAT could not switch the radio back on and
+  // the operator has not allowed it for this rig. Absent (an older main) shows it.
+  if (s.powerOff != null) {
+    const offBtn = document.getElementById('vfo-power-off');
+    if (offBtn) offBtn.style.display = s.powerOff ? '' : 'none';
   }
   // Active VFO + split badges — readback-fed from the radio (LZ3AW). The
   // VFO badge only appears once the rig reports B at least this session,
@@ -1200,10 +1239,7 @@ window.api.onRadioState((s) => {
     const sb = document.getElementById('split-badge');
     if (sb) sb.style.display = s.split ? '' : 'none';
   }
-  if (s.customCatButtons) {
-    customCatButtons = s.customCatButtons;
-    buildCustomCatBtns();
-  }
+  if (s.customCatButtons) applyCustomCatPush(s.customCatButtons);
   updateDisplay();
   updateModeHighlight();
 });
@@ -1370,9 +1406,11 @@ function updateModeHighlight() {
   });
 }
 
-// Frequency display click → type-to-tune pane
+// Frequency display click → type-to-tune pane (the Small VFO grows to show it)
 freqDisplay.addEventListener('click', () => {
-  if (vfoLocked) { window.api.setVfoLock(true); return; }
+  const route = VfoFreqEntry.clickRoute({ mini: vfoMini, locked: vfoLocked });
+  if (route === 'locked') { stripClose(); window.api.setVfoLock(true); return; }
+  if (route === 'grow-keypad') { kpGrowFromMini(); return; }
   showPane('keypad');
 });
 
@@ -1638,8 +1676,56 @@ function customSliderCommand(template, value) {
 }
 
 const customSliderTimers = {};
+// #526: every vfo-radio-state push carries the custom CAT list. Rebuilding on
+// each one replaced a slider under the operator's finger and the new one
+// started at its minimum. Rules in lib/custom-cat-slider.js.
+const customSliderLast = {};      // slot key -> the value last moved to in this window
+let customSliderSaved = {};       // slot key -> the saved value as last pushed
+let customCatSig = null;          // definitions the controls were built from
+let customSliderHeld = false;     // pointer down on a custom slider
+let customSliderInputAt = 0;      // last input event (keyboard moves count too)
+let customCatPending = false;     // a rebuild waits for the drag to end
+const customSliderBusy = () => customSliderHeld || (Date.now() - customSliderInputAt) < 600;
+
+function applyCustomCatPush(list) {
+  customCatButtons = list;
+  const moved = CustomCatSlider.savedValueChanges(list, customSliderSaved);
+  customSliderSaved = CustomCatSlider.savedValues(list);
+  const busy = customSliderBusy();
+  const plan = CustomCatSlider.plan(customCatSig, list, busy);
+  if (plan === 'defer') { customCatPending = true; flushCustomCatLater(); return; }
+  if (plan === 'rebuild') {
+    for (const key of Object.keys(moved)) customSliderLast[key] = moved[key];
+    buildCustomCatBtns();
+    return;
+  }
+  // Same slots: show a saved value that moved elsewhere (the main window's
+  // slider), in place, unless this window's slider is being moved.
+  if (busy) return;
+  for (const key of Object.keys(moved)) {
+    customSliderLast[key] = moved[key];
+    document.querySelectorAll('.custom-cat-slider.custom-cat-injected').forEach((el) => {
+      if (el._key !== key) return;
+      const r = el.querySelector('input[type="range"]'), v = el.querySelector('.ccs-val');
+      if (r) r.value = moved[key];
+      if (v) v.textContent = r ? r.value : moved[key];
+    });
+  }
+}
+function flushCustomCatLater() {
+  setTimeout(() => {
+    if (!customCatPending) return;
+    if (customSliderBusy()) { flushCustomCatLater(); return; }
+    customCatPending = false;
+    buildCustomCatBtns();
+  }, 650);
+}
+window.addEventListener('pointerup', () => { customSliderHeld = false; }, true);
+window.addEventListener('pointercancel', () => { customSliderHeld = false; }, true);
 
 function buildCustomCatBtns() {
+  customCatSig = CustomCatSlider.definitionSignature(customCatButtons);
+  customCatPending = false;
   // Remove any previously injected custom controls
   document.querySelectorAll('.custom-cat-injected').forEach(el => el.remove());
   // Buttons, toggles AND sliders. A toggle used to be drawn as a plain button
@@ -1655,8 +1741,8 @@ function buildCustomCatBtns() {
     btns.forEach(b => {
       if (row.id === 'mini-cat' && !vfoSmall.cat.includes(VfoLayout.CUSTOM_PREFIX + b.name)) return;
       if (b.type === 'slider') {
-        const lo = Number.isFinite(b.min) ? b.min : 0;
-        const hi = Number.isFinite(b.max) ? b.max : 255;
+        const { lo, hi } = CustomCatSlider.range(b);
+        const key = CustomCatSlider.slotKey(b);
         const wrap = document.createElement('span');
         wrap.className = 'custom-cat-slider custom-cat-injected';
         const lbl = document.createElement('span');
@@ -1667,16 +1753,18 @@ function buildCustomCatBtns() {
         range.className = 'ccs-range';
         range.min = lo;
         range.max = hi;
-        range.value = Number.isFinite(b.value) ? b.value : lo;
+        range.value = CustomCatSlider.startValue(b, customSliderLast[key]);
         range.title = b.command;
         const val = document.createElement('span');
         val.className = 'ccs-val';
         val.textContent = range.value;
+        range.addEventListener('pointerdown', () => { customSliderHeld = true; });
         range.addEventListener('input', () => {
           val.textContent = range.value;
+          customSliderLast[key] = +range.value;
+          customSliderInputAt = Date.now();
           // Debounced like the main window's: dragging a slider must not
           // fire a CAT command per pixel.
-          const key = b.name + '|' + b.command;
           if (customSliderTimers[key]) clearTimeout(customSliderTimers[key]);
           customSliderTimers[key] = setTimeout(() => {
             customSliderTimers[key] = null;
@@ -1690,7 +1778,7 @@ function buildCustomCatBtns() {
             if (v) v.textContent = range.value;
           });
         });
-        wrap._key = b.name + '|' + b.command;
+        wrap._key = key;
         wrap.appendChild(lbl);
         wrap.appendChild(range);
         wrap.appendChild(val);
@@ -2012,6 +2100,63 @@ kpGo.addEventListener('click', () => {
   showPane('dial');
 });
 
+// --- Small VFO: the strip's frequency is the entry (#672) ---
+// On the strip and not hidden for width: only then can typing show there.
+function freqInStrip() {
+  return vfoMini && freqDisplay.parentNode === miniStrip
+    && !freqDisplay.classList.contains('mini-hidden') && freqDisplay.getClientRects().length > 0;
+}
+function stripRender() {
+  const khz = kpTargetKhz(kpBuffer);
+  freqDisplay.innerHTML = '<span class="fq-main">' + kpBuffer + '<span class="fq-caret" aria-hidden="true"></span></span>'
+    + '<span class="fq-sub">' + (khz ? FreqDots.fromKhz(khz) : '') + '</span>';
+  freqDisplay.title = 'Type a frequency, Enter to tune, Esc to cancel';
+  freqDisplay.setAttribute('aria-label', khz ? 'Typing ' + FreqDots.khzMhz(khz) + '. Enter to tune, Esc to cancel.' : 'Type a frequency. Enter to tune, Esc to cancel.');
+  kpRender();
+  if (vfoMini) requestAnimationFrame(fitMini); // the entry is wider: the line refits (frequency and PTT never hide)
+}
+function stripOpen() {
+  if (stripEntry) return;
+  stripEntry = true;
+  kpBuffer = '';
+  freqDisplay.classList.add('entry');
+}
+// Esc, a click elsewhere, a size change: the live frequency comes back.
+function stripClose() {
+  if (!stripEntry) return;
+  stripEntry = false;
+  kpBuffer = '';
+  freqDisplay.classList.remove('entry');
+  freqDisplay.removeAttribute('aria-label');
+  updateDisplay();
+  if (vfoMini) requestAnimationFrame(fitMini);
+}
+// Enter: the same path as the keypad's Tune.
+function stripGo() {
+  if (vfoLocked) { stripClose(); window.api.setVfoLock(true); return; }
+  const khz = kpTargetKhz(kpBuffer);
+  if (!khz) return; // nothing to tune yet: keep typing
+  tuneJumpFromPopout(khz);
+  currentFreqHz = khz * 1000;
+  kpRememberRecent(khz);
+  stripClose();
+}
+// Grow to the Large VFO with the keypad open (what was typed on the strip
+// comes along); Tune or Cancel takes it back to the strip (showPane).
+function kpGrowFromMini() {
+  const carry = stripEntry ? kpBuffer : '';
+  stripClose();
+  kpFromMini = true;
+  setMini(false, { save: false });
+  showPane('keypad');
+  if (carry) { kpBuffer = carry; kpRender(); }
+}
+document.addEventListener('pointerdown', (e) => {
+  if (stripEntry && !freqDisplay.contains(e.target)) stripClose();
+}, true);
+window.addEventListener('blur', () => stripClose());
+freqDisplay.addEventListener('wheel', () => stripClose(), { passive: true });
+
 // Paste a frequency anywhere (or into the box) to fill type-to-tune; Enter
 // tunes as for typed digits (hoogskev 2026-10-31: the box took no paste).
 // lib/freq-paste.js reads "14.074", "14,074", "14074 kHz", "14.074.000".
@@ -2023,6 +2168,9 @@ document.addEventListener('paste', (e) => {
   const khz = window.FreqPaste ? window.FreqPaste.parsePastedFreq(text) : 0;
   if (!khz) return;
   e.preventDefault();
+  const route = VfoFreqEntry.pasteRoute({ mini: vfoMini, freqInStrip: freqInStrip() });
+  if (route === 'strip') { stripOpen(); kpBuffer = fmtMhz(khz); stripRender(); return; }
+  if (route === 'grow') kpGrowFromMini();
   showPane('keypad');
   kpBuffer = fmtMhz(khz);
   kpRender();
@@ -2035,25 +2183,41 @@ document.addEventListener('keydown', (e) => {
   // The "Type a frequency" box (readonly) is ours to type into: clicking it
   // focused an INPUT and every digit was dropped (hoogskev 10-29 / 11-02).
   if (t !== kpInput && t && (t.tagName === 'INPUT' && t.type !== 'checkbox' && t.type !== 'range' || t.tagName === 'SELECT' || t.tagName === 'TEXTAREA')) return;
-  if (e.key === 'Escape') {
-    if (sheetOpen()) { openSheet(false); return; }
-    showPane('dial');
-    return;
-  }
+  if (e.key === 'Escape' && sheetOpen()) { openSheet(false); return; }
   if (sheetOpen()) return;
   const kpActive = document.getElementById('tab-keypad').classList.contains('active');
-  if (e.key >= '0' && e.key <= '9') {
-    if (!kpActive) showPane('keypad');
-    const btn = document.querySelector(`.kp-btn[data-digit="${e.key}"]`);
-    if (btn) btn.click();
-  } else if (e.key === '.' || e.key === ',') {
-    if (!kpActive) showPane('keypad');
-    if (!kpBuffer.includes('.')) { kpBuffer += '.'; kpRender(); }
-  } else if (kpActive && e.key === 'Backspace') {
-    kpBuffer = kpBuffer.slice(0, -1);
-    kpRender();
-  } else if (kpActive && e.key === 'Enter') {
-    kpGo.click();
+  // lib/vfo-freq-entry.js: in the Small VFO the keypad pane is hidden, so
+  // digits go to the strip's frequency (or grow the window) and Enter tunes
+  // only what is on screen.
+  const route = VfoFreqEntry.keyRoute(e.key, {
+    mini: vfoMini, entryOpen: stripEntry, keypadShown: kpActive && !vfoMini,
+    freqInStrip: freqInStrip(), locked: vfoLocked,
+  });
+  if (route.startsWith('strip-')) e.preventDefault(); // Enter never also presses a focused strip button (PTT)
+  switch (route) {
+    case 'cancel':
+      if (stripEntry) stripClose(); else showPane('dial');
+      break;
+    case 'locked': window.api.setVfoLock(true); break;
+    case 'grow-type':
+      kpGrowFromMini();
+      kpBuffer = VfoFreqEntry.addKey(kpBuffer, e.key);
+      kpRender();
+      break;
+    case 'strip-type':
+      stripOpen();
+      kpBuffer = VfoFreqEntry.addKey(kpBuffer, e.key);
+      stripRender();
+      break;
+    case 'strip-back': kpBuffer = kpBuffer.slice(0, -1); stripRender(); break;
+    case 'strip-go': stripGo(); break;
+    case 'keypad-type':
+      if (!kpActive) showPane('keypad');
+      kpBuffer = VfoFreqEntry.addKey(kpBuffer, e.key);
+      kpRender();
+      break;
+    case 'keypad-back': kpBuffer = kpBuffer.slice(0, -1); kpRender(); break;
+    case 'keypad-go': kpGo.click(); break;
   }
 });
 
@@ -2967,6 +3131,8 @@ function miniHeight() {
 }
 
 function setMini(on, { save = true } = {}) {
+  stripClose();
+  if (on) kpFromMini = false;
   vfoMini = !!on;
   document.body.classList.toggle('mini', vfoMini);
   miniBtn.innerHTML = vfoMini ? ICONS.grow : ICONS.shrink;
@@ -3031,9 +3197,8 @@ document.getElementById('eq-btn').addEventListener('click', () => showTxAudioPan
 
 async function populateMicDevices() {
   try {
-    // Trigger permission prompt if needed
-    const tmp = await navigator.mediaDevices.getUserMedia({ audio: true });
-    tmp.getTracks().forEach(t => t.stop());
+    // Trigger permission prompt if needed (#743: voice processing off)
+    await MicLabelProbe.unlockDeviceLabels(navigator.mediaDevices);
     const devices = await navigator.mediaDevices.enumerateDevices();
     const inputs = devices.filter(d => d.kind === 'audioinput');
     micSelect.innerHTML = '<option value="">System Default</option>' +
@@ -3325,6 +3490,7 @@ async function pttStart() {
   const stale = () => gen !== pttGen;
   setPttVisual(true);
   if (kiwiGainNode) kiwiGainNode.gain.value = 0;
+  applyMonitorGain(); // #713: no radio monitor on the PC speakers while keyed
   // Start mic → radio TX. Built on locals and published to the globals only
   // while this press is still current, so an abandoned start never
   // overwrites (or leaks next to) a newer press's graph.
@@ -3356,7 +3522,9 @@ async function pttStart() {
         (s.catTarget && s.catTarget.type === 'k4-network') ||
         // Icom Network: the mic goes to the radio over RS-BA1. The legacy
         // branch played it on this computer's speakers (KG5EIU IC-9700 feedback).
-        (s.audioSource === 'icom-network');
+        (s.audioSource === 'icom-network') ||
+        // Yaesu SCU-LAN10: the mic goes to the radio over the LAN (#227).
+        (s.audioSource === 'yaesu-lan' && s.catTarget && s.catTarget.type === 'yaesu-lan');
 
       if (isDaxTxDirect && window.api.daxTxChunk) {
         txPath = 'direct';
@@ -3430,6 +3598,7 @@ function pttStop() {
   setPttVisual(false);
   window.api.nakedPtt(false);
   if (kiwiGainNode) kiwiGainNode.gain.value = kiwiVolume;
+  applyMonitorGain(); // #713: back to what the operator had
   // Stop mic + tear down whichever audio context was used.
   if (pttMicStream) { pttMicStream.getTracks().forEach(t => t.stop()); pttMicStream = null; }
   if (pttSourceNode) { try { pttSourceNode.disconnect(); } catch {} pttSourceNode = null; }
@@ -3738,6 +3907,8 @@ document.getElementById('log-btn-vfo').addEventListener('click', () => {
 
 // TX state from radio (external PTT)
 window.api.onTxState((state) => {
+  // #713: the radio monitor follows TX from any source (radio, ECHOCAT, FT8).
+  vfoRadioTx = !!state;
   if (state) {
     setPttVisual(true);
     // VK3AWA: cut SDR audio while transmitting so the user doesn't hear
@@ -3748,6 +3919,7 @@ window.api.onTxState((state) => {
     pttDown = false;
     if (kiwiGainNode) kiwiGainNode.gain.value = kiwiVolume;
   }
+  applyMonitorGain();
 });
 
 // --- CW Macros ---
@@ -3842,10 +4014,23 @@ async function playVoiceMacro(idx, btn, outputDeviceId) {
       'but no audio reaches the air. Switch to a voice mode and try again.');
     return;
   }
+  // Yaesu SCU-LAN10 (#227): the radio's audio is the LAN, not a sound card,
+  // so no output device is needed. Same path as the main window's macro bar.
+  const s = await window.api.getSettings();
+  if (s.audioSource === 'yaesu-lan' && s.catTarget && s.catTarget.type === 'yaesu-lan' && window.api.voiceMacroLan) {
+    stopVoicePlayback();
+    const b64 = await window.api.voiceMacroLoad(idx);
+    if (!b64) return;
+    const bin = atob(b64);
+    const raw = new Uint8Array(bin.length);
+    for (let j = 0; j < bin.length; j++) raw[j] = bin.charCodeAt(j);
+    playVoiceMacroLan(raw, idx, btn);
+    return;
+  }
   if (!outputDeviceId) {
     const ok = confirm('Voice macros play audio through the system audio output and need that ' +
       'output routed to the radio (FLEX DAX-IN, a virtual audio cable, etc.). No output device is ' +
-      'currently selected in Settings → Remote Audio Output, so the macro will play through your ' +
+      'currently selected in Settings > Radio, Edit the rig, Audio Devices, TX audio out, so the macro will play through your ' +
       'default speakers and not reach the radio.\n\nPlay anyway?');
     if (!ok) return;
   }
@@ -3873,6 +4058,29 @@ async function playVoiceMacro(idx, btn, outputDeviceId) {
     voicePlaybackSource.onended = () => stopVoicePlayback();
   });
 }
+
+// The recording decoded at 16 kHz, mixed to mono and handed to main, which
+// keys the radio, sends it over the LAN and says 'stop-voice-macro' when it
+// is out (or refused). Nothing plays on this computer's speakers.
+function playVoiceMacroLan(bytes, idx, btn) {
+  voicePlaybackCtx = new AudioContext({ sampleRate: 16000 });
+  voicePlaybackCtx.decodeAudioData(bytes.buffer, (audioBuffer) => {
+    const n = audioBuffer.length, chs = audioBuffer.numberOfChannels;
+    const mono = new Float32Array(n);
+    for (let c = 0; c < chs; c++) {
+      const d = audioBuffer.getChannelData(c);
+      for (let i = 0; i < n; i++) mono[i] += d[i] / chs;
+    }
+    voicePlayingIdx = idx;
+    btn.classList.add('active');
+    window.api.voiceMacroLan({ samples: mono, sampleRate: audioBuffer.sampleRate, label: btn.textContent || '' });
+  }, (err) => {
+    console.warn('[VFO] Could not decode the recording:', err && err.message);
+    stopVoicePlayback();
+  });
+}
+// main ends the macro (out, refused, failed): the button goes back.
+if (window.api.onStopVoiceMacro) window.api.onStopVoiceMacro(() => { if (voicePlayingIdx >= 0) stopVoicePlayback(); });
 
 function stopVoicePlayback() {
   if (voicePlaybackSource) { try { voicePlaybackSource.stop(); } catch {} voicePlaybackSource = null; }
@@ -3982,6 +4190,21 @@ let audioReattachPending = false; // #247: a power-on / dead stream waits for a 
 // user can throttle click-to-listen audio without touching the PC's master
 // volume. Persisted as a 0–150 percentage.
 let monitorVolume = (parseInt(localStorage.getItem('vfoMonitorVolume') || '100', 10) || 100) / 100;
+// #713: the radio reports TX (any source). With pttDown, the monitor is
+// silent while keyed and comes back to the operator's own state after
+// (lib/vfo-monitor-tx-mute.js). Every monitor gain write goes through here.
+let vfoRadioTx = false;
+function monitorGainNow(sdrLive = kiwiConnected) {
+  return VfoMonitorTxMute.monitorGain({
+    volume: monitorVolume,
+    muted: audioMonitorMuted,
+    sdrLive,
+    transmitting: VfoMonitorTxMute.transmitting(pttDown, vfoRadioTx),
+  });
+}
+function applyMonitorGain() {
+  if (audioMonitorGain) audioMonitorGain.gain.value = monitorGainNow();
+}
 
 // opts.deviceId: the input to open instead of the saved one — a reattach
 // after a power cycle that followed the CODEC to a new ID (#247).
@@ -3991,7 +4214,8 @@ async function startAudioMonitor(opts) {
     const s = await window.api.getSettings();
     // The SCU-LAN10's receive audio is network packets too: without it here
     // the button lit up and played the room microphone (review of the LAN work).
-    if (s.audioSource === 'smartsdr' || s.audioSource === 'icom-network' || s.audioSource === 'yaesu-lan') {
+    if (s.audioSource === 'smartsdr' || s.audioSource === 'icom-network' || s.audioSource === 'yaesu-lan' || s.audioSource === 'tci') {
+      // A TCI rig (Zeus / Thetis) streams RX1 the same way (lib/tci-rig.js).
       // Icom Network is the same: its RX audio arrives as packets, and the
       // capture branch below opened this computer's MIC (feedback, no radio).
       // SmartSDR Direct: the Windows DAX RX device is silent (no DAX program
@@ -4001,7 +4225,7 @@ async function startAudioMonitor(opts) {
       audioMonitorCtx = new (window.AudioContext || window.webkitAudioContext)();
       if (audioMonitorCtx.state === 'suspended') await audioMonitorCtx.resume();
       audioMonitorGain = audioMonitorCtx.createGain();
-      audioMonitorGain.gain.value = (audioMonitorMuted || kiwiConnected) ? 0 : monitorVolume;
+      audioMonitorGain.gain.value = monitorGainNow();
       audioMonitorGain.connect(audioMonitorCtx.destination);
       audioMonitorNextPlay = 0;
       audioMonitorActive = true;
@@ -4025,7 +4249,7 @@ async function startAudioMonitor(opts) {
     if (audioMonitorCtx.state === 'suspended') await audioMonitorCtx.resume();
     const source = audioMonitorCtx.createMediaStreamSource(audioMonitorStream);
     audioMonitorGain = audioMonitorCtx.createGain();
-    audioMonitorGain.gain.value = audioMonitorMuted ? 0 : monitorVolume;
+    audioMonitorGain.gain.value = monitorGainNow(false);
     // Both ears: macOS can return the mono capture as two channels with only
     // the left one filled (hoogskev, FTX-1). lib/mono-upmix.js.
     const monoSource = window.MonoUpmix ? window.MonoUpmix.monoToBothSides(audioMonitorCtx, source) : source;
@@ -4078,7 +4302,7 @@ audioBtn.addEventListener('click', async () => {
     const d = VfoAudioReattach.decide(audioReattachState(), 'unmute');
     audioReattachPending = d.pending;
     if (d.reopen) await reattachRadioAudio('unmute');
-    if (audioMonitorGain) audioMonitorGain.gain.value = kiwiConnected ? 0 : monitorVolume;
+    if (audioMonitorGain) audioMonitorGain.gain.value = monitorGainNow();
     updateAudioBtn();
   }
 });
@@ -4121,7 +4345,7 @@ async function reattachRadioAudio(why) {
     stopAudioMonitor();
     await startAudioMonitor({ deviceId: pick.deviceId });
     if (!audioMonitorActive) return false;
-    if (audioMonitorGain) audioMonitorGain.gain.value = (audioMonitorMuted || kiwiConnected) ? 0 : monitorVolume;
+    if (audioMonitorGain) audioMonitorGain.gain.value = monitorGainNow();
     audioReattachPending = false;
     try { window.api.vfoAudioReattached({ why, device: audioMonitorLabel || pick.label }); } catch {}
     return true;
@@ -4206,7 +4430,7 @@ window.api.onSmartSdrAudio((d) => {
     monitorVolume = p / 100;
     localStorage.setItem('vfoMonitorVolume', String(p));
     if (audioMonitorGain && audioMonitorActive && !audioMonitorMuted && !kiwiConnected) {
-      audioMonitorGain.gain.value = monitorVolume;
+      audioMonitorGain.gain.value = monitorGainNow();
     }
     // One knob for whichever receiver you hear: while the SDR is live, it
     // sets the SDR audio (Casey 2026-10-30: the second slider was the fault).
@@ -4365,7 +4589,8 @@ function buildKiwiStationList(s) {
     const clean = kiwiCleanHost(host);
     if (!clean) return;
     const parts = clean.split(':');
-    kiwiStations.push({ label: label || parts[0], host: parts[0], port: parseInt(parts[1], 10) || 8073, fullHost: clean });
+    // tls: entered as https:// (a KiwiSDR with HTTPS on: its audio is wss://).
+    kiwiStations.push({ label: label || parts[0], host: parts[0], port: parseInt(parts[1], 10) || 8073, fullHost: clean, tls: /^\s*https:\/\//i.test(host) });
   });
   // Build select (for settings reference)
   kiwiStationSelect.innerHTML = '<option value="">-- select station --</option>';
@@ -4418,7 +4643,7 @@ function kiwiTryConnect(st) {
   // all must not leave "Connecting..." up for good.
   clearTimeout(kiwiTryTimer);
   kiwiTryTimer = setTimeout(() => { if (kiwiTrying === st && !kiwiConnected) kiwiNoteFailure(st.fullHost, 'did not answer'); }, 20000);
-  window.api.kiwiConnect({ host: st.host, port: st.port });
+  window.api.kiwiConnect({ host: st.host, port: st.port, tls: !!st.tls });
   kiwiConnectedHost = st.fullHost;
   updateKiwiButtonStates();
 }
@@ -4625,7 +4850,7 @@ window.api.onKiwiStatus((s) => {
   if (s.connected) {
     if (audioMonitorGain) audioMonitorGain.gain.value = 0;
   } else {
-    if (audioMonitorGain && !audioMonitorMuted) audioMonitorGain.gain.value = monitorVolume;
+    if (audioMonitorGain && !audioMonitorMuted) audioMonitorGain.gain.value = monitorGainNow();
   }
 });
 

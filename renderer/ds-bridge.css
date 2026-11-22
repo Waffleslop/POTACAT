@@ -50,6 +50,7 @@
 
   /* Text on a filled accent (styles.css --on-*) */
   --on-accent-red: var(--ds-on-danger);
+  --on-mark-dxcc: var(--ds-on-danger);
   --on-accent-blue: var(--ds-on-tint);
   --on-accent-green: var(--ds-on-ok);
   --on-accent-green-btn: var(--ds-on-ok); /* the green button is --ds-ok here */

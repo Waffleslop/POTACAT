@@ -142,6 +142,20 @@ test('the cloud reply: an unbound legacy primary is listed and removable; a long
   assert.strictEqual(CS.shackLabelTooLong('kh6abc/vp2ezz12-', 'a'.repeat(20)), true, 'over 32 is refused');
 });
 
+test('the shack list says "not linked to a desktop", not "offline", when the server cannot tell (#380)', () => {
+  const list = CS.cleanShacks([
+    { deviceId: null, name: null, cloudHost: 'k3sbp.potacat.com', primary: true, online: false, link: 'not_linked' },
+    { deviceId: null, name: 'SHACK-PC', cloudHost: 'k3sbp.potacat.com', primary: true, online: true, link: 'inferred' },
+    { deviceId: 'dev-b', name: 'AZ', cloudHost: 'k3sbp-az.potacat.com', primary: false, online: false, link: 'linked' },
+    { deviceId: 'dev-c', name: 'OLD', cloudHost: 'k3sbp-old.potacat.com', primary: false, online: false },
+    { deviceId: null, cloudHost: 'k3sbp.potacat.com', primary: true, online: false },
+  ]);
+  assert.deepStrictEqual(list.map((x) => x.link), ['not_linked', 'inferred', 'linked', 'linked', 'not_linked']);
+  assert.deepStrictEqual(list.map((x) => x.status), ['not linked to a desktop', '', 'offline', 'offline', 'not linked to a desktop']);
+  assert.strictEqual(list[1].name, 'SHACK-PC', 'an inferred desktop shows its name');
+  assert.strictEqual(CS.cleanShacks([{ deviceId: 'd', link: 'bogus' }])[0].link, 'linked', 'an unknown link value falls back');
+});
+
 test('the server answers are told apart; anything else is an error', () => {
   const e = (code, body) => Object.assign(new Error('x'), { status: 409, code, body: { error: code, ...body } });
   assert.strictEqual(CS.interpretProvision(null, e('shack_name_required', { prefix: 'k-', suffix: '.p', limit: 3 })).state, 'name-required');

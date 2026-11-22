@@ -755,6 +755,50 @@ html, body {
   flex-shrink: 0;
 }
 
+/* The owner holds the radio this Guest Pass rides on (pass-paused, #541):
+   a wrapping line in the station orange, not the one-line summary. */
+#pass-banner.pass-held {
+  color: var(--sota);
+  white-space: normal;
+  font-size: 13px;
+}
+/* pass-state (#541 step 2): the pass is over, in the accent colour; and the
+   one button a notice can carry ("Use it here instead"). Theme tokens only. */
+#pass-banner.pass-over { color: var(--accent); }
+#pass-banner .pass-state-btn {
+  margin-left: 8px;
+  padding: 3px 10px;
+  font-size: 13px;
+  font-weight: 600;
+  background: var(--bg-card);
+  color: var(--text);
+  border: 1px solid var(--sota);
+  border-radius: 4px;
+  cursor: pointer;
+}
+#pass-banner .pass-state-btn:disabled { opacity: 0.6; cursor: default; }
+/* Classic Light: the station orange and POTA green are too pale on the light
+   header to read, so the words take the page's text colour and the notice
+   keeps its colour as a bar on the left. Theme tokens only. */
+:root[data-theme="light"]:not([data-ds]) #pass-banner { color: var(--text); }
+:root[data-theme="light"]:not([data-ds]) #pass-banner.pass-held {
+  color: var(--text);
+  box-shadow: inset 4px 0 0 var(--sota);
+}
+:root[data-theme="light"]:not([data-ds]) #pass-banner.pass-over {
+  color: var(--accent);
+  box-shadow: inset 4px 0 0 var(--accent);
+}
+/* The design-system looks (data-ds on <html>): the same roles from tokens.css. */
+:root[data-ds] #pass-banner { color: var(--ds-ok); }
+:root[data-ds] #pass-banner.pass-held { color: var(--ds-warn); }
+:root[data-ds] #pass-banner.pass-over { color: var(--ds-danger); }
+:root[data-ds] #pass-banner .pass-state-btn {
+  background: var(--ds-surface);
+  color: var(--ds-ink);
+  border-color: var(--ds-warn);
+}
+
 /* --- Filter Toolbar --- */
 #filter-toolbar {
   flex-shrink: 0;
@@ -2742,6 +2786,13 @@ html, body {
   animation: ft8-toast-fade 4s ease-in-out;
   pointer-events: none;
 }
+/* A stopped QSO that can still be finished with a 73 (#807): it stays up
+   and its Send 73 button takes a tap. */
+.ft8-error-toast.ft8-error-toast-action {
+  animation: none;
+  pointer-events: auto;
+}
+.ft8-error-toast-action .ft8-qso-skip-btn { margin-left: 8px; }
 @keyframes ft8-toast-fade {
   0% { opacity: 0; transform: translateX(-50%) translateY(-10px); }
   10% { opacity: 1; transform: translateX(-50%) translateY(0); }
@@ -3553,6 +3604,36 @@ html, body {
   .audio-button { width: 60px; height: 60px; }
   .speaker-button { width: 60px; height: 60px; }
 }
+
+/* --- APRS view (phase 6): the shack's APRS window. Theme variables only. --- */
+#aprs-view { flex: 1; min-height: 0; flex-direction: column; }
+.aprs-controls { padding: 8px 10px 4px; border-bottom: 1px solid var(--border); background: var(--bg); flex-shrink: 0; }
+.aprs-line { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 12px; margin-bottom: 6px; }
+.aprs-line .dir-search { flex: 1 1 120px; }
+.aprs-feed { font-size: 13px; color: var(--text); }
+.aprs-count { font-size: 13px; color: var(--text-dim); margin-left: auto; }
+.aprs-switch { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; color: var(--text); cursor: pointer; }
+.aprs-switch input { width: 18px; height: 18px; accent-color: var(--pota); }
+.aprs-bands { display: inline-flex; gap: 4px; }
+.aprs-chip { padding: 3px 10px; border-radius: 12px; background: var(--bg-card); color: var(--text-dim); border: 1px solid var(--border); font-size: 13px; cursor: pointer; }
+.aprs-chip.active { background: var(--pota); color: #000; border-color: var(--pota); }
+.aprs-sub { font-size: 12px; color: var(--text-dim); margin-bottom: 4px; }
+.aprs-line .aprs-sub { margin-bottom: 0; }
+.aprs-beacon { padding: 6px 12px; border-radius: 8px; background: var(--bg-card); color: var(--text); border: 1px solid var(--pota); font-size: 14px; cursor: pointer; }
+.aprs-beacon:disabled { opacity: 0.6; cursor: default; }
+.aprs-refusal { font-size: 13px; color: var(--text); background: var(--bg-card); border-left: 3px solid var(--sota); padding: 6px 8px; border-radius: 4px; margin-bottom: 6px; }
+.aprs-list { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; padding: 4px 8px 80px; }
+.aprs-row { display: flex; align-items: center; gap: 10px; background: var(--bg-card); border-radius: 8px; padding: 8px 10px; margin-bottom: 4px; border-left: 3px solid transparent; }
+.aprs-row.mine { border-left-color: var(--fav); } /* heard on the shack's radio: the theme's own tint */
+.aprs-row .aprs-ico { flex-shrink: 0; }
+.aprs-row-main { flex: 1; min-width: 0; }
+.aprs-row-top { display: flex; align-items: baseline; gap: 8px; }
+.aprs-call { font-size: 15px; font-weight: 600; color: var(--text); }
+.aprs-heard { font-size: 12px; color: var(--fav); font-weight: 600; }
+.aprs-age { font-size: 12px; color: var(--text-dim); margin-left: auto; white-space: nowrap; }
+.aprs-row-sub { font-size: 12px; color: var(--text-dim); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.aprs-pin { background: none; border: none; }
+.aprs-pin.mine .aprs-ico { border-radius: 50%; box-shadow: 0 0 0 2px var(--fav); } /* heard on the shack's radio */
 
 /* --- Directory View (HF Nets & SWL) --- */
 #dir-view {
@@ -4620,6 +4701,40 @@ body.popout-mode .popout-only { display: flex; }
 .fav-star.on { color: var(--fav); }
 .fav-star svg { width: 18px; height: 18px; }
 .lmk-group.fav-group { color: var(--fav); }
+
+/* WSJT-X Mode at the shack (#547): the caution amber of the theme. */
+:root {
+  --wsjtx-warn: var(--sota);
+  --wsjtx-warn-subtle: color-mix(in srgb, var(--sota) 16%, var(--bg-card));
+}
+:root[data-ds] {
+  --wsjtx-warn: var(--ds-warn);
+  --wsjtx-warn-subtle: var(--ds-warn-subtle);
+}
+.wsjtx-mode-chip {
+  font: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 8px;
+  margin-right: 6px;
+  border-radius: 4px;
+  border: 1px solid var(--wsjtx-warn);
+  background: var(--wsjtx-warn-subtle);
+  color: var(--wsjtx-warn);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.wsjtx-mode-chip.hidden { display: none; }
+#wsjtx-mode-note {
+  background: var(--wsjtx-warn-subtle);
+  color: var(--text);
+  border-bottom: 1px solid var(--wsjtx-warn);
+  border-left: 3px solid var(--wsjtx-warn);
+  font-size: 13px;
+  line-height: 1.4;
+  padding: 6px 10px;
+}
+#wsjtx-mode-note.hidden { display: none; }
 
 /* ── Mail tab (Winlink) ─────────────────────────────────────────────────
    The W0 layout (2026-11-12): one column on a phone; two panes, the list

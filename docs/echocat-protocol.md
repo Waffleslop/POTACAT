@@ -65,10 +65,14 @@ Format: each row is `name — direction — purpose`. Directions:
 | `auth` | C→S | Submit credentials (token / callsign+password / cloud token). |
 | `auth-ok` | S→C | Auth succeeded. Bundles initial feature flags and settings. Per-device-token auths also include `expiresAt` (epoch ms or `null` for no-expiry — trusted / account-linked devices), `accountLinked` (bool — pair came in via Cloud-attested flow), and `trusted` (bool — operator marked the device "my own"). Absent for the legacy single-shared-token path and Guest Pass auth. Also carries the shack's CURRENT alternate dials + trust info on every connect: `tsHost`, `cloudHost`, `tsCertPublic` (true = served cert is a Tailscale-issued LE cert, validate normally, no pin; absent/false = self-signed, pin `fingerprint`), `spki` (SHA-256 lower-hex of the cert's SubjectPublicKeyInfo DER — stable across cert reissues since the keypair persists, cert-pin Phase 2a; a client that stores it verifies future certs by SPKI and survives rotation), and `fingerprint` (SHA-256 colon-hex of the cert being presented NOW — also the no-re-pair recovery for a rotated cert). A client paired cloud-only should ADOPT `tsHost` from here rather than treating the pairing as frozen. |
 | `alt-hosts` | S→C | Mid-session update of the same alternate-dial fields `auth-ok` carries (`tsHost`, `cloudHost`, `tsCertPublic`, `fingerprint`, `spki`) — pushed when the values actually change (operator signs into Tailscale, Cloud Tunnel comes up/down). Sent since v1.8.5; registered 2026-08-03. |
-| `auth-fail` | S→C | Auth rejected with `reason`. New reason in v1.9: `"expired"` — paired device's sliding 180-day token elapsed without a reconnect; client should route to the re-pair UI. In cookie mode the web client treats any `auth-fail` as a dead cookie (`POST /api/web-signout` then reload to the connect page). |
+| `cloud-state` | S→C | The shack's Cloud state, for its own devices (capability `cloud-state`, 2026-11-21): `signedIn` (bool), `access` (`trial`\|`paid`\|`none`, from the subscription the desktop's Cloud card reads), `trialEndsAt` (ISO 8601, only with `access: 'trial'`), `tunnel` (`on`\|`off`). The same object rides in `auth-ok` as `cloud`; this message follows it whenever it changes (billing state, sign-in or sign-out, tunnel on or off). Never sent to a Guest Pass session. |
+| `auth-fail` | S→C | Auth rejected with `reason`. New reason in v1.9: `"expired"` — paired device's sliding 180-day token elapsed without a reconnect; client should route to the re-pair UI. In cookie mode the web client treats any `auth-fail` as a dead cookie (`POST /api/web-signout` then reload to the connect page). Guest Pass refusals also carry `code` (2026-11-14, #541): `rig_in_use` (with `by`: `owner` or `guest`; the pass is fine, ask again in a minute), `pass_check_failed` (the shack could not check the pass with Cloud: rate limit, Cloud down, no network; the pass may be fine, ask again with back-off 30 s, 1, 2, 4 then 5 min; `reason` is "Couldn't check your pass just now. Trying again." and never contains "revoked"), `pass_not_valid` (Cloud says the pass is not valid; `passReason` is `expired`, `cancelled`, `not_started` or `unknown`, and `passAt` is Cloud's time for it when sent; only `not_started` is worth asking again, at `passAt`). Each of these also carries `state` (`over` for pass_not_valid, `reconnecting` for pass_check_failed, `waiting` for rig_in_use), `stateReason` (over: `expired`, `cancelled`, `not_started` or `unknown`; reconnecting: `check-failed`; waiting: `owner` or `other-guest`) and `text`, the words to show as they are. `reason` stays the older human text that older phones read. A Guest Pass refusal with no `code` comes from an older shack and is final. Words for every case: lib/pass-wording.js. A client whose hello lists the capability `pass-state` (2026-11-14, #541 step 2) also gets `passState`: the same object as a `pass-state` message without `type` (`waiting`/`owner-has-radio`, `waiting`/`other-guest`, `reconnecting`/`check-failed`, `over`/`expired`, `cancelled` or `unknown`, `waiting`/`not_started` with `takeAt`). |
+| `pass-state` | S→C | Guest Pass state (2026-11-14, #541 step 2; lib/pass-state.js). Sent only to a client whose hello lists the capability `pass-state` (the shack lists it too), on connect (after `auth-ok`) and on every change: `{state, reason, endsAt, takeAt?, message?, device?}`. `state`: `on-air` (reasons `none`, `ends-soon`, `owner-soon`), `waiting` (`owner-has-radio`, `owner-idle`, `other-device`, `other-guest`, `rig-in-use`, `not_started`), `reconnecting` (`check-failed`; `network`, `station-offline` and `station-unavailable` are decided on the guest's own device and never sent), `over` (`expired`, `cancelled`, `unknown`). Only `over` ends the pass; every other state keeps it good. `endsAt` is the pass's end (ISO, `null` when unknown); `takeAt` the owner's take time (`owner-soon`) or the pass's start (`not_started`); `message` the owner's words; `device` the guest's device that is on air (`other-device`: `iPhone or iPad`, `Android phone`, `POTACAT desktop`, `web browser`, or absent). An expired or cancelled pass sends `over` just before `pass-ended`. The owner's controls in Share My Rig (2026-11-14, #200, #541 step 3; lib/pass-owner-controls.js): **Take the radio, Now** sends `waiting`/`owner-has-radio` at once, with `message` when the owner typed one (`pass-paused` is still sent alongside); **Take the radio, In 5 minutes** sends `on-air`/`owner-soon` with `takeAt` (ISO, 5 minutes on) and `message`, the guest keeps operating, and at `takeAt` the state becomes `waiting`/`owner-has-radio` with the same message; the owner can cancel the pending take, which sends plain `on-air`/`none` again; **Give it back** is immediate and sends `on-air`/`none` to the device that was on the air (a device waiting for it stays `waiting`/`other-device`); **Cancel pass** (called Revoke before 2026-11-14) sends `over`/`cancelled`, then `pass-ended` with `reason` `revoked`, unchanged on the wire for older phones. `message` is one line of at most 140 characters, already trimmed by the shack. While a take is pending or the owner holds the radio, `pass-claim` is refused. **The hand-back rule** (2026-11-15, #200, #541 step 4; lib/pass-state.js `offerOwnerIdle` / `canTakeBack`, owner activity in lib/pass-owner-activity.js): the radio stays the owner's while the owner uses it. After 5 minutes with no owner activity (a key-down, CW, tuning, a band or mode change, a JTCAT transmission, Winlink session activity, at the station or from one of the owner's own paired devices, and, while the owner holds the radio, the radio itself reporting transmit for at least 1 second (its CAT TX status, or forward power), so an owner on the hand mic keeps it; spots, decodes, other meter readings, frequency and mode seen only by CAT polling, and `owner-presence` do not count) the guest's device that was on the air is sent `waiting`/`owner-idle` (with the owner's `message`, if any) and may send `pass-take-back`. Any owner activity after that sends `waiting`/`owner-has-radio` again. Nothing switches on its own: there is no automatic hand-back (the older one, which followed an owner device going idle or away, was removed on 2026-11-15), and Give it back stays immediate. A device waiting for another of the guest's devices stays `waiting`/`owner-has-radio`. A client without the `pass-state` flag gets nothing new: it keeps `pass-paused` and waits for Give it back (`pass-resumed`). The older messages (`pass-paused`, `pass-resumed`, `kicked`, `pass-ended`) keep being sent. Words for every state and reason: lib/pass-wording.js `describeState` / `STATE_TABLE`. |
+| `pass-claim` | C→S | "Use it here instead" (#541 step 2, capability `pass-state`). A second device on the same pass session (same pass code and session token) from a client with the flag is admitted waiting (`waiting`/`other-device`), not on the air, and sends nothing but `pass-claim`, `pass-leave` and `ping`. `pass-claim` is granted only on that connection while its reason is `other-device`: the two devices swap with no redial, and the other one gets `waiting`/`other-device` naming this one (an older client there is displaced with `kicked`). Refused, with the current `pass-state` sent again, while the owner holds the radio (`owner-has-radio`, `owner-idle`) or a take is pending. When the device on air leaves, the waiting one takes the radio. A client without the flag keeps the older rule: the newest device takes the radio and the other gets `kicked`. |
+| `pass-take-back` | C→S | "Take the radio" (2026-11-15, #200, #541 step 4, capability `pass-state`). `{}`. Granted only on the connection that is told `waiting`/`owner-idle` (the guest's device that was on the air, after 5 minutes without owner activity): the radio goes back to it at once, as on Give it back (`on-air`/`none`, with `pass-resumed` alongside), and a device waiting for it stays `waiting`/`other-device`. Refused, with the current `pass-state` sent again, in every other case: the owner is using the radio (`owner-has-radio`), a take is pending (`owner-soon`), the guest already has the radio, the device is waiting for another of the guest's devices, or the client did not list `pass-state`. |
 | `kicked` | S→C | Server bumped this client because another connected. Carries `byPlatform`, `byVersion`, `byHost` so the displaced client can render a friendly "another device took over" banner instead of a mystery disconnect. |
 | `revoked` | S→C | The shack operator revoked this device's pairing **while it was connected** (Settings → paired devices → Revoke). Carries `reason` (display string). Sent immediately before the server closes the socket with code `4004`. Unlike `kicked`, the device token no longer exists — the client must drop to its unpaired state and must **not** auto-reconnect (a reconnect gets a terminal `auth-fail`; the server can't distinguish revoked from never-paired once the record is deleted). Only the matching per-device pairing is kicked; legacy shared-token and Guest Pass sessions are unaffected (pass revocation has its own `pass-ended` flow). New 2026-06-12. |
-| `pass-ended` | S→C | The Guest Pass this session was riding on ended (owner revoked it, it expired, or the owner's Cloud entitlement lapsed). Carries `reason` and `code`. The server also purges the pass's web-gate sessions, so a browser reload lands on the connect page (with `?notice=pass-ended`) rather than a dead SPA. Pre-existing message, registered 2026-09-11. |
+| `pass-ended` | S→C | The Guest Pass this session was riding on ended (the owner pressed Cancel pass, it expired, or the owner's Cloud entitlement lapsed). Carries `reason` and `code`. `reason` keeps its older values: Cancel pass in Share My Rig (named Revoke before 2026-11-14) is still `revoked` on the wire. The server also purges the pass's web-gate sessions, so a browser reload lands on the connect page (with `?notice=pass-ended`) rather than a dead SPA. Pre-existing message, registered 2026-09-11. |
 | `pong` | S→C | Reply to `ping` for connection health checks. |
 | `ping` | C→S | Latency / liveness probe. |
 
@@ -92,11 +96,12 @@ Application close codes (mirrored in `CLOSE_CODES` in
 | `spots` | S→C | Bulk push of current spot list. |
 | `sources` | S→C | Which spot sources are currently enabled (POTA, SOTA, etc.). |
 | `set-sources` | C→S | Toggle which spot sources to subscribe to. |
-| `echo-filters` | S→C | Server-side filter state (band/mode/distance). `data.muteRules` (2026-08-03) additionally carries the desktop-owned per-band region mutes (`[{continent:'AS', band:'40m'}]` — "hide Asia on 40m", other bands unaffected). Apply them in the spot filter AND display active rules — an invisible filter reads as missing spots. |
-| `set-echo-filters` | C→S | Update server-side filter state. Does NOT carry muteRules — they are desktop-owned and merged into `echo-filters` at send, so this message can never clobber them. |
+| `echo-filters` | S→C | Server-side filter state (band/mode/distance). `data.muteRules` (2026-08-03) additionally carries the desktop-owned per-band region mutes (`[{continent:'AS', band:'40m'}]` — "hide Asia on 40m", other bands unaffected). Apply them in the spot filter AND display active rules — an invisible filter reads as missing spots. Since #291 (2026-11-15) `data.bandsOff` is the operator's unticked bands (one list for every rig) and `data.bands` is the active rig's bands minus that list (null = All); the desktop re-sends `echo-filters` whenever the shack's rig bands change (a rig switch), so a client re-ticks its band filter from it. Rule: lib/spot-band-filter.js. |
+| `set-echo-filters` | C→S | Update server-side filter state. `filters.bands` is the ticked list as the client shows it; the desktop turns it into `bandsOff` against the shack's rig (bands the rig lacks keep their earlier state). Clients need not send `bandsOff`. Does NOT carry muteRules — they are desktop-owned and merged into `echo-filters` at send, so this message can never clobber them. |
 | `set-spot-mute-rules` | C→S | Full-list replace of the per-band region mutes from a client editor. Desktop sanitizes (valid continents, deduped, capped 50) and echoes the accepted set inside the next `echo-filters` push. |
 | `worked-parks` | S→C | List of park refs the user has worked (drives ATNO badges). |
-| `worked-qsos` | S→C | List of recent worked callsigns/refs (drives "worked" highlighting). |
+| `worked-qsos` | S→C | List of recent worked callsigns/refs (drives "worked" highlighting). Sent at connect (chunked when the hello lists `chunked-worked-qsos`). A client without `worked-incremental` is also sent the whole list again after every QSO the shack logs. A client whose hello lists `worked-incremental` (added 2026-11-17, #731) is sent it once per connection and again only after a full-log change (import, edit, delete, reload); after each logged QSO it gets `worked-today` (and `qso-added` if it lists `qso-delta`) and must merge the new QSO into its worked map itself. ECHOCAT Web merges both: `worked-today`, and each `qso-added` record built by lib/worked-entry.js, the rule the full list uses (a same-QSO last entry is replaced, not counted twice). |
+| `worked-today` | S→C | Today's (UTC) worked QSOs: `entries` = `[{call, ref, band, mode, date}]`. Sent at connect and after every logged QSO to the active client, never size-capped. Merge into the worked map (skip exact duplicates); a `worked-incremental` client relies on it for each new QSO. |
 
 ### Rig control / VFO
 
@@ -119,13 +124,16 @@ The `status` message is a kitchen-sink snapshot. The canonical fields are:
 | `filterWidth` | number | Hz |
 | `rfgain` | number | 0–255 |
 | `txpower` | number | TX power *setting* (slider) |
+| `txPowerUnit` | string | Optional, added 2026-11-16 (#195). `'%'` = `txpower` is a drive percentage, not watts (a Zeus or Thetis rig over TCI); label the slider `%` and never show it as watts. Absent = watts, as before. |
 | `smeter` | number | live S-meter (Gap 10) |
 | `swr` | number | live SWR (Gap 10) |
 | `alc` | number | live ALC (Gap 10) |
 | `power` | number | live wattmeter (Gap 10) |
-| `capabilities` | object | per-rig feature flags (filter, nb, atu, vfo, rfgain, txpower, power) |
+| `capabilities` | object | per-rig feature flags (filter, nb, atu, vfo, rfgain, txpower, power, powerOn, powerOff). `powerOn` (optional boolean, added 2026-11-13, #485): `false` = the radio can be switched OFF over CAT but not on (`power` is still `true`); show Power Off alone and no Power On. Absent (every older desktop, every other radio) = on and off both, as `power` says. Sent as `false` for the Yaesu FTX-1 Field and FTX-1 Optima (Yaesu FTX-1 CAT manual rev 2508-C p.23: PS Set has only P1=0, power off). A `power-on` rig-control for such a radio is refused with a `tune-blocked` reason. `powerOff` (optional boolean, added 2026-11-15, #293): `false` = do not offer Power Off: the shack's owner unticked "Show Power Off for this radio" for that rig, or made no choice and the shack cannot switch the radio back on over its connection. From 2026-11-19 (#768) a rig with no choice sends `true` on a direct serial port (Yaesu, Kenwood, Elecraft, Icom CI-V) or a Yaesu SCU-LAN10, and `false` on Hamlib / rigctld and every other connection. The field and its meaning to a client are unchanged. Absent (older desktops) = offered as `power` says. A `power-off` rig-control for such a radio is refused from every surface with a `tune-blocked` reason to a remote asker. |
 | `vfoLocked` | boolean | VFO lock active |
 | `audioState` | string | WebRTC connection state (when ECHOCAT audio bridge is up) |
+| `wsjtxMode` | boolean | ADDED 2026-11-14 (#547). `true` while the shack is in WSJT-X Mode (`settings.enableWsjtx`): POTACAT has left the radio to WSJT-X, so it has no CAT link, spot taps do not tune and POTACAT's own FT8 does not key. Show a "WSJT-X Mode" chip and the explain-only note "The shack is in WSJT-X Mode. WSJT-X has the radio, so tuning and transmitting from here are off. Turn it off at the shack: click CAT in POTACAT's top bar and untick WSJT-X Mode." There is no remote turn-off. Pushed again whenever the mode changes. Absent from older desktops (treat as `false`). |
+| `wsjtxHeard` | boolean | ADDED 2026-11-14 (#547). With `wsjtxMode`, `true` when a WSJT-X Heartbeat or Status packet reached the shack's UDP port in the last 60 s; always `false` when `wsjtxMode` is `false`. Pushed again when it changes. |
 
 **`tune` C→S sends `freqKhz` (string), not `frequency` (number)**.
 The kHz-as-string format is the legacy wire shape and the desktop
@@ -137,6 +145,8 @@ for the history.
 | `status` | S→C | Full radio status snapshot. See field table above. |
 | `tune` | C→S | Tune VFO. Fields: `freqKhz` (string, e.g. `"14250.000"`), `mode` (optional), `bearing` (optional, for rotor), `channelId` (optional, a Channels tap: a channel with the radio's memory number `mem` is recalled on the radio instead; older shacks ignore it and tune `freqKhz`), `pickSideband` (optional boolean, #445, desktop 2026-11-12: send `true` with a band button or a typed frequency and no `mode`; when the radio is in plain voice USB/LSB the shack sends the band's sideband with the tune, LSB below 10 MHz, USB from 10 MHz and on 60 m, the rule spot clicks use; CW, AM, FM, RTTY, every data mode, a radio in DATA, a running FT8/FreeDV/JS8 session and an unknown mode are left alone; leave it out for dial steps, arrows and scope taps; older shacks ignore it). With no radio control (radio not connected, or a no-CAT rig) a shack advertising `sdr-tune-without-rig` listens through an SDR that covers the frequency (connected, or the first listed one it brings up) instead of replying `tune-blocked` (#329, lib/listen-source.js `routeWithoutRig`). |
 | `tune-blocked` | S→C | Tune was rejected (VFO locked, out of band, etc.). |
+| `rig-reconnect` | C→S | "My radio is back on, retry now." Rate-limited (5 s). The desktop re-dials the active rig unless WSJT-X Mode is on. |
+| `rig-reconnect-ack` | S→C | Answer to `rig-reconnect`. Since 2026-11-14 (#547) it carries `ok` (boolean). `{ ok: true }`: reconnecting; the outcome follows in `status` (`catConnected`). `{ ok: false, code: "wsjtx-mode", reason }`: nothing reconnects because WSJT-X Mode is on; `reason` is the display string "WSJT-X Mode is on: WSJT-X has the radio. Untick WSJT-X Mode (click CAT in the top bar) for POTACAT to tune it". Older desktops send `{ type }` alone: treat a missing `ok` as `true`. |
 | `set-mode` | C→S | Change mode without retuning frequency. |
 | `set-vfo` | C→S | Switch VFO A/B. |
 | `swap-vfo` | C→S | A↔B swap. |
@@ -159,7 +169,7 @@ for the history.
 | `set-refresh-interval` | C→S | Spot refresh cadence. |
 | `scan-step` | C→S | Skip / unskip / next during a scan. |
 | `scan-state` | ↔ | Scan on/off STATE sync. Field: `scanning` (boolean). Each side announces when ITS own scan engine turns on/off; the receiver mirrors it as the peer's state. On mutual exclusion (one rig) a side that sees the peer's `scanning:true` stops its own engine. Re-sent to a (re)connecting client so a mid-scan reconnect shows the in-progress scan. |
-| `scan-control` | ↔ | Ask the peer to change ITS scan. Field: `action` (string): `"stop"` (the reported use-case) or `"start"` (optional; uses that side's own filters). Gated like other rig C→S (authenticated active client). NOTE: supersedes the older, unused `scan:state`/`scan:control` (colon) registrations. |
+| `scan-control` | ↔ | Ask the peer to change ITS scan. Field: `action` (string): `"stop"` (the reported use-case) or `"start"` (optional; uses that side's own filters). Gated like other rig C→S (authenticated active client). NOTE: supersedes the older, unused `scan:state`/`scan:control` (colon) registrations. **#37, capability `scan-remote-v1` (2026-11-21):** a phone that sees it in the shack's `hello` may send its OWN scan with the start: `filters` {`bands`, `modes`, `regions`, `sources` (string arrays), `newOnly`, `hideWorked` (booleans), `sort` (`age`\|`freq`\|`dist`\|`source`\|`event`)}, `dwellSec` (number, default 7, 1-120) and optional `fromFreqKhz`. The desktop then runs the loop in its main process (it keeps going with the phone locked, the window hidden, or headless), with the phone's filters exactly as the phone's `applyFilters` (shared vectors: echocat `docs/desktop-asks/scan-filter-vectors.json`, desktop `test/fixtures/scan/`) plus the desktop's own mute rules, hidden and skipped spots, and worked today (always). It starts at the spot within 0.05 kHz of `fromFreqKhz`, else within 0.2 kHz of the dial, else the first; dwells once per frequency string; wraps. The run ends on an empty list, the radio tuned by hand (more than 4 kHz off the spot after a 2.5 s settle), any transmit, `stop` from a phone, or the desktop's own Scan button. A phone disconnecting does not end it. `scan-state {scanning}` goes to every client on start, on stop and at connect. A start with no `filters` keeps the old meaning (the desktop's own scan, filters and dwell). |
 | `rig-control` | C→S | Generic raw-CAT passthrough button (Settings → Rig table). |
 | `rig-blocked` | S→C | Rig switch denied (club mode etc.), or no radio to share. Fields: `reason` (string), `retry` (optional boolean). `retry: false` = a desktop that is itself driving a remote shack; it sends `auth-ok` then this, with no station state, and closes 1008 "no radio here" 750 ms later. Redialling will not help until the desktop leaves remote mode (#301, 2026-11-12). |
 | `rigs` | S→C | List of configured rigs and the active one. |
@@ -201,8 +211,8 @@ for the history.
 
 | Message | Dir | Purpose |
 |---|---|---|
-| `log-qso` | C→S | Submit a QSO for logging on the desktop. |
-| `log-ok` | S→C | Logging succeeded; includes idx in ADIF. |
+| `log-qso` | C→S | Submit a QSO for logging on the desktop. Idempotent by `uuid` (from 2026-11-17, #733): a `log-qso` whose `uuid` is already in the log (or still being saved) writes nothing and is answered with the first `log-ok` under the new `reqId`, plus `alreadyLogged: true`. A device may resend an unacknowledged `log-qso` with the same `uuid`. Without a `uuid` every `log-qso` is a new QSO. |
+| `log-ok` | S→C | Logging succeeded; includes idx in ADIF. Sent once the records are on disk (from 2026-11-17, #732), before the external-logger and QRZ uploads, respots and SOTA upload. When a respot was asked for, its outcome follows in a second `log-ok` with `followUp: true`, carrying `success`, `callsign`, `reqId`, `uuid`, `records`, `cloudJournal`, `resposted` and `respotError`, never `error`. A device that already handled the first treats it as a respot notice only. |
 | `get-all-qsos` | C→S | Request the full QSO log. |
 | `all-qsos` | S→C | Full QSO log payload. Chunked when the client hello advertises `chunked-all-qsos`; otherwise one frame capped to the most-recent 2000 records AND 256KB (`truncated: true` when cut). |
 | `qso-added` | S→C | Incremental append after a QSO save, sent only to clients advertising `qso-delta` — replaces the full `all-qsos` re-push on every save. `data` = one record in `all-qsos` shape, `total` = new log length; if `total` ≠ local count + 1 the client should resync via `get-all-qsos`. |
@@ -248,7 +258,7 @@ for the history.
 | `jtcat-call-cq` | C→S | CQ message (with optional POTA/SOTA modifier). |
 | `jtcat-reply` | C→S | Reply to a decoded callsign. |
 | `jtcat-cancel-qso` | C→S | Abandon current QSO. |
-| `jtcat-skip-phase` | C→S | Skip to next QSO phase. |
+| `jtcat-skip-phase` | C→S | Skip to next QSO phase. Optional `unconfirmed: true` (2026-11-20, #807): send the 73 for the QSO the retry cap stopped unlogged, and nothing else. |
 | `jtcat-log-qso` | C→S | Log the current FT8 QSO. |
 | `jtcat-auto-cq-mode` | C→S | Hunt filter `{ mode }`: `off` / `pota` / `sota` / `all` / `fd` (Field Day, seasonal) / `event` (Hunt: Event stations — answer CQs from tracked-event stations still needed; offer it only while `jtcat-auto-cq-state.eventHunt.available`). |
 | `jtcat-auto-cq-state` | S→C | Current hunt mode `{ mode, fallback, workedCount, eventHunt: { available, events: [{ id, name, badge }] } }`. Broadcast on change AND hydrated at connect (since 1.10.16). `eventHunt` is the shack's decision on whether the `event` mode is on offer (opted-in checklist event within 24 h of its window); a client renders the option from it and keeps the option while `mode === 'event'`. |
@@ -258,8 +268,8 @@ for the history.
 | `jtcat-wspr-beacon` | C→S | Drive the WSPR beacon `{ enabled?, txPct?, dBm?, dBmAuto?, runMin?, runAsked? }` (partial = leave unchanged). The client sends intent only: the host owns the beacon's RF power, the reported dBm, the attended watchdog and the TX path. Reported power (since 2026-11-13, #268): `dBmAuto: true` = report the beacon's own RF power (the default); `dBmAuto: false` with `dBm` = report that fixed value. `dBm` is 0..60 and snapped down to a WSPR value (ending in 0, 3 or 7). A `dBm` alone (no `dBmAuto`, no `enabled`) is a fixed pick. A `dBm` that rides an `enabled` toggle without `dBmAuto` (a client from before Auto) never turns Auto off. |
 | `jtcat-wspr-beacon-state` | S→C | Authoritative beacon on/off `{ enabled, runMin?, runAsked?, slotTx?, txPct?, dBm?, dBmAuto?, beaconWatts? }`. The client sets its toggle from this (confirm/revert), never optimistically. Since 2026-11-13 (#268): `dBm` = the value the beacon reports now (Auto: the highest WSPR value not above `beaconWatts`, e.g. 5 W = 37 dBm), `dBmAuto`, `beaconWatts` = the RF power the beacon runs at (1 W, or the level the operator set while armed). Also sent, with `enabled` as it stands, whenever one of these changes (a new pick, or the operator moving the RF power while the beacon is armed); replayed on reconnect. The connect message's `settings.wsprDbm` is likewise the value reported now (it can be above 30) and `settings.wsprDbmAuto` the mode. Show `dBm` as the reported power; offer Auto plus 0..60 dBm (WSPR values) as the choices. |
 | `jtcat-cycle` | S→C | Cycle boundary tick (for slot indicators). |
-| `jtcat-tx-status` | S→C | Currently transmitting? what message? what slot? |
-| `jtcat-qso-state` | S→C | Active QSO phase tracker. |
+| `jtcat-tx-status` | S→C | Currently transmitting? what message? what slot? `{ state: 'tx' \| 'rx', message?, slot?, txFreq?, durMs?, sliceId? }`. `txFreq` (Hz, optional) is the engine's TX audio offset; on a `state: 'tx'` status it is the offset THAT transmission went out on, stamped at key-down. Clients show it in the df cell of their own TX row in the Activity list, rounded to whole Hz, keeping the value from that status rather than the current slider (#503, desktop 1.14.5; no wire change, the field was already sent). Missing or 0: the cell stays blank. |
+| `jtcat-qso-state` | S→C | Active QSO phase tracker. `{ phase: 'error', error, send73? }` = TX stopped; `send73: true` (desktop, 2026-11-20, #807) means the stopped QSO had reports both ways but their RR73 never came, so it is NOT logged; show a Send 73 button that sends `{ type: 'jtcat-skip-phase', unconfirmed: true }`, which puts that QSO's 73 on the air and logs it (within 5 minutes, while no other QSO has started; with `unconfirmed` it never acts on a newer QSO). A QSO is logged only when our RR73/RRR/73 goes out or theirs is received. |
 | `jtcat-qso-logged` | S→C | A JTCAT contact was written to the shack's log: `{ callsign, band, mode, grid, rstSent, rstRcvd, parksText, parksNote }`. `parksText` is ready to show: `at US-1111`, `at US-1111 and US-2222`, `at DE-1197, DE-0941 and DE-0034`, or `''` when the contact was not at a park. `parksNote` names the parks read from the activator's own spot comment (JTCAT option `jtcatNferParks`): `US-2222: from their own spot comment`, or `''`. Sent at the moment of the write, not cached or replayed, and **only to a client whose `hello.capabilities` include `jtcat-qso-logged`** (an older client never receives it), and never to a Guest Pass session. Toast when `parksNote` is set: `Logged <callsign> <parksText> (<parksNote>)`; ECHOCAT Web shows nothing new for a contact without a note and never replaces an error toast. Added 2026-11-12. |
 | `jtcat-spectrum` | S→C | Waterfall spectrum bins for the popout. |
 | `jtcat-waterfall` | C→S | Request the spectrum stream (start/stop). |
@@ -331,11 +341,13 @@ and non-private respectively. The predicate is the thread store's own
 
 | Message | Dir | Purpose |
 |---|---|---|
-| `freedv-start` | C→S | Start the FreeDV engine. |
-| `freedv-stop` | C→S | Stop. |
+| `freedv-start` | C→S | Start the FreeDV engine on the shack (`mode` optional). If FreeDV is off in settings the shack replies with `freedv-status` instead. |
+| `freedv-stop` | C→S | Stop. The radio audio returns to the track. |
 | `freedv-set-mode` | C→S | RADE V1 / 700D / etc. |
-| `freedv-set-tx` | C→S | TX enable. |
-| `freedv-set-squelch` | C→S | Squelch level. |
+| `freedv-set-tx` | C→S | TX enable: `on` (the server also reads `enabled`). FreeDV cannot transmit yet: `on: true` is refused with `ptt-refused { kind: 'freedv', message }` and `tune-blocked { reason }`. |
+| `freedv-set-squelch` | C→S | `{ enabled, threshold }` (dB). |
+| `freedv-sync` | S→C | `{ sync, snr }` on every engine change. ECHOCAT Web uses it; the phone uses `freedv-status`. |
+| `freedv-status` | S→C | `{ state: 'off'\|'starting'\|'running'\|'unavailable', mode, modes[], rx, tx, sync, snr (float dB or null), reason, reasonCode, callsign, callsignAt }`. After every auth-ok and on change; sync/SNR at most 4 per second (a sync flip or a 1 dB SNR move). `reason` is a sentence to show as is; `reasonCode` (`disabled`, `no-decoder`, `too-slow`, `tx-not-built`) is for placement and tests. `tx` is false and `callsign` null until FreeDV transmit exists. Capability `freedv-remote-rx`: decoded FreeDV speech is on the audio track while FreeDV runs (the raw radio audio is muted), at about the level of SSB receive audio. |
 | `set-freedv` | C→S | Master FreeDV on/off toggle. |
 | `freedv-enabled` | S→C | Server tells client whether the FreeDV master toggle is on (sent at startup + on changes). |
 
@@ -352,6 +364,7 @@ and non-private respectively. The predicate is the thread store's own
 | `cw-stop` | C→S | Cancel CW transmission. Halts the iambic paddle keyer and aborts any in-flight macro / freeform text on the rig (KY buffer flush, SmartSDR cwx clear, pyserial SIGTERM, DTR-timer clear, CAT 0x17 0xFF). |
 | `cw-enable` | C→S | Enable/disable the CW key port. |
 | `paddle` | C→S | Phone paddle event (dot/dash/space). |
+| `cw-key` | C→S | Timed keying from the client's own keyer (server capability `cw-key-stream`, 1.10.27; lib/cw-key-playout.js replays it a jitter buffer behind). `{at, down, ms?}`: `at` the client's time for the edge (ms, any monotonic origin, one clock per streak); `down` with `ms` an iambic element of that length; `down` without `ms` a straight-key press, its key-up arrives separately; `{down: false, cancel: true}` key up at `at` and drop anything queued after it; `{hold: true}` the straight-key keepalive (every 400 ms while held). **Sidetone and air agree** (2026-11-19, #244; lib/cw-sidetone-commit.js): an element is committed when the client's sidetone starts it. The client may withdraw an element only before that, and then it is neither heard nor sent; it sends each iambic element at its commit, never at the keyer's choice, so a withdrawal never goes on the wire. Once sent, the element is keyed in full. `cancel` therefore means a stop (STOP, a mode change, paddle keying lost): the client silences its tone at once and sends `at` = the point in the element where the tone stopped (an element not yet sounding: just before its start), so the shack cuts its copy at the same place. A cancel that reaches the shack after its own time keys up on arrival when it cuts the element now on the air part-way; a cancel whose `at` is before the start of the element now on the air (a withdrawal from an older client) leaves that element to play out in full. Field names unchanged. |
 | `save-cw-macros` | C→S | Persist CW macro set. |
 
 ### SSTV
@@ -412,7 +425,7 @@ shows the modes it is sent in `winlink-state.modes` and nothing else.
 | `winlink-state` | S→C | The one payload every surface renders; fields in the table below. Never carries the password or a message body. Sent coalesced (about 50 ms) after any change, and again with every `winlink-session`. |
 | `winlink-mailbox` | S→C | One folder: `{box, messages[], total}`. `messages` = the newest 500, newest first, without bodies; `total` = how many the folder holds. Each message: `mid`, `box`, `from`, `to[]`, `cc[]`, `subject`, `date`, `read` (always true outside `in`), `p2pOnly`, `attachments[{name, size}]`. Pushed to every owner device when a folder changes; also the reply to `winlink-list` (then with `reqId`). |
 | `winlink-session` | S→C | `{session}`: the running or last session; fields in the table below. Pushed on every change: progress, PTT, a prompt, the end. |
-| `winlink-spectrum` | S→C | The waterfall, about 10 a second, only to owner devices that sent `winlink-watch {on: true}`; a frame is dropped, never queued, for a device whose socket is behind. `bins` = 128 values over 0 to 3000 Hz (0 = noise floor, 255 = +50 dB); `lo`, `hi` = the modem's band as fractions of that width, with `label`; `busy` and `peakDb` = the Busy / Clear verdict, decided on the shack. |
+| `winlink-spectrum` | S→C | The waterfall, about 10 a second, only to owner devices that sent `winlink-watch {on: true}`; a frame is dropped, never queued, for a device whose socket is behind. `bins` = 128 values over 0 to 3000 Hz (0 = noise floor, 255 = +50 dB); `lo`, `hi` = the modem's band as fractions of that width, with `label`; `busy` and `peakDb` = the Busy / Clear verdict, decided on the shack. Optional (#669): `inputDb` = the modem's receive input level, whole dBFS, peak held 0.5 s (null = no audio: show nothing); `inputHot` = true at or above -3 dBFS (show "Input too high"). Rule: `lib/winlink-wf-audio.js` `wireInput`. A shack without them omits both. |
 | `winlink-refused` | S→C | `{reason: 'guest-pass', reqId?}`: a Guest Pass session sent a Winlink message. The only reason in use. |
 
 `winlink-state` fields:
@@ -477,7 +490,7 @@ saved password and is not shown.
 |---|---|---|
 | `winlink-list` | C→S | `{box}`: refresh one folder from Pat. Reply: `winlink-mailbox`. An unknown `box` is read as `in`. |
 | `winlink-read` | C→S | `{box, mid}`: one message with its body. Reply: `winlink-message`, else `winlink-result {op: 'read'}`. Reading an unread message in `in` marks it read on the shack; a `winlink-mailbox` and a `winlink-state` push follow. |
-| `winlink-message` | S→C | `{box, mid, message}`: the message as in `winlink-mailbox`, plus `body`. To the asker only. |
+| `winlink-message` | S→C | `{box, mid, message}`: the message as in `winlink-mailbox`, plus `body`, and `sentRoute` when the shack kept one (see below). To the asker only. |
 | `winlink-attachment-get` | C→S | `{box, mid, name}`: one attachment. Reply: `winlink-attachment`, else `winlink-result {op: 'attachment'}`. An attachment over 2 MB is refused with an error. |
 | `winlink-attachment` | S→C | `{box, mid, name, size, dataBase64}`. To the asker only. |
 | `winlink-delete` | C→S | `{box, mid}`: delete a message. On a shack with `mail-folders-v2` this MOVES it to `deleted` (from `in`, `out`, `sent` or `archive`; from `out` it is no longer sent), and in `deleted` it removes it for good. An older shack removes it for good. Reply: `winlink-result {op: 'delete'}`; the folders are pushed again. |
@@ -519,6 +532,26 @@ never sent that folder. Any client may ask for it with `winlink-list {box: 'dele
   (`Delete (do not send)` in the Outbox), and in Deleted `Restore to <folder>` and `Delete for good`,
   which asks once on the button itself: `Delete for good? It cannot be brought back.`
 
+#### How a sent message went out (`message.sentRoute`, #442, added 2026-11-13)
+
+Pat records nothing about how a message left. When a session ends, the shack gives each message
+that was in the Outbox when the session started, is gone from it, and is now in Sent one record,
+kept by message id (`lib/winlink-sent-routes.js`). Archive and Deleted keep the id, so they keep it.
+
+- **Where.** `winlink-message.message.sentRoute`, for `box` `sent`, `archive` and `deleted` only,
+  and only when the shack kept a record. Messages sent before 2026-11-13 (POTACAT before this
+  change), or sent by another program, have none: show nothing, never a guess. Never on `in` or
+  `out`, never in `winlink-mailbox` rows.
+- **Fields.** `{mode, transport, sentAt, gateway?, dialKhz?}`. `mode`: `telnet`, `ardop`, `packet`,
+  `vara`, `varafm`, `mercury`. `transport`: `internet` (telnet) or `radio`. `sentAt`: ISO time the
+  session ended (the message left during it). `gateway` (upper case, with SSID) and `dialKhz` (the
+  dial, kHz) on radio routes only, each when known.
+- **Words** (`lib/winlink-mail-actions.js` `sentRouteLine`), one line in the reader:
+  `Sent 13 Nov 2026 at 14:32 UTC via W5ABC on 7.102 MHz (ARDOP).` or
+  `Sent 13 Nov 2026 at 14:32 UTC over the internet.` Mode words: ARDOP, Packet, VARA HF, VARA FM,
+  Mercury. The dial is in MHz with at least three decimals (145.050 MHz, 10.1455 MHz).
+- Additive: an older client ignores the field; an older shack never sends it.
+
 #### Gateways and sessions
 
 | Message | Dir | Purpose |
@@ -530,13 +563,31 @@ never sent that folder. Any client may ask for it with `winlink-list {box: 'dele
 | `winlink-favourite` | C→S | `{op, call, mode, dialKhz, url?}`: `op` `add` or `remove` a gateway in My gateways. Reply: `winlink-result {op: 'favourite'}`; the list follows in `winlink-state.favourites`. |
 | `winlink-set-mode` | C→S | `{mode}`: save the mode to use. No reply; a `winlink-state` push follows. A mode the shack does not know is ignored. |
 | `winlink-qsy` | C→S | `{dialKhz, mode?}`: a gateway was picked, not yet called: tune the shack's radio there so the waterfall shows that frequency. Refused while a session runs, while another part of POTACAT has the radio, or for a frequency the radio cannot reach. The dial from before the first pick is remembered. Reply: `winlink-result {op: 'qsy'}`. |
-| `winlink-qsy-restore` | C→S | The device is leaving its Mail tab: put the dial back where it was before the first `winlink-qsy`. Nothing happens if nothing moved; during a session the radio goes back when the session ends. Reply: `winlink-result {op: 'qsy-restore'}`. |
+| `winlink-qsy-restore` | C→S | The device is leaving its Mail tab: put the dial back where it was before the first `winlink-qsy`. Nothing happens if nothing moved; during a session the radio goes back when the session ends; while another Mail view is open (the desktop's mail window or another device's Mail tab) the radio stays until the last one closes. Reply: `winlink-result {op: 'qsy-restore'}`. |
+| `winlink-mail-view` | C→S | `{open}`: this device's Mail tab is open (`true`) or closed (`false`). Send `true` when the tab opens and again after each `auth-ok` while it is open; send `false` when it closes, then `winlink-qsy-restore` as today. Capability `winlink-mail-view`. No reply. See "Staying on the gateway" below. |
 | `winlink-connect` | C→S | `{mode, gateway?, dialKhz?, url?}`: start a session, the same as Send / Receive at the shack. `telnet` needs only `mode`. `url` is the gateway row's own `url` from `winlink-gateways` (it carries the bandwidth) and is checked against `gateway` and `mode`. Refused, with the reason as `error`, until the notice is accepted and a password is saved, while a session runs, for a mode that is not available (its `reason`), and for a frequency the radio cannot reach. Reply: `winlink-result {op: 'connect'}` as soon as the session has started (`ok: true`) or was refused; everything after that, the end included, arrives as `winlink-session` pushes. |
 | `winlink-abort` | C→S | Stop the running session. Reply: `winlink-result {op: 'abort'}`. |
 | `winlink-retry` | C→S | `{op, reqId?}`, `op` = `cancel` or `now`: act on the automatic retry after a dropped link (Cancel, or Try now). Reply: `winlink-result {op: 'retry'}`. Refused for a Guest Pass. |
 | `winlink-prompt` | C→S | `{id, value}`: answer `session.prompt` (the busy prompt above). No reply; a `winlink-session` push follows. |
 | `winlink-watch` | C→S | `{on}`: subscribe this device to `winlink-spectrum`, or stop. No reply. The shack computes the spectrum only while a device watches; a closed socket ends the subscription. |
 | `winlink-result` | S→C | `{op, ok, error?, reqId?}`: the outcome of a request, to the asker only. `error` is a sentence to show. `op` is one of `read`, `attachment`, `delete`, `move`, `compose`, `template`, `contact`, `contact-group`, `posreport`, `gateways`, `history`, `favourite`, `qsy`, `qsy-restore`, `connect`, `abort`, `retry`, `accept-notice`, `account-check`, `set-password`, `register`, `recovery-email`. |
+
+#### Staying on the gateway
+
+After a radio session (finished or failed) the radio stays on the gateway's frequency while a Mail
+view is open, so the operator can look at the band; it goes back to the dial from before the first
+gateway pick when the last view closes. A Mail view is the desktop's mail window or a device's Mail
+tab: a shack that lists `winlink-mail-view` in its hello's `capabilities` counts each device that
+sent `winlink-mail-view {open: true}`, by its connection. With no view open, a session goes back
+1.5 s after it ends, as before.
+
+- A device leaving its Mail tab sends `winlink-mail-view {open: false}` and `winlink-qsy-restore`.
+  The radio goes back only if no other view is open.
+- A closed socket counts as closed. If that device was the only view and a return is pending, the
+  shack waits 30 s (`GONE_GRACE_MS` in `lib/winlink-mail-views.js`) for it to reconnect and say
+  `{open: true}` again before the radio goes back.
+- A Guest Pass is refused (no Mail tab). A shack without the capability does not count devices: do
+  not send the message to it; the radio goes back after a session as before.
 
 #### Account
 
@@ -555,18 +606,128 @@ message.
 | `winlink-recovery-email-set` | C→S | `{email}`: change it. Reply: `winlink-result {op: 'recovery-email'}`. |
 | `winlink-recovery-email` | S→C | `{email}`. To the asker only. |
 
-### Cloud (cross-device QSO sync via Cognito)
+#### The Flex pan on the Winlink channel (added 2026-11-15)
 
-> **Scope:** These messages exist solely for the in-browser ECHOCAT UI
-> (`renderer/remote.html` Settings → Cloud Sync, wired in
-> `renderer/remote.js:8132-8289`), which piggybacks on the desktop's
-> cloud session over WebSocket. The iOS and Android apps do **not** use
-> these — they speak to `api.potacat.com` directly over HTTPS via their
-> own `CloudAuth` / `CloudSync` clients. Don't infer from the protocol
-> registry that mobile is expected to send them; that path was never
-> wired on the native apps and was retired from the mobile protocol
-> registry in the 2026-05-27 cleanup. The desktop-side handlers stay in
-> place to serve the browser ECHOCAT.
+A shack that lists `scope-winlink-view` in its hello's `capabilities` centres a Flex panadapter on
+the Winlink modem's channel, so a Mail tab that draws the shack's scope shows the signal in the
+middle.
+
+| Message | Dir | Purpose |
+|---|---|---|
+| `scope-digital-view` | C→S | `{on, view?}`. `view: 'winlink'`: while this device's Mail tab shows the shack's scope (it must also be subscribed with `scope-subscribe`), ask for the Winlink view; `{on: false, view: 'winlink'}` ends it. No `view` (or any other value) is the JTCAT view, as before. Each view is asked and ended on its own, per device; a closed socket ends both. No reply. |
+
+- **The view.** Centred on the modem's channel at its RF position: the centre of
+  `lib/winlink-spectrum.js` `markerBand` (1500 Hz audio for ARDOP, VARA HF and Mercury), above the
+  dial on USB/DIGU, below it on LSB/DIGL. On DIGU/DIGL the slice's `digu_offset` / `digl_offset`
+  moves it to where the signal really is (DIGU: dial + audio - offset; DIGL: dial - audio +
+  offset). 6000 Hz wide, never narrower than the radio's `min_bw`. No view on FM.
+- **When.** While a Winlink radio session runs (the shack does this by itself, whatever any device
+  asks), or while a device asks for it. A running session wins over the JTCAT view; a device's ask
+  comes after the JTCAT view.
+- **What a device sees.** The usual `scope-state`, with `centerOffsetHz` (where the pan really is,
+  Hz from the dial) and `decodeWindow` `{lo, hi}` (the modem's channel, Hz from the dial, negative
+  below it), exactly as for the JTCAT view. Draw the channel marks from `decodeWindow`.
+- **The end.** When the session ends and no device asks, the pan goes back to the operator's own
+  zoom, centred on the dial, as the JTCAT view does.
+- Flex Direct only; other scopes ignore the ask.
+
+### APRS (phase 6, added 2026-11-18)
+
+APRS on a client through the desktop: the station list and map of the desktop's
+More > APRS window, "Listen on my radio", the receive-only iGate switch and the
+**internet** beacon. Rules: `lib/aprs-echocat.js`; tests:
+`test/aprs-echocat-test.js`, `test/aprs-echocat-wire-test.js`.
+
+**Capability.** The shack's `hello` lists `aprs`. A client that lists `aprs` in
+its own `hello` gets `aprs-state` (on connect and on every change) and, while it
+is subscribed, `aprs-stations`. A client that does not list it gets neither, and
+its APRS requests are ignored, so an older phone sees no change. The radio
+beacon (phase 7) is not on the wire.
+
+A POTACAT desktop driving a remote shack (More > Remote Radios) lists `aprs`
+too, from #868 (2026-11-21): its APRS window's listen switch and band picker
+send `aprs-listen`, it subscribes while that window is open (and unsubscribes
+when it closes, so the shack stops listening the desktop started), and it shows
+the shack's `aprs-state.listen` and the `aprs-stations` rows with `rf` (the ones
+the shack's radio heard). No new message or field; `lib/remote-bridge.js` and
+`lib/aprs-remote-shack.js` hold the mapping.
+
+| Message | Dir | Purpose |
+|---|---|---|
+| `aprs-subscribe` | C→S | `{on: boolean, rangeKm?: number}`. Start or stop watching. On `on: true` the shack sends this device a snapshot (`aprs-stations` `op: 'snapshot'`), then deltas. The APRS-IS feed runs while the desktop's APRS window is open **or** any device is subscribed, and stops after the last device leaves (unsubscribe or disconnect) with the window closed. `rangeKm` sets the feed's radius (clamped 10 to 1000 km, not saved) only while the desktop window is closed; with the window open the window's range holds. Send it when the APRS view (or the Map's APRS layer) comes on screen and `on: false` when it leaves. A Guest Pass may subscribe. |
+| `aprs-listen` | C→S | `{on: boolean, band?: '2m' \| '30m'}`. The window's "Listen on my radio" switch and band chips, through the same functions (`aprsListenSetBand`, then `aprsListenSet`), so the same gates and refusal sentences apply (they come back in `aprs-state.listen.sentence`). Counts as the operator using the radio (an APRS idle session ends, as at the window). Listening a device turned on stops when that device leaves, unless the desktop APRS window is open (then closing the window stops it, as before). A Guest Pass may listen on the radio it is operating; listening a guest turned on never gates to APRS-IS. |
+| `aprs-igate` | C→S | `{on: boolean}`. The desktop setting "Report what I hear to APRS-IS (iGate)" (`settings.aprsIgate`), saved as Settings saves it. It gates only while the radio listens. **Refused to a Guest Pass** (on or off): `refused` with `of: 'aprs-igate'` and the text "APRS beacons and the iGate go out under the owner's callsign, so they are not part of a Guest Pass." (`lib/pass-wording.js`, kind `callsign`). |
+| `aprs-beacon-is` | C→S | `{}`. The window's "Beacon now": one position beacon over **APRS-IS only** (CALL-10, the desktop's beacon settings, approximate position by default). Nothing is transmitted on the air. Same refusals as the window (no callsign, placeholder callsign, no position, APRS-IS not verified), shown in `aprs-state.beacon.sentence`. The beacon timer stays a desktop-window feature. **Refused to a Guest Pass** with the same `refused` text as `aprs-igate`. |
+| `aprs-beacon-rf` | C→S | `{band?}` (2026-11-21, Casey's go). ONE position beacon **over the radio**: the window's "Beacon now (radio)" run, with the same gate (lib/aprs-rf-gate.js), config swap and transmit cap; the press counts as the APRS window being open. With Listen on, it goes out on the listening band. With Listen off, the desktop sets the radio up for the beacon (it starts listening on `band`, or the chosen band, which tunes, sets the mode and filter), sends, then stops listening so the radio goes back where it was. Nothing repeats and there is no timer. Refusals: `refused {of: 'aprs-beacon-rf', reason, text}` to that device only (`busy`, `not-ready`, `setup`, `not-sent`, with the gate's own sentence). **Refused to a Guest Pass.** |
+| `aprs-find` | C→S | `{call: string}` (2026-11-21, Casey's go). Follow ONE call on APRS-IS **beyond** `rangeKm`: the desktop adds a budlist term (`b/CALL`) to its read-only APRS-IS filter, next to the range filter, and sends `#filter` on the live connection. `K5ABC` (no SSID) follows K5ABC and every SSID of it (`b/K5ABC/K5ABC-*`); `K5ABC-9` follows that station only. Rows for the call arrive in `aprs-stations` like any other (whatever the distance) and are not aged out while the find is on; a row already held goes out again in the next delta so the phone can centre on it. APRS-IS does not replay history, so a call silent since the desktop connected appears when it next sends. One call per device: a new `aprs-find` replaces that device's old one. `{call: ''}` stops; unsubscribing (`aprs-subscribe {on: false}`) or disconnecting stops it too. The callsign must be 3 to 7 letters and digits (at least one of each) with an optional `-SSID` of 1 or 2 characters; nothing else reaches the filter. At most 10 calls across every device. Refusals, to that device only: `refused {of: 'aprs-find', reason, text}` with `reason` `bad-call`, `not-subscribed` (send `aprs-subscribe {on: true}` first) or `full`. Read only: nothing transmits and nothing goes out under the owner's callsign, so **a Guest Pass may find**, as it may subscribe. |
+| `aprs-state` | S→C | Coalesced to at most one every 500 ms. Fields below. |
+| `aprs-state.beacon.rf` | (field) | The radio beacon for the phone's confirm (2026-11-21): `{ready, setup, sentence, band, mhz, modeLabel, powerW, airSeconds, sending, lastAt, lastResult, lastSentence}`. `setup: true` = Listen is off and the desktop will set the radio up for the press. `sentence` says why `ready` is false. `lastResult` is `confirmed` (the radio reported transmit), `unconfirmed` (keyed, no readback from this radio) or `not-sent`. `airSeconds` is known only while listening. The top-level `mayBeaconRf` is true for an owner device when `rf.ready`. |
+| `aprs-stations` | S→C | Station rows; only to a subscribed `aprs` client. `op: 'snapshot'`: `{stations: Row[], chunk, totalChunks, total}`, byte-bounded chunks (200 KB, like `worked-qsos`), always at least one (an empty store sends one empty chunk); replace the list once the last chunk (`chunk + 1 === totalChunks`) is in. `op: 'delta'`: `{add: Row[], update: Row[], gone: key[], total}`, batched every 1.5 s, never empty. Treat `add` and `update` as upserts by `key`. `gone`: not heard for 60 minutes, or a killed object or item. |
+
+`aprs-state`:
+
+```
+{
+  type: 'aprs-state',
+  feed:   { state: 'off'|'stopped'|'connecting'|'connected'|'waiting'|'refused'|'no-grid', server, km, anonymous, subscribers },
+  listen: { on, state: 'off'|'starting'|'listening'|'paused'|'refused', band, bands: ['2m','30m'],
+            modeLabel, mhz, heard, lastAt, sentence, note },
+  igate:  { on, active, call, link: 'stopped'|'connecting'|'connected'|'verified'|'unverified'|'waiting',
+            gated, lastAt, lastFrom, sentence, paused },   // paused: "iGate paused: a guest has the radio" while a Guest Pass runs, else ''
+  beacon: { call, lastAt, lastPacket, sending, sentence, backAt, timerOn, nextAt,
+            position: { lat, lon, source: 'map'|'grid', approx } | null },   // never more exact than the packet: whole minutes unless approx is false
+  refusal: string,      // the one sentence to show: listen (refused or paused), else beacon, else iGate; '' = none
+  mayBeacon: boolean,   // false on a Guest Pass: hide the beacon button
+  mayIgate: boolean     // false on a Guest Pass: hide the iGate switch
+}
+```
+
+`sentence` and `note` are the desktop window's words, shown as they are. When the radio
+moves off the APRS frequency or mode while listening (a spot click, a phone tune, the VFO knob),
+listening pauses with `on: false, state: 'refused'` and `sentence` "Paused: your radio moved. Your
+radio is on 14.317 MHz USB. Turn listening on to go back to 30 m." (following the radio as it moves);
+`aprs-listen {on: true}` is the normal start and tunes back to APRS. No new field. Times
+are epoch ms (0 = never). `listen.bands` is what this rig can listen on (empty =
+none); `listen.band` is the band it listens on, or would start on. `beacon.backAt
+>= beacon.lastAt` means the beacon came back over APRS-IS.
+
+Row (one station or object):
+
+```
+{ key, call, label, type: 'position'|'object'|'item'|..., lat, lon,
+  symbol,          // APRS table + code, 2 characters, e.g. '/>'
+  cls,             // 'car'|'house'|'digi'|'igate'|'weather'|'hiker'|'boat'|'aircraft'|'other' (lib/aprs-symbols.js)
+  course, speed,   // degrees and knots, or null
+  altitude, comment, status,
+  lastHeard,       // epoch ms, any source
+  isHeard,         // epoch ms APRS-IS last reported it, or null
+  heardByMe,       // the shack's radio heard it
+  rf: { kind: 'direct'|'digi', digi, lastHeard, packets, band, bands } | null,
+  distanceKm, bearing }   // from the shack's grid, or null
+```
+
+`rf.band` (2026-11-21): the band the shack's radio was listening on when it last
+heard this station, `'2m'` or `'30m'`; `''` when not known (a packet the desktop
+could not tag), so infer from `aprs-state.listen.band` only then. `rf.bands`:
+every band the radio heard it on while the shack has held the row, shortest
+wavelength first (`['2m', '30m']`), for a "Both" filter. Rows heard only on
+APRS-IS have `rf: null`. Older desktops send neither field.
+
+`key` is the callsign, or `obj:<NAME>` for an object or item. Draw `cls` with
+the desktop's icon set (renderer/aprs-icons.js: a round badge per class, car,
+boat and aircraft turned to `course`). Idle Mode's `aprs` choice stays on
+`set-idle-rx` (capability `idle-mode`).
+
+### Cloud (the shack's POTACAT Cloud account)
+
+> **Scope (updated 2026-11-21):** the browser ECHOCAT (`renderer/remote.html`
+> Settings > Cloud Sync) and the ECHOCAT phone apps both use these. They act on
+> the account the desktop is signed in to, through the desktop's own session:
+> signing up from a phone (`cloud-register`) starts the desktop's trial and turns
+> on its Cloud Sync, and a payment started on the phone (`cloud-stripe-checkout`)
+> pays for that account. The phone apps also talk to `api.potacat.com` directly
+> for the phone's own sign-in. A Guest Pass session gets none of them (each is
+> refused with `guest_pass` or at the wall).
 
 | Message | Dir | Purpose |
 |---|---|---|
@@ -575,6 +736,8 @@ message.
 | `cloud-register` | C→S | Sign up. |
 | `cloud-register-result` | S→C | Sign-up result. |
 | `cloud-logout` | C→S | Log out. |
+| `cloud-tunnel-enable` | C→S | (capability `cloud-tunnel-enable`, 2026-11-21) An owner device turns the shack's Cloud Tunnel ON. Only while the account is signed in and has Cloud access (trial or paid); it also clears the desktop's remembered "turned off by hand". Refused to a Guest Pass (`guest_pass`). Turning the tunnel off is not offered to a device. |
+| `cloud-tunnel-result` | S→C | `{ok, error?, message?}`: `ok:true` when the tunnel is on (or already was); `error` is `guest_pass`, `signed_out`, `no_access` or `not_ready`, with `message` in plain words. The tunnel's new state also arrives as `cloud-state` where that is supported. |
 | `cloud-logout-result` | S→C | Logout confirmation. |
 | `cloud-get-status` | C→S | Sync status query. |
 | `cloud-status` | S→C | Status response. |
@@ -586,13 +749,36 @@ message.
 | `cloud-verify-result` | S→C | Subscription tier response. |
 | `cloud-save-bmac-email` | C→S | Save Buy-Me-A-Coffee email for benefit lookup. |
 | `cloud-bmac-result` | S→C | BMAC lookup result. |
+| `cloud-stripe-checkout` | C→S | `{plan: 'monthly'\|'yearly'}`: a Stripe checkout URL for the desktop's account. The client opens it itself; the desktop watches for the payment and pushes `cloud-billing-state` when it lands. Capability `cloud-billing`. |
+| `cloud-stripe-portal` | C→S | The Stripe customer portal URL for the desktop's account. |
+| `cloud-stripe-result` | S→C | `{kind: 'checkout'\|'portal', url?, plan?, error?, message?}`. |
+| `cloud-billing-state` | S→C | `{subscription?, reason?, localQsos?}`: pushed when the account's billing changes (a payment landed, a trial ended). |
+| `cloud-checkout-state` | S→C | `{phase, plan?, stripeConfigured?}`: where a checkout the desktop is watching stands. |
 
 ### KiwiSDR / WebSDR
 
 | Message | Dir | Purpose |
 |---|---|---|
-| `kiwi-connect` | C→S | Connect to a KiwiSDR / WebSDR station. |
+| `kiwi-connect` | C→S | Connect to an SDR: a KiwiSDR, a WebSDR station or an rtl_tcp server. `{host?, id?, password?}`; no `host` = the station's first listed SDR. |
 | `kiwi-disconnect` | C→S | Disconnect. |
+| `kiwi-tune` | C→S | `{freqKhz, mode?}`: tune the connected SDR (`freqKhz` may be a string, as for `tune`). Ignored when no SDR is connected. |
+| `refused` | S→C | `{reason: 'guest-pass', of, text, reqId?}`: the shack will not do that for this Guest Pass session. Show `text` as it is; `of` is the message type, for the client's own use, never for display. |
+
+**Guest Pass (2026-11-14, #543).** A pass session may send all three SDR
+messages, for the SDRs the owner has already set up at the station (the
+entries in `kiwiSdrList` and the `kiwiSdrHost1..3` slot keys of the settings
+the guest receives). A `kiwi-connect` must name one of them: by the entry's
+`id` when it has one, or by its exact host and port (scheme, trailing slash,
+an inline `password@` and letter case are ignored; no port is 8073), or send
+no `host` for the first one. The shack connects with the owner's own entry,
+never the guest's string or `password`. Any other host or port is answered
+with `refused`, `of: 'kiwi-connect'`, `text: "On a Guest Pass you can use the
+station's own SDRs, not add a new one."`. A guest never edits the list: a
+`save-settings` carrying any SDR key (`kiwiSdrList`, `kiwiSdrHost`,
+`kiwiSdrHost1..3`, `kiwiSdrLabel1..3`) is not saved, is answered with
+`settings-update` (the owner's settings as they are) and then the same
+`refused` text with `of: 'save-settings'`. Rule: lib/guest-sdr.js. Before
+2026-11-14 the shack refused all three SDR messages for a pass session.
 
 (KiwiSDR audio/state events are sent over the existing audio channel and
 the broader `status` message; no dedicated S→C envelope today.)

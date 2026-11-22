@@ -122,7 +122,7 @@ test('wiring: the main window and the JTCAT window both run it on sound-card cap
   assert.ok(/function stopPopoutAudio\(\) \{\n    if \(_popoutStallTimer\) \{ clearInterval\(_popoutStallTimer\)/.test(pop));
   // Not on the feeds main supplies.
   // #243: the WebSDR feed (jtcatFromSdr) comes from main too, so it is excluded alongside.
-  assert.ok(/!\((jtcatFromSdr \|\| )?s\.audioSource === 'smartsdr' \|\| s\.audioSource === 'icom-network' \|\| s\.audioSource === 'yaesu-lan'\)/.test(app));
+  assert.ok(/!\((jtcatFromSdr \|\| )?(jtcatFromTci \|\| )?s\.audioSource === 'smartsdr' \|\| s\.audioSource === 'icom-network' \|\| s\.audioSource === 'yaesu-lan'\)/.test(app));
   assert.ok(/audioSource !== 'smartsdr' && audioSource !== 'icom-network' && audioSource !== 'yaesu-lan'/.test(pop));
 });
 

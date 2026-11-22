@@ -189,7 +189,7 @@ test('wired: decided once per ended session, before the radio is put back; a pen
   const end = fnBody(main, 'winlinkEndSession');
   const decide = end.indexOf('const retryWill = wasActive && state === \'error\' ? winlinkRetryDecide(s, outcome) : false;');
   assert.ok(decide > 0 && decide < end.indexOf('WinlinkReturn.atSessionEnd('), 'decided before the return');
-  assert.ok(/windowOpen: winlinkMailWindowOpen\(\) \|\| retryWill/.test(end), 'kept like an open mail window while it waits');
+  assert.ok(/windowOpen: winlinkMailViewOpen\(\) \|\| retryWill/.test(end), 'kept like an open mail window while it waits');
   assert.ok(/_winlinkRetry\.holdsReturn = true;/.test(end), 'and goes back if the retry is not made');
   const dec = fnBody(main, 'winlinkRetryDecide');
   assert.ok(/WinlinkAutoRetry\.shouldRetry\(\{ outcome, mode: s\.mode, gateway: s\.gateway, dialKhz: s\.dialKhz, origin: s\.origin, autoRetry: s\.autoRetry, enabled: settings\.winlinkAutoRetry !== false \}\)/.test(dec));

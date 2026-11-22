@@ -212,6 +212,116 @@ function appMainPidsFromProcessTable(rows, myPid) {
   return rows.filter(r => r && app.has(r.ProcessId) && !/--type=/.test(r.CommandLine || '')).map(r => r.ProcessId);
 }
 
+// --- Stopping the app without stopping ourselves (#819) ---
+// POTACAT's Install / Start now buttons spawn the launcher, so the launcher
+// can be a child in POTACAT's process tree. `taskkill /T` walks parent PIDs
+// (detached: true does not break that link on Windows), so the forced stop
+// of a restart killed the launcher too and the start step never ran: the
+// remote operator was stranded until someone at home started POTACAT. The
+// stop now reads the whole process table, plans the kill itself and leaves
+// out this launcher and everything under it (its own cloudflared connector).
+// Everything else POTACAT started (rigctld, Dire Wolf, ardopcf, Pat,
+// cloudflared, Mercury, the Yaesu scope helper, ...) is still killed, so the
+// restarted app can bind its ports and serial devices again.
+
+/** Pure: "pid ppid createdMs" lines (the PowerShell query below) -> rows. */
+function parseProcessTable(text) {
+  const rows = [];
+  for (const line of String(text || '').split(/\r?\n/)) {
+    const m = /^\s*(\d+)\s+(\d+)(?:\s+(\d+))?\s*$/.exec(line);
+    if (!m) continue;
+    const created = m[3] ? Number(m[3]) : 0;
+    rows.push({ pid: Number(m[1]), ppid: Number(m[2]), created: created > 0 ? created : null });
+  }
+  return rows;
+}
+
+/**
+ * Pure: which PIDs a stop kills. rows: [{ pid, ppid, created }] (created in
+ * ms, or null when unknown). roots: the app's PIDs. keepPid: this launcher.
+ * Returns { kill, spared, launcherInTree }: kill lists every process under
+ * the roots, parents before children (a parent killed first cannot start a
+ * new child), except keepPid and its descendants.
+ */
+function treeKillPlan(rows, roots, keepPid) {
+  const byPid = new Map();
+  for (const r of rows || []) if (r && r.pid) byPid.set(r.pid, r);
+  const kids = new Map();
+  for (const r of byPid.values()) {
+    if (r.ppid === r.pid) continue;
+    const parent = byPid.get(r.ppid);
+    // Windows keeps a dead parent's PID in ParentProcessId; once that PID is
+    // reused, an unrelated older process looks like the new one's child. A
+    // real child is never older than its parent.
+    if (parent && parent.created != null && r.created != null && r.created < parent.created) continue;
+    if (!kids.has(r.ppid)) kids.set(r.ppid, []);
+    kids.get(r.ppid).push(r.pid);
+  }
+  // Spared: this launcher and its own children. The walk stops at the app:
+  // the POTACAT the launcher started is the launcher's child, and it is
+  // exactly what a stop is for.
+  const rootSet = new Set(roots || []);
+  const spared = new Set();
+  const walk = [keepPid];
+  while (walk.length) {
+    const pid = walk.shift();
+    if (spared.has(pid) || (pid !== keepPid && rootSet.has(pid))) continue;
+    spared.add(pid);
+    walk.push(...(kids.get(pid) || []));
+  }
+  const kill = [];
+  const seen = new Set();
+  let launcherInTree = false;
+  const queue = [...(roots || [])];
+  while (queue.length) {
+    const pid = queue.shift();
+    if (seen.has(pid)) continue;
+    seen.add(pid);
+    if (spared.has(pid)) { launcherInTree = true; continue; }
+    if (!byPid.has(pid)) continue; // already gone
+    kill.push(pid);
+    queue.push(...(kids.get(pid) || []));
+  }
+  return { kill, spared: [...spared], launcherInTree };
+}
+
+/** Pure: the PIDs of a plan that are still the same processes (same start time). */
+function stillAlive(pids, before, now) {
+  const was = new Map((before || []).map(r => [r.pid, r]));
+  const is = new Map((now || []).map(r => [r.pid, r]));
+  return (pids || []).filter((pid) => {
+    const a = was.get(pid), b = is.get(pid);
+    return !!(a && b && (a.created == null || b.created == null || a.created === b.created));
+  });
+}
+
+/** Every process on the machine: pid, parent pid, start time (ms). */
+function readWindowsProcessTable() {
+  const script = 'Get-CimInstance Win32_Process | ForEach-Object { ' +
+    '$c = 0; if ($_.CreationDate) { $c = [long]($_.CreationDate.ToFileTimeUtc() / 10000) }; ' +
+    '"$($_.ProcessId) $($_.ParentProcessId) $c" }';
+  const out = execSync('powershell -NoProfile -NonInteractive -Command -', {
+    input: script, encoding: 'utf8', timeout: 15000, windowsHide: true, maxBuffer: 16 * 1024 * 1024,
+  });
+  const rows = parseProcessTable(out);
+  if (!rows.length) throw new Error('empty process table');
+  return rows;
+}
+
+/** taskkill a list of PIDs in one call (each one alone, never /T). */
+function taskkillEach(pids, force) {
+  if (!pids.length) return '';
+  const args = pids.map(pid => `/PID ${Number(pid)}`).join(' ');
+  try {
+    execSync(`taskkill ${force ? '/F ' : ''}${args}`, { timeout: 15000, windowsHide: true, stdio: 'pipe' });
+    return '';
+  } catch (err) {
+    // Non-zero when any one PID failed (already gone, or a window-less
+    // process asked to close); the others were still handled.
+    return String((err && err.message) || '').split('\n')[0];
+  }
+}
+
 /** Get all PIDs of POTACAT.exe except our own launcher process */
 function getOtherPids() {
   if (IS_WIN) {
@@ -392,11 +502,29 @@ async function stopPotacat() {
   // the main window quits POTACAT through its normal path — settings and
   // window positions saved, the radio released. Only what is still alive
   // after GRACEFUL_STOP_MS is killed outright.
+  // Windows: never `taskkill /T` while the table can be read; that walks into
+  // this launcher when POTACAT started it (#819). The plan covers the same
+  // processes /T would, minus us and our own children.
+  let table = null, plan = null;
+  if (IS_WIN) {
+    try {
+      table = readWindowsProcessTable();
+      plan = treeKillPlan(table, pids, MY_PID);
+      if (plan.launcherInTree) console.log('[Launcher] This launcher runs inside POTACAT\'s process tree; stopping the app around it');
+    } catch (err) {
+      console.warn(`[Launcher] Could not read the process table (${err.message}); falling back to taskkill /T`);
+      table = null; plan = null;
+    }
+  }
   if (IS_WIN) {
     let mains = [];
     try { mains = getWindowsAppMainPids(); } catch {}
-    for (const pid of mains) {
-      try { execSync(`taskkill /PID ${pid} /T`, { timeout: 10000, windowsHide: true }); } catch {}
+    if (plan) {
+      if (mains.length) taskkillEach(plan.kill, false);
+    } else {
+      for (const pid of mains) {
+        try { execSync(`taskkill /PID ${pid} /T`, { timeout: 10000, windowsHide: true }); } catch {}
+      }
     }
     if (mains.length) {
       const until = Date.now() + GRACEFUL_STOP_MS;
@@ -415,14 +543,33 @@ async function stopPotacat() {
     _pidCache = null;
   }
   const errors = [];
-  for (const pid of (IS_WIN ? getOtherPids() : pids)) {
+  let forced = null;
+  if (IS_WIN && plan) {
     try {
-      if (IS_WIN) {
-        execSync(`taskkill /PID ${pid} /T /F`, { timeout: 10000, windowsHide: true });
-      } else {
-        execSync(`kill ${pid}`, { timeout: 10000 });
-      }
-    } catch (err) { errors.push(`${pid}: ${err.message.split('\n')[0]}`); }
+      const now = readWindowsProcessTable();
+      // Roots: what still looks like the app, plus everything the first plan
+      // found that is still the same process. A helper whose POTACAT already
+      // exited has a dead parent, so only the earlier snapshot still knows it
+      // was POTACAT's (it would hold its COM port or TCP port otherwise).
+      const roots = [...new Set([...getOtherPids(), ...stillAlive(plan.kill, table, now)])];
+      forced = treeKillPlan(now, roots, MY_PID);
+    } catch (err) {
+      console.warn(`[Launcher] Could not re-read the process table (${err.message}); falling back to taskkill /T`);
+    }
+  }
+  if (forced) {
+    const e = taskkillEach(forced.kill, true);
+    if (e) errors.push(e);
+  } else {
+    for (const pid of (IS_WIN ? getOtherPids() : pids)) {
+      try {
+        if (IS_WIN) {
+          execSync(`taskkill /PID ${pid} /T /F`, { timeout: 10000, windowsHide: true });
+        } else {
+          execSync(`kill ${pid}`, { timeout: 10000 });
+        }
+      } catch (err) { errors.push(`${pid}: ${err.message.split('\n')[0]}`); }
+    }
   }
   // taskkill /F returns when the kill is DISPATCHED, not when the process
   // has exited — an immediate tasklist still shows the PIDs mid-death, so
@@ -1156,4 +1303,4 @@ function main() {
 // Run directly (node launcher.js, the extracted copy) it starts at once;
 // POTACAT.exe --launcher requires it and calls main(); tests only require it.
 if (require.main === module) main();
-module.exports = { main, createDualServer, generateTlsCert, _derInt: derInt, isTunnelRequest, clientKey, routeOf, readPairedDevices, deviceForToken, authorize, sameSecret, CloudReplica, handleRequest };
+module.exports = { main, parseProcessTable, treeKillPlan, stillAlive, readWindowsProcessTable, taskkillEach, createDualServer, generateTlsCert, _derInt: derInt, isTunnelRequest, clientKey, routeOf, readPairedDevices, deviceForToken, authorize, sameSecret, CloudReplica, handleRequest };

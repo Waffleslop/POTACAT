@@ -30,21 +30,19 @@ function body(src, name) {
 console.log('POTA spot age');
 
 test('only POTA is exempt, and only until the operator opts in', () => {
-  // eslint-disable-next-line no-new-func
-  const make = (settings) => new Function('settings', body(main, 'spotAgeExempt') + '\nreturn spotAgeExempt;')(settings);
-  const off = make({});
-  assert.strictEqual(off({ source: 'pota' }), true, 'POTA follows the feed by default');
-  for (const src of ['wwff', 'llota', 'wwbota', 'sota', 'dxc']) assert.strictEqual(off({ source: src }), false, src);
-  assert.strictEqual(make({ potaAgeLimit: true })({ source: 'pota' }), false, 'opt-in applies the limit to POTA');
+  const SpotAge = require('../lib/spot-age');
+  const off = SpotAge.ageOptsFromSettings({});
+  assert.strictEqual(SpotAge.spotAgeLimitSecs({ source: 'pota' }, off), Infinity, 'POTA follows the feed by default');
+  for (const src of ['wwff', 'llota', 'wwbota', 'sota', 'dxc']) assert.ok(SpotAge.spotAgeLimitSecs({ source: src }, off) < Infinity, src);
+  assert.strictEqual(SpotAge.spotAgeLimitSecs({ source: 'pota' }, SpotAge.ageOptsFromSettings({ potaAgeLimit: true })), 300, 'opt-in applies the limit to POTA');
+  // SmartSDR / TCI: POTA keeps only the panadapter's own cap.
+  assert.strictEqual(SpotAge.spotAgeLimitSecs({ source: 'pota' }, Object.assign({}, off, { capMin: 15 })), 900);
 });
 
-test('ECHOCAT, SmartSDR and TCI all use the exemption', () => {
-  const merged = body(main, 'sendMergedSpots');
-  assert.ok(/else if \(spotAgeExempt\(s\)\) limit = Infinity;/.test(merged), 'ECHOCAT forward');
-  const sdr = body(main, 'pushSpotsToSmartSdr'), tci = body(main, 'pushSpotsToTci');
-  for (const [n, f] of [['SmartSDR', sdr], ['TCI', tci]]) {
-    assert.ok(/spotAgeExempt\(spot\) \? potaMaxAgeMs : maxAgeMs/.test(f), n + ': POTA keeps only the panadapter cap');
-  }
+test('ECHOCAT, SmartSDR and TCI all use the shared rule (#502)', () => {
+  assert.ok(/remoteServer\.broadcastSpots\(spotsWithinMaxAge\(merged\)\)/.test(body(main, 'sendMergedSpots')), 'ECHOCAT forward');
+  assert.ok(/spotsWithinMaxAge\(spotsForPanadapter\(spots\), sdrCapMin\)/.test(body(main, 'pushSpotsToSmartSdr')), 'SmartSDR');
+  assert.ok(/spotsWithinMaxAge\(spotsForPanadapter\(spots\), tciCapMin\)/.test(body(main, 'pushSpotsToTci')), 'TCI');
 });
 
 test('the desktop table exempts POTA the same way', () => {
