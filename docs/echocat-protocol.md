@@ -158,7 +158,7 @@ for the history.
 | `set-atu` | C→S | Toggle ATU. |
 | `set-enable-atu` | C→S | Enable/disable ATU subsystem. |
 | `set-enable-split` | C→S | Enable/disable split. |
-| `set-cw-xit` | C→S | Set CW XIT offset (Hz). |
+| `set-cw-xit` | C→S | `{value}`: set the CW XIT offset in Hz. |
 | `set-cw-filter` | C→S | Default CW filter width. |
 | `set-ssb-filter` | C→S | Default SSB filter width. |
 | `set-digital-filter` | C→S | Default digital-mode filter width. |
