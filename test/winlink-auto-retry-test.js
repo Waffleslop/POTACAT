@@ -199,7 +199,7 @@ test('wired: decided once per ended session, before the radio is put back; a pen
 
 test('wired: the retry is the same gateway, dial, mode and url, marked as the retry; one log line each for started, cancelled, skipped', () => {
   const start = fnBody(main, 'winlinkRetryStart');
-  assert.ok(/winlinkStartSession\(\{ mode: r\.mode, gateway: r\.gateway, dialKhz: r\.dialKhz, url: r\.url, origin: 'automatic retry', autoRetry: true \}\)/.test(start));
+  assert.ok(/winlinkStartSession\(\{ mode: r\.mode, gateway: r\.gateway, dialKhz: r\.dialKhz, url: r\.url, origin: 'automatic retry', autoRetry: true, fromEchocat: !!r\.fromEchocat \}\)/.test(start), 'the retry of an ECHOCAT session is still that session (#697)');
   assert.ok(/automatic retry started: /.test(start));
   assert.ok(/automatic retry cancelled: /.test(fnBody(main, 'winlinkRetryEnd')) && /automatic retry skipped: /.test(fnBody(main, 'winlinkRetryEnd')));
   const ss = main.slice(main.indexOf('async function winlinkStartSession('), main.indexOf('async function winlinkEnterFmDataBeforeDial('));

@@ -974,7 +974,7 @@ const GLOBAL_KEYS = new Set([
   'winlinkVaraHfPath', // Winlink: where VARA.exe is on THIS machine (blank = the usual places)
   'winlinkVaraFmPath', // Winlink: where VARAFM.exe is on THIS machine
   'winlinkPredictionUrl', // Winlink: a VOACAP service other than api.potacat.com (dev / self-hosted); blank = POTACAT's
-  'winlinkVaraAutoLaunch', // Winlink: start the operator's VARA when a session needs it (default on; never stopped by POTACAT)
+  'winlinkVaraAutoLaunch', // Winlink: start the operator's VARA when a session needs it (default on; never stopped by POTACAT, except a VARA POTACAT itself started for an ECHOCAT session, closed when that session is over: #697)
   'winlinkDirewolfPath', // Winlink: explicit Dire Wolf binary on THIS machine
   'winlinkAgwPort',    // Winlink: Dire Wolf's AGWPE port on this machine (default 8010)
   'winlinkWaterfallSpeed', // mail-window waterfall lines/sec — a display property of this screen (as jtcatWaterfallSpeed)
@@ -2103,6 +2103,7 @@ let _winlinkLastActivity = 0;
 // A session started while a Guest Pass guest had the radio is the guest's:
 // its traffic is never the owner's activity (#200 step 4).
 let _winlinkSessionByGuest = false;
+let _winlinkSessionFromEchocat = false; // this session was started from an ECHOCAT device (or is the automatic retry of one): #697
 let _winlinkSessionError = '';
 let _winlinkSessionErrorKind = '';   // 'login-failed' | 'no-answer' | 'transport-down' | 'rig-refused' | 'stopped' | '' — session.errorKind for clients
 // How this session ended, as facts for lib/winlink-outcome.js (#425). The
@@ -11552,6 +11553,59 @@ const _varaLaunch = { hf: null, fm: null }; // { child, at } for a VARA POTACAT 
 // answering" until VARA was restarted (W7RTA IC-7300, 2026-10-24).
 const _patHoldsVara = { hf: null, fm: null };
 let _patVaraKind = null; // the VARA this session hands Pat: the one to clear above if Pat could not open it
+// ── closing the VARA POTACAT opened for an ECHOCAT session (#697) ──────────
+// Casey 2026-11-21: "close VARA we opened". The rule is
+// VaraProcess.shouldCloseVara; this is the glue. Looked at after a session
+// ends (with no retry pending), after the retry is skipped or cancelled, and
+// when an ECHOCAT device disconnects. A link still closing is looked at again
+// every few seconds, for up to two minutes.
+let _varaCloseTimer = null;
+let _varaCloseLooks = 0;
+function winlinkVaraCloseSoon(why, delayMs = 3000) {
+  if (!_varaLaunch.hf && !_varaLaunch.fm) return;
+  clearTimeout(_varaCloseTimer);
+  _varaCloseLooks = 0;
+  _varaCloseTimer = setTimeout(() => { winlinkVaraCloseCheck(why).catch((e) => winlinkLog(`VARA close check failed: ${e.message}`)); }, delayMs);
+}
+async function winlinkVaraCloseCheck(why) {
+  _varaCloseTimer = null;
+  for (const kind of VaraProcess.KINDS) {
+    const l = _varaLaunch[kind];
+    if (!l) continue;
+    const child = l.child;
+    const busyWord = (patClient && !winlinkSessionActive()) ? await winlinkPatStillBusy() : '';
+    const d = VaraProcess.shouldCloseVara({
+      launchedByUs: !!(child && child.pid && child.exitCode === null && child.signalCode === null),
+      startedFromEchocat: !!l.forEchocat,
+      sessionActive: winlinkSessionActive(),
+      retryPending: !!_winlinkRetry,
+      connected: !!busyWord,
+      transmitting: winlinkAnyTx(),
+    });
+    if (d.wait) {
+      if (++_varaCloseLooks <= 24 && !_varaCloseTimer) _varaCloseTimer = setTimeout(() => { winlinkVaraCloseCheck(why).catch(() => {}); }, 5000);
+      else if (_varaCloseLooks > 24) winlinkLog(`${VaraProcess.varaName(kind)} stays open: ${d.why} two minutes after ${why}`);
+      continue;
+    }
+    if (!d.close) continue;
+    const name = VaraProcess.varaName(kind);
+    const r = await VaraProcess.closeVaraWeOpened({
+      pid: child.pid,
+      run: (cmd, args) => new Promise((resolve) => { require('child_process').execFile(cmd, args, { timeout: 5000, windowsHide: true }, () => resolve()); }),
+      kill: () => child.kill(),
+      hasExited: () => child.exitCode !== null || child.signalCode !== null,
+      stillOurs: () => _varaLaunch[kind] === l && !winlinkSessionActive(),
+    });
+    if (r.how === 'not-ours') continue;
+    if (_varaLaunch[kind] === l) _varaLaunch[kind] = null;
+    if (r.closed) {
+      _patHoldsVara[kind] = null; // Pat's old command connection went with it; the next session opens a new one
+      winlinkLog(`closed the ${name} window POTACAT opened for the ECHOCAT session${r.how === 'killed' ? ' (it did not close by itself, so the process POTACAT started was ended)' : ''}`);
+    } else {
+      winlinkLog(`could not close the ${name} window POTACAT opened for the ECHOCAT session: close it on the shack PC`);
+    }
+  }
+}
 async function winlinkVaraReady(mode, { configured } = {}) {
   const kind = VaraProcess.kindOfMode(mode);
   const name = VaraProcess.varaName(kind);
@@ -11620,6 +11674,7 @@ async function winlinkVaraReady(mode, { configured } = {}) {
           child.on('exit', () => { if (_varaLaunch[kind] && _varaLaunch[kind].child === child) _varaLaunch[kind] = null; });
           child.unref();
           _varaLaunch[kind] = { child, at: Date.now() };
+          _varaLaunch[kind].forEchocat = _winlinkSessionFromEchocat; // #697: closed again after the ECHOCAT session, never otherwise
         } catch (e) {
           _winlinkSessionErrorKind = 'vara-not-answering';
           throw new Error(`${name} could not be started on the shack PC (${e.message}) — start it there yourself, with its PTT set to VOX`);
@@ -11658,6 +11713,8 @@ async function winlinkVaraReady(mode, { configured } = {}) {
     throw new Error(`${name} did not accept a new connection; is another program using it?`);
   }
   if (accept.tries > 1) winlinkLog(`${name}: took ${accept.waitedMs} ms to accept a new connection after the check`);
+  // A desktop session that uses a VARA POTACAT opened for the phone makes it the desktop's: it then stays open (#697).
+  if (_varaLaunch[kind] && !_winlinkSessionFromEchocat) _varaLaunch[kind].forEchocat = false;
   _patVaraKind = kind;
   _patHoldsVara[kind] = patProc; // Pat opens it this session and keeps it (cleared if Pat says it could not)
   winlinkLog(`${name} ready on ${where}${probe.version ? ' — ' + probe.version : probe.silent ? ' (answered the connection, no VERSION reply)' : ''}`);
@@ -15319,7 +15376,7 @@ function winlinkSessionPush() {
  * the pop-out's Connect and ECHOCAT's winlink-connect, both operator actions.
  * @returns {{ok:boolean, error?:string, reason?:string}}
  */
-async function winlinkStartSession({ mode, gateway, dialKhz, url: rowUrl, origin, autoRetry } = {}) {
+async function winlinkStartSession({ mode, gateway, dialKhz, url: rowUrl, origin, autoRetry, fromEchocat } = {}) {
   if (!(await winlinkEnsureStarted())) return { ok: false, error: winlinkState.snapshot().patError || 'Winlink could not start — see the [Winlink] lines in the log' };
   if (!settings.winlinkNoticeAcceptedAt) return { ok: false, error: 'Read and accept the Winlink notice first' };
   if (!settings.winlinkPassword) return { ok: false, error: 'Set your Winlink password in Settings > Station > Winlink first' };
@@ -15382,6 +15439,7 @@ async function winlinkStartSession({ mode, gateway, dialKhz, url: rowUrl, origin
   _winlinkPatConnected = false;
   if (radio) _winlinkPreviewReturnTo = null; // the session's returnTo carries it now
   _winlinkSessionByGuest = !!(passEnforcement && ['active', 'expiring'].includes(passEnforcement.getState()));
+  _winlinkSessionFromEchocat = VaraProcess.isEchocatOrigin(origin) || !!fromEchocat;
   winlinkSessionTouch();
   winlinkSessionPush();
   winlinkLog(`session start: ${mode}${radio ? ` → ${String(gateway).toUpperCase()} on ${Number(dialKhz).toFixed(1)} kHz dial` : ''} (${origin || 'operator'})`);
@@ -15936,6 +15994,7 @@ function winlinkEndSession(state, text, received = 0) {
     .catch((e) => winlinkLog(`how the messages went out could not be noted: ${e.message}`))
     .then(() => winlinkRefreshMailboxes());
   if (retryWill) winlinkRetryTick();
+  else if (wasActive) winlinkVaraCloseSoon('the session ended'); // #697: only a VARA POTACAT opened for an ECHOCAT session
 }
 
 // ── one automatic retry after a dropped link (#425) ─────────────────────────
@@ -15978,7 +16037,7 @@ function winlinkRetryDecide(s, outcome) {
   }
   const noCat = winlinkNoCat();
   _winlinkRetry = {
-    gateway: String(s.gateway).toUpperCase(), mode: s.mode, dialKhz: Number(s.dialKhz), url: s.url || '', origin: s.origin || '',
+    gateway: String(s.gateway).toUpperCase(), mode: s.mode, dialKhz: Number(s.dialKhz), url: s.url || '', origin: s.origin || '', fromEchocat: _winlinkSessionFromEchocat,
     noCat, endsAt: Date.now() + WinlinkAutoRetry.COUNTDOWN_S * 1000, tryNow: false,
     watch: new WinlinkAutoRetry.ChannelWatch(), acc: null, busy: null, ofStartedAt: s.startedAt, holdsReturn: false, timer: null,
   };
@@ -16026,12 +16085,13 @@ async function winlinkRetryStart() {
   winlinkRetryStop();
   winlinkLog(`automatic retry started: ${r.gateway} on ${r.dialKhz.toFixed(1)} kHz dial (${WinlinkModes.LABELS[r.mode] || r.mode})${r.tryNow ? ', now: the operator pressed Try now' : ''}`);
   winlinkRetryShow({ retryState: 'starting', retryInS: 0, retryText: WinlinkOutcome.retryText({ state: 'starting', gateway: r.gateway }) });
-  const res = await winlinkStartSession({ mode: r.mode, gateway: r.gateway, dialKhz: r.dialKhz, url: r.url, origin: 'automatic retry', autoRetry: true });
+  const res = await winlinkStartSession({ mode: r.mode, gateway: r.gateway, dialKhz: r.dialKhz, url: r.url, origin: 'automatic retry', autoRetry: true, fromEchocat: !!r.fromEchocat });
   if (!res || !res.ok) {
     const why = WinlinkOutcome.plainReason((res && res.error) || 'it could not start', 160).replace(/[.\s]+$/, '');
     winlinkLog(`automatic retry skipped: it could not start (${why})`);
     winlinkRetryShow({ retryState: 'skipped', retryInS: 0, retryText: WinlinkOutcome.retryText({ state: 'skipped', gateway: r.gateway, why: why.charAt(0).toLowerCase() + why.slice(1) }) });
     if (r.holdsReturn) winlinkRetryReturnDial();
+    winlinkVaraCloseSoon('the automatic retry could not start');
   }
 }
 
@@ -16062,6 +16122,7 @@ function winlinkRetryEnd(state, why) {
   winlinkLog(state === 'cancelled' ? `automatic retry cancelled: ${why}` : `automatic retry skipped: ${why === 'busy' ? `the channel stayed busy for ${WinlinkAutoRetry.BUSY_WAIT_S} s after the countdown` : why}`);
   winlinkRetryShow({ retryState: state, retryInS: 0, retryText: WinlinkOutcome.retryText({ state, gateway: r.gateway, why }) });
   if (r.holdsReturn && (state === 'skipped' || why === WinlinkAutoRetry.cancelReason('cancel'))) winlinkRetryReturnDial();
+  winlinkVaraCloseSoon(`the automatic retry was ${state}`);
 }
 
 /**
@@ -17179,7 +17240,10 @@ onRemoteServer((rs) => {
   // A device's Mail tab open or closed; gone = its connection went with the tab open.
   rs.on('winlink-mail-view', ({ open, clientId, gone } = {}) => winlinkMailViewSet(clientId, !!open, { gone: !!gone }));
   // The last device is gone: nothing of theirs is open any more.
-  rs.on('client-disconnected', () => { if (_winlinkMailDevices.any()) { _winlinkMailDevices.clear(); winlinkMailDeviceGone(); } });
+  rs.on('client-disconnected', () => {
+    if (_winlinkMailDevices.any()) { _winlinkMailDevices.clear(); winlinkMailDeviceGone(); }
+    winlinkVaraCloseSoon('the ECHOCAT device disconnected'); // #697: still only once the session is over
+  });
   // A freshly built server hydrates new devices from its own cache — on or
   // off: an off shack hydrates {enabled:false} rather than nothing.
   if (typeof rs.broadcastWinlinkState === 'function' && settings) winlinkPush();
