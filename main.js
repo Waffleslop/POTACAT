@@ -8491,8 +8491,10 @@ function ensureRemoteClient() {
       freq: snap.freq || 0,
       rigType: snap.rigType || 'remote',
     });
-    // The JS8 and SSTV windows show the dial too (they hear cat-* locally).
-    for (const w of [win, js8PopoutWin, sstvPopoutWin]) {
+    // The JS8 and SSTV windows show the dial too (they hear cat-* locally),
+    // and the Band Scope window centres its axis and tuning lines on it: it
+    // kept the frequency it opened with while a desktop drove a shack (#944).
+    for (const w of [win, js8PopoutWin, sstvPopoutWin, scopePopoutWin]) {
       if (!w || w.isDestroyed()) continue;
       if (typeof snap.freq === 'number' && snap.freq > 0) w.webContents.send('cat-frequency', snap.freq);
       if (snap.mode) w.webContents.send('cat-mode', snap.mode);

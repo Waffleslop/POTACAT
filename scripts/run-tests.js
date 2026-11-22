@@ -156,6 +156,7 @@ const TESTS = [
   'test/worked-roster-test.js',
   'test/grid-state-test.js',
   'test/worked-overlay-test.js',
+  'test/remote-scope-freq-test.js',
   'test/modem-rx-level-test.js',
   'test/watchlist-groups-test.js',
   'test/cert-san-policy-test.js',
