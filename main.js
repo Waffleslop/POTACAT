@@ -15183,6 +15183,7 @@ const aprsEcho = AprsEchocat.createController({
   setFollow: (calls) => { if (aprsFeedHooks) aprsFeedHooks.setFollow(calls); }, // aprs-find: calls passed beyond the range
   sendTo: (id, m) => { if (remoteServer && remoteServer.sendAprsTo) remoteServer.sendAprsTo(id, m); },
   setWatch: (calls) => { if (aprsFeedHooks) aprsFeedHooks.setWatch(calls); }, // heard you: my beacon's call and who heard it
+  setArea: (area) => { if (aprsFeedHooks) aprsFeedHooks.setArea(area); }, // Map view: the devices' map areas
   ownLogin: () => { const l = AprsIgate.uplinkLogin(settings.myCallsign); return l.ok ? l.call : ''; },
   heardChanged: (map) => { if (aprsWin && !aprsWin.isDestroyed()) aprsWin.webContents.send('aprs-heard-you', map); },
   windowOpen: () => !!(aprsWin && !aprsWin.isDestroyed()),
@@ -48348,7 +48349,7 @@ function cloudShackNotice(text, kind) {
     const Feed = require('./lib/aprs-is-feed');
     const AprsParser = require('./lib/aprs-parser');
     const dev = APRS_IS_DEV_SERVER || {}; // dev builds only: a local fake APRS-IS server
-    aprsFeed = new Feed.AprsIsFeed({ call: settings.myCallsign, version: app.getVersion(), lat: home.lat, lon: home.lon, km: settings.aprsRangeKm, follow: aprsEcho.followCalls(), watch: aprsEcho.watchCalls(), host: dev.host, port: dev.port });
+    aprsFeed = new Feed.AprsIsFeed({ call: settings.myCallsign, version: app.getVersion(), lat: home.lat, lon: home.lon, km: settings.aprsRangeKm, follow: aprsEcho.followCalls(), watch: aprsEcho.watchCalls(), area: aprsEcho.feedArea(), host: dev.host, port: dev.port });
     aprsBatch = Feed.createBatcher((packets) => aprsSend('aprs-packets', packets), 500);
     aprsFeed.on('line', (line) => {
       try { aprsMessagesFeedLine(line); } catch (e) { aprsLog('message: ' + e.message); } // A1: messages, acks and rejs for us
@@ -48371,6 +48372,7 @@ function cloudShackNotice(text, kind) {
     setRange: (km) => { if (aprsFeed) aprsFeed.setRange(null, null, require('./lib/aprs-is-feed').clampRangeKm(km)); },
     setFollow: (calls) => { if (aprsFeed) aprsFeed.setFollow(calls); },
     setWatch: (calls) => { if (aprsFeed) aprsFeed.setWatch(calls); },
+    setArea: (area) => { if (aprsFeed) aprsFeed.setArea(area); },
   };
   ipcMain.on('aprs-popout-open', () => {
     if (aprsWin && !aprsWin.isDestroyed()) { aprsWin.focus(); return; }
@@ -48398,6 +48400,7 @@ function cloudShackNotice(text, kind) {
       if (!aprsEcho.keepsFeed()) aprsStopFeed();
       if (_remoteAprsWanted) remoteAprsWatch(false); // #868: the shack stops listening this desktop started, as closing its own window would
       aprsWin = null;
+      aprsEcho.windowChanged(); // Map view: with the window gone, a device's map area may take the range term's place
       _aprsMsgViewing = ''; // A1: messages still going out carry on; nothing is being read now
       aprsBeaconStop(); // phase 5: the beacon timer runs only while the window is open
       aprsRfTimerStop(); // and the 2 m radio timer
