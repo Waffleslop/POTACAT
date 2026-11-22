@@ -867,7 +867,8 @@
     wfListenStart();
     window.api.watchAudio(false);
     window.api.audioRig().then(function (rig) {
-      var c = { audio: rig && rig.ok && rig.inputId ? { deviceId: { exact: rig.inputId }, echoCancellation: false, noiseSuppression: false, autoGainControl: false } : { echoCancellation: false, noiseSuppression: false, autoGainControl: false } };
+      // #757: 1 channel, the modem bridge's layout for the same device.
+      var c = { audio: rig && rig.ok && rig.inputId ? { deviceId: { exact: rig.inputId }, channelCount: 1, echoCancellation: false, noiseSuppression: false, autoGainControl: false } : { channelCount: 1, echoCancellation: false, noiseSuppression: false, autoGainControl: false } };
       return navigator.mediaDevices.getUserMedia(c);
     }).then(function (stream) {
       if (wfMode !== 'capture') { stream.getTracks().forEach(function (t) { t.stop(); }); return; }
