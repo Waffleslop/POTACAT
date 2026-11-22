@@ -132,5 +132,13 @@ test('a radio that transmits when POTACAT did not key it is logged with the line
   assert.ok(/function txNoteRadioPtt\(/.test(main) && /unsolicitedTxReport\(/.test(main));
 });
 
+test('an APRS beacon over the radio has its own ceiling per band, behind the beacon\'s own cap', () => {
+  assert.strictEqual(T.limitMsFor('aprs2m'), 4000);
+  assert.strictEqual(T.limitMsFor('aprs30m'), 8000);
+  assert.strictEqual(T.labelFor('aprs2m'), 'APRS beacon');
+  assert.strictEqual(T.labelFor('aprs30m'), 'APRS beacon');
+  assert.ok(/APRS beacon had kept the radio keyed for 8 s/.test(T.tripMessage('aprs30m', 8000)));
+});
+
 console.log(`\ntx limit: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

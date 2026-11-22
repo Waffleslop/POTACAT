@@ -25,6 +25,13 @@ contextBridge.exposeInMainWorld('api', {
   // POTA self-spot by email (spot@pota.tdod.org), filled from the live activation.
   potaSpotTemplate: (o) => ipcRenderer.invoke('winlink-pota-spot-template', o || {}),
   onComposePrefill: (cb) => ipcRenderer.on('winlink-compose-prefill', (_e, m) => cb(m || {})),
+  // Winlink forms (#346): Pat's catalog, Pat's download of the standard forms, the form window,
+  // and the filled form coming back for the compose pane. send() carries its formId.
+  formsCatalog: () => ipcRenderer.invoke('winlink-forms-catalog'),
+  formsUpdate: () => ipcRenderer.invoke('winlink-forms-update'),
+  formOpen: (o) => ipcRenderer.invoke('winlink-form-open', o),
+  formInfo: (o) => ipcRenderer.invoke('winlink-form-info', o), // #346 phase 2: does this received form name a reply form?
+  onFormResult: (cb) => ipcRenderer.on('winlink-form-result', (_e, m) => cb(m || {})),
 
   // Sessions — Connect is the only way a radio session starts.
   connect: (o) => ipcRenderer.invoke('winlink-cmd-connect', o),
@@ -42,6 +49,8 @@ contextBridge.exposeInMainWorld('api', {
   // magnitudes to main (which decides Busy/Clear and pushes the frames).
   onRemoteWatch: (cb) => ipcRenderer.on('winlink-remote-watch', (_e, on) => cb(!!on)),
   spectrumMags: (mags, inputPeak) => ipcRenderer.send('winlink-spectrum-mags', mags, inputPeak),
+  // Driving a remote shack (#299): the shack's waterfall frames, as this window's magnitudes.
+  onRemoteSpectrum: (cb) => ipcRenderer.on('winlink-remote-spectrum', (_e, d) => cb(d)),
   onAudioFrame: (cb) => {
     // main sends frames through audioSafeSend, which bounds its backlog on
     // ACKs from here (batched, with a periodic flush). Without them main

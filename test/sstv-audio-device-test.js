@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 'use strict';
 const { readSrc } = require('./_src');
-// SSTV listens to, and transmits through, the RADIO's audio device (My Rigs >
-// Audio), like FT8 and ECHOCAT. It used to default to the computer's default
+// SSTV listens to, and transmits through, the RADIO's audio device (Settings >
+// Radio, Audio Devices), like FT8 and ECHOCAT. It used to default to the computer's default
 // device, so on a USB-codec or SignaLink station it decoded the laptop mic
 // while everything else worked, and a saved device that had gone away was
 // silently replaced (Casey 2026-09-28: "Nobody is getting good rx").
@@ -33,7 +33,7 @@ test('an unset SSTV input follows the radio input', () => {
 test('a missing radio input is refused, never replaced by the default', () => {
   const r = resolveSstvAudio({ sstvId: '', rigId: 'gone', devices: DEVICES, kind: 'input' });
   assert.strictEqual(r.ok, false);
-  assert.match(r.message, /My Rigs > Audio/);
+  assert.match(r.message, /Settings > Radio, Edit the rig, Audio Devices, RX audio in/);
 });
 
 test('a device chosen in the SSTV window still overrides, and says when it differs', () => {
@@ -66,7 +66,7 @@ test('the output follows the same rules', () => {
   assert.strictEqual(resolveSstvAudio({ sstvId: '', rigId: 'codec-out', devices: OUT, kind: 'output' }).deviceId, 'codec-out');
   const gone = resolveSstvAudio({ sstvId: '', rigId: 'x', devices: OUT, kind: 'output' });
   assert.strictEqual(gone.ok, false);
-  assert.match(gone.message, /radio output/);
+  assert.match(gone.message, /Audio Devices, TX audio out/);
 });
 
 test('the SSTV window uses the resolver for RX and TX, and never falls back silently', () => {

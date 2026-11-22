@@ -1155,7 +1155,7 @@ let _currentRigFreqKhz = null;
 if (window.api.onCatFrequency) {
   window.api.onCatFrequency((hz) => {
     if (typeof hz === 'number' && hz > 0) {
-      _currentRigFreqKhz = Math.round(hz / 1000);
+      _currentRigFreqKhz = hz / 1000; // to the hertz; the box shows 100 Hz (#794)
     }
   });
 }
@@ -1170,7 +1170,7 @@ newQsoBtn.addEventListener('click', () => {
     // actually have a frequency cached — opening the form before the
     // rig connects leaves the field empty to type into.
     if (_currentRigFreqKhz && !newQsoFreq.value.trim()) {
-      newQsoFreq.value = String(_currentRigFreqKhz);
+      LogFreqField.fill(newQsoFreq, _currentRigFreqKhz);
     }
     newQsoCall.focus();
   }
@@ -1188,7 +1188,7 @@ document.getElementById('qso-new-save').addEventListener('click', async () => {
   const nowIso = new Date().toISOString();
   const qsoDate = ((newQsoDate && newQsoDate.value) || nowIso.slice(0, 10)).replace(/-/g, '');
   const timeOn = ((newQsoTime && newQsoTime.value) || nowIso.slice(11, 16)).replace(/:/g, '');
-  const freqKhz = newQsoFreq.value.trim();
+  const freqKhz = LogFreqField.value(newQsoFreq);
   const mode = newQsoMode.value;
   const ref = newQsoRef.value.trim().toUpperCase();
   const type = newQsoSelectedType;

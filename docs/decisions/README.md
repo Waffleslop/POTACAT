@@ -6,6 +6,7 @@ Undated entries from the first months carry 2026-03-01 as a stand-in date and sa
 
 | Date | Decision | Size |
 |---|---|---|
+| 2026-11-20 | [A JTCAT QSO is logged only when a 73 is sent or received](2026-11-20-a-jtcat-qso-is-logged-only-when-a-73-is-sent-or-received.md) | 2 KB |
 | 2026-11-02 | [What a record carries beyond the form](2026-11-02-what-a-record-carries-beyond-the-form.md) | 1 KB |
 | 2026-10-24 | [rig-presets.js grown: FIELDS, rules, Guest Pass tune (appendix 10/24)](2026-10-24-rig-presets-js-grown-fields-rules-guest-pass-tune-appendix-1.md) | 1 KB |
 | 2026-10-23 | [worked-overlay legend, LoTW detail, modem RX level (appendix 10/23)](2026-10-23-worked-overlay-legend-lotw-detail-modem-rx-level-appendix-10.md) | 1 KB |

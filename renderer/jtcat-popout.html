@@ -46,10 +46,7 @@
     /* The switch made the Band Activity header wider than a half-width pane: it
        wraps onto a second line rather than push Clear out of sight. */
     .jp-decode-header { flex-wrap: wrap; row-gap: 6px; }
-    .jp-view-switch { display: flex; gap: 0; }
-    .jp-view-switch .jtcat-filter-btn { border-radius: 0; }
-    .jp-view-switch .jtcat-filter-btn:first-child { border-radius: 8px 0 0 8px; }
-    .jp-view-switch .jtcat-filter-btn:last-child { border-radius: 0 8px 8px 0; margin-left: -1px; }
+    .jp-decode-header .jp-view-select { height: 34px; font-size: 14px; font-weight: 700; padding: 0 8px; border-radius: 8px; border: 1px solid var(--border-primary); background: var(--bg-primary); color: var(--text-primary); letter-spacing: 0; text-transform: none; cursor: pointer; }
     #jp-band-activity[hidden], #jp-stations[hidden] { display: none; }
     .jp-stations { padding: 0; overflow-x: auto; container: jp-stations / inline-size; }
     /* Call, Need, Calling, Park, Grid, Country, State, dB, Hz, Age (#557). */
@@ -722,7 +719,7 @@
       <div id="jp-pk-modes" class="jp-pk-modes" role="radiogroup" aria-label="Mode"></div>
       <div class="jp-picker-sec-row">
         <span class="jp-picker-sec">BAND</span>
-        <span class="jp-picker-note">Only the bands ticked for this radio (Settings &rarr; My Rigs)</span>
+        <span class="jp-picker-note">Only the bands ticked for this radio (Settings &gt; Radio, Edit the rig)</span>
       </div>
       <div id="jp-pk-bands" class="jp-pk-bands" role="radiogroup" aria-label="Band"></div>
       <button type="button" id="jp-pk-apply" class="jp-pk-apply" disabled>Running FT8 on 20m</button>
@@ -764,7 +761,7 @@
   <div class="jp-main">
     <div class="jp-decode-pane">
       <div class="jp-decode-section">
-        <div class="jp-decode-header"><span>Band Activity<span id="jp-hidden-note" class="jp-hidden-note" hidden></span></span> <div class="jp-view-switch" role="group" aria-label="Show Band Activity as"><button type="button" id="jp-view-stream" class="jtcat-filter-btn active" title="Every decode as it arrives, newest at the bottom">Stream</button><button type="button" id="jp-view-stations" class="jtcat-filter-btn" title="One line per station heard, kept up to date">Stations</button></div> <div style="display:flex;gap:4px;align-items:center;"><input type="text" id="jp-search" placeholder="Filter by call or word" title="One or more callsigns or words, separated by commas or spaces: a line shows if it contains any of them" spellcheck="false"><button id="jp-cq-filter" class="jtcat-filter-btn" title="Only CQs, 73s and calls to me">CQ &amp; 73</button><button id="jp-wanted-filter" class="jtcat-filter-btn" title="Show only needed DXCC/grid/call">Wanted</button><button id="jp-sort-signal" class="jtcat-filter-btn" title="Sort by signal strength (strongest first)">dB</button><button id="jp-event-filter" class="jtcat-filter-btn" title="Show only tracked-event stations you still need (13 Colonies etc.)">Event</button><button id="jp-clear" class="jtcat-filter-btn" title="Clear all decodes">Clear</button></div></div>
+        <div class="jp-decode-header"><span>Band Activity<span id="jp-hidden-note" class="jp-hidden-note" hidden></span></span> <div style="display:flex;gap:4px;align-items:center;"><input type="text" id="jp-search" placeholder="Filter by call or word" title="One or more callsigns or words, separated by commas or spaces: a line shows if it contains any of them" spellcheck="false"><button id="jp-cq-filter" class="jtcat-filter-btn" title="Only CQs, 73s and calls to me">CQ &amp; 73</button><button id="jp-wanted-filter" class="jtcat-filter-btn" title="Show only needed DXCC/grid/call">Wanted</button><button id="jp-sort-signal" class="jtcat-filter-btn" title="Sort by signal strength (strongest first)">dB</button><button id="jp-event-filter" class="jtcat-filter-btn" title="Show only tracked-event stations you still need (13 Colonies etc.)">Event</button><button id="jp-clear" class="jtcat-filter-btn" title="Clear all decodes">Clear</button><select id="jp-view" class="jp-view-select" aria-label="Show Band Activity as" title="Stream: every decode as it arrives, newest at the bottom. Stations: one line per station heard, kept up to date."><option value="stream" selected>Stream</option><option value="stations">Stations</option></select></div></div>
         <div id="jp-band-activity" class="jp-decode-list">
           <div class="jp-empty">Waiting for decodes...</div>
         </div>
@@ -1229,7 +1226,7 @@
         <option value="radio">Radio (sound card)</option>
         <option value="websdr">WebSDR</option>
       </select></span>
-      <span class="jp-opt-help">Where JTCAT hears the band. Radio (sound card) is your radio's audio, as Settings &gt; My Rigs sets it. WebSDR decodes from the WebSDR you are listening to; it follows JTCAT's band. JTCAT does not transmit while the WebSDR is the source: it cannot hear you and is not on your radio's frequency.</span>
+      <span class="jp-opt-help">Where JTCAT hears the band. Radio (sound card) is your radio's audio, as Settings &gt; Radio, Edit the rig, Audio Devices sets it. WebSDR decodes from the WebSDR you are listening to; it follows JTCAT's band. JTCAT does not transmit while the WebSDR is the source: it cannot hear you and is not on your radio's frequency.</span>
     </label>
     <div class="jp-opt-section">Contacts</div>
     <button id="jp-answer-callers" class="jp-opt-row active">
@@ -1250,7 +1247,7 @@
     </button>
     <label class="jp-opt-row jp-opt-num-row">
       <span class="jp-opt-label">Stop repeating a message after <input id="jp-max-attempts" type="number" min="1" max="60" value="12"> tries</span>
-      <span class="jp-opt-help">Stop repeating an unanswered message after this many transmissions. If signal reports were exchanged both ways, the QSO is logged and a final 73 is sent first.</span>
+      <span class="jp-opt-help">Stop repeating an unanswered message after this many transmissions. A contact is logged only when a 73 is sent or received; if it stops before that, it is not logged and you can press Send 73 to log it.</span>
     </label>
     <label class="jp-opt-row jp-opt-num-row">
       <span class="jp-opt-label">Call a station again after <input id="jp-rework-days" type="number" min="0" max="3650" value="0"> days</span>

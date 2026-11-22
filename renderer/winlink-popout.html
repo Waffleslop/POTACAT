@@ -80,6 +80,16 @@
     .wl-tpl-head { padding: 6px 10px 2px; font-size: 12px; color: var(--text-secondary); }
     .wl-tpl-sep { height: 1px; margin: 4px 6px; background: var(--border-primary); }
     .wl-tpl-add { color: var(--accent-blue, #4fc3f7); font-weight: 600; }
+    /* Winlink forms (#346): the picker fills the reading pane like the Position report. */
+    .wl-forms-row { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: 0 0 12px; max-width: 620px; }
+    .wl-forms-row input[type=text] { flex: 1; min-width: 160px; }
+    .wl-forms-head { margin: 14px 0 4px; font-size: 12px; color: var(--text-secondary); }
+    .wl-forms-list { display: flex; flex-direction: column; gap: 2px; max-width: 620px; }
+    .wl-forms-list .wl-tpl-item { border: 1px solid transparent; }
+    .wl-forms-list .wl-tpl-item:hover { border-color: var(--border-primary); }
+    .wl-forms-msg { margin: 8px 0 0; max-width: 620px; font-size: 13px; line-height: 1.5; color: var(--text-secondary); }
+    .wl-forms-msg.bad { color: var(--accent-red-text, var(--accent-red, #e94560)); }
+    #wl-c-body[readonly] { background: var(--bg-secondary); color: var(--text-secondary); }
     .wl-star { width: 15px; height: 15px; flex-shrink: 0; fill: var(--accent-blue, #4fc3f7); }
     .wl-star.empty { fill: none; stroke: var(--text-secondary); stroke-width: 1.6; }
 
@@ -198,7 +208,18 @@
     .wl-folders .wl-btn.on { border-color: var(--accent-blue, #4fc3f7); color: var(--accent-blue, #4fc3f7); background: var(--bg-hover); font-weight: 700; }
 
     .wl-list { width: 320px; flex-shrink: 0; border-right: 1px solid var(--border-primary); overflow-y: auto; }
-    .wl-row { padding: 6px 10px; border-bottom: 1px solid var(--border-primary); cursor: pointer; }
+    .wl-row { padding: 6px 10px 6px 6px; border-bottom: 1px solid var(--border-primary); cursor: pointer; display: flex; align-items: flex-start; gap: 6px; }
+    .wl-row-main { flex: 1; min-width: 0; }
+    /* #346: a box per row picks it; the bar above the list deletes the lot. */
+    .wl-sel { width: 16px; height: 16px; margin: 2px 0 0; flex-shrink: 0; cursor: pointer; accent-color: var(--accent-blue, #4fc3f7); }
+    .wl-row.picked { background: var(--bg-hover); }
+    .wl-selbar { position: sticky; top: 0; z-index: 1; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 6px 10px; border-bottom: 1px solid var(--border-primary); background: var(--bg-secondary); font-size: 13px; }
+    .wl-selbar-text { font-weight: 700; flex: 1 1 100%; }
+    .wl-selbar-btns { display: flex; flex-wrap: wrap; flex: 1 1 100%; gap: 6px; align-items: center; min-width: 0; }
+    .wl-selbar .wl-btn { height: 28px; font-size: 13px; }
+    .wl-selbar.armed { box-shadow: inset 3px 0 0 #e94560; }
+    .wl-selbar-q { flex: 1 1 100%; }
+    .wl-selbar.bad .wl-selbar-text { color: var(--accent-red-text, var(--accent-red, #e94560)); font-weight: 400; }
     .wl-row:hover { background: var(--bg-hover); }
     .wl-row.active { background: var(--bg-hover); box-shadow: inset 3px 0 0 var(--accent-blue, #4fc3f7); }
     .wl-row.unread .wl-subj { font-weight: 700; }
@@ -428,6 +449,7 @@
       <div class="wl-folder" data-box="deleted">Deleted <span class="wl-count" id="wl-c-deleted"></span></div>
       <button class="wl-btn primary" id="wl-new">New message</button>
       <button class="wl-btn" id="wl-tpl-btn" aria-haspopup="menu" aria-expanded="false" title="Start from a template: Position report, POTA spot, or your own">Templates</button>
+      <button class="wl-btn" id="wl-forms-btn" title="Fill in a Winlink form: Winlink Check-in, ICS-213 and the rest of the Winlink Standard Forms">Forms</button>
       <span class="wl-spacer"></span>
       <button class="wl-btn" id="wl-history-btn" title="Every gateway you have called">History</button>
       <button class="wl-btn" id="wl-settings">Settings</button>
@@ -465,6 +487,25 @@
         </div>
         <!-- One row (Casey 2026-11-11): Attach | Cancel | Put in Outbox -->
         <div class="wl-c-actions"><button class="wl-btn" id="wl-c-attach">Attach…</button><button class="wl-btn" id="wl-c-save-tpl" title="Keep this message as a template in the Templates menu">Save as template</button><span class="wl-c-files" id="wl-c-files"></span><span class="wl-spacer"></span><button class="wl-btn" id="wl-c-cancel">Cancel</button><button class="wl-btn primary" id="wl-c-send">Put in Outbox</button></div>
+      </div>
+      <!-- Winlink forms (#346): Pat's forms, filled in Pat's own page in a window of its own. -->
+      <div class="wl-form" id="wl-form-forms" hidden>
+        <div class="wl-form-body">
+          <h2 class="wl-form-title">Winlink forms</h2>
+          <p class="wl-form-lead" id="wl-forms-lead">The Winlink Standard Forms, the same ones Winlink Express uses. A form opens in its own window; when you press its Submit, the message comes back here to put in the Outbox.</p>
+          <div class="wl-forms-row">
+            <span class="wl-form-help" id="wl-forms-status">Asking Pat for its forms...</span>
+            <span class="wl-spacer"></span>
+            <button type="button" class="wl-btn" id="wl-forms-get" hidden>Get the standard forms</button>
+          </div>
+          <div class="wl-forms-row" id="wl-forms-find-row" hidden>
+            <input type="text" id="wl-forms-find" placeholder="Find a form: ICS 213, check-in, radiogram" spellcheck="false" aria-label="Find a form">
+          </div>
+          <div id="wl-forms-favs-wrap" hidden><div class="wl-forms-head">Favorites</div><div class="wl-forms-list" id="wl-forms-favs"></div></div>
+          <div id="wl-forms-list-wrap" hidden><div class="wl-forms-head" id="wl-forms-list-head">Found</div><div class="wl-forms-list" id="wl-forms-list"></div></div>
+          <div class="wl-forms-msg" id="wl-forms-msg" role="status"></div>
+        </div>
+        <div class="wl-c-actions"><span class="wl-spacer"></span><button type="button" class="wl-btn" id="wl-forms-close">Close</button></div>
       </div>
       <!-- Position report (Casey 2026-11-11: "what is the full strategy"): a form, not an instant queue. -->
       <form class="wl-form" id="wl-form-pos" hidden autocomplete="off">
@@ -562,8 +603,10 @@
   <script src="../lib/rig-bands.js"></script>
   <script src="../lib/winlink-contacts.js"></script>
   <script src="../lib/winlink-mail-actions.js"></script>
+  <script src="../lib/winlink-mail-select.js"></script>
   <script src="../lib/winlink-mail-view.js"></script>
   <script src="../lib/pota-email-spot.js"></script>
+  <script src="../lib/winlink-forms.js"></script>
   <script src="winlink-popout.js"></script>
 </body>
 </html>

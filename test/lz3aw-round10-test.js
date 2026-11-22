@@ -354,8 +354,10 @@ test('protocol + capability: cw-key is registered and advertised', () => {
 test('web: the page sends its keyer\'s elements (ideal times) and stops forwarding contacts', () => {
   const web = R('renderer/remote.js');
   assert.ok(/cwKeyStreamOk = ws\._serverCapabilities\.indexOf\('cw-key-stream'\) !== -1;/.test(web));
-  const fn = web.slice(web.indexOf('function sendCwKeyStream('), web.indexOf('function sendCwKeyStream(') + 1400);
-  assert.ok(/info\.continued && cwStreamNextAt\) \? cwStreamNextAt : now/.test(fn), 'a continued element starts exactly one space after the last');
+  // #244 (2026-11-19): the element's time is fixed at the choice, and it is
+  // sent when its sidetone starts (lib/cw-sidetone-commit.js).
+  const fn = web.slice(web.indexOf('function cwStreamElementAt('), web.indexOf('function cwStreamElementAt(') + 1400);
+  assert.ok(/info\.continued && cwStreamNextAt\) \? cwStreamNextAt : performance\.now\(\)/.test(fn), 'a continued element starts exactly one space after the last');
   assert.ok(/cwStreamNextAt = at \+ durMs \+/.test(fn));
   assert.ok(/startElement\(!currentIsDit, true\)/.test(web) && /startElement\(currentIsDit, true\)/.test(web), 'continuations are marked');
   const sp = web.slice(web.indexOf('function sendPaddle('), web.indexOf('function sendPaddle(') + 1500);

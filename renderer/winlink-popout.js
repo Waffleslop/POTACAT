@@ -161,6 +161,10 @@
     if (m.id === 'mercury') note = 'Experimental: few gateways run Mercury yet.';
     if (m.id === 'vara' || m.id === 'varafm') note = 'Your own ' + (m.id === 'varafm' ? 'VARA FM' : 'VARA HF') + ', with its PTT set to VOX — POTACAT starts it if needed and keys the radio.';
     if (m.note) note = m.note;   // a radio mode that runs with a caveat: no CAT control, the operator sets the dial (NA4DQ)
+    // VARA too old for 1 January 2027 (the shack read its version): said first, plainly.
+    var vn = (state && state.varaNotice) || {};
+    var varaOld = m.id === 'vara' ? vn.hf : m.id === 'varafm' ? vn.fm : '';
+    if (varaOld) note = varaOld + (note ? ' ' + note : '');
     // Say WHY the other modes are greyed, whichever mode is picked (#435) —
     // a tooltip on a disabled option is invisible on most systems. One line
     // per distinct reason, as ECHOCAT Web says it.
@@ -254,16 +258,74 @@
   // ── lists ────────────────────────────────────────────────────────────────
   function renderList() {
     var rows = lists[box] || [];
+    sel = WMS.prune(sel, rows.map(function (m) { return m.mid; }));
+    if (!sel.mids.length) selArmed = false;
     // The Deleted folder says how long it keeps a message, with the choice beside it (#475).
-    var head = box === 'deleted' ? deletedHead() : '';
+    var head = selBar() + (box === 'deleted' ? deletedHead() : '');
     if (!rows.length) { $('wl-list').innerHTML = head + '<div class="wl-empty">Nothing in ' + ({ in: 'the inbox', out: 'the outbox', sent: 'Sent', archive: 'the archive', deleted: 'Deleted' })[box] + '.</div>'; return; }
     $('wl-list').innerHTML = head + rows.map(function (m) {
       var fromOther = box === 'in' || ((box === 'archive' || box === 'deleted') && !WMA.isOwnAddress(m.from, state && state.mycall));
       var who = fromOther ? m.from : (m.to || []).join(', ');
-      return '<div class="wl-row' + (m.read ? '' : ' unread') + (m.mid === openMid ? ' active' : '') + '" data-mid="' + esc(m.mid) + '">'
-        + '<div class="wl-row-top"><span class="wl-from">' + esc(who) + '</span><span>' + esc(fmtDate(m.date)) + '</span></div>'
-        + '<div class="wl-subj">' + (m.attachments && m.attachments.length ? '[' + m.attachments.length + ' att] ' : '') + esc(m.subject || '(no subject)') + '</div></div>';
+      var picked = sel.mids.indexOf(m.mid) >= 0;
+      return '<div class="wl-row' + (m.read ? '' : ' unread') + (m.mid === openMid ? ' active' : '') + (picked ? ' picked' : '') + '" data-mid="' + esc(m.mid) + '">'
+        + '<input type="checkbox" class="wl-sel"' + (picked ? ' checked' : '') + (selBusy ? ' disabled' : '') + ' aria-label="Select this message" title="Select. Shift-click a second box to select the messages between.">'
+        + '<div class="wl-row-main"><div class="wl-row-top"><span class="wl-from">' + esc(who) + '</span><span>' + esc(fmtDate(m.date)) + '</span></div>'
+        + '<div class="wl-subj">' + (m.attachments && m.attachments.length ? '[' + m.attachments.length + ' att] ' : '') + esc(m.subject || '(no subject)') + '</div></div></div>';
     }).join('');
+  }
+
+  // ── several at once (#346) ───────────────────────────────────────────────
+  // A box on each row picks it (Shift-click a second box, or Ctrl/Shift-click
+  // a row, for more); the bar above the list deletes the lot after one
+  // question asked in the bar itself. Each message goes through the same
+  // delete as the reader's button, one after another, so nothing new crosses
+  // the wire. Words: lib/winlink-mail-select.js.
+  var WMS = window.WinlinkMailSelect;
+  var sel = WMS.none();
+  var selArmed = false;          // the bar is asking its one question
+  var selBusy = null;            // { i, n } while deleting
+  var selMsg = null;             // { text, bad } after a run
+  var selMsgTimer = null;
+  function selBar() {
+    var n = sel.mids.length;
+    if (selBusy) return '<div class="wl-selbar" id="wl-selbar" role="status"><span class="wl-selbar-text">' + esc(WMS.progressText(box, selBusy.i, selBusy.n)) + '</span></div>';
+    if (n && selArmed) {
+      return '<div class="wl-selbar armed" id="wl-selbar"><div class="wl-selbar-q">' + esc(WMS.confirmText(box, n)) + '</div>'
+        + '<div class="wl-selbar-btns"><span class="wl-spacer"></span><button class="wl-btn" id="wl-sel-cancel">Cancel</button>'
+        + '<button class="wl-btn danger" id="wl-sel-go">' + esc(box === 'deleted' ? 'Delete for good' : 'Move to Deleted') + '</button></div></div>';
+    }
+    if (n) {
+      return '<div class="wl-selbar" id="wl-selbar"><span class="wl-selbar-text">' + esc(WMS.barText(n)) + '</span>'
+        + '<div class="wl-selbar-btns"><button class="wl-btn" id="wl-sel-all">Select all</button>'
+        + '<button class="wl-btn" id="wl-sel-clear">Clear</button>'
+        + '<span class="wl-spacer"></span>'
+        + '<button class="wl-btn danger" id="wl-sel-del">' + esc(WMS.deleteLabel(box, n)) + '</button></div></div>';
+    }
+    if (selMsg) return '<div class="wl-selbar' + (selMsg.bad ? ' bad' : '') + '" id="wl-selbar" role="status"><span class="wl-selbar-text">' + esc(selMsg.text) + '</span></div>';
+    return '';
+  }
+  function clearSelection() { sel = WMS.none(); selArmed = false; }
+  async function deleteSelected() {
+    if (selBusy || !sel.mids.length) return;
+    var from = box;
+    var mids = sel.mids.slice();
+    var ok = 0, failed = 0, firstError = '';
+    clearSelection();
+    selMsg = null; clearTimeout(selMsgTimer);
+    for (var i = 0; i < mids.length; i++) {
+      selBusy = { i: i + 1, n: mids.length };
+      renderList();
+      var r = null;
+      try { r = await window.api.del(from, mids[i]); } catch (e) { r = { ok: false, error: e && e.message }; }
+      if (r && r.ok) {
+        ok++;
+        if (openMid === mids[i]) { openMid = null; showReader('<div class="wl-empty">Pick a message.</div>'); }
+      } else { failed++; if (!firstError) firstError = (r && r.error) || ''; }
+    }
+    selBusy = null;
+    selMsg = { text: WMS.resultText(from, ok, failed, firstError), bad: failed > 0 };
+    selMsgTimer = setTimeout(function () { selMsg = null; renderList(); }, failed ? 12000 : 6000);
+    renderList();
   }
 
   function deletedHead() {
@@ -280,14 +342,39 @@
     renderList();
   });
   $('wl-list').addEventListener('click', function (e) {
-    var row = e.target.closest('.wl-row');
-    if (row) openMessage(row.getAttribute('data-mid'));
+    var t = e.target;
+    if (t.closest('#wl-selbar')) {
+      var b = t.closest('button');
+      if (!b) return;
+      if (b.id === 'wl-sel-all') { sel = WMS.allOf((lists[box] || []).map(function (m) { return m.mid; })); selArmed = false; }
+      else if (b.id === 'wl-sel-clear') clearSelection();
+      else if (b.id === 'wl-sel-del') selArmed = true;
+      else if (b.id === 'wl-sel-cancel') selArmed = false;
+      else if (b.id === 'wl-sel-go') { deleteSelected(); return; }
+      renderList();
+      return;
+    }
+    var row = t.closest('.wl-row');
+    if (!row) return;
+    var mid = row.getAttribute('data-mid');
+    // The box, or Ctrl/Shift on the row, picks; a plain click on the row opens it.
+    if (t.classList.contains('wl-sel') || e.ctrlKey || e.metaKey || e.shiftKey) {
+      if (selBusy) return;
+      sel = WMS.pick(sel, mid, { shift: e.shiftKey }, (lists[box] || []).map(function (m) { return m.mid; }));
+      selArmed = false; selMsg = null;
+      renderList();
+      var again = document.querySelector('.wl-row[data-mid="' + (window.CSS && CSS.escape ? CSS.escape(mid) : mid) + '"] .wl-sel');
+      if (again) again.focus();
+      return;
+    }
+    openMessage(mid);
   });
 
   Array.prototype.forEach.call(document.querySelectorAll('.wl-folder'), function (f) {
     f.addEventListener('click', function () {
       if (historyOpen) closeHistory();
       box = f.getAttribute('data-box');
+      clearSelection();
       Array.prototype.forEach.call(document.querySelectorAll('.wl-folder'), function (x) { x.classList.toggle('active', x === f); });
       openMid = null;
       showReader('<div class="wl-empty">Pick a message.</div>');
@@ -324,7 +411,12 @@
       var left = acts.filter(function (a) { return !a.danger; });
       var right = acts.filter(function (a) { return a.danger; });
       var deleted = openBox === WMA.DELETED;
+      // A Winlink form attachment (#346): Pat renders it in the form window.
+      var formAtt = !deleted && window.WinlinkForms ? window.WinlinkForms.formAttachment(m.attachments) : null;
       var html = '<div class="wl-reader-actions">'
+        + (formAtt ? '<button class="wl-btn" id="wl-view-form" title="Open the form this message carries, the way the sender filled it in">View form</button>' : '')
+        // Reply with form (#346 phase 2): shown once Pat's copy of the form says it names a reply form.
+        + (formAtt && (openBox === 'in' || openBox === 'archive') ? '<button class="wl-btn" id="wl-reply-form" hidden title="Answer with the reply form this form names, already linked to it">Reply with form</button>' : '')
         + left.map(btn).join('')
         + (!deleted && m.from && !contactFor(m.from) && WC.normalizeAddress(m.from) ? '<button class="wl-btn" id="wl-addbook">Add to address book</button>' : '')
         + '<span class="wl-spacer"></span>' + right.map(btn).join('') + '</div>'
@@ -353,6 +445,24 @@
       // Reply all: never the default; To = the sender, Cc = everyone else but this station.
       on('wl-reply-all', function () { var ra = WMA.replyAll(m, mycall); compose({ to: ra.to.join(', '), cc: ra.cc.join(', '), subject: WMA.replySubject(m.subject), body: quoteBody(m) }); });
       on('wl-addbook', function () { openBook({ address: m.from }); });
+      if ($('wl-reply-form') && window.api.formInfo) window.api.formInfo({ box: openBox, mid: mid, file: formAtt.file }).then(function (r) {
+        var b = $('wl-reply-form');
+        if (b && openMid === mid && r && r.ok && r.reply) { b.hidden = false; b.title = 'Answer with the reply form ' + r.replyName + ', already linked to this message'; }
+      });
+      on('wl-reply-form', function () {
+        say('Opening the reply form...');
+        window.api.formOpen({ kind: 'reply', box: openBox, mid: mid, file: formAtt.file }).then(function (r) {
+          if (!r || !r.ok) say((r && r.error) || 'Could not open the reply form.', true);
+          else say('The reply form is open in its own window. Fill it in and press its Submit button; the reply comes back here for you to put in the Outbox.');
+        });
+      });
+      on('wl-view-form', function () {
+        say('Opening the form...');
+        window.api.formOpen({ kind: 'view', box: openBox, mid: mid, file: formAtt.file }).then(function (r) {
+          if (!r || !r.ok) say((r && r.error) || 'Could not open the form.', true);
+          else say('The form is open in its own window.');
+        });
+      });
       // #wl-forward, not #wl-fwd: that id is the PWR meter, which took the click.
       on('wl-forward', function () { compose({ subject: 'Fwd: ' + m.subject, body: '\n\n--- Forwarded from ' + m.from + ':\n' + (m.body || '') }); });
       acts.forEach(function (a) {
@@ -420,6 +530,11 @@
       $('wl-reader').style.display = 'none';
       $('wl-compose').classList.add('show');
       setTemplateMode(pre.template ? { id: pre.id || null } : null);
+      // A form's message (#346): Pat adds the form's data when it goes in the
+      // Outbox. A read-only form's body cannot be changed (the template says so).
+      composeForm = pre.form || null;
+      $('wl-c-body').readOnly = !!(composeForm && composeForm.readOnly);
+      $('wl-c-save-tpl').hidden = !!pre.template || !!composeForm;
       $('wl-c-name').value = pre.name || '';
       setChips('to', pre.to || '');
       setChips('cc', pre.cc || '');
@@ -430,7 +545,8 @@
       $('wl-c-err').textContent = '';
       // A template's instructions go in their own panel above the body.
       $('wl-c-hint').textContent = pre.note || '';
-      $('wl-c-hint').hidden = !pre.note;
+      if (composeForm) $('wl-c-hint').textContent = formNote(composeForm);
+      $('wl-c-hint').hidden = !$('wl-c-hint').textContent;
       (pre.template ? $('wl-c-name') : pre.to ? $('wl-c-body') : chipFields.to.input).focus();
     };
     if (pre && pre.template) go(); else requireNotice(go);
@@ -451,9 +567,10 @@
     $('wl-c-err').textContent = '';
     if (tplEdit) { saveTemplate(); return; }
     $('wl-c-send').disabled = true;
-    window.api.send({ to: chipValue('to'), cc: chipValue('cc'), subject: $('wl-c-subj').value, body: $('wl-c-body').value, attachments: pendingFiles }).then(function (r) {
+    window.api.send({ to: chipValue('to'), cc: chipValue('cc'), subject: $('wl-c-subj').value, body: $('wl-c-body').value, attachments: pendingFiles, formId: composeForm ? composeForm.id : undefined }).then(function (r) {
       $('wl-c-send').disabled = false;
       if (!r || !r.ok) { $('wl-c-err').textContent = (r && r.error) || 'Could not queue it'; return; }
+      composeForm = null;
       showReader('<div class="wl-empty">In the Outbox. It goes out on the next Send / Receive.</div>');
     });
   });
@@ -564,6 +681,88 @@
     setTemplateMode({ id: null });
     $('wl-c-err').textContent = '';
     $('wl-c-name').focus();
+  });
+
+  // ── Winlink forms (#346) ─────────────────────────────────────────────────
+  // Pat's forms (lib/winlink-forms.js): favourites first, then every form,
+  // with a search. A form opens in its own window (Pat's own page); its
+  // Submit brings the message back to the compose pane above. Offered only
+  // with Pat 1.0.1 or newer; otherwise the panel says why in one sentence.
+  var composeForm = null;   // { id, name, readOnly } while the compose pane holds a form's message
+  var formsCat = null;      // main's answer: { ok, allowed, why, installed, version, count, favourites, forms }
+  function formNote(f) {
+    return 'Made with the Winlink form "' + f.name + '". Pat adds the form\'s data as an attachment, so Winlink Express and Pat show it as the form.'
+      + (f.readOnly ? ' This form\'s message may not be changed; fill the form in again to change it.' : '');
+  }
+  function formsSay(t, bad) { var el = $('wl-forms-msg'); el.textContent = t || ''; el.classList.toggle('bad', !!bad); }
+  function formItem(f) {
+    if (f.missing) return '<button type="button" class="wl-tpl-item" data-form-find="' + esc(f.search) + '"><span class="wl-tpl-main">' + esc(f.name) + '<span class="wl-tpl-sub">Not in this forms set by that name. Click to search for it.</span></span></button>';
+    return '<button type="button" class="wl-tpl-item" data-form-path="' + esc(f.path) + '"><span class="wl-tpl-main">' + esc(f.name) + '<span class="wl-tpl-sub">' + esc(f.folder) + '</span></span></button>';
+  }
+  function renderFormsPanel() {
+    var c = formsCat || {};
+    var usable = !!(c.ok && c.allowed);
+    var status = !c.allowed && c.why ? c.why
+      : !c.ok ? (c.error || 'Pat did not answer.')
+      : c.installed ? c.count + ' forms, Winlink Standard Forms version ' + (c.version || 'unknown') + '.'
+      : 'No forms on this computer yet. Pat gets the Winlink Standard Forms (about 3 MB) from getpat.io.';
+    $('wl-forms-status').textContent = status;
+    $('wl-forms-get').hidden = !usable;
+    $('wl-forms-get').textContent = c.installed ? 'Check for newer forms' : 'Get the standard forms';
+    $('wl-forms-find-row').hidden = !(usable && c.installed);
+    var favs = usable && c.installed ? (c.favourites || []) : [];
+    $('wl-forms-favs-wrap').hidden = !favs.length;
+    $('wl-forms-favs').innerHTML = favs.map(formItem).join('');
+    var q = String($('wl-forms-find').value || '').trim();
+    var list = !(usable && c.installed) ? [] : q ? window.WinlinkForms.searchForms(c.forms, q, 60) : (c.forms || []);
+    $('wl-forms-list-wrap').hidden = !(usable && c.installed);
+    $('wl-forms-list-head').textContent = q ? (list.length ? 'Found ' + list.length + (list.length === 60 ? ' (the first 60)' : '') : 'No form has those words') : 'All forms';
+    $('wl-forms-list').innerHTML = list.map(formItem).join('');
+  }
+  function openFormsPanel() {
+    requireNotice(function () {
+      showForm('wl-form-forms');
+      formsSay('');
+      formsCat = null;
+      $('wl-forms-status').textContent = 'Asking Pat for its forms...';
+      $('wl-forms-get').hidden = true;
+      $('wl-forms-find-row').hidden = true;
+      $('wl-forms-favs-wrap').hidden = true;
+      $('wl-forms-list-wrap').hidden = true;
+      window.api.formsCatalog().then(function (c) {
+        formsCat = c || { ok: false, allowed: true, error: 'Pat did not answer.' };
+        renderFormsPanel();
+        if (!$('wl-forms-find-row').hidden) $('wl-forms-find').focus();
+      });
+    });
+  }
+  $('wl-forms-btn').addEventListener('click', function () { closeTemplateMenu(); openFormsPanel(); });
+  $('wl-forms-close').addEventListener('click', function () { showReader('<div class="wl-empty">Pick a message.</div>'); });
+  $('wl-forms-find').addEventListener('input', renderFormsPanel);
+  $('wl-forms-get').addEventListener('click', function () {
+    var b = $('wl-forms-get');
+    b.disabled = true;
+    formsSay('Pat is getting the Winlink Standard Forms from getpat.io (about 3 MB)...');
+    window.api.formsUpdate().then(function (r) {
+      b.disabled = false;
+      formsSay((r && r.text) || 'That did not work. Try again.', !(r && r.ok));
+      return window.api.formsCatalog();
+    }).then(function (c) { if (c) { formsCat = c; renderFormsPanel(); } });
+  });
+  $('wl-form-forms').addEventListener('click', function (e) {
+    var find = e.target.closest('[data-form-find]');
+    if (find) { $('wl-forms-find').value = find.getAttribute('data-form-find'); renderFormsPanel(); $('wl-forms-find').focus(); return; }
+    var it = e.target.closest('[data-form-path]');
+    if (!it) return;
+    formsSay('Opening the form...');
+    window.api.formOpen({ kind: 'new', path: it.getAttribute('data-form-path') }).then(function (r) {
+      if (!r || !r.ok) { formsSay((r && r.error) || 'Could not open the form.', true); return; }
+      formsSay('The form is open in its own window. Fill it in and press its Submit button; the message comes back here for you to put in the Outbox.');
+    });
+  });
+  if (window.api.onFormResult) window.api.onFormResult(function (m) {
+    if (!m || m.error) { showForm('wl-form-forms'); formsSay((m && m.error) || 'The form did not come back.', true); return; }
+    compose({ to: m.to, cc: m.cc, subject: m.subject, body: m.body, form: { id: m.id, name: m.name, readOnly: !!m.readOnly } });
   });
 
   // ── waterfall: is the gateway frequency in use? ──────────────────────────
@@ -755,7 +954,8 @@
     wfListenStart();
     window.api.watchAudio(false);
     window.api.audioRig().then(function (rig) {
-      var c = { audio: rig && rig.ok && rig.inputId ? { deviceId: { exact: rig.inputId }, echoCancellation: false, noiseSuppression: false, autoGainControl: false } : { echoCancellation: false, noiseSuppression: false, autoGainControl: false } };
+      // #757: 1 channel, the modem bridge's layout for the same device.
+      var c = { audio: rig && rig.ok && rig.inputId ? { deviceId: { exact: rig.inputId }, channelCount: 1, echoCancellation: false, noiseSuppression: false, autoGainControl: false } : { channelCount: 1, echoCancellation: false, noiseSuppression: false, autoGainControl: false } };
       return navigator.mediaDevices.getUserMedia(c);
     }).then(function (stream) {
       if (wfMode !== 'capture') { stream.getTracks().forEach(function (t) { t.stop(); }); return; }
@@ -796,6 +996,15 @@
     var pcm = d.pcm instanceof Float32Array ? d.pcm : new Float32Array(d.pcm);
     wfNoteFrame(pcm);
     wfPush(pcm, d.sampleRate || 24000);
+  });
+  // Driving a remote shack (#299): no radio audio reaches this PC; the shack
+  // sends its waterfall as frames (lib/winlink-remote-shack.js magsFromWireBins).
+  if (window.api.onRemoteSpectrum) window.api.onRemoteSpectrum(function (d) {
+    if (wfMode !== 'frames' || !d || !Array.isArray(d.mags)) return;
+    wfLastFrameAt = wfLastSoundAt = Date.now();
+    var m = new Float32Array(d.mags);
+    busyUpdate(m);
+    if (wf && $('wl-wf').classList.contains('show')) wf.pushFrame(m);
   });
   function wfSync() {
     wfApplyPrefs();
@@ -974,7 +1183,7 @@
       if (hit) picked = true;
       return favOption(f, i, hit);
     }).join('') + '</optgroup>' : '';
-    var more = r.leftOut ? '<option value="" disabled>' + esc(r.leftOut + ' more this radio cannot call (outside the amateur bands, or bands not set up in Settings > My Rigs > Bands)') + '</option>' : '';
+    var more = r.leftOut ? '<option value="" disabled>' + esc(r.leftOut + ' more this radio cannot call (outside the amateur bands, or not ticked under Check all bands in Settings > Radio, Edit the rig)') + '</option>' : '';
     sel.innerHTML = '<optgroup label="' + (r.predicted ? 'Best path now' : 'Nearest first') + '">' + rows + '</optgroup>' + extra + more;
     if (pendingPick && !picked) {
       // A History row not in today's list is still callable: a row of its own at the top.
@@ -1595,6 +1804,7 @@
 
   // ── the forms share the reading pane with the reader and compose ────────
   function hideForms() {
+    $('wl-form-forms').hidden = true;
     $('wl-form-pos').hidden = true;
     $('wl-form-spot').hidden = true;
     closeBook();

@@ -1495,7 +1495,7 @@ window.api.onSstvTxAudio(async (data) => {
   const gainLevel = window.SstvDrive.gainFromPct(txGainSlider.value);
 
   try {
-    // The radio's output (My Rigs > Audio) unless this window chose one; a
+    // The radio's output (Settings > Radio, Audio Devices) unless this window chose one; a
     // configured device that cannot be opened REFUSES the transmission (the
     // catch below unkeys) instead of playing the picture out of the PC
     // speakers with the radio keyed (lib/sstv-audio-device.js).
@@ -1829,9 +1829,9 @@ openFolderBtn.addEventListener('click', openGalleryFolder);
 let _sstvAudioDevices = { inputs: [], outputs: [] };
 
 function _rigDeviceOptionLabel(list, rigId) {
-  if (!rigId) return 'From My Rigs (not set)';
+  if (!rigId) return 'From the radio (not set)';
   const d = list.find(x => x.deviceId === rigId);
-  return 'From My Rigs (' + (d ? (d.label || rigId.slice(0, 20)) : 'not connected') + ')';
+  return 'From the radio (' + (d ? (d.label || rigId.slice(0, 20)) : 'not connected') + ')';
 }
 
 async function populateAudioDevices() {
@@ -1841,7 +1841,7 @@ async function populateAudioDevices() {
     const outputs = devices.filter(d => d.kind === 'audiooutput');
     _sstvAudioDevices = { inputs, outputs };
 
-    // "" follows the radio's device (My Rigs > Audio), like FT8 and ECHOCAT.
+    // "" follows the radio's device (Settings > Radio, Audio Devices), like FT8 and ECHOCAT.
     audioInputSelect.innerHTML = '';
     { const o = document.createElement('option'); o.value = ''; o.textContent = _rigDeviceOptionLabel(inputs, settings.remoteAudioInput); audioInputSelect.appendChild(o); }
     for (const d of inputs) {
@@ -3388,7 +3388,7 @@ function setStatusDevice(label, fromRigs) {
   el.textContent = '';
   el.append('Listening on ');
   const b = document.createElement('b'); b.textContent = label; el.appendChild(b);
-  el.append(fromRigs ? ' (from My Rigs)' : ' (chosen for SSTV)');
+  el.append(fromRigs ? ' (from the radio)' : ' (chosen for SSTV)');
 }
 
 // ---- Radio: meters, tuner, SWR trip ----------------------------------------------

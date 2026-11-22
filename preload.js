@@ -33,6 +33,8 @@ contextBridge.exposeInMainWorld('api', {
   tune: (frequency, mode, bearing, slicePort) => ipcRenderer.send('tune', { frequency, mode, bearing, slicePort, origin: (new Error()).stack }),
   // A band button: in voice SSB main picks the band's sideband (#445).
   tuneByBand: (frequency) => ipcRenderer.send('tune', { frequency, pickSideband: true, origin: (new Error()).stack }),
+  // A band button's destination: the radio's last frequency on that band, or the preset (#680).
+  bandJumpTarget: (frequency) => ipcRenderer.invoke('band-jump-target', frequency),
   onTuneBlocked: (cb) => ipcRenderer.on('tune-blocked', (_e, msg) => cb(msg)),
   // Generic main→renderer toast ({message, warn?, duration?}) — radio-link
   // transitions etc. Rendered via showLogToast in app.js.
@@ -293,6 +295,7 @@ contextBridge.exposeInMainWorld('api', {
   getRigModels: () => ipcRenderer.invoke('get-rig-models'),
   getRigSetupNotes: (q) => ipcRenderer.invoke('get-rig-setup-notes', q),
   getPacketRigMode: (q) => ipcRenderer.invoke('get-packet-rig-mode', q),
+  getRigPowerOffInfo: (q) => ipcRenderer.invoke('get-rig-power-off-info', q),
   icomScopeCapture: () => ipcRenderer.invoke('icom-scope-capture'),
   stationSetupGet: (rigId) => ipcRenderer.invoke('station-setup-get', rigId),
   stationSetupReport: (q) => ipcRenderer.invoke('station-setup-report', q),
@@ -545,6 +548,13 @@ contextBridge.exposeInMainWorld('api', {
   mercuryListDevices: () => ipcRenderer.invoke('mercury-list-devices'),
   // Winlink (Pat) — the mail window, Settings helpers, the bug-report line.
   winlinkPopoutOpen: () => ipcRenderer.send('winlink-popout-open'),
+  aprsPopoutOpen: () => ipcRenderer.send('aprs-popout-open'),
+  // APRS phase 4: the iGate's marks { on, active, call, sentence, link, gated, lastAt, lastFrom }
+  aprsIgateStatus: () => ipcRenderer.invoke('aprs-igate-status'),
+  onAprsIgateStatus: (cb) => ipcRenderer.on('aprs-igate-status', (_e, s) => cb(s)),
+  // The radio's GPS, read only (lib/flex-gps.js): Settings offers its grid, never sets it.
+  getFlexGps: () => ipcRenderer.invoke('flex-gps-get'),
+  onFlexGps: (cb) => ipcRenderer.on('flex-gps', (_e, s) => cb(s)),
   winlinkPotaSpotOpen: (o) => ipcRenderer.send('winlink-pota-spot-open', o || {}),
   winlinkDiag: () => ipcRenderer.invoke('winlink-diag'),
   settingsSaveStatus: () => ipcRenderer.invoke('settings-save-status'),

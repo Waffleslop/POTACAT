@@ -59,8 +59,8 @@ test('the editor saves a yaesu-lan target, and only for the three radios the spe
   const b = bodyOf(app, 'function yaesuLanTargetFromForm() {', '\n}');
   assert.ok(/type: 'yaesu-lan'/.test(b) && /port: parseInt\(/.test(b) && /password:/.test(b));
   assert.ok(/radioType === 'yaesu-lan'\) \{\n\s*return yaesuLanTargetFromForm\(\);/.test(app));
-  assert.ok(app.includes("const YAESU_LAN_MODELS = ['FTDX10', 'FT-710', 'FTDX101D/MP'];"));
-  assert.deepStrictEqual(P.MODELS.slice().sort(), ['FT-710', 'FTDX10', 'FTDX101D/MP'].sort(), 'the same three as the protocol module');
+  assert.ok(app.includes("const YAESU_LAN_MODELS = ['FTDX10', 'FT-710', 'FTDX101D', 'FTDX101MP'];"));
+  assert.deepStrictEqual(P.MODELS.slice().sort(), ['FT-710', 'FTDX10', 'FTDX101D', 'FTDX101MP'].sort(), 'the same four as the protocol module');
   assert.ok(/catTarget\.type === 'yaesu-lan' && !YAESU_LAN_MODELS\.includes\(model \|\| ''\)/.test(app), 'save refuses another model');
   assert.ok(/brand === 'Yaesu' && getSelectedRadioType\(\) === 'yaesu-lan'/.test(app), 'picking a Yaesu model keeps the LAN connection');
   const { getModel } = require('../lib/rig-models');

@@ -47,7 +47,7 @@ test('winlinkStartSession is reached only from Connect paths and the auto-check'
   const callers = main.split('\n').filter((l) => /winlinkStartSession\(/.test(l) && !/function winlinkStartSession/.test(l));
   // #425: the automatic retry after a dropped link is the one caller that is not an operator's tap.
   // It only ever repeats a session the operator started (lib/winlink-auto-retry.js shouldRetry).
-  const allowed = [/origin: 'mail window'/, /origin: 'ECHOCAT device'/, /mode: 'telnet', origin: 'auto-check/, /origin: 'automatic retry', autoRetry: true }/];
+  const allowed = [/origin: 'mail window'/, /origin: 'ECHOCAT device'/, /mode: 'telnet', origin: 'auto-check/, /origin: 'automatic retry', autoRetry: true(, fromEchocat: !!r.fromEchocat)? }/];
   for (const l of callers) assert.ok(allowed.some((r) => r.test(l)), 'unexpected caller: ' + l.trim());
 });
 test('Pat never gets --listen / --send-only; ardopcf never gets a PTT or CAT flag', () => {
@@ -352,7 +352,8 @@ test('What\'s New carries the Winlink card once per profile, with a working opt-
 test('Winlink is always available and Pat starts on first use', () => {
   assert.ok(!/settings\.enableWinlink/.test(main), 'no code path in main is gated on enableWinlink');
   assert.ok(/enabled: true,\n\s*patStarted: !!patClient,/.test(fnBody(main, 'winlinkPayload')));
-  assert.ok(/ipcMain\.on\('winlink-popout-open', \(\) => \{ openWinlinkPopout\(\); winlinkEnsureStarted\(\); \}\);/.test(main), 'the mail window starts it');
+  // Driving a remote shack (#299) the window is the shack's, and the shack's Pat starts instead.
+  assert.ok(/ipcMain\.on\('winlink-popout-open', \(\) => \{ openWinlinkPopout\(\); if \(isRemoteMode\(\)\) remoteWinlinkView\(true\); else winlinkEnsureStarted\(\); \}\);/.test(main), 'the mail window starts it');
   assert.ok(/if \(type !== 'winlink-watch'\) winlinkEnsureStarted\(\);/.test(fnBody(main, 'winlinkHandleRemote')), 'a device request starts it');
   assert.ok(/if \(settings\.winlinkPassword\) connectWinlink\(\);/.test(main), 'an account holder has it running from launch');
   for (const f of ['winlinkAccountCheck', 'winlinkSetPassword', 'winlinkRegister', 'winlinkStartSession']) {
@@ -420,7 +421,8 @@ test('Pat gets a prediction engine on every config write, decided in one place',
   assert.ok(/C:\\\\itshfbc\\\\bin_win\\\\voacapw\.exe/.test(fn), 'the operator\'s own Windows VOACAP wins (and the path keeps its backslashes)');
   assert.ok(/'voacapl'/.test(fn), 'voacapl on PATH elsewhere');
   assert.ok(/WinlinkPat\.predictionConfig\(\{ enabled, localVoacap, serviceUrl: settings\.winlinkPredictionUrl, serviceUp: _voacapService\.up \}\)/.test(fn));
-  assert.ok(/'winlinkPredictionUrl',/.test(read('main.js').slice(0, 60000)), 'the service override is a machine key');
+  const globalKeys = (read('main.js').match(/const GLOBAL_KEYS = new Set\(\[([\s\S]*?)\]\);/) || [])[1] || '';
+  assert.ok(/'winlinkPredictionUrl',/.test(globalKeys), 'the service override is a machine key');
   assert.ok(/'winlinkPrediction', 'winlinkPredictionUrl', 'myCallsign', 'grid'\]/.test(main), 'a change relaunches Pat');
 });
 test('the gateway reply says how it is ordered, on every surface', () => {

@@ -16,11 +16,11 @@ index 65bf029..908eff9 100644
  	if !a.config.Ardop.ARQBandwidth.IsZero() {
 diff --git a/app/potacat_arq_timeout.go b/app/potacat_arq_timeout.go
 new file mode 100644
-index 0000000..dd75210
+index 0000000..19f6553
 --- /dev/null
 +++ b/app/potacat_arq_timeout.go
 @@ -0,0 +1,60 @@
-+// POTACAT modification to Pat v1.0.0. NOT part of upstream Pat.
++// POTACAT modification to Pat v1.0.1. NOT part of upstream Pat.
 +// Added by the POTACAT project (https://github.com/Waffleslop/POTACAT) and
 +// offered under the same MIT license as Pat (see the LICENSE file).
 +// Report problems with this file to POTACAT, not to Pat's authors.
