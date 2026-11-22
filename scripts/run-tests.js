@@ -206,6 +206,7 @@ const TESTS = [
   'test/jtcat-worked-update-test.js',
   'test/g90-tx-poll-test.js',
   'test/g90-fake-rigctld-test.js', // #109: a fake rigctld that dies on CAT in TX; the G90 keeps the link through an over, a generic model's reconnect unkeys first
+  'test/g90-mode-on-spot-test.js', // #916: a spot click sets the G90's mode with a CI-V 06 frame through rigctld (Hamlib's G90 backend only tries CI-V 26)
   'test/wfm-mode-test.js',
   'test/jtcat-dial-follow-test.js',
   'test/js8-dial-follow-test.js',
