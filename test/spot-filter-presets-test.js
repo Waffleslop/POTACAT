@@ -137,6 +137,9 @@ check('wiring: applying a preset commits the Spots menu like a click', () => {
   const fn = app.slice(app.indexOf('async function applySpotFilterPreset('), app.indexOf('function saveSpotFilterPresets('));
   assert.ok(fn.length > 0);
   assert.ok(/applyFilterData\(/.test(fn) && /saveFilters\(\)/.test(fn), 'band/mode/region set and saved');
+  assert.ok(fn.indexOf('noteBandFilterTicks()') > fn.indexOf('applyFilterData(')
+    && fn.indexOf('noteBandFilterTicks()') < fn.indexOf('saveFilters()'),
+  'band ticks go into the #291 off list before saving, like a hand click');
   assert.ok(/await commitSpotsPanel\(\)/.test(fn), 'sources and switches go through commitSpotsPanel');
   assert.ok(fn.indexOf('syncSpotsPanel()') >= 0 && fn.indexOf('syncSpotsPanel()') < fn.indexOf('if (p.sources)'),
     'the menu boxes are synced before the preset sets its own');

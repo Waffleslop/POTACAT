@@ -17331,7 +17331,15 @@ async function applySpotFilterPreset(preset) {
   const p = SpotFilterPresets.normalizePreset(preset);
   if (!p) return;
   if (scanning) stopScan();
+  // Band ticks go through the off list like a hand click (#291): without
+  // this, applyFilterData would park them as pre-#291 legacy ticks, and a
+  // preset of All would come undone at the next rig switch.
+  const prevOff = bandFilterOff;
+  const prevLegacy = bandFilterLegacyTicks;
   applyFilterData({ bands: p.bands, bandRadio: p.bandRadio, modes: p.modes, modeRadio: p.modeRadio, continents: p.continents });
+  bandFilterOff = prevOff;
+  bandFilterLegacyTicks = prevLegacy;
+  noteBandFilterTicks();
   saveFilters();
   updateBandButtonsVisibility();
   if (callFilterEl && typeof CallFilter !== 'undefined') {
