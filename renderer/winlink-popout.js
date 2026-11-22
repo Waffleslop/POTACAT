@@ -161,10 +161,6 @@
     if (m.id === 'mercury') note = 'Experimental: few gateways run Mercury yet.';
     if (m.id === 'vara' || m.id === 'varafm') note = 'Your own ' + (m.id === 'varafm' ? 'VARA FM' : 'VARA HF') + ', with its PTT set to VOX — POTACAT starts it if needed and keys the radio.';
     if (m.note) note = m.note;   // a radio mode that runs with a caveat: no CAT control, the operator sets the dial (NA4DQ)
-    // VARA too old for 1 January 2027 (the shack read its version): said first, plainly.
-    var vn = (state && state.varaNotice) || {};
-    var varaOld = m.id === 'vara' ? vn.hf : m.id === 'varafm' ? vn.fm : '';
-    if (varaOld) note = varaOld + (note ? ' ' + note : '');
     // Say WHY the other modes are greyed, whichever mode is picked (#435) —
     // a tooltip on a disabled option is invisible on most systems. One line
     // per distinct reason, as ECHOCAT Web says it.
