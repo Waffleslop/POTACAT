@@ -75,6 +75,9 @@ Departures from WSJT-X (do not "fix"):
   Run, Hunt, the WSPR beacon, the Spot Target, a QSO in progress, TX left enabled, Tune
   (main.js tuneLinkStopAutoTx: jtcatHaltTxNow + clearSpotTarget; lib/tune-link-guard.js). Receive
   keeps going. Spot clicks and every other tune are unchanged (test/tune-link-guard-test.js).
+  A link never starts the band-change ATU tune ("Auto-tune ATU on band change" keys a carrier):
+  bandChangeAtuTune asks tuneLinkAutoAtu, logs the skip to the CAT log, and the link's notice adds
+  one clause when it is shown anyway.
 - Wrong-band and out-of-privilege TX guards trust only a LIVE dial reading.
 - ULTRACAT (hidden, `settings.ultracat`): Run mode and unattended Hunt are the operator's
   responsibility; without it Hunt stops after 30 min idle (test/jtcat-hunt-off-test.js).

@@ -42,7 +42,7 @@ if (window.api.onRxSpectrumWant) window.api.onRxSpectrumWant(async (o) => {
   if (!o || !o.on || !o.inputDeviceId) return;
   try {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: {
-      deviceId: { exact: o.inputDeviceId }, echoCancellation: false, noiseSuppression: false, autoGainControl: false,
+      deviceId: { exact: o.inputDeviceId }, channelCount: 1, echoCancellation: false, noiseSuppression: false, autoGainControl: false, // #757: same layout as JTCAT
     } });
     if (my !== rxSpecGen) { stream.getTracks().forEach((t) => t.stop()); return; } // superseded while opening
     rxSpecStream = stream;
@@ -79,7 +79,11 @@ window.api.onStartAudio(async (config) => {
     audioEl.srcObject = null;
 
     // Capture radio's USB audio output (RX audio to send to phone)
+    // #757: 1 channel like every other capture of the radio (JTCAT, modem
+    // bridge). Two record streams of one Linux source in different layouts
+    // left the second undecodable. The phone hears mono Opus either way.
     const baseAudio = {
+      channelCount: 1,
       echoCancellation: false,
       noiseSuppression: false,
       autoGainControl: false,

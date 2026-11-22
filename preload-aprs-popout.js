@@ -15,6 +15,8 @@ contextBridge.exposeInMainWorld('api', {
   onStatus: (cb) => ipcRenderer.on('aprs-status', (_e, s) => cb(s)),
   // [parsed packet, ...] from lib/aprs-parser.js, at most every 500 ms
   onPackets: (cb) => ipcRenderer.on('aprs-packets', (_e, p) => cb(p)),
+  // Heard you (2026-11-22): { CALL: {at, by, beacons, lastBeaconAt} } for the stations that heard my radio beacon.
+  onHeardYou: (cb) => ipcRenderer.on('aprs-heard-you', (_e, m) => cb(m)),
   setRange: (km) => ipcRenderer.send('aprs-set-range', km),
   // "Show the last" in minutes (15, 30, 60, 180, 360), saved per profile.
   setShowLast: (min) => ipcRenderer.send('aprs-set-show-last', min),
@@ -74,7 +76,8 @@ contextBridge.exposeInMainWorld('api', {
   // { call, sentence, link, convos: [{ call, unread, updatedAt, last, lastDir, lastState }], unread, viewing,
   //   thread: [{ lid, dir: 'in'|'out', text, at, id, via, state, tries, status }] }
   messagesGet: () => ipcRenderer.send('aprs-messages-get'),
-  messageSend: (to, text) => ipcRenderer.invoke('aprs-message-send', { to: String(to || ''), text: String(text || '') }),
+  messageSend: (to, text, over) => ipcRenderer.invoke('aprs-message-send', { to: String(to || ''), text: String(text || ''), over: over === 'radio' ? 'radio' : 'internet' }),
+  messageRetry: (lid) => ipcRenderer.invoke('aprs-message-retry', String(lid || '')), // A3: one more try on the radio
   messagesView: (call) => ipcRenderer.send('aprs-messages-view', String(call || '')),
   messageStop: (lid) => ipcRenderer.send('aprs-message-stop', String(lid || '')),
   messagesDelete: (call) => ipcRenderer.send('aprs-messages-delete', String(call || '')),

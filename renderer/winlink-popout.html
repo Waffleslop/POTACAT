@@ -208,7 +208,18 @@
     .wl-folders .wl-btn.on { border-color: var(--accent-blue, #4fc3f7); color: var(--accent-blue, #4fc3f7); background: var(--bg-hover); font-weight: 700; }
 
     .wl-list { width: 320px; flex-shrink: 0; border-right: 1px solid var(--border-primary); overflow-y: auto; }
-    .wl-row { padding: 6px 10px; border-bottom: 1px solid var(--border-primary); cursor: pointer; }
+    .wl-row { padding: 6px 10px 6px 6px; border-bottom: 1px solid var(--border-primary); cursor: pointer; display: flex; align-items: flex-start; gap: 6px; }
+    .wl-row-main { flex: 1; min-width: 0; }
+    /* #346: a box per row picks it; the bar above the list deletes the lot. */
+    .wl-sel { width: 16px; height: 16px; margin: 2px 0 0; flex-shrink: 0; cursor: pointer; accent-color: var(--accent-blue, #4fc3f7); }
+    .wl-row.picked { background: var(--bg-hover); }
+    .wl-selbar { position: sticky; top: 0; z-index: 1; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 6px 10px; border-bottom: 1px solid var(--border-primary); background: var(--bg-secondary); font-size: 13px; }
+    .wl-selbar-text { font-weight: 700; flex: 1 1 100%; }
+    .wl-selbar-btns { display: flex; flex-wrap: wrap; flex: 1 1 100%; gap: 6px; align-items: center; min-width: 0; }
+    .wl-selbar .wl-btn { height: 28px; font-size: 13px; }
+    .wl-selbar.armed { box-shadow: inset 3px 0 0 #e94560; }
+    .wl-selbar-q { flex: 1 1 100%; }
+    .wl-selbar.bad .wl-selbar-text { color: var(--accent-red-text, var(--accent-red, #e94560)); font-weight: 400; }
     .wl-row:hover { background: var(--bg-hover); }
     .wl-row.active { background: var(--bg-hover); box-shadow: inset 3px 0 0 var(--accent-blue, #4fc3f7); }
     .wl-row.unread .wl-subj { font-weight: 700; }
@@ -592,6 +603,7 @@
   <script src="../lib/rig-bands.js"></script>
   <script src="../lib/winlink-contacts.js"></script>
   <script src="../lib/winlink-mail-actions.js"></script>
+  <script src="../lib/winlink-mail-select.js"></script>
   <script src="../lib/winlink-mail-view.js"></script>
   <script src="../lib/pota-email-spot.js"></script>
   <script src="../lib/winlink-forms.js"></script>

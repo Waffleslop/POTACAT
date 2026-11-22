@@ -49,6 +49,8 @@ contextBridge.exposeInMainWorld('api', {
   // magnitudes to main (which decides Busy/Clear and pushes the frames).
   onRemoteWatch: (cb) => ipcRenderer.on('winlink-remote-watch', (_e, on) => cb(!!on)),
   spectrumMags: (mags, inputPeak) => ipcRenderer.send('winlink-spectrum-mags', mags, inputPeak),
+  // Driving a remote shack (#299): the shack's waterfall frames, as this window's magnitudes.
+  onRemoteSpectrum: (cb) => ipcRenderer.on('winlink-remote-spectrum', (_e, d) => cb(d)),
   onAudioFrame: (cb) => {
     // main sends frames through audioSafeSend, which bounds its backlog on
     // ACKs from here (batched, with a periodic flush). Without them main

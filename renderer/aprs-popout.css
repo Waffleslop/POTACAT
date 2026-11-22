@@ -110,6 +110,8 @@ body { display: flex; flex-direction: column; }
 /* ── the Beacon panel ── */
 .aprs-beacon { display: flex; flex-direction: column; gap: 10px; padding: 14px 16px; border-bottom: 1px solid var(--border-primary); flex: none; }
 .aprs-grid2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.aprs-rf-timer { margin-top: 10px; }
+.aprs-rf-timer select:disabled { opacity: 0.55; }
 .aprs-grid-wide { grid-template-columns: minmax(0, 1.7fr) minmax(0, 1fr); }
 .aprs-field { display: flex; flex-direction: column; gap: 4px; font-size: 14px; color: var(--text-secondary); min-width: 0; }
 .aprs-field select, .aprs-field input, .aprs-within select, #aprs-search { font: inherit; font-size: 15px; padding: 7px 9px; border-radius: 8px;
@@ -194,6 +196,8 @@ body { display: flex; flex-direction: column; }
 .aprs-st-call { font-weight: 700; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .aprs-st-via { font-weight: 400; font-size: 14px; color: var(--text-secondary); }
 .aprs-st.mine .aprs-st-via { color: var(--accent-green); font-weight: 600; }
+/* Heard you (2026-11-22): this station heard my radio beacon in the last hour. Theme tokens only. */
+.aprs-st-heard { font-weight: 600; font-size: 13px; color: var(--accent-blue); border: 1px solid var(--accent-blue); border-radius: 4px; padding: 0 5px; }
 .aprs-st-right { font-size: 14px; color: var(--text-secondary); text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .aprs-text-btn { margin-left: auto; font: inherit; font-size: 14px; padding: 2px 4px; border: 0; background: none; color: var(--accent-blue); cursor: pointer; }
 .aprs-text-btn:hover { text-decoration: underline; }

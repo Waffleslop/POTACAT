@@ -391,6 +391,11 @@ let prioritizeNewParks = false; // sort unworked-park spots to the top of the ta
 let hideQrt = true; // hide spots with QRT in comments (default on)
 let dxOnly = false; // only spots main stamped isDx (lib/dx-rule.js)
 let spotMuteRules = []; // "hide {continent} on {band}" rules — lib/spot-mute-rules.js (N7BBQ)
+let spotFilterPresets = []; // named filter sets — lib/spot-filter-presets.js
+const filterPresetsDropdown = document.getElementById('filter-presets-dropdown');
+const filterPresetsBtn = document.getElementById('filter-presets-btn');
+const filterPresetsText = document.getElementById('filter-presets-text');
+const filterPresetsMenu = document.getElementById('filter-presets-menu');
 let showBearing = false;
 let respotDefault = true; // default: re-spot on POTA after logging
 // Per-network re-spot templates (Chris NR9Q request). Empty WWFF/LLOTA/WWBOTA
@@ -2222,7 +2227,7 @@ async function loadPrefs() {
     meterBoxVisible = settings.showMeterBox;
     try { localStorage.setItem('meterBoxVisible', meterBoxVisible); } catch {}
     if (typeof meterBox !== 'undefined' && meterBox) {
-      meterBox.classList.toggle('hidden', !meterBoxVisible);
+      syncMeterBoxShown();
     }
     if (typeof quickShowMeter !== 'undefined' && quickShowMeter) {
       quickShowMeter.checked = meterBoxVisible;
@@ -2252,6 +2257,11 @@ async function loadPrefs() {
     renderMuteRules();
   } catch (err) {
     console.error('[mute-rules] init failed:', err);
+  }
+  try {
+    spotFilterPresets = SpotFilterPresets.normalizePresets(settings.spotFilterPresets);
+  } catch (err) {
+    console.error('[filter-presets] init failed:', err);
   }
   enablePota = settings.enablePota !== false; // default true
   enableSota = settings.enableSota === true;  // default false
@@ -3755,6 +3765,13 @@ function syncTxAudioInputRow() {
   if (blank) blank.textContent = ok && window.TxAudioInput.MODELS[model] == null ? 'Ask on first transmit' : 'Rear (data / ACC2 socket), the default';
 }
 if (rigModelSelect) rigModelSelect.addEventListener('change', syncTxAudioInputRow);
+// Sweep 1a: the DATA MOD to USB box, only for the Icoms POTACAT can set it on (lib/icom-usb-data-mod.js).
+function syncIcomUsbDataModRow() {
+  const row = document.getElementById('rig-icom-usb-data-mod');
+  if (!row || !window.IcomUsbDataMod) return;
+  row.classList.toggle('hidden', !window.IcomUsbDataMod.hasChoice(rigModelSelect ? rigModelSelect.value : ''));
+}
+if (rigModelSelect) rigModelSelect.addEventListener('change', syncIcomUsbDataModRow);
 {
   const reset = document.getElementById('rig-bands-reset');
   if (reset) reset.addEventListener('click', () => { rigBandsState.touched = false; loadRigBandsForModel(); });
@@ -3780,6 +3797,7 @@ async function openRigEditor(mode, rigId) {
       if (rigModelSelect) { rigModelSelect.value = rig.model || ''; syncYaesuLanMuteMonitorRow(); }
       { const t = document.getElementById('set-tx-audio-input'); if (t) t.value = rig.txAudioInput === 'front' || rig.txAudioInput === 'rear' ? rig.txAudioInput : ''; syncTxAudioInputRow(); }
       { const t = document.getElementById('set-tx-channel'); if (t) t.value = rig.txChannel === 'left' ? 'left' : 'both'; } // #654
+      { const t = document.getElementById('set-icom-usb-data-mod'); if (t) t.checked = !rig.icomUsbDataModOff; syncIcomUsbDataModRow(); } // sweep 1a: absent = on
       await populateRadioSection(rig.catTarget);
       // Per-rig audio source — populateRadioSection just rebuilt the options
       // for this rig's radio type, so the stored value (validated) sticks.
@@ -3844,6 +3862,7 @@ async function openRigEditor(mode, rigId) {
     fillSdrScopeForm(null);
     { const v = document.getElementById('set-voice-as-data'); if (v) v.checked = false; }
     { const v = document.getElementById('set-allow-power-off'); if (v) v.checked = false; }
+    { const v = document.getElementById('set-icom-usb-data-mod'); if (v) v.checked = true; syncIcomUsbDataModRow(); } // sweep 1a: a new rig starts on
     { const v = document.getElementById('set-amp-drive-on'); if (v) v.checked = false; }
     { const v = document.getElementById('set-amp-drive-w'); if (v) v.value = 10; }
     { const v = document.getElementById('set-packet-mode'); if (v) v.value = 'auto'; }
@@ -4001,6 +4020,8 @@ async function saveRigEditor() {
   const txAudioInputEl = document.getElementById('set-tx-audio-input');
   const rigTxAudioInput = txAudioInputEl && (txAudioInputEl.value === 'front' || txAudioInputEl.value === 'rear')
     && window.TxAudioInput && window.TxAudioInput.hasChoice(model) ? txAudioInputEl.value : ''; // #594
+  const icomUsbDataModEl = document.getElementById('set-icom-usb-data-mod');
+  const rigIcomUsbDataModOff = !!(icomUsbDataModEl && !icomUsbDataModEl.checked); // sweep 1a: stored only when off
   const txChannelEl = document.getElementById('set-tx-channel');
   const rigTxLeftOnly = !!(txChannelEl && txChannelEl.value === 'left'); // #654: absent = both channels
   const lanVoiceSsbEl = document.getElementById('set-lan-voice-ssb');
@@ -4038,6 +4059,7 @@ async function saveRigEditor() {
       if (rigAmpDriveW > 0) rig.ampDriveLimitW = rigAmpDriveW; else delete rig.ampDriveLimitW;
       if (rigTxAudioInput) rig.txAudioInput = rigTxAudioInput; else delete rig.txAudioInput;
       if (rigTxLeftOnly) rig.txChannel = 'left'; else delete rig.txChannel;
+      if (rigIcomUsbDataModOff) rig.icomUsbDataModOff = true; else delete rig.icomUsbDataModOff;
       if (rigLanVoiceInSsb) rig.lanVoiceInSsb = true; else delete rig.lanVoiceInSsb;
       if (rigPacketMode) rig.packetMode = rigPacketMode; else delete rig.packetMode; // absent = Automatic
       rig.flexBandAntennaMap = flexBandAntennaMap;
@@ -4071,6 +4093,7 @@ async function saveRigEditor() {
       ...(rigAmpDriveW > 0 ? { ampDriveLimitW: rigAmpDriveW } : {}),
       ...(rigTxAudioInput ? { txAudioInput: rigTxAudioInput } : {}),
       ...(rigTxLeftOnly ? { txChannel: 'left' } : {}),
+      ...(rigIcomUsbDataModOff ? { icomUsbDataModOff: true } : {}),
       ...(rigLanVoiceInSsb ? { lanVoiceInSsb: true } : {}),
       ...(rigPacketMode ? { packetMode: rigPacketMode } : {}),
       flexBandAntennaMap,
@@ -4279,12 +4302,14 @@ function updateBandButtonsVisibility() {
   if (show) updateBandButtonActive();
 }
 
-bandButtonsEl.addEventListener('click', (e) => {
+bandButtonsEl.addEventListener('click', async (e) => {
   const btn = e.target.closest('button');
   if (!btn) return;
   const band = btn.dataset.band;
-  const freq = getBandQsyFreq(band);
+  let freq = getBandQsyFreq(band);
   if (freq) {
+    // Back to where this radio last was on the band, or the preset (#680).
+    try { const t = await window.api.bandJumpTarget(freq); if (Number(t) > 0) freq = Number(t); } catch {}
     const curMode = (radioMode || '').toUpperCase();
     // Voice SSB (or a mode not read yet): main decides, from the radio's own
     // mode and DATA state, whether the band's sideband goes with it (#445,
@@ -5103,8 +5128,15 @@ function saveFilters() {
 }
 
 function restoreFilters() {
+  let data = null;
+  try { data = JSON.parse(localStorage.getItem(FILTERS_KEY)); } catch { /* corrupt: All */ }
+  applyFilterData(data);
+}
+
+// Sets the Band, Mode and Region checkboxes from saved data (the
+// saveFilters shape); no data = All. Also used by the filter presets.
+function applyFilterData(data) {
   try {
-    const data = JSON.parse(localStorage.getItem(FILTERS_KEY));
     if (!data) {
       // First run — ensure filters default to "All" (override any HTML-hardcoded checks)
       [bandFilterEl, modeFilterEl, continentFilterEl].forEach((container) => {
@@ -6749,22 +6781,28 @@ async function _gpRevokeFromOwnerBanner() {
       console.warn('[Guest Pass] blocked:', info);
     });
   }
-  // Serial CAT connected but the radio isn't honoring tune commands — point the
-  // user at the usual culprit (CAT RTS / Disable DTR/RTS) with a sticky warning
-  // rather than letting them assume "connected" means tuning works. (FTDX3000)
+  // A network CAT link (Flex / TS-2000 emulation over TCP, a K4 on the network:
+  // the only links lib/cat.js CatClient drives) answers but does not follow
+  // tune commands. Say what POTACAT saw, and where the cause can be. No serial
+  // RTS or DTR is involved on a network link, so no radio CAT RTS menu (#849:
+  // the old toast told the operator to turn the CAT RTS menu on, the opposite of the setup notes;
+  // a direct-serial radio that waits for RTS is tried with RTS/CTS by POTACAT
+  // itself, main.js serial handshake trial).
   if (window.api && window.api.onCatTuneUnconfirmed) {
     window.api.onCatTuneUnconfirmed((info) => {
-      const yaesuHint = info && info.isYaesu
-        ? ' On Yaesu (FTDX1200/3000/5000), set the radio’s CAT RTS menu to Enable.'
-        : '';
-      showLogToast(
-        'Radio connected but not responding to frequency changes. ' +
-        'Check your radio’s CAT settings and uncheck "Disable DTR/RTS on connect" in rig setup.' +
-        yaesuHint,
-        { warn: true, sticky: true });
+      showLogToast(catTuneUnconfirmedText(info), { warn: true, sticky: true });
     });
   }
 })();
+
+/** The sticky warning when a network CAT link answers but never moves to the frequency asked (#849). */
+function catTuneUnconfirmedText(info) {
+  const khz = info && info.targetHz ? (info.targetHz / 1000).toFixed(1) + ' kHz' : 'the frequency asked';
+  const tries = info && info.attempts ? ' after ' + info.attempts + ' tries' : '';
+  return 'The radio answers but did not move to ' + khz + tries + '. ' +
+    'This is a network CAT link, so it is not a cable or RTS setting: check that the program at the other end ' +
+    '(SmartSDR CAT, the TS-2000 emulation, the K4) lets POTACAT change the frequency.';
+}
 
 // ── Settings → ECHOCAT → Guest Pass generate form ──
 
@@ -10011,7 +10049,7 @@ function _buildEchocatCardHTML(tunnel, tail, devices, web) {
     detail = (tail.notReady || 'Tailscale is installed but not signed in.') + ' Or enable POTACAT Cloud Tunnel.';
   }
   if (pillCls === '' && !detail) {
-    detail = 'Available only on the local network. Enable POTACAT Cloud Tunnel or connect to your tailnet for remote access.';
+    detail = 'Available only on the local network. Turn on Cloud Tunnel, or connect to your tailnet, for remote access.';
   }
   // ECHOCAT access (lib/remote-access.js) overrides the reachability story:
   // Off = nothing listens; Cloud only = the LAN and tailnet see a closed port.
@@ -10363,7 +10401,7 @@ function _pairRenderState() {
       '<span class="pair-state-title">POTACAT Cloud Tunnel</span>' +
       '<span class="pair-state-body">' + statusText + ' Enable it for one-tap remote pairing.</span>' +
       '<div class="pair-state-actions">' +
-        '<button type="button" id="pair-enable-tunnel-btn" class="btn btn-primary btn-sm">Enable POTACAT Cloud Tunnel</button>' +
+        '<button type="button" id="pair-enable-tunnel-btn" class="btn btn-primary btn-sm">Turn on Cloud Tunnel</button>' +
       '</div>';
     const enableBtn = document.getElementById('pair-enable-tunnel-btn');
     if (enableBtn) {
@@ -15469,6 +15507,7 @@ function renderDxccMatrix() {
 // --- Rendering ---
 function render() {
   const filtered = sortSpots(getFiltered());
+  try { updateFilterPresetsButton(); } catch (err) { console.error('[filter-presets]', err); }
 
   spotCountEl.textContent = `${filtered.length} spots`;
   updateParksStatsOverlay();
@@ -17184,7 +17223,10 @@ function syncSpotsPanel() {
 
 document.querySelector('.spots-dropdown-panel').addEventListener('click', (e) => e.stopPropagation());
 
-document.querySelector('.spots-dropdown-panel').addEventListener('change', async (e) => {
+// The Spots menu's state, read from its checkboxes, applied and saved. A
+// filter preset (lib/spot-filter-presets.js) sets the checkboxes and calls
+// this too, so a preset goes the same way as a click.
+async function commitSpotsPanel() {
   enablePota = spotsPota.checked;
   enableSota = spotsSota.checked;
   enableWwff = spotsWwff.checked;
@@ -17270,7 +17312,192 @@ document.querySelector('.spots-dropdown-panel').addEventListener('change', async
   });
 
   render();
-});
+}
+document.querySelector('.spots-dropdown-panel').addEventListener('change', () => commitSpotsPanel());
+
+// --- Spot filter presets (lib/spot-filter-presets.js) ---
+// Named sets of the spot filters: the filter bar (Band, Mode, Calls), the
+// Spots menu's sources and Filters, and Region. One click sets them all; the
+// button names the preset that matches the filters set now, so a hand change
+// shows at once. Saved in settings.spotFilterPresets (declared at the top).
+
+/** The spot filters set now, in the preset shape. */
+function currentSpotFilters() {
+  const bandRadioCb = bandFilterEl.querySelector('input[value="radio"]');
+  const modeRadioCb = modeFilterEl.querySelector('input[value="radio"]');
+  const checkedValues = (container) => {
+    if (container.querySelector('input[value="all"]').checked) return null;
+    return [...container.querySelectorAll('input:not([value="all"]):not([value="radio"]):checked')].map((cb) => cb.value);
+  };
+  return {
+    bands: checkedValues(bandFilterEl),
+    bandRadio: !!(bandRadioCb && bandRadioCb.checked),
+    modes: checkedValues(modeFilterEl),
+    modeRadio: !!(modeRadioCb && modeRadioCb.checked),
+    continents: checkedValues(continentFilterEl),
+    calls: callFilterEl ? callFilterEl.value : '',
+    sources: {
+      pota: enablePota, sota: enableSota, wwff: enableWwff, llota: enableLlota, wwbota: enableWwbota,
+      tiles: enableTiles, gma: enableGma, parc: enableParc, cluster: enableCluster, cwspots: enableCwSpots,
+      rbn: enableRbn, pskr: enablePskr, dxe: enableDxe,
+    },
+    hide: {
+      worked: hideWorked, workedParks: hideWorkedParks, workedCallRef: hideWorkedCallRef,
+      prioritizeNew: prioritizeNewParks, strictAtno, outOfBand: hideOutOfBand, qrt: hideQrt, dxOnly,
+    },
+  };
+}
+
+/** Set every filter a preset holds, then save and redraw as a click would. */
+async function applySpotFilterPreset(preset) {
+  const p = SpotFilterPresets.normalizePreset(preset);
+  if (!p) return;
+  if (scanning) stopScan();
+  // Band ticks go through the off list like a hand click (#291): without
+  // this, applyFilterData would park them as pre-#291 legacy ticks, and a
+  // preset of All would come undone at the next rig switch.
+  const prevOff = bandFilterOff;
+  const prevLegacy = bandFilterLegacyTicks;
+  applyFilterData({ bands: p.bands, bandRadio: p.bandRadio, modes: p.modes, modeRadio: p.modeRadio, continents: p.continents });
+  bandFilterOff = prevOff;
+  bandFilterLegacyTicks = prevLegacy;
+  noteBandFilterTicks();
+  saveFilters();
+  updateBandButtonsVisibility();
+  if (callFilterEl && typeof CallFilter !== 'undefined') {
+    callFilterEl.value = p.calls;
+    callFilter = CallFilter.parseCallFilter(p.calls);
+    try { localStorage.setItem('pota-cat-call-filter', p.calls); } catch {}
+  }
+  // The Spots menu's checkboxes are synced only when it opens: bring them
+  // to the state in force first, so a box the preset does not set is
+  // committed as it is, not as the menu last showed it.
+  syncSpotsPanel();
+  if (p.sources) {
+    const boxes = {
+      pota: spotsPota, sota: spotsSota, wwff: spotsWwff, llota: spotsLlota, wwbota: spotsWwbota,
+      tiles: spotsTiles, gma: spotsGma, parc: spotsParc, cluster: spotsCluster, cwspots: spotsCwSpots,
+      rbn: spotsRbn, pskr: spotsPskr, dxe: spotsDxe,
+    };
+    for (const k of SpotFilterPresets.SOURCE_KEYS) if (boxes[k]) boxes[k].checked = p.sources[k];
+  }
+  if (p.hide) {
+    const boxes = {
+      worked: spotsHideWorked, workedParks: spotsHideParks, workedCallRef: spotsHideCallRef,
+      prioritizeNew: spotsPrioritizeNew, strictAtno: spotsStrictAtno, outOfBand: spotsHideOob,
+      qrt: spotsHideQrt, dxOnly: spotsDxOnly,
+    };
+    for (const k of SpotFilterPresets.HIDE_KEYS) if (boxes[k]) boxes[k].checked = p.hide[k];
+  }
+  await commitSpotsPanel(); // saves, redraws, and refuses a callsign-only source without a callsign
+}
+
+function saveSpotFilterPresets(list) {
+  spotFilterPresets = SpotFilterPresets.normalizePresets(list);
+  window.api.saveSettings({ spotFilterPresets });
+  updateFilterPresetsButton();
+  renderFilterPresetsMenu();
+}
+
+/** The button shows the preset that matches the filters set now. */
+function updateFilterPresetsButton() {
+  if (!filterPresetsText || typeof SpotFilterPresets === 'undefined') return;
+  const match = SpotFilterPresets.findMatchingPreset(spotFilterPresets, currentSpotFilters());
+  filterPresetsText.textContent = match ? match.name : (spotFilterPresets.length ? 'none' : '');
+  filterPresetsBtn.title = match
+    ? `Filter preset "${match.name}": ${SpotFilterPresets.describePreset(match)}`
+    : 'Filter presets: save the filters set now under a name, and set them again with one click';
+}
+
+function renderFilterPresetsMenu() {
+  if (!filterPresetsMenu || typeof SpotFilterPresets === 'undefined') return;
+  const match = SpotFilterPresets.findMatchingPreset(spotFilterPresets, currentSpotFilters());
+  filterPresetsMenu.textContent = '';
+  if (!spotFilterPresets.length) {
+    const empty = document.createElement('div');
+    empty.className = 'filter-presets-empty';
+    empty.textContent = 'No presets yet. Set the filters you want, then save them here.';
+    filterPresetsMenu.appendChild(empty);
+  }
+  spotFilterPresets.forEach((p, idx) => {
+    const row = document.createElement('div');
+    row.className = 'filter-presets-row' + (match && match.name === p.name ? ' active' : '');
+    const apply = document.createElement('button');
+    apply.type = 'button';
+    apply.className = 'filter-presets-apply';
+    apply.textContent = (match && match.name === p.name ? '✓ ' : '') + p.name;
+    apply.title = SpotFilterPresets.describePreset(p);
+    apply.addEventListener('click', async () => {
+      filterPresetsDropdown.classList.remove('open');
+      await applySpotFilterPreset(p);
+      updateFilterPresetsButton();
+    });
+    row.appendChild(apply);
+    const tool = (label, title, fn, disabled) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'filter-presets-tool';
+      b.textContent = label;
+      b.title = title;
+      b.disabled = !!disabled;
+      b.addEventListener('click', fn);
+      row.appendChild(b);
+    };
+    tool('↑', 'Move up', () => saveSpotFilterPresets(SpotFilterPresets.movePreset(spotFilterPresets, p.name, -1)), idx === 0);
+    tool('↓', 'Move down', () => saveSpotFilterPresets(SpotFilterPresets.movePreset(spotFilterPresets, p.name, 1)), idx === spotFilterPresets.length - 1);
+    tool('Update', `Save the filters set now as "${p.name}"`, () => {
+      if (!confirm(`Replace the filters of "${p.name}" with the filters set now?`)) return;
+      saveSpotFilterPresets(SpotFilterPresets.savePreset(spotFilterPresets, p.name, currentSpotFilters()).list);
+    }, match && match.name === p.name);
+    tool('Rename', `Rename "${p.name}"`, async () => {
+      const name = await _summaryPrompt({ title: 'Rename filter preset', defaultValue: p.name });
+      if (name == null) return;
+      const r = SpotFilterPresets.renamePreset(spotFilterPresets, p.name, name);
+      if (r.error) { alert(r.error); return; }
+      saveSpotFilterPresets(r.list);
+    });
+    tool('✕', `Delete "${p.name}"`, () => {
+      if (!confirm(`Delete the filter preset "${p.name}"? Your filters stay as they are.`)) return;
+      saveSpotFilterPresets(SpotFilterPresets.deletePreset(spotFilterPresets, p.name));
+    });
+    filterPresetsMenu.appendChild(row);
+  });
+  const divider = document.createElement('div');
+  divider.className = 'view-menu-divider';
+  filterPresetsMenu.appendChild(divider);
+  const add = document.createElement('button');
+  add.type = 'button';
+  add.className = 'view-menu-item';
+  add.textContent = 'Save the filters set now as…';
+  add.addEventListener('click', async () => {
+    filterPresetsDropdown.classList.remove('open');
+    const name = await _summaryPrompt({
+      title: 'Save filter preset',
+      message: 'Band, Mode, Calls, Region, the spot sources and the Filters switches are saved under this name.',
+      placeholder: 'POTA 40m CW',
+    });
+    if (name == null) return;
+    const exists = spotFilterPresets.some((x) => x.name.toUpperCase() === SpotFilterPresets.cleanName(name).toUpperCase());
+    if (exists && !confirm(`There is already a preset called "${SpotFilterPresets.cleanName(name)}". Replace it?`)) return;
+    const r = SpotFilterPresets.savePreset(spotFilterPresets, name, currentSpotFilters());
+    if (r.error) { alert(r.error); return; }
+    saveSpotFilterPresets(r.list);
+  });
+  filterPresetsMenu.appendChild(add);
+}
+
+if (filterPresetsBtn) {
+  filterPresetsBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    document.querySelectorAll('.multi-dropdown.open').forEach((d) => {
+      if (d !== filterPresetsDropdown) d.classList.remove('open');
+    });
+    const opening = !filterPresetsDropdown.classList.contains('open');
+    filterPresetsDropdown.classList.toggle('open');
+    if (opening) renderFilterPresetsMenu();
+  });
+  filterPresetsMenu.addEventListener('click', (e) => e.stopPropagation());
+}
 
 // --- Hide spot context menu ---
 const hideSpotMenu = document.getElementById('hide-spot-menu');
@@ -17733,7 +17960,7 @@ quickShowMeter.addEventListener('change', () => {
   // (Electron session partition), which made the checkbox spring back to
   // enabled for users who disabled it. Reported by bjh 2026-04-23.
   window.api.saveSettings({ showMeterBox: meterBoxVisible });
-  meterBox.classList.toggle('hidden', !meterBoxVisible);
+  syncMeterBoxShown();
   document.getElementById('set-show-meter').checked = meterBoxVisible;
 });
 
@@ -18386,7 +18613,7 @@ async function openSettingsDialog(tab) {
     meterBoxVisible = s.showMeterBox;
     localStorage.setItem('meterBoxVisible', meterBoxVisible);
     quickShowMeter.checked = meterBoxVisible;
-    meterBox.classList.toggle('hidden', !meterBoxVisible);
+    syncMeterBoxShown();
   }
   document.getElementById('set-show-meter').checked = meterBoxVisible;
   setEnableBandActivity.checked = s.enableBandActivity === true;
@@ -19088,7 +19315,7 @@ settingsSave.addEventListener('click', async () => {
   meterBoxVisible = document.getElementById('set-show-meter').checked;
   localStorage.setItem('meterBoxVisible', meterBoxVisible);
   quickShowMeter.checked = meterBoxVisible;
-  meterBox.classList.toggle('hidden', !meterBoxVisible);
+  syncMeterBoxShown();
   const bandActivityEnabled = setEnableBandActivity.checked;
   const showBearingEnabled = setShowBearing.checked;
   const enableSplitViewVal = setEnableSplitView.checked;
@@ -22802,6 +23029,24 @@ function clampFloatingBox(box, storageKey) {
   box.style.right = 'auto';
   box.style.bottom = 'auto';
 }
+/**
+ * Show the meter box, and when it was hidden, put it inside the window first.
+ * It stays hidden until the radio's first reading, and clampFloatingBox skips
+ * a hidden box, so a box saved on a bigger window used to appear wherever it
+ * was saved: off the edge of a smaller one, with nothing pulling it back
+ * (NJ2DX 2026-11-21, IC-7300: "the S-meter floating panel disappeared";
+ * making the window bigger brought it back). Every way the box appears runs
+ * through here, so it always lands where it can be seen.
+ */
+function syncMeterBoxShown() {
+  if (!meterBox) return;
+  const wasHidden = meterBox.classList.contains('hidden');
+  meterBox.classList.toggle('hidden', !meterBoxVisible);
+  if (meterBoxVisible && wasHidden) clampFloatingBox(meterBox, 'meterBoxPos');
+}
+function showMeterBox() {
+  if (meterBoxVisible && meterBox && meterBox.classList.contains('hidden')) syncMeterBoxShown();
+}
 let _floatingBoxResizeTimer = null;
 window.addEventListener('resize', () => {
   clearTimeout(_floatingBoxResizeTimer);
@@ -22856,6 +23101,7 @@ window.addEventListener('resize', () => {
       left: parseInt(meterBox.style.left, 10),
       top: parseInt(meterBox.style.top, 10),
     }));
+    clampFloatingBox(meterBox, 'meterBoxPos'); // dropped past an edge: shown inside, the drop point kept
   });
 })();
 const smeterBarCanvas = document.getElementById('smeter-bar');
@@ -22865,27 +23111,40 @@ const swrTextEl = document.getElementById('swr-text');
 const alcBarCanvas = document.getElementById('alc-bar');
 const alcTextEl = document.getElementById('alc-text');
 
+// The meter's colours come from the theme (styles.css roles, which every
+// design-system theme points at its own through ds-bridge.css): the track is
+// the window's background, the ticks a border line, and a reading is ok /
+// warn / bad. Read when drawn, so a theme change shows at the next reading.
+function meterThemeColor(name, fallback) {
+  try { const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim(); return v || fallback; } catch { return fallback; }
+}
+function meterLevelColor(kind) {
+  if (kind === 'bad') return meterThemeColor('--bad', '#e94560');
+  if (kind === 'warn') return meterThemeColor('--warn', '#f0a500');
+  if (kind === 'idle') return meterThemeColor('--border-primary', '#333');
+  return meterThemeColor('--ok', '#4ecca3');
+}
 function drawMeterBar(canvas, level, color) {
   if (!canvas) return;
   const ctx = canvas.getContext('2d');
   const w = canvas.width, h = canvas.height;
   ctx.clearRect(0, 0, w, h);
-  ctx.fillStyle = '#1a1a2e';
+  ctx.fillStyle = meterThemeColor('--bg-primary', '#1a1a2e');
   ctx.fillRect(0, 0, w, h);
   const barW = Math.round(Math.max(0, Math.min(1, level)) * w);
   ctx.fillStyle = color;
   ctx.fillRect(0, 0, barW, h);
   // Tick marks
-  ctx.fillStyle = 'rgba(255,255,255,0.15)';
+  ctx.fillStyle = meterThemeColor('--border-secondary', 'rgba(255,255,255,0.15)');
   for (let i = 1; i <= 9; i++) {
     ctx.fillRect(Math.round(i * w / 12), 0, 1, h);
   }
 }
 
 window.api.onCatSmeter((val) => {
-  if (meterBoxVisible) meterBox.classList.remove('hidden');
+  showMeterBox();
   const level = val / 255;
-  const color = val < 80 ? '#4ecca3' : val < 160 ? '#ffd740' : '#e94560';
+  const color = meterLevelColor(val < 80 ? 'ok' : val < 160 ? 'warn' : 'bad');
   drawMeterBar(smeterBarCanvas, level, color);
   if (val <= 120) {
     smeterTextEl.textContent = 'S' + Math.round(val * 9 / 120);
@@ -22897,15 +23156,15 @@ window.api.onCatSmeter((val) => {
 
 window.api.onCatSwr((val) => {
   if (val <= 0) {
-    drawMeterBar(swrBarCanvas, 0, '#333');
+    drawMeterBar(swrBarCanvas, 0, meterLevelColor('idle'));
     swrTextEl.textContent = '—';
-    swrTextEl.style.color = '#666';
+    swrTextEl.style.color = meterThemeColor('--text-dim', '#666');
     return;
   }
-  if (meterBoxVisible) meterBox.classList.remove('hidden');
+  showMeterBox();
   const swr = 1.0 + (val / 60);
   const level = Math.min(1, (swr - 1) / 4);
-  const color = swr <= 1.5 ? '#4ecca3' : swr <= 2.0 ? '#ffd740' : swr <= 3.0 ? '#f0a500' : '#e94560';
+  const color = meterLevelColor(swr <= 1.5 ? 'ok' : swr <= 3.0 ? 'warn' : 'bad');
   drawMeterBar(swrBarCanvas, level, color);
   swrTextEl.textContent = swr < 10 ? swr.toFixed(1) : '>10';
   swrTextEl.style.color = color;
@@ -22920,36 +23179,36 @@ if (window.api.onCatFwdPower && pwrBarCanvas) {
   window.api.onCatFwdPower((watts) => {
     const w = Number(watts) || 0;
     if (w <= 0) {
-      drawMeterBar(pwrBarCanvas, 0, '#333');
+      drawMeterBar(pwrBarCanvas, 0, meterLevelColor('idle'));
       pwrTextEl.textContent = '—';
-      pwrTextEl.style.color = '#666';
+      pwrTextEl.style.color = meterThemeColor('--text-dim', '#666');
       return;
     }
-    if (meterBoxVisible) meterBox.classList.remove('hidden');
+    showMeterBox();
     const full = radioPower > 0 ? radioPower : 100;
     const level = Math.min(1, w / full);
-    drawMeterBar(pwrBarCanvas, level, '#4ecca3');
+    drawMeterBar(pwrBarCanvas, level, meterLevelColor('ok'));
     pwrTextEl.textContent = (w < 10 ? w.toFixed(1) : Math.round(w)) + ' W';
-    pwrTextEl.style.color = '#4ecca3';
+    pwrTextEl.style.color = meterLevelColor('ok');
   });
 }
 
 // Direct SWR ratio from FlexRadio vita49 (bypasses RM1 conversion)
 window.api.onCatSwrRatio((swr) => {
-  if (meterBoxVisible) meterBox.classList.remove('hidden');
+  showMeterBox();
   const level = Math.min(1, (swr - 1) / 4);
-  const color = swr <= 1.5 ? '#4ecca3' : swr <= 2.0 ? '#ffd740' : swr <= 3.0 ? '#f0a500' : '#e94560';
+  const color = meterLevelColor(swr <= 1.5 ? 'ok' : swr <= 3.0 ? 'warn' : 'bad');
   drawMeterBar(swrBarCanvas, level, color);
   swrTextEl.textContent = swr < 10 ? swr.toFixed(1) : '>10';
   swrTextEl.style.color = color;
 });
 
 window.api.onCatAlc((val) => {
-  if (meterBoxVisible) meterBox.classList.remove('hidden');
+  showMeterBox();
   // Radios report ALC on 0..255 scale (Kenwood RM3 / Yaesu RM2). Anything
   // above ~40% ALC is into compression — color accordingly.
   const pct = Math.min(1, val / 255);
-  const color = pct <= 0 ? '#666' : pct < 0.4 ? '#4ecca3' : pct < 0.7 ? '#ffd740' : pct < 0.9 ? '#f0a500' : '#e94560';
+  const color = pct <= 0 ? meterThemeColor('--text-dim', '#666') : meterLevelColor(pct < 0.4 ? 'ok' : pct < 0.9 ? 'warn' : 'bad');
   drawMeterBar(alcBarCanvas, pct, pct <= 0 ? '#333' : color);
   // A reading of ZERO is a reading. Rendering it as an em dash made it
   // identical to "this rig reports no ALC at all", so a K3 running with
@@ -27067,6 +27326,8 @@ let freedvTxOutputCtx = null;
 let freedvMicStream = null;
 let freedvMicCtx = null;
 let freedvMicProcessor = null;
+// #905: a stop during the async open wins (lib/capture-open-guard.js).
+const _freedvOpen = window.CaptureOpenGuard.createOpenGuard();
 
 const FREEDV_MODES = new Set(['FREEDV', 'DV', 'FREEDV-700E', 'FREEDV-700D', 'FREEDV-1600']);
 
@@ -27088,7 +27349,9 @@ function freedvMicNote(samples) {
 
 async function startFreedvForMode(mode) {
   if (freedvActive) { console.log('[FreeDV] Already active, skipping start'); return; }
+  const openToken = _freedvOpen.begin();
   const s = await window.api.getSettings();
+  if (!_freedvOpen.isCurrent(openToken)) return; // stopped while the settings were read
   if (!s.enableFreedv) { console.log('[FreeDV] Not enabled in settings, skipping'); return; }
   freedvActive = true;
   console.log('[FreeDV] Auto-starting for mode:', mode);
@@ -27110,12 +27373,21 @@ async function startFreedvForMode(mode) {
   try {
     const constraints = { channelCount: 1, echoCancellation: false, noiseSuppression: false, autoGainControl: false };
     if (s.remoteAudioInput) constraints.deviceId = { exact: s.remoteAudioInput };
-    freedvAudioStream = await navigator.mediaDevices.getUserMedia({ audio: constraints });
-    freedvAudioCtx = new AudioContext();
-    const source = freedvAudioCtx.createMediaStreamSource(freedvAudioStream);
-    const dsRatio = freedvAudioCtx.sampleRate / 8000;
-    await freedvAudioCtx.audioWorklet.addModule('freedv-audio-worklet.js');
-    const worklet = new AudioWorkletNode(freedvAudioCtx, 'freedv-processor', {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: constraints });
+    if (!_freedvOpen.isCurrent(openToken)) { window.CaptureOpenGuard.releaseStream(stream); return; }
+    freedvAudioStream = stream;
+    const audioCtx = new AudioContext();
+    freedvAudioCtx = audioCtx;
+    const source = audioCtx.createMediaStreamSource(stream);
+    const dsRatio = audioCtx.sampleRate / 8000;
+    await audioCtx.audioWorklet.addModule('freedv-audio-worklet.js');
+    if (!_freedvOpen.isCurrent(openToken)) {
+      // stopFreedv already released the globals; release what this open built.
+      window.CaptureOpenGuard.releaseStream(stream);
+      audioCtx.close().catch(() => {});
+      return;
+    }
+    const worklet = new AudioWorkletNode(audioCtx, 'freedv-processor', {
       processorOptions: { dsRatio },
     });
     let _freedvAudioCount = 0;
@@ -27127,7 +27399,7 @@ async function startFreedvForMode(mode) {
       }
     };
     source.connect(worklet);
-    worklet.connect(freedvAudioCtx.destination);
+    worklet.connect(audioCtx.destination);
     freedvProcessor = worklet;
   } catch (err) {
     console.error('[FreeDV] RX audio capture failed:', err.message);
@@ -27137,6 +27409,7 @@ async function startFreedvForMode(mode) {
 }
 
 function stopFreedv() {
+  _freedvOpen.cancel(); // an open still in flight releases its capture and keeps nothing
   if (!freedvActive) return;
   freedvActive = false;
   console.log('[FreeDV] Auto-stopping');
@@ -33054,6 +33327,9 @@ function fmtJtcatOffset(ms) {
 
 function applyJtcatClock(d) {
   if (!jtcatSyncStatus) return;
+  // Only the buttons this OS can honour (main's canFix / canOpenSettings, lib/ntp.js).
+  if (d && jtcatClockSyncBtn) jtcatClockSyncBtn.style.display = d.canFix === false ? 'none' : '';
+  if (d && jtcatClockSetBtn) jtcatClockSetBtn.style.display = d.canOpenSettings === false ? 'none' : '';
   jtcatSyncStatus.classList.remove('jtcat-synced');
   jtcatSyncStatus.style.color = '';
   if (jtcatClockBanner) jtcatClockBanner.classList.add('hidden');

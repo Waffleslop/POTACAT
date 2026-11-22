@@ -1,5 +1,5 @@
 'use strict';
-// CI's jtcat-tests job runs without `npm install`, so `ws` is absent there and
+// CI's tests job (jtcat-tests until 2026-11-21) runs without `npm install`, so `ws` is absent there and
 // any test that loads lib/remote-server.js died on require('ws') before a single
 // assertion ran (the 1.10.27 and 1.11.0 Test runs). Those tests use the
 // server's methods, never a socket, so when `ws` is missing this stands in a

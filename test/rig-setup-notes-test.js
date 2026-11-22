@@ -111,6 +111,7 @@ test('USB data audio: DATA MOD = USB on the Icoms, per the manual of each (FM_12
     ['IC-7100', 'ic7100-data-mod-usb', 'Connectors → DATA MOD → USB', 'required'],
     ['IC-7610', 'ic7610-data1-mod-usb', 'MENU → SET → Connectors → MOD Input → DATA1 MOD → USB', 'required'],
     ['IC-7300 MK II', 'ic7300mk2-data-mod-usb', 'MENU → SET → Connectors → MOD Input → DATA MOD → USB', 'recommended'],
+    ['IC-9700', 'ic9700-data-mod-usb', 'MENU → SET → Connectors → MOD Input → DATA MOD → USB', 'recommended'], // #892: AM_3 p.4-4, CI-V rev 4 p.7
   ];
   for (const [model, id, path, level] of cases) {
     for (const radioType of ['icom', 'hamlib']) {
@@ -128,6 +129,7 @@ test('USB data audio: DATA MOD = USB on the Icoms, per the manual of each (FM_12
   assert.ok(/factory it is ACC/.test(note(resolve({ model: 'IC-7300', radioType: 'icom' }), 'ic7300-data-mod-usb').steps[0]));
   assert.ok(/factory it is ACC/.test(note(resolve({ model: 'IC-7100', radioType: 'icom' }), 'ic7100-data-mod-usb').steps[0]));
   assert.ok(!/factory/i.test(note(resolve({ model: 'IC-7300 MK II', radioType: 'icom' }), 'ic7300mk2-data-mod-usb').steps.join(' ')));
+  assert.ok(!/factory/i.test(note(resolve({ model: 'IC-9700', radioType: 'icom' }), 'ic9700-data-mod-usb').steps.join(' ')));
   // The original IC-7300 has no MOD Input level (FM_12b p.126, BM_12 p.64).
   assert.ok(!/MOD Input/.test(note(resolve({ model: 'IC-7300', radioType: 'icom' }), 'ic7300-data-mod-usb').steps.join(' ')));
   // The IC-7100's 9600 bps is DATA2 pin 3 only (FM_5 p.344).

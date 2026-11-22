@@ -41,12 +41,22 @@ test('macOS granted and sound arriving: nothing to say', () => {
   assert.strictEqual(M.micVerdict({ platform: 'darwin', status: 'granted', silentMs: 0, heardSound: true }).say, false);
   assert.strictEqual(M.micVerdict({ platform: 'darwin', status: 'granted', silentMs: 1e6, heardSound: true }).say, false);
 });
-test('macOS exact zeros since the start, for SILENT_MS: say it (the status can be stale)', () => {
+test('macOS exact zeros since the start, for SILENT_MS, access not granted: say it, naming the permission', () => {
+  for (const status of ['not-determined', 'unknown', null, undefined]) {
+    assert.strictEqual(M.micVerdict({ platform: 'darwin', status, silentMs: M.SILENT_MS - 1 }).say, false);
+    const v = M.micVerdict({ platform: 'darwin', status, silentMs: M.SILENT_MS });
+    assert.strictEqual(v.say, true, String(status));
+    assert.strictEqual(v.reason, 'silence');
+    assert.ok(v.message.includes('System Settings > Privacy & Security > Microphone'), String(status));
+  }
+});
+test('#912 macOS granted, exact zeros for SILENT_MS: say it, but point at the input device, not the permission', () => {
   assert.strictEqual(M.micVerdict({ platform: 'darwin', status: 'granted', silentMs: M.SILENT_MS - 1 }).say, false);
   const v = M.micVerdict({ platform: 'darwin', status: 'granted', silentMs: M.SILENT_MS });
   assert.strictEqual(v.say, true);
-  assert.strictEqual(v.reason, 'silence');
-  assert.ok(v.message.includes('System Settings > Privacy & Security > Microphone'));
+  assert.strictEqual(v.reason, 'silence', 'main still checks for a closed squelch first');
+  assert.ok(!/macOS may be blocking|Privacy & Security/.test(v.message), v.message);
+  assert.ok(/Audio Devices, RX audio in/.test(v.message) && /level/.test(v.message), v.message);
 });
 test('the listen test passes its own 3 s window', () => {
   assert.strictEqual(M.micVerdict({ platform: 'darwin', silentMs: 3000, minSilentMs: 3000 }).say, true);

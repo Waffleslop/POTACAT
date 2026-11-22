@@ -254,16 +254,74 @@
   // ── lists ────────────────────────────────────────────────────────────────
   function renderList() {
     var rows = lists[box] || [];
+    sel = WMS.prune(sel, rows.map(function (m) { return m.mid; }));
+    if (!sel.mids.length) selArmed = false;
     // The Deleted folder says how long it keeps a message, with the choice beside it (#475).
-    var head = box === 'deleted' ? deletedHead() : '';
+    var head = selBar() + (box === 'deleted' ? deletedHead() : '');
     if (!rows.length) { $('wl-list').innerHTML = head + '<div class="wl-empty">Nothing in ' + ({ in: 'the inbox', out: 'the outbox', sent: 'Sent', archive: 'the archive', deleted: 'Deleted' })[box] + '.</div>'; return; }
     $('wl-list').innerHTML = head + rows.map(function (m) {
       var fromOther = box === 'in' || ((box === 'archive' || box === 'deleted') && !WMA.isOwnAddress(m.from, state && state.mycall));
       var who = fromOther ? m.from : (m.to || []).join(', ');
-      return '<div class="wl-row' + (m.read ? '' : ' unread') + (m.mid === openMid ? ' active' : '') + '" data-mid="' + esc(m.mid) + '">'
-        + '<div class="wl-row-top"><span class="wl-from">' + esc(who) + '</span><span>' + esc(fmtDate(m.date)) + '</span></div>'
-        + '<div class="wl-subj">' + (m.attachments && m.attachments.length ? '[' + m.attachments.length + ' att] ' : '') + esc(m.subject || '(no subject)') + '</div></div>';
+      var picked = sel.mids.indexOf(m.mid) >= 0;
+      return '<div class="wl-row' + (m.read ? '' : ' unread') + (m.mid === openMid ? ' active' : '') + (picked ? ' picked' : '') + '" data-mid="' + esc(m.mid) + '">'
+        + '<input type="checkbox" class="wl-sel"' + (picked ? ' checked' : '') + (selBusy ? ' disabled' : '') + ' aria-label="Select this message" title="Select. Shift-click a second box to select the messages between.">'
+        + '<div class="wl-row-main"><div class="wl-row-top"><span class="wl-from">' + esc(who) + '</span><span>' + esc(fmtDate(m.date)) + '</span></div>'
+        + '<div class="wl-subj">' + (m.attachments && m.attachments.length ? '[' + m.attachments.length + ' att] ' : '') + esc(m.subject || '(no subject)') + '</div></div></div>';
     }).join('');
+  }
+
+  // ── several at once (#346) ───────────────────────────────────────────────
+  // A box on each row picks it (Shift-click a second box, or Ctrl/Shift-click
+  // a row, for more); the bar above the list deletes the lot after one
+  // question asked in the bar itself. Each message goes through the same
+  // delete as the reader's button, one after another, so nothing new crosses
+  // the wire. Words: lib/winlink-mail-select.js.
+  var WMS = window.WinlinkMailSelect;
+  var sel = WMS.none();
+  var selArmed = false;          // the bar is asking its one question
+  var selBusy = null;            // { i, n } while deleting
+  var selMsg = null;             // { text, bad } after a run
+  var selMsgTimer = null;
+  function selBar() {
+    var n = sel.mids.length;
+    if (selBusy) return '<div class="wl-selbar" id="wl-selbar" role="status"><span class="wl-selbar-text">' + esc(WMS.progressText(box, selBusy.i, selBusy.n)) + '</span></div>';
+    if (n && selArmed) {
+      return '<div class="wl-selbar armed" id="wl-selbar"><div class="wl-selbar-q">' + esc(WMS.confirmText(box, n)) + '</div>'
+        + '<div class="wl-selbar-btns"><span class="wl-spacer"></span><button class="wl-btn" id="wl-sel-cancel">Cancel</button>'
+        + '<button class="wl-btn danger" id="wl-sel-go">' + esc(box === 'deleted' ? 'Delete for good' : 'Move to Deleted') + '</button></div></div>';
+    }
+    if (n) {
+      return '<div class="wl-selbar" id="wl-selbar"><span class="wl-selbar-text">' + esc(WMS.barText(n)) + '</span>'
+        + '<div class="wl-selbar-btns"><button class="wl-btn" id="wl-sel-all">Select all</button>'
+        + '<button class="wl-btn" id="wl-sel-clear">Clear</button>'
+        + '<span class="wl-spacer"></span>'
+        + '<button class="wl-btn danger" id="wl-sel-del">' + esc(WMS.deleteLabel(box, n)) + '</button></div></div>';
+    }
+    if (selMsg) return '<div class="wl-selbar' + (selMsg.bad ? ' bad' : '') + '" id="wl-selbar" role="status"><span class="wl-selbar-text">' + esc(selMsg.text) + '</span></div>';
+    return '';
+  }
+  function clearSelection() { sel = WMS.none(); selArmed = false; }
+  async function deleteSelected() {
+    if (selBusy || !sel.mids.length) return;
+    var from = box;
+    var mids = sel.mids.slice();
+    var ok = 0, failed = 0, firstError = '';
+    clearSelection();
+    selMsg = null; clearTimeout(selMsgTimer);
+    for (var i = 0; i < mids.length; i++) {
+      selBusy = { i: i + 1, n: mids.length };
+      renderList();
+      var r = null;
+      try { r = await window.api.del(from, mids[i]); } catch (e) { r = { ok: false, error: e && e.message }; }
+      if (r && r.ok) {
+        ok++;
+        if (openMid === mids[i]) { openMid = null; showReader('<div class="wl-empty">Pick a message.</div>'); }
+      } else { failed++; if (!firstError) firstError = (r && r.error) || ''; }
+    }
+    selBusy = null;
+    selMsg = { text: WMS.resultText(from, ok, failed, firstError), bad: failed > 0 };
+    selMsgTimer = setTimeout(function () { selMsg = null; renderList(); }, failed ? 12000 : 6000);
+    renderList();
   }
 
   function deletedHead() {
@@ -280,14 +338,39 @@
     renderList();
   });
   $('wl-list').addEventListener('click', function (e) {
-    var row = e.target.closest('.wl-row');
-    if (row) openMessage(row.getAttribute('data-mid'));
+    var t = e.target;
+    if (t.closest('#wl-selbar')) {
+      var b = t.closest('button');
+      if (!b) return;
+      if (b.id === 'wl-sel-all') { sel = WMS.allOf((lists[box] || []).map(function (m) { return m.mid; })); selArmed = false; }
+      else if (b.id === 'wl-sel-clear') clearSelection();
+      else if (b.id === 'wl-sel-del') selArmed = true;
+      else if (b.id === 'wl-sel-cancel') selArmed = false;
+      else if (b.id === 'wl-sel-go') { deleteSelected(); return; }
+      renderList();
+      return;
+    }
+    var row = t.closest('.wl-row');
+    if (!row) return;
+    var mid = row.getAttribute('data-mid');
+    // The box, or Ctrl/Shift on the row, picks; a plain click on the row opens it.
+    if (t.classList.contains('wl-sel') || e.ctrlKey || e.metaKey || e.shiftKey) {
+      if (selBusy) return;
+      sel = WMS.pick(sel, mid, { shift: e.shiftKey }, (lists[box] || []).map(function (m) { return m.mid; }));
+      selArmed = false; selMsg = null;
+      renderList();
+      var again = document.querySelector('.wl-row[data-mid="' + (window.CSS && CSS.escape ? CSS.escape(mid) : mid) + '"] .wl-sel');
+      if (again) again.focus();
+      return;
+    }
+    openMessage(mid);
   });
 
   Array.prototype.forEach.call(document.querySelectorAll('.wl-folder'), function (f) {
     f.addEventListener('click', function () {
       if (historyOpen) closeHistory();
       box = f.getAttribute('data-box');
+      clearSelection();
       Array.prototype.forEach.call(document.querySelectorAll('.wl-folder'), function (x) { x.classList.toggle('active', x === f); });
       openMid = null;
       showReader('<div class="wl-empty">Pick a message.</div>');
@@ -867,7 +950,8 @@
     wfListenStart();
     window.api.watchAudio(false);
     window.api.audioRig().then(function (rig) {
-      var c = { audio: rig && rig.ok && rig.inputId ? { deviceId: { exact: rig.inputId }, echoCancellation: false, noiseSuppression: false, autoGainControl: false } : { echoCancellation: false, noiseSuppression: false, autoGainControl: false } };
+      // #757: 1 channel, the modem bridge's layout for the same device.
+      var c = { audio: rig && rig.ok && rig.inputId ? { deviceId: { exact: rig.inputId }, channelCount: 1, echoCancellation: false, noiseSuppression: false, autoGainControl: false } : { channelCount: 1, echoCancellation: false, noiseSuppression: false, autoGainControl: false } };
       return navigator.mediaDevices.getUserMedia(c);
     }).then(function (stream) {
       if (wfMode !== 'capture') { stream.getTracks().forEach(function (t) { t.stop(); }); return; }
@@ -908,6 +992,15 @@
     var pcm = d.pcm instanceof Float32Array ? d.pcm : new Float32Array(d.pcm);
     wfNoteFrame(pcm);
     wfPush(pcm, d.sampleRate || 24000);
+  });
+  // Driving a remote shack (#299): no radio audio reaches this PC; the shack
+  // sends its waterfall as frames (lib/winlink-remote-shack.js magsFromWireBins).
+  if (window.api.onRemoteSpectrum) window.api.onRemoteSpectrum(function (d) {
+    if (wfMode !== 'frames' || !d || !Array.isArray(d.mags)) return;
+    wfLastFrameAt = wfLastSoundAt = Date.now();
+    var m = new Float32Array(d.mags);
+    busyUpdate(m);
+    if (wf && $('wl-wf').classList.contains('show')) wf.pushFrame(m);
   });
   function wfSync() {
     wfApplyPrefs();

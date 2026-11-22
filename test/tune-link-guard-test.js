@@ -116,6 +116,40 @@ test('no emoji or symbols in anything the operator reads', () => {
   assert.ok(/^[\x20-\x7e]*$/.test(text), text);
 });
 
+console.log('tune link: the automatic ATU tune');
+// "Auto-tune ATU on band change" (settings.enableAtu) keys a carrier. A tune
+// link must never start it: a click on a web page must not key the radio.
+test("a link that changes band skips the band-change tune", () => {
+  assert.deepStrictEqual(G.tuneLinkAutoAtu({ origin: 'link', action: 'tune' }), { start: false, linkSkipped: true });
+});
+test('spot clicks and every other origin keep today\'s band-change tune', () => {
+  assert.deepStrictEqual(G.tuneLinkAutoAtu({ origin: undefined, action: 'tune' }), { start: true, linkSkipped: false });
+  assert.deepStrictEqual(G.tuneLinkAutoAtu({ origin: 'Error\n at spot click', action: 'tune' }), { start: true, linkSkipped: false });
+  assert.deepStrictEqual(G.tuneLinkAutoAtu({ action: 'tune' }), { start: true, linkSkipped: false });
+});
+test('nothing to skip when no tune was due (same band, setting off, WSPR receive-only hop)', () => {
+  assert.deepStrictEqual(G.tuneLinkAutoAtu({ origin: 'link', action: 'none' }), { start: false, linkSkipped: false });
+  assert.deepStrictEqual(G.tuneLinkAutoAtu({ origin: 'link', action: 'skip' }), { start: false, linkSkipped: false });
+  assert.deepStrictEqual(G.tuneLinkAutoAtu({ origin: undefined, action: 'none' }), { start: false, linkSkipped: false });
+  assert.deepStrictEqual(G.tuneLinkAutoAtu(), { start: false, linkSkipped: false });
+});
+test('the CAT log line for a skipped tune', () => {
+  assert.strictEqual(G.tuneLinkAtuLogLine('20m'),
+    '[ATU] Tune link to 20m: the automatic ATU tune was skipped; press Tune if you need it');
+  assert.strictEqual(G.tuneLinkAtuLogLine(''),
+    '[ATU] Tune link: the automatic ATU tune was skipped; press Tune if you need it');
+});
+test('the notice gains one clause when the tune was skipped, only when the notice is shown', () => {
+  assert.strictEqual(G.tuneLinkNotice(14074, plan({ hunt: true }), { atuSkipped: true }),
+    'A tune link moved your radio to 14.074 MHz. Hunt was stopped so nothing transmits on the new frequency.'
+    + ' The automatic ATU tune was skipped; press Tune if you need it.');
+  assert.strictEqual(G.tuneLinkNotice(14074, plan({ hunt: true }), { atuSkipped: false }),
+    'A tune link moved your radio to 14.074 MHz. Hunt was stopped so nothing transmits on the new frequency.');
+  assert.strictEqual(G.tuneLinkNotice(14074, plan(), { atuSkipped: true }), '', 'no notice of its own: the CAT log line is enough');
+  const t = G.tuneLinkNotice(14074, plan({ run: true }), { atuSkipped: true }) + G.tuneLinkAtuLogLine('20m');
+  assert.ok(/^[\x20-\x7e]*$/.test(t), t);
+});
+
 console.log('tune link: main.js wiring');
 const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
 const hStart = main.indexOf('function handleProtocolUrl(');
@@ -140,10 +174,43 @@ test('the stop uses the existing Halt TX path and the Spot Target clear, nothing
   assert.ok(/clearSpotTarget\(/.test(sBody), 'clears the Spot Target through clearSpotTarget');
   assert.ok(!/keepAuto/.test(sBody), 'never keeps Run / Hunt / the beacon');
 });
+const nStart = main.indexOf('function tuneLinkNotify(');
+const nBody = main.slice(nStart, main.indexOf('\n}\n', nStart));
 test('the notice reaches the main window and the JTCAT window on existing channels', () => {
-  assert.ok(/'app-notice'/.test(sBody), 'main window app-notice');
-  assert.ok(/'jtcat-qso-notice'/.test(sBody), 'JTCAT window jtcat-qso-notice');
+  assert.ok(nStart > 0, 'tuneLinkNotify defined');
+  assert.ok(/'app-notice'/.test(nBody), 'main window app-notice');
+  assert.ok(/'jtcat-qso-notice'/.test(nBody), 'JTCAT window jtcat-qso-notice');
+  assert.ok(/TuneLinkGuard\.tuneLinkNotice\([^)]*atuSkipped/.test(nBody), 'the notice carries the skipped-ATU clause');
   assert.ok(/sendCatLog\(/.test(sBody), 'CAT log line');
+});
+test('the notice goes out after tuneRadio, so it knows whether the ATU tune was skipped', () => {
+  const tune = hBody.indexOf('tuneRadio(');
+  const reset = hBody.indexOf('_tuneLinkAtuSkipped = false');
+  const notify = hBody.indexOf('tuneLinkNotify(');
+  assert.ok(reset > 0 && reset < tune, 'the skipped flag is cleared before the tune');
+  assert.ok(notify > tune, 'tuneLinkNotify runs after tuneRadio');
+  assert.ok(/tuneLinkNotify\([^;]*_tuneLinkAtuSkipped/.test(hBody), 'tuneLinkNotify is told about the skipped tune');
+});
+
+console.log('tune link: the automatic ATU tune, main.js wiring');
+const tStart = main.indexOf('function tuneRadio(');
+const aStart = main.indexOf('function bandChangeAtuTune(');
+const tBody = main.slice(tStart, aStart);
+const aBody = main.slice(aStart, main.indexOf('\n}\n', aStart));
+test('every band-change tune call in tuneRadio passes the origin', () => {
+  const calls = tBody.match(/bandChangeAtuTune\([^,]+,\s*\{[^}]*\}/g) || [];
+  assert.strictEqual(calls.length, 3, 'three tune paths');
+  for (const c of calls) assert.ok(/\borigin\b/.test(c) && /\bpurpose\b/.test(c), c);
+});
+test('bandChangeAtuTune checks the origin through lib/tune-link-guard.js before it can start a tune', () => {
+  assert.ok(/function bandChangeAtuTune\(freqMhz,\s*\{\s*purpose,\s*origin\s*\}/.test(aBody), 'takes { purpose, origin }');
+  const check = aBody.indexOf('TuneLinkGuard.tuneLinkAutoAtu(');
+  const startCall = aBody.indexOf('start(');
+  assert.ok(check > 0, 'decides with TuneLinkGuard.tuneLinkAutoAtu');
+  assert.ok(check < startCall, 'decided before start() can run');
+  assert.ok(/linkSkipped[\s\S]*sendCatLog\(TuneLinkGuard\.tuneLinkAtuLogLine\(/.test(aBody), 'a skipped tune is logged');
+  assert.ok(/_tuneLinkAtuSkipped = true/.test(aBody), 'a skipped tune is reported to the notice');
+  assert.ok(/_atuOwedTune = null/.test(aBody.slice(check)), 'a link drops a WSPR owed tune (the radio left that band)');
 });
 test('only the protocol link calls the stop (spot clicks and other tunes unchanged)', () => {
   const calls = main.split('tuneLinkStopAutoTx(').length - 1;

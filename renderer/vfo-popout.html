@@ -1262,7 +1262,7 @@ const BANDS = [
   { label: '4m', freq: 70000 },
   { label: '2m', freq: 144000 },
   { label: '1.25m', freq: 222000 },
-  { label: '70cm', freq: 420000 },
+  { label: '70cm', freq: 432000 }, // #891: 432 MHz, inside every region's 70 cm band and the IC-9700's range (420 is only the US edge)
   { label: '33cm', freq: 902000 },
   { label: '23cm', freq: 1240000 },
   { label: '13cm', freq: 2304000 },
@@ -1313,9 +1313,12 @@ function buildBandGrid(container) {
     btn.className = 'tog band-btn';
     btn.textContent = b.label;
     btn.dataset.freq = b.freq;
-    btn.addEventListener('click', () => {
+    btn.addEventListener('click', async () => {
       if (vfoLocked) return;
-      tuneJumpFromPopout(b.freq);
+      // Back to where this radio last was on the band, or the preset (#680).
+      let khz = b.freq;
+      try { const t = await window.api.bandJumpTarget(b.freq); if (Number(t) > 0) khz = Number(t); } catch {}
+      tuneJumpFromPopout(khz);
     });
     container.appendChild(btn);
   }
