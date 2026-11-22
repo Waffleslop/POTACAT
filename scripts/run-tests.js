@@ -66,6 +66,7 @@ const TESTS = [
   'test/main-ismac-scope-test.js', // K3SBP 2026-11-21: isMac is not defined (opening APRS crashed); every isMac in main.js is declared in its own function
   'test/aprs-rf-phone-test.js', // ECHOCAT ask 2026-11-21: one radio beacon per press from the owner's phone; the window's gate and caps; Listen off is set up and put back
   'test/set-cw-xit-registry-test.js', // ECHOCAT 2026-11-22: the set-cw-xit registry row names value, the field the code reads
+  'test/vfo-popout-70cm-test.js', // #891 NJ2DX: the VFO pop-out 70cm button sends 432 MHz, inside every 70 cm radio range (IC-9700 starts at 430)
   'test/smartsdr-meter-test.js',
   'test/smartsdr-udpport-reconnect-test.js', // K3SBP 2026-11-21: after a network drop the new Flex connection is told client udpport again (pan FFT, meters)
   'test/flex-slice-filter-test.js',
@@ -100,6 +101,7 @@ const TESTS = [
   'test/dxcluster-backoff-test.js',
   'test/audio-backpressure-test.js',
   'test/spot-mute-rules-test.js',
+  'test/spot-filter-presets-test.js',
   'test/websdr-test.js',
   'test/jtcat-websdr-source-test.js', // #243: JTCAT decodes from the WebSDR: source switch, dial follow, TX refused, 12 kHz resampler
   'test/ragchew-test.js',
@@ -115,6 +117,7 @@ const TESTS = [
   'test/guest-pass-onair-call-test.js', // the pass's station call is the on-air call (K3SBP on W7RTA's pass)
   'test/guest-pass-lease-end-test.js', // the end of a pass stops every transmitter and closes the guest socket
   'test/guest-pass-hopping-test.js', // guests hop between rigs; the owner takes over and hands back
+  'test/pass-guest-activity-test.js', // the take-over dialog learns whether the guest is connected and when they last used the radio
   'test/guest-sdr-test.js', // #543: a guest uses the station's own SDRs; a typed-in host and SDR settings writes are refused in words
   'test/guest-settings-secrets-test.js', // a guest never receives the station's SDR passwords or other settings secrets; refusals in plain words
   'test/guest-pass-authority-test.js', // a Guest Pass is default-deny: the allowlist wall in the demux + the rig-control action wall
@@ -190,10 +193,12 @@ const TESTS = [
   'test/ts590-atu-ac111-test.js', // TS-590S/SG starts a tune with AC111; per its PC command guide (VA2PSL #635); other Kenwoods keep AC011;
   'test/freedv-spot-merge-test.js', // #742: one row per FreeDV station across PSKReporter + FreeDV Reporter; departed stations leave; rows keyed by mode too
   'test/freedv-display-mode-test.js', // #716: RADE, not DIGU/PKTUSB, on every surface while FreeDV runs
+  'test/vfo-ptt-row-test.js', // #190: ECHOCAT Web VFO-tab PTT row shows while the mode is unknown; hidden in CW/data
   'test/ws-liveness-test.js', // ECHOCAT Web: reconnect when no pong comes back or the screen wakes on a dead socket
   'test/error-banner-text-test.js', // #806: ECHOCAT Web error banner shows the message on iPhone Safari (stack has no message there)
   'test/freedv-diag-test.js', // #717: FreeDV audio in, sync on/off and capture failures in the session log, rate-limited
   'test/freedv-mac-mic-test.js', // #718: FreeDV capture runs the macOS microphone check and a 10 s silence watch, the shared rule
+  'test/freedv-stop-during-open-test.js', // #905: a FreeDV stop during the capture open wins: the late stream is stopped and nothing is kept
   'test/freedv-ptt-refusal-test.js', // FDV1: voice PTT refused in FreeDV modes until FreeDV transmit exists; one sentence on every surface
   'test/freedv-echocat-test.js', // FDV1: decoded FreeDV speech on the ECHOCAT track, freedv-status, protocol drift fixed (agreed with ECHOCAT)
   'test/kenwood-filter-width-test.js',
@@ -210,6 +215,7 @@ const TESTS = [
   'test/ptt-cat-line-test.js',
   'test/rigctld-link-hints-test.js',
   'test/serial-cat-test-connection-test.js',
+  'test/cat-test-kills-rigctld-test.js', // every serial Test Connection stops rigctld and waits before opening the port (#910)
   'test/voice-recorder-test.js',
   'test/hf-net-row-test.js',
   'test/log-freq-follow-test.js',
@@ -281,6 +287,7 @@ const TESTS = [
   'test/direwolf-aprs-tx-config-test.js', // APRS phase 7: the transmit config (PTT via the shim, channel access per band); listen and Winlink configs byte-identical
   'test/direwolf-aprs-tx-offline-test.js', // APRS phase 7: the bundled Dire Wolf keys a fake shim once and its audio decodes back (skips without the build)
   'test/aprs-echocat-test.js', // APRS phase 6: ECHOCAT devices: snapshot, 1.5 s deltas, feed and listen ownership, Guest Pass, aprs-state
+  'test/aprs-heard-you-test.js', // ECHOCAT 2026-11-22: who heard my radio beacon (q construct, digis, 15-min feed watch, heardMe rows, beacon.rf.heard, window mark)
   'test/aprs-find-band-test.js', // ECHOCAT 2026-11-21: rf.band on aprs-stations rows, aprs-find (follow one call beyond range, budlist, validated, guest allowed)
   'test/aprs-echocat-wire-test.js', // APRS phase 6: the 'aprs' capability on the wire (old clients untouched), guest refusals, main.js glue, ECHOCAT Web
   'test/aprs-message-test.js', // APRS A1: message, ack, rej and reply-ack formats (APRS 1.0.1 ch. 14), the 67-character limit, ours by SSID, the g/ filter
@@ -440,6 +447,8 @@ const TESTS = [
   'test/mac-mic-access-test.js', // #463: a Mac that refuses the microphone is named, logged and in Report a Bug
   'test/capture-stall-test.js', // kc8zp_ryan: JTCAT capture rebuilt when the OS mutes/suspends it or it stops delivering
   'test/jtcat-capture-gate-test.js', // #133: a remote-started FT8 capture is restarted like a desktop one; one capture build at a time
+  'test/remote-off-release-test.js', // #746: ECHOCAT turned off releases the radio input a phone-started FT8/JS8 held
+  'test/rig-capture-layout-test.js', // #757: every capture of the radio input asks for 1 channel, so two captures of one Linux source share a layout
   'test/jtcat-log-comment-test.js', // dcxweaver: the "JTCAT FT8" COMMENT is optional (default on)
   'test/vfo-sdr-volume-test.js', // #118 df1vb: the SDR Volume row stands in when the VOL knob is hidden
   'test/wspr-power-memory-test.js',
@@ -777,6 +786,10 @@ const SERIAL = new Set([
   'test/paddle-bounce-test.js', // web keyer element timing in real milliseconds; a dash was cut short once under load
 ]);
 
+// SERIAL files that may be retried once after a failure (timing under load,
+// never a logic failure). Every file here must also be in SERIAL.
+const RETRY_ONCE = new Set(SERIAL);
+
 // The longest files, started first so the pool does not wait on one that began
 // late (sstv-quality alone is about 6 minutes under load). Order only, never results.
 const SLOW_FIRST = [
@@ -880,7 +893,16 @@ async function runParallel(list, jobs) {
   if (alone.length) console.log(`\n[run-tests] ${alone.length} file(s) that run alone (SERIAL):`);
   for (const f of alone) {
     process.stdout.write(`\n[run-tests] ${f} (alone)\n`);
-    const r = await runFile(f, true);
+    let r = await runFile(f, true);
+    // A timing test that failed gets one more try (Casey 2026-11-22: "Retry
+    // timing tests"). These three fail when another agent's suite loads the
+    // machine; a pass on the retry is printed as FLAKY so it stays visible.
+    // Only SERIAL files are retried; every other failure counts at once.
+    if (r.code !== 0 && RETRY_ONCE.has(f)) {
+      console.error(`\n[run-tests] RETRY: ${f} failed (${why(r.code, r.signal)}); a timing test, so one more try`);
+      r = await runFile(f, true);
+      if (r.code === 0) console.log(`\n[run-tests] FLAKY: ${f} passed on the retry`);
+    }
     r.out = null;
     r.ms = 0;
     n++;
@@ -932,7 +954,7 @@ function parseArgs(argv) {
   return o;
 }
 
-module.exports = { TESTS, SERIAL, SLOW_FIRST, runAll, parseArgs, defaultJobs };
+module.exports = { TESTS, SERIAL, RETRY_ONCE, SLOW_FIRST, runAll, parseArgs, defaultJobs };
 
 if (require.main === module) {
   const o = parseArgs(process.argv.slice(2));

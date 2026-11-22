@@ -517,14 +517,16 @@
     if (!rf) return '';
     return rf.kind === 'digi' ? (rf.digi ? 'via ' + rf.digi : 'via a digipeater') : 'direct';
   }
+  var heardYou = {}; // CALL -> {at, by, ...}: stations that heard my radio beacon (main, 'aprs-heard-you')
   function rowHtml(r, t) {
     var v = W.stationRow(r, { unit: unit, now: t });
+    var hy = r.type === 'object' || r.type === 'item' ? null : W.heardYouMark(heardYou[r.call], t);
     var age = W.ageFade(t - r.lastHeard, showLastMin).step;
     var right = [v.dist, v.ago].filter(Boolean).join(' · ');
     return '<li class="aprs-st' + (v.mine ? ' mine' : '') + (age === 2 ? ' older' : age === 1 ? ' old' : '') + (r.key === selected ? ' sel' : '') + '" data-key="' + esc(r.key) + '"'
-      + ' title="' + esc(kindName(r.cls) + (v.mine ? '. Heard by my radio, ' + rfText(r.rf) : '') + (v.comment ? '. ' + v.comment : '')) + '">'
+      + ' title="' + esc(kindName(r.cls) + (v.mine ? '. Heard by my radio, ' + rfText(r.rf) : '') + (hy ? '. ' + hy.tip : '') + (v.comment ? '. ' + v.comment : '')) + '">'
       + '<span class="aprs-st-ico">' + symHtml(r.cls, r.course, 20) + '</span>'
-      + '<span class="aprs-st-call">' + esc(v.call) + ' <span class="aprs-st-via">' + esc(v.via) + '</span></span>'
+      + '<span class="aprs-st-call">' + esc(v.call) + (hy ? ' <span class="aprs-st-heard">' + esc(hy.text) + '</span>' : '') + ' <span class="aprs-st-via">' + esc(v.via) + '</span></span>'
       + '<span class="aprs-st-right">' + esc(right) + '</span>'
       + '<span class="aprs-st-cmt">' + esc(v.comment) + '</span>'
       + '</li>';
@@ -698,6 +700,7 @@
     rebuild();
   });
   window.api.onStatus(setLink);
+  if (window.api.onHeardYou) window.api.onHeardYou(function (m) { heardYou = m && typeof m === 'object' ? m : {}; renderRows(); });
   window.api.onPackets(function (packets) {
     if (!Array.isArray(packets)) return;
     var t = Date.now();

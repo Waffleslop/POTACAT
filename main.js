@@ -347,6 +347,7 @@ const { RigController } = require('./lib/rig-controller');
 const { RIG_CONTROLS } = require('./lib/rig-controls');
 const _rigGainSteps = require('./lib/rig-gain-steps'); // preamp/ATT ladders (KB2UXB)
 const { normalizeMuteRules } = require('./lib/spot-mute-rules'); // per-band region mutes (N7BBQ)
+const { normalizePresets: normalizeSpotFilterPresets } = require('./lib/spot-filter-presets'); // named spot filter sets
 const ScanRun = require('./lib/scan-run'); // #37: a phone-started scan the desktop runs in main (phone locked or not)
 const SpotAge = require('./lib/spot-age'); // Max Spot Age, shared with the table (#239)
 const SpotHides = require('./lib/spot-hides'); // hidden spots, one list for every surface (K8IKO)
@@ -405,6 +406,7 @@ const jtcatModehop = require('./lib/jtcat-modehop');
 const { operatorModeChange: jtcatModeChangeRule } = require('./lib/jtcat-mode-change');
 const TuneLinkGuard = require('./lib/tune-link-guard'); // a potacat://tune link stops automatic JTCAT TX before it tunes
 const FakeIt = require('./lib/jtcat-fake-it'); // split operation "Fake It" (fakeItShiftForTx / fakeItRestoreDial)
+const JtcatCaptureGate = require('./lib/jtcat-capture-gate'); // #746: ECHOCAT off releases a phone-driven capture
 const { WsprScheduler } = require('./lib/wspr/scheduler');
 const WsprPowerMemory = require('./lib/wspr-power-memory'); // pre-beacon RF power remember/restore decisions
 const WsprDbm = require('./lib/wspr/dbm'); // the dBm the beacon reports: follows its RF power, or the operator's fixed pick (#268)
@@ -972,7 +974,7 @@ const GLOBAL_KEYS = new Set([
   'winlinkVaraHfPath', // Winlink: where VARA.exe is on THIS machine (blank = the usual places)
   'winlinkVaraFmPath', // Winlink: where VARAFM.exe is on THIS machine
   'winlinkPredictionUrl', // Winlink: a VOACAP service other than api.potacat.com (dev / self-hosted); blank = POTACAT's
-  'winlinkVaraAutoLaunch', // Winlink: start the operator's VARA when a session needs it (default on; never stopped by POTACAT)
+  'winlinkVaraAutoLaunch', // Winlink: start the operator's VARA when a session needs it (default on; never stopped by POTACAT, except a VARA POTACAT itself started for an ECHOCAT session, closed when that session is over: #697)
   'winlinkDirewolfPath', // Winlink: explicit Dire Wolf binary on THIS machine
   'winlinkAgwPort',    // Winlink: Dire Wolf's AGWPE port on this machine (default 8010)
   'winlinkWaterfallSpeed', // mail-window waterfall lines/sec — a display property of this screen (as jtcatWaterfallSpeed)
@@ -2101,6 +2103,7 @@ let _winlinkLastActivity = 0;
 // A session started while a Guest Pass guest had the radio is the guest's:
 // its traffic is never the owner's activity (#200 step 4).
 let _winlinkSessionByGuest = false;
+let _winlinkSessionFromEchocat = false; // this session was started from an ECHOCAT device (or is the automatic retry of one): #697
 let _winlinkSessionError = '';
 let _winlinkSessionErrorKind = '';   // 'login-failed' | 'no-answer' | 'transport-down' | 'rig-refused' | 'stopped' | '' — session.errorKind for clients
 // How this session ended, as facts for lib/winlink-outcome.js (#425). The
@@ -11550,6 +11553,59 @@ const _varaLaunch = { hf: null, fm: null }; // { child, at } for a VARA POTACAT 
 // answering" until VARA was restarted (W7RTA IC-7300, 2026-10-24).
 const _patHoldsVara = { hf: null, fm: null };
 let _patVaraKind = null; // the VARA this session hands Pat: the one to clear above if Pat could not open it
+// ── closing the VARA POTACAT opened for an ECHOCAT session (#697) ──────────
+// Casey 2026-11-21: "close VARA we opened". The rule is
+// VaraProcess.shouldCloseVara; this is the glue. Looked at after a session
+// ends (with no retry pending), after the retry is skipped or cancelled, and
+// when an ECHOCAT device disconnects. A link still closing is looked at again
+// every few seconds, for up to two minutes.
+let _varaCloseTimer = null;
+let _varaCloseLooks = 0;
+function winlinkVaraCloseSoon(why, delayMs = 3000) {
+  if (!_varaLaunch.hf && !_varaLaunch.fm) return;
+  clearTimeout(_varaCloseTimer);
+  _varaCloseLooks = 0;
+  _varaCloseTimer = setTimeout(() => { winlinkVaraCloseCheck(why).catch((e) => winlinkLog(`VARA close check failed: ${e.message}`)); }, delayMs);
+}
+async function winlinkVaraCloseCheck(why) {
+  _varaCloseTimer = null;
+  for (const kind of VaraProcess.KINDS) {
+    const l = _varaLaunch[kind];
+    if (!l) continue;
+    const child = l.child;
+    const busyWord = (patClient && !winlinkSessionActive()) ? await winlinkPatStillBusy() : '';
+    const d = VaraProcess.shouldCloseVara({
+      launchedByUs: !!(child && child.pid && child.exitCode === null && child.signalCode === null),
+      startedFromEchocat: !!l.forEchocat,
+      sessionActive: winlinkSessionActive(),
+      retryPending: !!_winlinkRetry,
+      connected: !!busyWord,
+      transmitting: winlinkAnyTx(),
+    });
+    if (d.wait) {
+      if (++_varaCloseLooks <= 24 && !_varaCloseTimer) _varaCloseTimer = setTimeout(() => { winlinkVaraCloseCheck(why).catch(() => {}); }, 5000);
+      else if (_varaCloseLooks > 24) winlinkLog(`${VaraProcess.varaName(kind)} stays open: ${d.why} two minutes after ${why}`);
+      continue;
+    }
+    if (!d.close) continue;
+    const name = VaraProcess.varaName(kind);
+    const r = await VaraProcess.closeVaraWeOpened({
+      pid: child.pid,
+      run: (cmd, args) => new Promise((resolve) => { require('child_process').execFile(cmd, args, { timeout: 5000, windowsHide: true }, () => resolve()); }),
+      kill: () => child.kill(),
+      hasExited: () => child.exitCode !== null || child.signalCode !== null,
+      stillOurs: () => _varaLaunch[kind] === l && !winlinkSessionActive(),
+    });
+    if (r.how === 'not-ours') continue;
+    if (_varaLaunch[kind] === l) _varaLaunch[kind] = null;
+    if (r.closed) {
+      _patHoldsVara[kind] = null; // Pat's old command connection went with it; the next session opens a new one
+      winlinkLog(`closed the ${name} window POTACAT opened for the ECHOCAT session${r.how === 'killed' ? ' (it did not close by itself, so the process POTACAT started was ended)' : ''}`);
+    } else {
+      winlinkLog(`could not close the ${name} window POTACAT opened for the ECHOCAT session: close it on the shack PC`);
+    }
+  }
+}
 async function winlinkVaraReady(mode, { configured } = {}) {
   const kind = VaraProcess.kindOfMode(mode);
   const name = VaraProcess.varaName(kind);
@@ -11618,6 +11674,7 @@ async function winlinkVaraReady(mode, { configured } = {}) {
           child.on('exit', () => { if (_varaLaunch[kind] && _varaLaunch[kind].child === child) _varaLaunch[kind] = null; });
           child.unref();
           _varaLaunch[kind] = { child, at: Date.now() };
+          _varaLaunch[kind].forEchocat = _winlinkSessionFromEchocat; // #697: closed again after the ECHOCAT session, never otherwise
         } catch (e) {
           _winlinkSessionErrorKind = 'vara-not-answering';
           throw new Error(`${name} could not be started on the shack PC (${e.message}) — start it there yourself, with its PTT set to VOX`);
@@ -11656,6 +11713,8 @@ async function winlinkVaraReady(mode, { configured } = {}) {
     throw new Error(`${name} did not accept a new connection; is another program using it?`);
   }
   if (accept.tries > 1) winlinkLog(`${name}: took ${accept.waitedMs} ms to accept a new connection after the check`);
+  // A desktop session that uses a VARA POTACAT opened for the phone makes it the desktop's: it then stays open (#697).
+  if (_varaLaunch[kind] && !_winlinkSessionFromEchocat) _varaLaunch[kind].forEchocat = false;
   _patVaraKind = kind;
   _patHoldsVara[kind] = patProc; // Pat opens it this session and keeps it (cleared if Pat says it could not)
   winlinkLog(`${name} ready on ${where}${probe.version ? ' — ' + probe.version : probe.silent ? ' (answered the connection, no VERSION reply)' : ''}`);
@@ -14689,6 +14748,7 @@ async function aprsRfTransmit(why = 'click') {
     settings.aprsRfBeaconLastAt = aprsRfUi.lastAt; // kept: a restart never beacons early on the radio timer
     try { saveSettings(settings); } catch (e) { aprsLog('could not save the radio beacon time: ' + e.message); }
     sendCatLog(`[APRS beacon] sent over the radio${why === 'timer' ? ' by the 2 m timer' : ''} (${c.bandLabel}, ${c.mhz} MHz; the radio reported transmit): ${b.packet}`);
+    try { aprsEcho.beaconSent(b.source); } catch (e) { aprsLog('heard you: ' + e.message); } // 15 minutes on APRS-IS for who heard it (read only)
   } else if (res.ok) {
     aprsRfSay(res.sentence || AprsRfBeacon.SENT_SENTENCES.noReadback);
     sendCatLog(`[APRS beacon] keyed but not confirmed (${c.bandLabel}, ${c.mhz} MHz): ${aprsRfUi.sentence}`);
@@ -15117,6 +15177,9 @@ const aprsEcho = AprsEchocat.createController({
   setFeedRange: (km) => { if (aprsFeedHooks) aprsFeedHooks.setRange(km); },
   setFollow: (calls) => { if (aprsFeedHooks) aprsFeedHooks.setFollow(calls); }, // aprs-find: calls passed beyond the range
   sendTo: (id, m) => { if (remoteServer && remoteServer.sendAprsTo) remoteServer.sendAprsTo(id, m); },
+  setWatch: (calls) => { if (aprsFeedHooks) aprsFeedHooks.setWatch(calls); }, // heard you: my beacon's call and who heard it
+  ownLogin: () => { const l = AprsIgate.uplinkLogin(settings.myCallsign); return l.ok ? l.call : ''; },
+  heardChanged: (map) => { if (aprsWin && !aprsWin.isDestroyed()) aprsWin.webContents.send('aprs-heard-you', map); },
   windowOpen: () => !!(aprsWin && !aprsWin.isDestroyed()),
   listenSet: (on) => aprsListenSet(on),
   listenSetBand: (b) => aprsListenSetBand(b),
@@ -15313,7 +15376,7 @@ function winlinkSessionPush() {
  * the pop-out's Connect and ECHOCAT's winlink-connect, both operator actions.
  * @returns {{ok:boolean, error?:string, reason?:string}}
  */
-async function winlinkStartSession({ mode, gateway, dialKhz, url: rowUrl, origin, autoRetry } = {}) {
+async function winlinkStartSession({ mode, gateway, dialKhz, url: rowUrl, origin, autoRetry, fromEchocat } = {}) {
   if (!(await winlinkEnsureStarted())) return { ok: false, error: winlinkState.snapshot().patError || 'Winlink could not start — see the [Winlink] lines in the log' };
   if (!settings.winlinkNoticeAcceptedAt) return { ok: false, error: 'Read and accept the Winlink notice first' };
   if (!settings.winlinkPassword) return { ok: false, error: 'Set your Winlink password in Settings > Station > Winlink first' };
@@ -15376,6 +15439,7 @@ async function winlinkStartSession({ mode, gateway, dialKhz, url: rowUrl, origin
   _winlinkPatConnected = false;
   if (radio) _winlinkPreviewReturnTo = null; // the session's returnTo carries it now
   _winlinkSessionByGuest = !!(passEnforcement && ['active', 'expiring'].includes(passEnforcement.getState()));
+  _winlinkSessionFromEchocat = VaraProcess.isEchocatOrigin(origin) || !!fromEchocat;
   winlinkSessionTouch();
   winlinkSessionPush();
   winlinkLog(`session start: ${mode}${radio ? ` → ${String(gateway).toUpperCase()} on ${Number(dialKhz).toFixed(1)} kHz dial` : ''} (${origin || 'operator'})`);
@@ -15930,6 +15994,7 @@ function winlinkEndSession(state, text, received = 0) {
     .catch((e) => winlinkLog(`how the messages went out could not be noted: ${e.message}`))
     .then(() => winlinkRefreshMailboxes());
   if (retryWill) winlinkRetryTick();
+  else if (wasActive) winlinkVaraCloseSoon('the session ended'); // #697: only a VARA POTACAT opened for an ECHOCAT session
 }
 
 // ── one automatic retry after a dropped link (#425) ─────────────────────────
@@ -15972,7 +16037,7 @@ function winlinkRetryDecide(s, outcome) {
   }
   const noCat = winlinkNoCat();
   _winlinkRetry = {
-    gateway: String(s.gateway).toUpperCase(), mode: s.mode, dialKhz: Number(s.dialKhz), url: s.url || '', origin: s.origin || '',
+    gateway: String(s.gateway).toUpperCase(), mode: s.mode, dialKhz: Number(s.dialKhz), url: s.url || '', origin: s.origin || '', fromEchocat: _winlinkSessionFromEchocat,
     noCat, endsAt: Date.now() + WinlinkAutoRetry.COUNTDOWN_S * 1000, tryNow: false,
     watch: new WinlinkAutoRetry.ChannelWatch(), acc: null, busy: null, ofStartedAt: s.startedAt, holdsReturn: false, timer: null,
   };
@@ -16020,12 +16085,13 @@ async function winlinkRetryStart() {
   winlinkRetryStop();
   winlinkLog(`automatic retry started: ${r.gateway} on ${r.dialKhz.toFixed(1)} kHz dial (${WinlinkModes.LABELS[r.mode] || r.mode})${r.tryNow ? ', now: the operator pressed Try now' : ''}`);
   winlinkRetryShow({ retryState: 'starting', retryInS: 0, retryText: WinlinkOutcome.retryText({ state: 'starting', gateway: r.gateway }) });
-  const res = await winlinkStartSession({ mode: r.mode, gateway: r.gateway, dialKhz: r.dialKhz, url: r.url, origin: 'automatic retry', autoRetry: true });
+  const res = await winlinkStartSession({ mode: r.mode, gateway: r.gateway, dialKhz: r.dialKhz, url: r.url, origin: 'automatic retry', autoRetry: true, fromEchocat: !!r.fromEchocat });
   if (!res || !res.ok) {
     const why = WinlinkOutcome.plainReason((res && res.error) || 'it could not start', 160).replace(/[.\s]+$/, '');
     winlinkLog(`automatic retry skipped: it could not start (${why})`);
     winlinkRetryShow({ retryState: 'skipped', retryInS: 0, retryText: WinlinkOutcome.retryText({ state: 'skipped', gateway: r.gateway, why: why.charAt(0).toLowerCase() + why.slice(1) }) });
     if (r.holdsReturn) winlinkRetryReturnDial();
+    winlinkVaraCloseSoon('the automatic retry could not start');
   }
 }
 
@@ -16056,6 +16122,7 @@ function winlinkRetryEnd(state, why) {
   winlinkLog(state === 'cancelled' ? `automatic retry cancelled: ${why}` : `automatic retry skipped: ${why === 'busy' ? `the channel stayed busy for ${WinlinkAutoRetry.BUSY_WAIT_S} s after the countdown` : why}`);
   winlinkRetryShow({ retryState: state, retryInS: 0, retryText: WinlinkOutcome.retryText({ state, gateway: r.gateway, why }) });
   if (r.holdsReturn && (state === 'skipped' || why === WinlinkAutoRetry.cancelReason('cancel'))) winlinkRetryReturnDial();
+  winlinkVaraCloseSoon(`the automatic retry was ${state}`);
 }
 
 /**
@@ -17173,7 +17240,10 @@ onRemoteServer((rs) => {
   // A device's Mail tab open or closed; gone = its connection went with the tab open.
   rs.on('winlink-mail-view', ({ open, clientId, gone } = {}) => winlinkMailViewSet(clientId, !!open, { gone: !!gone }));
   // The last device is gone: nothing of theirs is open any more.
-  rs.on('client-disconnected', () => { if (_winlinkMailDevices.any()) { _winlinkMailDevices.clear(); winlinkMailDeviceGone(); } });
+  rs.on('client-disconnected', () => {
+    if (_winlinkMailDevices.any()) { _winlinkMailDevices.clear(); winlinkMailDeviceGone(); }
+    winlinkVaraCloseSoon('the ECHOCAT device disconnected'); // #697: still only once the session is over
+  });
   // A freshly built server hydrates new devices from its own cache — on or
   // off: an off shack hydrates {enabled:false} rather than nothing.
   if (typeof rs.broadcastWinlinkState === 'function' && settings) winlinkPush();
@@ -30016,6 +30086,7 @@ function connectRemote() {
   // Local network and Cloud is the always-on 0.0.0.0 of before.
   const remoteAccess = RemoteAccess.normalizeRemoteAccess(settings).access;
   if (!settings.enableRemote || remoteAccess === 'off') {
+    releasePhoneDrivenJtcat();
     sendCatLog('[Echo CAT] Access: ' + RemoteAccess.describeRemoteAccess('off'));
     return;
   }
@@ -33380,6 +33451,24 @@ function disconnectRemote() {
     remoteServer = null;
   }
   destroyRemoteAudioWindow();
+}
+
+// ECHOCAT access turned off (#746). FT8/JS8 the phone started is captured by
+// the main window; disconnectRemote() drops the server's listeners, so the
+// disconnect grace that would release it never runs and the radio's input
+// stayed busy until POTACAT quit. Not called on a restart of the server.
+function releasePhoneDrivenJtcat() {
+  const d = JtcatCaptureGate.remoteOffRelease({
+    engineRunning: !!ft8Engine,
+    desktopWindowOpen: !!((jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) || (js8PopoutWin && !js8PopoutWin.isDestroyed())),
+  });
+  if (d.stopEngine) {
+    try { if (js8Engine()) js8SetHeartbeat(false); } catch { /* no JS8 */ }
+    stopJtcat();
+    remoteJtcatQso = null;
+    sendCatLog('[JTCAT] ECHOCAT turned off: stopped the engine the phone started and released the radio audio input');
+  }
+  if (d.releaseCapture && win && !win.isDestroyed()) win.webContents.send('jtcat-stop-for-remote');
 }
 
 let _ssbModeBeforePtt = null; // original mode saved during DATA-mode PTT workaround
@@ -38855,7 +38944,8 @@ function flexDigitalViewWanted() {
     const mode = wlSession ? winlinkState.session.mode : WinlinkModes.pickWinlinkMode(winlinkState.snapshot().modes, settings.winlinkDefaultMode || 'telnet');
     if (!WinlinkModes.isRadioMode(mode)) return null;
     return ScopeDigitalView.winlinkView({ band: WinlinkSpectrum.markerBand(mode, winlinkModemBw()), rigMode: _currentMode,
-      digOffsetHz: ScopeDigitalView.flexDigOffsetHz(_currentMode, _flexSliceKv), minSpanHz: g.minSpanHz });
+      digOffsetHz: ScopeDigitalView.flexDigOffsetHz(_currentMode, _flexSliceKv),
+      filterLoHz: parseInt(_flexSliceKv.filter_lo, 10), filterHiHz: parseInt(_flexSliceKv.filter_hi, 10), minSpanHz: g.minSpanHz });
   }
   return ScopeDigitalView.digitalView({ mode: ft8Engine._mode, rigMode: _currentMode, minSpanHz: g.minSpanHz });
 }
@@ -38878,7 +38968,7 @@ function flexDigitalViewSync() {
     smartSdr.setPanBandwidth(v.spanHz);
     yaesuScopeState.spanHz = v.spanHz;   // the pan status confirms (or clamps) it
     if (dial) flexScopeAskCenter(dial + v.offsetHz);
-    sendCatLog(`[Scope] Flex panadapter: ${v.kind === 'winlink' ? 'Winlink' : ft8Engine._mode} view, ${v.spanHz} Hz wide, centred ${v.offsetHz > 0 ? '+' : ''}${v.offsetHz} Hz from the dial (${v.kind === 'winlink' ? `the modem's channel ${v.window.lo} to ${v.window.hi} Hz${ScopeDigitalView.flexDigOffsetHz(_currentMode, _flexSliceKv) ? `, with the slice's ${String(_currentMode).toUpperCase()} offset of ${ScopeDigitalView.flexDigOffsetHz(_currentMode, _flexSliceKv)} Hz` : ''}` : `decode window ${v.window.lo} to ${v.window.hi} Hz`})`);
+    sendCatLog(`[Scope] Flex panadapter: ${v.kind === 'winlink' ? 'Winlink' : ft8Engine._mode} view, ${v.spanHz} Hz wide, centred ${v.offsetHz > 0 ? '+' : ''}${v.offsetHz} Hz from the dial (${v.kind === 'winlink' ? `the modem's channel ${v.window.lo} to ${v.window.hi} Hz${ScopeDigitalView.flexDigOffsetHz(_currentMode, _flexSliceKv) ? `, the slice's ${String(_currentMode).toUpperCase()} offset ${ScopeDigitalView.flexDigOffsetHz(_currentMode, _flexSliceKv)} Hz, filter ${_flexSliceKv.filter_lo} to ${_flexSliceKv.filter_hi}` : ''}` : `decode window ${v.window.lo} to ${v.window.hi} Hz`})`);
   } else if (wasOn) {
     flexScopeWantOffsetHz = 0;
     flexDigitalView = null;
@@ -48251,7 +48341,7 @@ function cloudShackNotice(text, kind) {
     const Feed = require('./lib/aprs-is-feed');
     const AprsParser = require('./lib/aprs-parser');
     const dev = APRS_IS_DEV_SERVER || {}; // dev builds only: a local fake APRS-IS server
-    aprsFeed = new Feed.AprsIsFeed({ call: settings.myCallsign, version: app.getVersion(), lat: home.lat, lon: home.lon, km: settings.aprsRangeKm, follow: aprsEcho.followCalls(), host: dev.host, port: dev.port });
+    aprsFeed = new Feed.AprsIsFeed({ call: settings.myCallsign, version: app.getVersion(), lat: home.lat, lon: home.lon, km: settings.aprsRangeKm, follow: aprsEcho.followCalls(), watch: aprsEcho.watchCalls(), host: dev.host, port: dev.port });
     aprsBatch = Feed.createBatcher((packets) => aprsSend('aprs-packets', packets), 500);
     aprsFeed.on('line', (line) => {
       try { aprsMessagesFeedLine(line); } catch (e) { aprsLog('message: ' + e.message); } // A1: messages, acks and rejs for us
@@ -48273,6 +48363,7 @@ function cloudShackNotice(text, kind) {
     stop: () => aprsStopFeed(),
     setRange: (km) => { if (aprsFeed) aprsFeed.setRange(null, null, require('./lib/aprs-is-feed').clampRangeKm(km)); },
     setFollow: (calls) => { if (aprsFeed) aprsFeed.setFollow(calls); },
+    setWatch: (calls) => { if (aprsFeed) aprsFeed.setWatch(calls); },
   };
   ipcMain.on('aprs-popout-open', () => {
     if (aprsWin && !aprsWin.isDestroyed()) { aprsWin.focus(); return; }
@@ -48321,6 +48412,7 @@ function cloudShackNotice(text, kind) {
     }
     aprsSend('aprs-init', { home: aprsHome(), distUnit: settings.distUnit || 'mi', km: Feed.clampRangeKm(settings.aprsRangeKm), showLastMin: AprsWindowState.normShowLast(settings.aprsShowLastMin), mapView: AprsMap.cleanView(settings.aprsMapView) });
     aprsStartFeed();
+    if (aprsWin && !aprsWin.isDestroyed()) aprsWin.webContents.send('aprs-heard-you', aprsEcho.heardList()); // the "heard you" marks held now
     if (isRemoteMode()) remoteAprsWatch(true); // #868: listening and the heard stations are the shack's
     aprsListenPush();
     aprsIgatePush();
@@ -48389,6 +48481,7 @@ function cloudShackNotice(text, kind) {
   // watching the feed keeps it running for itself); on connects again.
   ipcMain.on('aprs-feed-set', (_e, on) => {
     if (on) { aprsStartFeed(); return; }
+    aprsEcho.heardStop(); // switched off by the operator: the heard-you watch ends too
     if (aprsEcho.keepsFeed()) { aprsLog('APRS-IS stays connected: an ECHOCAT device is watching it'); return; }
     aprsStopFeed();
     aprsSend('aprs-status', { state: 'stopped' });
@@ -54624,6 +54717,10 @@ function cloudShackNotice(text, kind) {
         return out;
       });
     }
+    // Spot filter presets: sanitised on every write, like the mutes below.
+    if (newSettings.spotFilterPresets !== undefined) {
+      newSettings.spotFilterPresets = normalizeSpotFilterPresets(newSettings.spotFilterPresets);
+    }
     // Per-band region mutes: sanitize on every write (never store a payload
     // verbatim) and ship the updated set to connected ECHOCAT clients so a
     // rule added on the desktop hides the spots on the mobile device too.
@@ -55151,6 +55248,7 @@ function cloudShackNotice(text, kind) {
         connectRemote();
       } else {
         disconnectRemote();
+        releasePhoneDrivenJtcat();
       }
     }
 
@@ -55773,11 +55871,13 @@ function cloudShackNotice(text, kind) {
     const { portPath, baudRate, civAddress } = config;
     const { SerialPort } = require('serialport');
 
-    // Temporarily disconnect live CAT to release the serial port
+    // Temporarily disconnect live CAT + kill rigctld to release the serial port
+    // (a Hamlib rig entry's rigctld holds the COM port: "Access denied", #910)
     if (cat) {
       await restoreIcomNetworkDataMod('Icom CI-V test');
       cat.disconnect();
     }
+    killRigctld();
 
     await new Promise((r) => setTimeout(r, 500));
 

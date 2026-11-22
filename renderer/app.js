@@ -391,6 +391,11 @@ let prioritizeNewParks = false; // sort unworked-park spots to the top of the ta
 let hideQrt = true; // hide spots with QRT in comments (default on)
 let dxOnly = false; // only spots main stamped isDx (lib/dx-rule.js)
 let spotMuteRules = []; // "hide {continent} on {band}" rules — lib/spot-mute-rules.js (N7BBQ)
+let spotFilterPresets = []; // named filter sets — lib/spot-filter-presets.js
+const filterPresetsDropdown = document.getElementById('filter-presets-dropdown');
+const filterPresetsBtn = document.getElementById('filter-presets-btn');
+const filterPresetsText = document.getElementById('filter-presets-text');
+const filterPresetsMenu = document.getElementById('filter-presets-menu');
 let showBearing = false;
 let respotDefault = true; // default: re-spot on POTA after logging
 // Per-network re-spot templates (Chris NR9Q request). Empty WWFF/LLOTA/WWBOTA
@@ -2252,6 +2257,11 @@ async function loadPrefs() {
     renderMuteRules();
   } catch (err) {
     console.error('[mute-rules] init failed:', err);
+  }
+  try {
+    spotFilterPresets = SpotFilterPresets.normalizePresets(settings.spotFilterPresets);
+  } catch (err) {
+    console.error('[filter-presets] init failed:', err);
   }
   enablePota = settings.enablePota !== false; // default true
   enableSota = settings.enableSota === true;  // default false
@@ -5116,8 +5126,15 @@ function saveFilters() {
 }
 
 function restoreFilters() {
+  let data = null;
+  try { data = JSON.parse(localStorage.getItem(FILTERS_KEY)); } catch { /* corrupt: All */ }
+  applyFilterData(data);
+}
+
+// Sets the Band, Mode and Region checkboxes from saved data (the
+// saveFilters shape); no data = All. Also used by the filter presets.
+function applyFilterData(data) {
   try {
-    const data = JSON.parse(localStorage.getItem(FILTERS_KEY));
     if (!data) {
       // First run — ensure filters default to "All" (override any HTML-hardcoded checks)
       [bandFilterEl, modeFilterEl, continentFilterEl].forEach((container) => {
@@ -15468,6 +15485,7 @@ function renderDxccMatrix() {
 // --- Rendering ---
 function render() {
   const filtered = sortSpots(getFiltered());
+  try { updateFilterPresetsButton(); } catch (err) { console.error('[filter-presets]', err); }
 
   spotCountEl.textContent = `${filtered.length} spots`;
   updateParksStatsOverlay();
@@ -17183,7 +17201,10 @@ function syncSpotsPanel() {
 
 document.querySelector('.spots-dropdown-panel').addEventListener('click', (e) => e.stopPropagation());
 
-document.querySelector('.spots-dropdown-panel').addEventListener('change', async (e) => {
+// The Spots menu's state, read from its checkboxes, applied and saved. A
+// filter preset (lib/spot-filter-presets.js) sets the checkboxes and calls
+// this too, so a preset goes the same way as a click.
+async function commitSpotsPanel() {
   enablePota = spotsPota.checked;
   enableSota = spotsSota.checked;
   enableWwff = spotsWwff.checked;
@@ -17269,7 +17290,192 @@ document.querySelector('.spots-dropdown-panel').addEventListener('change', async
   });
 
   render();
-});
+}
+document.querySelector('.spots-dropdown-panel').addEventListener('change', () => commitSpotsPanel());
+
+// --- Spot filter presets (lib/spot-filter-presets.js) ---
+// Named sets of the spot filters: the filter bar (Band, Mode, Calls), the
+// Spots menu's sources and Filters, and Region. One click sets them all; the
+// button names the preset that matches the filters set now, so a hand change
+// shows at once. Saved in settings.spotFilterPresets (declared at the top).
+
+/** The spot filters set now, in the preset shape. */
+function currentSpotFilters() {
+  const bandRadioCb = bandFilterEl.querySelector('input[value="radio"]');
+  const modeRadioCb = modeFilterEl.querySelector('input[value="radio"]');
+  const checkedValues = (container) => {
+    if (container.querySelector('input[value="all"]').checked) return null;
+    return [...container.querySelectorAll('input:not([value="all"]):not([value="radio"]):checked')].map((cb) => cb.value);
+  };
+  return {
+    bands: checkedValues(bandFilterEl),
+    bandRadio: !!(bandRadioCb && bandRadioCb.checked),
+    modes: checkedValues(modeFilterEl),
+    modeRadio: !!(modeRadioCb && modeRadioCb.checked),
+    continents: checkedValues(continentFilterEl),
+    calls: callFilterEl ? callFilterEl.value : '',
+    sources: {
+      pota: enablePota, sota: enableSota, wwff: enableWwff, llota: enableLlota, wwbota: enableWwbota,
+      tiles: enableTiles, gma: enableGma, parc: enableParc, cluster: enableCluster, cwspots: enableCwSpots,
+      rbn: enableRbn, pskr: enablePskr, dxe: enableDxe,
+    },
+    hide: {
+      worked: hideWorked, workedParks: hideWorkedParks, workedCallRef: hideWorkedCallRef,
+      prioritizeNew: prioritizeNewParks, strictAtno, outOfBand: hideOutOfBand, qrt: hideQrt, dxOnly,
+    },
+  };
+}
+
+/** Set every filter a preset holds, then save and redraw as a click would. */
+async function applySpotFilterPreset(preset) {
+  const p = SpotFilterPresets.normalizePreset(preset);
+  if (!p) return;
+  if (scanning) stopScan();
+  // Band ticks go through the off list like a hand click (#291): without
+  // this, applyFilterData would park them as pre-#291 legacy ticks, and a
+  // preset of All would come undone at the next rig switch.
+  const prevOff = bandFilterOff;
+  const prevLegacy = bandFilterLegacyTicks;
+  applyFilterData({ bands: p.bands, bandRadio: p.bandRadio, modes: p.modes, modeRadio: p.modeRadio, continents: p.continents });
+  bandFilterOff = prevOff;
+  bandFilterLegacyTicks = prevLegacy;
+  noteBandFilterTicks();
+  saveFilters();
+  updateBandButtonsVisibility();
+  if (callFilterEl && typeof CallFilter !== 'undefined') {
+    callFilterEl.value = p.calls;
+    callFilter = CallFilter.parseCallFilter(p.calls);
+    try { localStorage.setItem('pota-cat-call-filter', p.calls); } catch {}
+  }
+  // The Spots menu's checkboxes are synced only when it opens: bring them
+  // to the state in force first, so a box the preset does not set is
+  // committed as it is, not as the menu last showed it.
+  syncSpotsPanel();
+  if (p.sources) {
+    const boxes = {
+      pota: spotsPota, sota: spotsSota, wwff: spotsWwff, llota: spotsLlota, wwbota: spotsWwbota,
+      tiles: spotsTiles, gma: spotsGma, parc: spotsParc, cluster: spotsCluster, cwspots: spotsCwSpots,
+      rbn: spotsRbn, pskr: spotsPskr, dxe: spotsDxe,
+    };
+    for (const k of SpotFilterPresets.SOURCE_KEYS) if (boxes[k]) boxes[k].checked = p.sources[k];
+  }
+  if (p.hide) {
+    const boxes = {
+      worked: spotsHideWorked, workedParks: spotsHideParks, workedCallRef: spotsHideCallRef,
+      prioritizeNew: spotsPrioritizeNew, strictAtno: spotsStrictAtno, outOfBand: spotsHideOob,
+      qrt: spotsHideQrt, dxOnly: spotsDxOnly,
+    };
+    for (const k of SpotFilterPresets.HIDE_KEYS) if (boxes[k]) boxes[k].checked = p.hide[k];
+  }
+  await commitSpotsPanel(); // saves, redraws, and refuses a callsign-only source without a callsign
+}
+
+function saveSpotFilterPresets(list) {
+  spotFilterPresets = SpotFilterPresets.normalizePresets(list);
+  window.api.saveSettings({ spotFilterPresets });
+  updateFilterPresetsButton();
+  renderFilterPresetsMenu();
+}
+
+/** The button shows the preset that matches the filters set now. */
+function updateFilterPresetsButton() {
+  if (!filterPresetsText || typeof SpotFilterPresets === 'undefined') return;
+  const match = SpotFilterPresets.findMatchingPreset(spotFilterPresets, currentSpotFilters());
+  filterPresetsText.textContent = match ? match.name : (spotFilterPresets.length ? 'none' : '');
+  filterPresetsBtn.title = match
+    ? `Filter preset "${match.name}": ${SpotFilterPresets.describePreset(match)}`
+    : 'Filter presets: save the filters set now under a name, and set them again with one click';
+}
+
+function renderFilterPresetsMenu() {
+  if (!filterPresetsMenu || typeof SpotFilterPresets === 'undefined') return;
+  const match = SpotFilterPresets.findMatchingPreset(spotFilterPresets, currentSpotFilters());
+  filterPresetsMenu.textContent = '';
+  if (!spotFilterPresets.length) {
+    const empty = document.createElement('div');
+    empty.className = 'filter-presets-empty';
+    empty.textContent = 'No presets yet. Set the filters you want, then save them here.';
+    filterPresetsMenu.appendChild(empty);
+  }
+  spotFilterPresets.forEach((p, idx) => {
+    const row = document.createElement('div');
+    row.className = 'filter-presets-row' + (match && match.name === p.name ? ' active' : '');
+    const apply = document.createElement('button');
+    apply.type = 'button';
+    apply.className = 'filter-presets-apply';
+    apply.textContent = (match && match.name === p.name ? '✓ ' : '') + p.name;
+    apply.title = SpotFilterPresets.describePreset(p);
+    apply.addEventListener('click', async () => {
+      filterPresetsDropdown.classList.remove('open');
+      await applySpotFilterPreset(p);
+      updateFilterPresetsButton();
+    });
+    row.appendChild(apply);
+    const tool = (label, title, fn, disabled) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'filter-presets-tool';
+      b.textContent = label;
+      b.title = title;
+      b.disabled = !!disabled;
+      b.addEventListener('click', fn);
+      row.appendChild(b);
+    };
+    tool('↑', 'Move up', () => saveSpotFilterPresets(SpotFilterPresets.movePreset(spotFilterPresets, p.name, -1)), idx === 0);
+    tool('↓', 'Move down', () => saveSpotFilterPresets(SpotFilterPresets.movePreset(spotFilterPresets, p.name, 1)), idx === spotFilterPresets.length - 1);
+    tool('Update', `Save the filters set now as "${p.name}"`, () => {
+      if (!confirm(`Replace the filters of "${p.name}" with the filters set now?`)) return;
+      saveSpotFilterPresets(SpotFilterPresets.savePreset(spotFilterPresets, p.name, currentSpotFilters()).list);
+    }, match && match.name === p.name);
+    tool('Rename', `Rename "${p.name}"`, async () => {
+      const name = await _summaryPrompt({ title: 'Rename filter preset', defaultValue: p.name });
+      if (name == null) return;
+      const r = SpotFilterPresets.renamePreset(spotFilterPresets, p.name, name);
+      if (r.error) { alert(r.error); return; }
+      saveSpotFilterPresets(r.list);
+    });
+    tool('✕', `Delete "${p.name}"`, () => {
+      if (!confirm(`Delete the filter preset "${p.name}"? Your filters stay as they are.`)) return;
+      saveSpotFilterPresets(SpotFilterPresets.deletePreset(spotFilterPresets, p.name));
+    });
+    filterPresetsMenu.appendChild(row);
+  });
+  const divider = document.createElement('div');
+  divider.className = 'view-menu-divider';
+  filterPresetsMenu.appendChild(divider);
+  const add = document.createElement('button');
+  add.type = 'button';
+  add.className = 'view-menu-item';
+  add.textContent = 'Save the filters set now as…';
+  add.addEventListener('click', async () => {
+    filterPresetsDropdown.classList.remove('open');
+    const name = await _summaryPrompt({
+      title: 'Save filter preset',
+      message: 'Band, Mode, Calls, Region, the spot sources and the Filters switches are saved under this name.',
+      placeholder: 'POTA 40m CW',
+    });
+    if (name == null) return;
+    const exists = spotFilterPresets.some((x) => x.name.toUpperCase() === SpotFilterPresets.cleanName(name).toUpperCase());
+    if (exists && !confirm(`There is already a preset called "${SpotFilterPresets.cleanName(name)}". Replace it?`)) return;
+    const r = SpotFilterPresets.savePreset(spotFilterPresets, name, currentSpotFilters());
+    if (r.error) { alert(r.error); return; }
+    saveSpotFilterPresets(r.list);
+  });
+  filterPresetsMenu.appendChild(add);
+}
+
+if (filterPresetsBtn) {
+  filterPresetsBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    document.querySelectorAll('.multi-dropdown.open').forEach((d) => {
+      if (d !== filterPresetsDropdown) d.classList.remove('open');
+    });
+    const opening = !filterPresetsDropdown.classList.contains('open');
+    filterPresetsDropdown.classList.toggle('open');
+    if (opening) renderFilterPresetsMenu();
+  });
+  filterPresetsMenu.addEventListener('click', (e) => e.stopPropagation());
+}
 
 // --- Hide spot context menu ---
 const hideSpotMenu = document.getElementById('hide-spot-menu');
@@ -27098,6 +27304,8 @@ let freedvTxOutputCtx = null;
 let freedvMicStream = null;
 let freedvMicCtx = null;
 let freedvMicProcessor = null;
+// #905: a stop during the async open wins (lib/capture-open-guard.js).
+const _freedvOpen = window.CaptureOpenGuard.createOpenGuard();
 
 const FREEDV_MODES = new Set(['FREEDV', 'DV', 'FREEDV-700E', 'FREEDV-700D', 'FREEDV-1600']);
 
@@ -27119,7 +27327,9 @@ function freedvMicNote(samples) {
 
 async function startFreedvForMode(mode) {
   if (freedvActive) { console.log('[FreeDV] Already active, skipping start'); return; }
+  const openToken = _freedvOpen.begin();
   const s = await window.api.getSettings();
+  if (!_freedvOpen.isCurrent(openToken)) return; // stopped while the settings were read
   if (!s.enableFreedv) { console.log('[FreeDV] Not enabled in settings, skipping'); return; }
   freedvActive = true;
   console.log('[FreeDV] Auto-starting for mode:', mode);
@@ -27141,12 +27351,21 @@ async function startFreedvForMode(mode) {
   try {
     const constraints = { channelCount: 1, echoCancellation: false, noiseSuppression: false, autoGainControl: false };
     if (s.remoteAudioInput) constraints.deviceId = { exact: s.remoteAudioInput };
-    freedvAudioStream = await navigator.mediaDevices.getUserMedia({ audio: constraints });
-    freedvAudioCtx = new AudioContext();
-    const source = freedvAudioCtx.createMediaStreamSource(freedvAudioStream);
-    const dsRatio = freedvAudioCtx.sampleRate / 8000;
-    await freedvAudioCtx.audioWorklet.addModule('freedv-audio-worklet.js');
-    const worklet = new AudioWorkletNode(freedvAudioCtx, 'freedv-processor', {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: constraints });
+    if (!_freedvOpen.isCurrent(openToken)) { window.CaptureOpenGuard.releaseStream(stream); return; }
+    freedvAudioStream = stream;
+    const audioCtx = new AudioContext();
+    freedvAudioCtx = audioCtx;
+    const source = audioCtx.createMediaStreamSource(stream);
+    const dsRatio = audioCtx.sampleRate / 8000;
+    await audioCtx.audioWorklet.addModule('freedv-audio-worklet.js');
+    if (!_freedvOpen.isCurrent(openToken)) {
+      // stopFreedv already released the globals; release what this open built.
+      window.CaptureOpenGuard.releaseStream(stream);
+      audioCtx.close().catch(() => {});
+      return;
+    }
+    const worklet = new AudioWorkletNode(audioCtx, 'freedv-processor', {
       processorOptions: { dsRatio },
     });
     let _freedvAudioCount = 0;
@@ -27158,7 +27377,7 @@ async function startFreedvForMode(mode) {
       }
     };
     source.connect(worklet);
-    worklet.connect(freedvAudioCtx.destination);
+    worklet.connect(audioCtx.destination);
     freedvProcessor = worklet;
   } catch (err) {
     console.error('[FreeDV] RX audio capture failed:', err.message);
@@ -27168,6 +27387,7 @@ async function startFreedvForMode(mode) {
 }
 
 function stopFreedv() {
+  _freedvOpen.cancel(); // an open still in flight releases its capture and keeps nothing
   if (!freedvActive) return;
   freedvActive = false;
   console.log('[FreeDV] Auto-stopping');

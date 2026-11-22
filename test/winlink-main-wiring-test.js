@@ -47,7 +47,7 @@ test('winlinkStartSession is reached only from Connect paths and the auto-check'
   const callers = main.split('\n').filter((l) => /winlinkStartSession\(/.test(l) && !/function winlinkStartSession/.test(l));
   // #425: the automatic retry after a dropped link is the one caller that is not an operator's tap.
   // It only ever repeats a session the operator started (lib/winlink-auto-retry.js shouldRetry).
-  const allowed = [/origin: 'mail window'/, /origin: 'ECHOCAT device'/, /mode: 'telnet', origin: 'auto-check/, /origin: 'automatic retry', autoRetry: true }/];
+  const allowed = [/origin: 'mail window'/, /origin: 'ECHOCAT device'/, /mode: 'telnet', origin: 'auto-check/, /origin: 'automatic retry', autoRetry: true(, fromEchocat: !!r.fromEchocat)? }/];
   for (const l of callers) assert.ok(allowed.some((r) => r.test(l)), 'unexpected caller: ' + l.trim());
 });
 test('Pat never gets --listen / --send-only; ardopcf never gets a PTT or CAT flag', () => {

@@ -15,6 +15,8 @@ contextBridge.exposeInMainWorld('api', {
   onStatus: (cb) => ipcRenderer.on('aprs-status', (_e, s) => cb(s)),
   // [parsed packet, ...] from lib/aprs-parser.js, at most every 500 ms
   onPackets: (cb) => ipcRenderer.on('aprs-packets', (_e, p) => cb(p)),
+  // Heard you (2026-11-22): { CALL: {at, by, beacons, lastBeaconAt} } for the stations that heard my radio beacon.
+  onHeardYou: (cb) => ipcRenderer.on('aprs-heard-you', (_e, m) => cb(m)),
   setRange: (km) => ipcRenderer.send('aprs-set-range', km),
   // "Show the last" in minutes (15, 30, 60, 180, 360), saved per profile.
   setShowLast: (min) => ipcRenderer.send('aprs-set-show-last', min),
