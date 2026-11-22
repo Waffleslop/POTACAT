@@ -405,6 +405,7 @@ const jtcatModehop = require('./lib/jtcat-modehop');
 const { operatorModeChange: jtcatModeChangeRule } = require('./lib/jtcat-mode-change');
 const TuneLinkGuard = require('./lib/tune-link-guard'); // a potacat://tune link stops automatic JTCAT TX before it tunes
 const FakeIt = require('./lib/jtcat-fake-it'); // split operation "Fake It" (fakeItShiftForTx / fakeItRestoreDial)
+const JtcatCaptureGate = require('./lib/jtcat-capture-gate'); // #746: ECHOCAT off releases a phone-driven capture
 const { WsprScheduler } = require('./lib/wspr/scheduler');
 const WsprPowerMemory = require('./lib/wspr-power-memory'); // pre-beacon RF power remember/restore decisions
 const WsprDbm = require('./lib/wspr/dbm'); // the dBm the beacon reports: follows its RF power, or the operator's fixed pick (#268)
@@ -30016,6 +30017,7 @@ function connectRemote() {
   // Local network and Cloud is the always-on 0.0.0.0 of before.
   const remoteAccess = RemoteAccess.normalizeRemoteAccess(settings).access;
   if (!settings.enableRemote || remoteAccess === 'off') {
+    releasePhoneDrivenJtcat();
     sendCatLog('[Echo CAT] Access: ' + RemoteAccess.describeRemoteAccess('off'));
     return;
   }
@@ -33380,6 +33382,24 @@ function disconnectRemote() {
     remoteServer = null;
   }
   destroyRemoteAudioWindow();
+}
+
+// ECHOCAT access turned off (#746). FT8/JS8 the phone started is captured by
+// the main window; disconnectRemote() drops the server's listeners, so the
+// disconnect grace that would release it never runs and the radio's input
+// stayed busy until POTACAT quit. Not called on a restart of the server.
+function releasePhoneDrivenJtcat() {
+  const d = JtcatCaptureGate.remoteOffRelease({
+    engineRunning: !!ft8Engine,
+    desktopWindowOpen: !!((jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) || (js8PopoutWin && !js8PopoutWin.isDestroyed())),
+  });
+  if (d.stopEngine) {
+    try { if (js8Engine()) js8SetHeartbeat(false); } catch { /* no JS8 */ }
+    stopJtcat();
+    remoteJtcatQso = null;
+    sendCatLog('[JTCAT] ECHOCAT turned off: stopped the engine the phone started and released the radio audio input');
+  }
+  if (d.releaseCapture && win && !win.isDestroyed()) win.webContents.send('jtcat-stop-for-remote');
 }
 
 let _ssbModeBeforePtt = null; // original mode saved during DATA-mode PTT workaround
@@ -55151,6 +55171,7 @@ function cloudShackNotice(text, kind) {
         connectRemote();
       } else {
         disconnectRemote();
+        releasePhoneDrivenJtcat();
       }
     }
 
