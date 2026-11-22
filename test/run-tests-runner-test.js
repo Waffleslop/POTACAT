@@ -97,6 +97,20 @@ try {
     for (const f of SERIAL) assert.ok(TESTS.includes(f), f + ' in SERIAL is in TESTS');
     for (const f of require('../scripts/run-tests.js').SLOW_FIRST) assert.ok(TESTS.includes(f), f + ' in SLOW_FIRST is in TESTS');
   });
+  // Casey 2026-11-22 "Retry timing tests": one more try, only for the SERIAL
+  // timing files, only in the run-alone loop; a pass on the retry says FLAKY.
+  check('a SERIAL timing test that fails gets exactly one retry; nothing else is retried', () => {
+    const { SERIAL, RETRY_ONCE } = require('../scripts/run-tests.js');
+    assert.ok(RETRY_ONCE instanceof Set && RETRY_ONCE.size > 0);
+    for (const f of RETRY_ONCE) assert.ok(SERIAL.has(f), f + ' retried but not SERIAL');
+    const src = require('fs').readFileSync(require('path').join(__dirname, '..', 'scripts', 'run-tests.js'), 'utf8');
+    assert.strictEqual((src.match(/RETRY_ONCE\.has\(/g) || []).length, 1, 'one retry site');
+    const alone = src.slice(src.indexOf('for (const f of alone) {'), src.indexOf('failed.sort('));
+    assert.ok(/if \(r\.code !== 0 && RETRY_ONCE\.has\(f\)\) \{[\s\S]*r = await runFile\(f, true\);[\s\S]*FLAKY:/.test(alone), 'the retry is in the alone loop and prints FLAKY');
+    const pool = src.slice(src.indexOf('const worker = async'), src.indexOf('for (const f of alone) {'));
+    assert.ok(!/RETRY_ONCE/.test(pool), 'the parallel pool never retries');
+    assert.ok(!/RETRY_ONCE/.test(src.slice(src.indexOf('async function runSerial('), src.indexOf('async function runParallel('))), '--jobs 1 stays exactly as before');
+  });
 } finally {
   fs.rmSync(dir, { recursive: true, force: true });
 }
