@@ -15080,7 +15080,12 @@ async function aprsMsgRadioTransmit(job) {
   aprsLog(`${what} over the radio: ${f.packet} on ${mhz} MHz, about ${(cap.airMs / 1000).toFixed(1)} s on air, cap ${(cap.capMs / 1000).toFixed(1)} s`);
   const res = await aprsRfRunner().send({ packet: f, capMs: cap.capMs });
   if (_aprsRfPeak.active()) aprsRfUi.lastPeak = _aprsRfPeak.end();
-  if (res.ok && res.confirmed) sendCatLog(`[APRS ${what}] sent over the radio (${AprsRfBeacon.BAND_LABEL[band]}, ${mhz} MHz; the radio reported transmit): ${f.packet}`);
+  if (res.ok && res.confirmed) {
+    sendCatLog(`[APRS ${what}] sent over the radio (${AprsRfBeacon.BAND_LABEL[band]}, ${mhz} MHz; the radio reported transmit): ${f.packet}`);
+    // A confirmed radio message also starts the 15-minute "heard you" watch, as a beacon does
+    // (Casey 2026-11-22: "yes, messages too"). Read only: who carried it to APRS-IS.
+    try { aprsEcho.beaconSent(f.source); } catch (e) { aprsLog('heard you: ' + e.message); }
+  }
   else if (res.ok) sendCatLog(`[APRS ${what}] keyed but not confirmed (${AprsRfBeacon.BAND_LABEL[band]}, ${mhz} MHz)`);
   else aprsLog(`${what} over the radio not sent: ${res.sentence}`);
   return res;
