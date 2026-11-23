@@ -529,6 +529,7 @@ const TESTS = [
   'test/review-ask-test.js',
   'test/rigctld-gain-fallback-test.js',
   'test/release-notes-format-test.js',
+  'test/website-links-guard-test.js', // release.yml update-website pushes only version strings in the download block; anything else is a website handoff branch
   'test/contests-view-test.js',
   'test/remote-server-rewire-test.js',
   'test/sstv-tx-data-mode-test.js',
