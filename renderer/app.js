@@ -2656,6 +2656,10 @@ function updateRadioSubPanels() {
   // Voice in DATA mode runs in the rig controller: serial, Icom, Hamlib and flrig links.
   const voiceAsDataRow = document.getElementById('rig-voice-as-data');
   if (voiceAsDataRow) voiceAsDataRow.classList.toggle('hidden', !['serialcat', 'icom', 'civ-tcp', 'icom-network', 'hamlib', 'rigctldnet', 'flrig', 'dxlab-commander', 'yaesu-lan'].includes(type));
+  // Where the sound card interface plugs in (#153, lib/rig-audio-jack.js): radios that take one.
+  const audioJackRow = document.getElementById('rig-audio-jack');
+  if (audioJackRow) audioJackRow.classList.toggle('hidden', !(window.RigAudioJack && RigAudioJack.appliesToRadioType(type)));
+  syncAudioJackRows();
   // Packet mode on the radio (#128): for every radio, shown once Winlink is on.
   const packetModeRow = document.getElementById('rig-packet-mode');
   if (packetModeRow) packetModeRow.classList.toggle('hidden', !(typeof setWinlinkEnable !== 'undefined' && setWinlinkEnable && setWinlinkEnable.checked));
@@ -3768,6 +3772,52 @@ function syncTxAudioInputRow() {
   if (blank) blank.textContent = ok && window.TxAudioInput.MODELS[model] == null ? 'Ask on first transmit' : 'Rear (data / ACC2 socket), the default';
 }
 if (rigModelSelect) rigModelSelect.addEventListener('change', syncTxAudioInputRow);
+// Where the sound card interface plugs in (#153, lib/rig-audio-jack.js).
+// rigVoiceDataSwitchChoice is the operator's own tick-box choice for the rig
+// being edited: true or false once stored or once the box is clicked,
+// undefined while the rig follows the global SSB-over-DATA setting (shown as
+// that setting would act: off for voice on a Yaesu).
+var rigVoiceDataSwitchChoice; // var: the sub-panel refresh can run before this line does
+function rigAudioJackChoice() {
+  const mic = document.getElementById('set-audio-jack-mic');
+  return mic && mic.checked ? 'mic' : 'data';
+}
+function voiceDataSwitchFallback() {
+  const model = rigModelSelect ? rigModelSelect.value : '';
+  let brand = null;
+  for (const group of (typeof rigModelData !== 'undefined' ? rigModelData : [])) {
+    if (group.models && group.models.includes(model)) { brand = group.brand; break; }
+  }
+  return !!(typeof setSsbOverData !== 'undefined' && setSsbOverData && setSsbOverData.checked) && brand !== 'Yaesu';
+}
+function syncAudioJackRows() {
+  const mic = rigAudioJackChoice() === 'mic' && !!(window.RigAudioJack && RigAudioJack.appliesToRadioType(getSelectedRadioType()));
+  const sw = document.getElementById('rig-voice-data-switch-row');
+  if (sw) sw.style.display = mic ? 'none' : '';
+  const box = document.getElementById('set-voice-data-switch');
+  if (box) box.checked = typeof rigVoiceDataSwitchChoice === 'boolean' ? rigVoiceDataSwitchChoice : voiceDataSwitchFallback();
+  // Voice in DATA mode turns the microphone jack off: never on a mic-jack rig.
+  const vad = document.getElementById('rig-voice-as-data');
+  if (vad) vad.style.display = mic ? 'none' : '';
+}
+function loadRigAudioJack(rig) {
+  const mic = !!(rig && rig.audioJack === 'mic');
+  const d = document.getElementById('set-audio-jack-data');
+  const m = document.getElementById('set-audio-jack-mic');
+  if (d) d.checked = !mic;
+  if (m) m.checked = mic;
+  rigVoiceDataSwitchChoice = rig && typeof rig.voiceDataSwitch === 'boolean' ? rig.voiceDataSwitch : undefined;
+  syncAudioJackRows();
+}
+for (const id of ['set-audio-jack-data', 'set-audio-jack-mic']) {
+  const el = document.getElementById(id);
+  if (el) el.addEventListener('change', syncAudioJackRows);
+}
+{
+  const box = document.getElementById('set-voice-data-switch');
+  if (box) box.addEventListener('change', () => { rigVoiceDataSwitchChoice = box.checked; });
+}
+if (rigModelSelect) rigModelSelect.addEventListener('change', syncAudioJackRows);
 // Sweep 1a: the DATA MOD to USB box, only for the Icoms POTACAT can set it on (lib/icom-usb-data-mod.js).
 function syncIcomUsbDataModRow() {
   const row = document.getElementById('rig-icom-usb-data-mod');
@@ -3831,6 +3881,7 @@ async function openRigEditor(mode, rigId) {
       if (atuKeepOnEl) atuKeepOnEl.checked = !!rig.atuKeepOn;
       const voiceAsDataEl = document.getElementById('set-voice-as-data');
       if (voiceAsDataEl) voiceAsDataEl.checked = !!rig.voiceAsData;
+      loadRigAudioJack(rig); // #153
       { // the amplifier drive limit (lib/amp-drive-limit.js)
         const on = document.getElementById('set-amp-drive-on');
         const w = document.getElementById('set-amp-drive-w');
@@ -3864,6 +3915,7 @@ async function openRigEditor(mode, rigId) {
     buildFlexBandAntennaMap({});
     fillSdrScopeForm(null);
     { const v = document.getElementById('set-voice-as-data'); if (v) v.checked = false; }
+    loadRigAudioJack(null); // #153: a new rig starts on the data jack, following the global setting
     { const v = document.getElementById('set-allow-power-off'); if (v) v.checked = false; }
     { const v = document.getElementById('set-icom-usb-data-mod'); if (v) v.checked = true; syncIcomUsbDataModRow(); } // sweep 1a: a new rig starts on
     { const v = document.getElementById('set-amp-drive-on'); if (v) v.checked = false; }
@@ -4007,7 +4059,11 @@ async function saveRigEditor() {
   const atuKeepOnEl = document.getElementById('set-atu-keep-on');
   const rigAtuKeepOn = !!(atuKeepOnEl && atuKeepOnEl.checked);
   const voiceAsDataEl = document.getElementById('set-voice-as-data');
-  const rigVoiceAsData = !!(voiceAsDataEl && voiceAsDataEl.checked);
+  // #153: the jack is stored only for a radio that shows the question, and
+  // only as 'mic' (absent = data jack); the tick box only once it was set.
+  const rigAudioJack = window.RigAudioJack && RigAudioJack.appliesToRadioType(getSelectedRadioType()) ? rigAudioJackChoice() : 'data';
+  const rigVoiceDataSwitch = rigAudioJack === 'data' ? rigVoiceDataSwitchChoice : undefined;
+  const rigVoiceAsData = !!(voiceAsDataEl && voiceAsDataEl.checked) && rigAudioJack !== 'mic';
   // #293, #768: only a choice the operator made is stored (true or false). A
   // rig with none follows the default for its connection (lib/rig-power.js).
   const rigPowerOffStored = typeof rigPowerOffChoice === 'boolean' ? rigPowerOffChoice : undefined;
@@ -4058,6 +4114,8 @@ async function saveRigEditor() {
       rig.externalAtuSeconds = rigExternalAtuSeconds;
       rig.atuKeepOn = rigAtuKeepOn;
       if (rigVoiceAsData) rig.voiceAsData = true; else delete rig.voiceAsData;
+      if (rigAudioJack === 'mic') rig.audioJack = 'mic'; else delete rig.audioJack;
+      if (typeof rigVoiceDataSwitch === 'boolean') rig.voiceDataSwitch = rigVoiceDataSwitch; else delete rig.voiceDataSwitch;
       if (rigPowerOffStored !== undefined) rig.allowPowerOffNoWake = rigPowerOffStored; else delete rig.allowPowerOffNoWake;
       if (rigAmpDriveW > 0) rig.ampDriveLimitW = rigAmpDriveW; else delete rig.ampDriveLimitW;
       if (rigTxAudioInput) rig.txAudioInput = rigTxAudioInput; else delete rig.txAudioInput;
@@ -4092,6 +4150,8 @@ async function saveRigEditor() {
       externalAtuSeconds: rigExternalAtuSeconds,
       atuKeepOn: rigAtuKeepOn,
       ...(rigVoiceAsData ? { voiceAsData: true } : {}),
+      ...(rigAudioJack === 'mic' ? { audioJack: 'mic' } : {}),
+      ...(typeof rigVoiceDataSwitch === 'boolean' ? { voiceDataSwitch: rigVoiceDataSwitch } : {}),
       ...(rigPowerOffStored !== undefined ? { allowPowerOffNoWake: rigPowerOffStored } : {}),
       ...(rigAmpDriveW > 0 ? { ampDriveLimitW: rigAmpDriveW } : {}),
       ...(rigTxAudioInput ? { txAudioInput: rigTxAudioInput } : {}),

@@ -115,7 +115,9 @@ const main = readSrc(path.join(root, 'main.js'));
 const app = readSrc(path.join(root, 'renderer', 'app.js'));
 const html = readSrc(path.join(root, 'renderer', 'index.html'));
 test('main applies rig.voiceAsData on connect', () => {
-  assert.ok(/cat\.setVoiceAsData\(!!\(vRig && vRig\.voiceAsData\)\)/.test(main));
+  // Through lib/rig-audio-jack.js (#153): never on a microphone-jack rig.
+  assert.ok(/const vOn = RigAudioJack\.voiceAsDataOn\(vRig, vJack\);/.test(main));
+  assert.ok(/cat\.setVoiceAsData\(vOn\)/.test(main));
 });
 test('SSB-over-DATA stands down on a Voice in DATA rig', () => {
   assert.ok(/!yaesuVoice && !voiceInData && audioActive/.test(main));

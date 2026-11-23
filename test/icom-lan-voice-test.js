@@ -42,7 +42,9 @@ check('both LAN voice paths (ECHOCAT and the VFO window) use it', () => {
   assert.ok(/icomNetworkVoiceTx\(!!state, 'VFO window PTT'\)\) \{\s*handleRemotePtt\(!!state, icomLanVoicePttOpts\(\)\);/.test(main));
 });
 check('the log names the real reason; SSB-over-DATA is named only when it is the setting', () => {
-  assert.ok(/\(\$\{forceData \? \(opts\.dataReason \|\| 'this audio reaches the radio only in DATA mode'\) : 'SSB-over-DATA: mic disabled'\}\)/.test(main));
+  assert.ok(/\(\$\{forceData \? \(opts\.dataReason \|\| 'this audio reaches the radio only in DATA mode'\) : _dataPlanJack\.reason\}\)/.test(main));
+  // The non-forced reason is the rule's: SSB-over-DATA, or the rig's own tick box (#153).
+  assert.strictEqual(require('../lib/rig-audio-jack').pttDataPlan({ jack: 'data', ssbOverData: true }).reason, 'SSB-over-DATA: mic disabled');
 });
 check('the rig editor shows, loads and saves it for Icom Network rigs only', () => {
   assert.ok(/id="set-lan-voice-ssb"[^>]*> Voice over the LAN stays in USB \/ LSB/.test(html));
