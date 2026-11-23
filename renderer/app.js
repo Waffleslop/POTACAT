@@ -2676,6 +2676,10 @@ function updateRadioSubPanels() {
   const audioJackRow = document.getElementById('rig-audio-jack');
   if (audioJackRow) audioJackRow.classList.toggle('hidden', !(window.RigAudioJack && RigAudioJack.appliesToRadioType(type)));
   syncAudioJackRows();
+  // CW sideband (#753, lib/cw-sideband.js): radios whose link can set both CW modes.
+  const cwSidebandRow = document.getElementById('rig-cw-sideband');
+  if (cwSidebandRow) cwSidebandRow.classList.toggle('hidden', !(window.CwSideband && CwSideband.appliesToRadioType(type)));
+  syncCwSidebandRow();
   // Packet mode on the radio (#128): for every radio, shown once Winlink is on.
   const packetModeRow = document.getElementById('rig-packet-mode');
   if (packetModeRow) packetModeRow.classList.toggle('hidden', !(typeof setWinlinkEnable !== 'undefined' && setWinlinkEnable && setWinlinkEnable.checked));
@@ -3827,6 +3831,24 @@ function syncAudioJackRows() {
   const vad = document.getElementById('rig-voice-as-data');
   if (vad) vad.style.display = mic ? 'none' : '';
 }
+// CW sideband (#753): the choices in the radio's own words (CW-U / CW-L on a
+// Yaesu, CW / CW-R elsewhere), from lib/cw-sideband.js.
+function syncCwSidebandRow() {
+  const sel = document.getElementById('set-cw-sideband');
+  if (!sel || !window.CwSideband) return;
+  const model = rigModelSelect ? rigModelSelect.value : '';
+  let brand = null;
+  for (const group of (typeof rigModelData !== 'undefined' ? rigModelData : [])) {
+    if (group.models && group.models.includes(model)) { brand = group.brand; break; }
+  }
+  for (const c of CwSideband.choices(brand)) {
+    const opt = sel.querySelector('option[value="' + c.value + '"]');
+    if (opt) opt.textContent = c.label;
+  }
+  const help = document.getElementById('cw-sideband-help');
+  if (help) help.textContent = CwSideband.helpText(brand);
+}
+if (rigModelSelect) rigModelSelect.addEventListener('change', syncCwSidebandRow);
 function loadRigAudioJack(rig) {
   const mic = !!(rig && rig.audioJack === 'mic');
   const d = document.getElementById('set-audio-jack-data');
@@ -3878,6 +3900,7 @@ async function openRigEditor(mode, rigId) {
       { const t = document.getElementById('set-tx-audio-input'); if (t) t.value = rig.txAudioInput === 'front' || rig.txAudioInput === 'rear' ? rig.txAudioInput : ''; syncTxAudioInputRow(); }
       { const t = document.getElementById('set-tx-channel'); if (t) t.value = rig.txChannel === 'left' ? 'left' : 'both'; } // #654
       { const t = document.getElementById('set-icom-usb-data-mod'); if (t) t.checked = !rig.icomUsbDataModOff; syncIcomUsbDataModRow(); } // sweep 1a: absent = on
+      { const t = document.getElementById('set-cw-sideband'); if (t) t.value = window.CwSideband ? CwSideband.settingOf(rig) : 'band'; syncCwSidebandRow(); } // #753: absent = Automatic
       await populateRadioSection(rig.catTarget);
       // Per-rig audio source — populateRadioSection just rebuilt the options
       // for this rig's radio type, so the stored value (validated) sticks.
@@ -3948,6 +3971,7 @@ async function openRigEditor(mode, rigId) {
     { const v = document.getElementById('set-amp-drive-on'); if (v) v.checked = false; }
     { const v = document.getElementById('set-amp-drive-w'); if (v) v.value = 10; }
     { const v = document.getElementById('set-packet-mode'); if (v) v.value = 'auto'; }
+    { const v = document.getElementById('set-cw-sideband'); if (v) v.value = 'band'; syncCwSidebandRow(); } // #753: a new rig starts on Automatic
     await populateRigAudioDevices('', '');
   }
 
@@ -4113,6 +4137,10 @@ async function saveRigEditor() {
   const rigTxLeftOnly = !!(txChannelEl && txChannelEl.value === 'left'); // #654: absent = both channels
   const lanVoiceSsbEl = document.getElementById('set-lan-voice-ssb');
   const rigLanVoiceInSsb = !!(lanVoiceSsbEl && lanVoiceSsbEl.checked);
+  const cwSidebandEl = document.getElementById('set-cw-sideband');
+  // #753: stored only when not Automatic, and only for a radio type that shows the question.
+  const rigCwSideband = cwSidebandEl && window.CwSideband && CwSideband.appliesToRadioType(getSelectedRadioType())
+    && CwSideband.normalizeSetting(cwSidebandEl.value) !== CwSideband.AUTO ? CwSideband.normalizeSetting(cwSidebandEl.value) : '';
   const packetModeEl = document.getElementById('set-packet-mode');
   const rigPacketMode = packetModeEl && (packetModeEl.value === 'fm' || packetModeEl.value === 'fmdata') ? packetModeEl.value : '';
 
@@ -4151,6 +4179,7 @@ async function saveRigEditor() {
       if (rigIcomUsbDataModOff) rig.icomUsbDataModOff = true; else delete rig.icomUsbDataModOff;
       if (rigLanVoiceInSsb) rig.lanVoiceInSsb = true; else delete rig.lanVoiceInSsb;
       if (rigPacketMode) rig.packetMode = rigPacketMode; else delete rig.packetMode; // absent = Automatic
+      if (rigCwSideband) rig.cwSideband = rigCwSideband; else delete rig.cwSideband; // absent = Automatic (#753)
       rig.flexBandAntennaMap = flexBandAntennaMap;
       if (rigSdrScope) rig.sdrScope = rigSdrScope;
       rig.setupDone = [...rigSetupDone];
@@ -4187,6 +4216,7 @@ async function saveRigEditor() {
       ...(rigIcomUsbDataModOff ? { icomUsbDataModOff: true } : {}),
       ...(rigLanVoiceInSsb ? { lanVoiceInSsb: true } : {}),
       ...(rigPacketMode ? { packetMode: rigPacketMode } : {}),
+      ...(rigCwSideband ? { cwSideband: rigCwSideband } : {}),
       flexBandAntennaMap,
       ...(rigSdrScope ? { sdrScope: rigSdrScope } : {}),
       setupDone: [...rigSetupDone],

@@ -2463,6 +2463,16 @@
           <label class="radio-label" style="margin-top:6px;"><input type="radio" name="rig-audio-jack" id="set-audio-jack-mic" value="mic"> Microphone jack</label>
           <span class="help-text" style="display:block;margin:2px 0 0 24px;">POTACAT never switches this radio to a DATA mode: FT8, WSPR, PSK, FreeDV, SSTV, Winlink and voice all go out in USB, LSB or FM. Warning for Icom owners: an Icom takes USB or rear-socket audio only in a DATA mode unless its menus are changed, so picking the microphone jack by mistake sends SSTV and Winlink as a silent carrier. Pick this only if the audio cable really goes into the microphone socket.</span>
         </div>
+        <div id="rig-cw-sideband" class="hidden" style="margin-top:8px;">
+          <label>CW sideband:
+            <select id="set-cw-sideband" style="margin-top:2px;">
+              <option value="band">Automatic (default)</option>
+              <option value="upper">Always CW</option>
+              <option value="lower">Always CW-R (reverse)</option>
+            </select>
+          </label>
+          <span class="help-text" id="cw-sideband-help" style="display:block;margin:2px 0 0 0;">Automatic: a CW spot tunes the radio to CW on every band, and if you put the radio in CW-R yourself it stays there. Always: every CW tune, on every band, uses that one, also after a restart.</span>
+        </div>
         <div id="rig-voice-as-data" style="margin-top:8px;">
           <label class="checkbox-label"><input type="checkbox" id="set-voice-as-data"> Voice in DATA mode (USB-D / LSB-D)</label>
           <span class="help-text" style="display:block;margin:2px 0 0 24px;">For radios whose data port is silent in USB and LSB, such as the Xiegu G90: POTACAT puts the radio in USB-D or LSB-D for voice, so receive audio reaches your sound card interface and ECHOCAT. Contacts are still logged as SSB. The radio's own microphone is off in these modes, so voice has to come in through the data port.</span>
@@ -5540,6 +5550,7 @@
   <script src="../lib/tx-audio-input.js"></script>
   <script src="../lib/ft891-tx-audio-input.js"></script>
   <script src="../lib/rig-audio-jack.js"></script>
+  <script src="../lib/cw-sideband.js"></script>
   <script src="../lib/icom-usb-data-mod.js"></script>
   <script src="../lib/tx-channel.js"></script>
   <script src="../lib/ptt-flow-conflict.js"></script>
