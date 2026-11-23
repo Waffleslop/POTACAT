@@ -209,6 +209,7 @@ const TESTS = [
   'test/vfo-ptt-row-test.js', // #190: ECHOCAT Web VFO-tab PTT row shows while the mode is unknown; hidden in CW/data
   'test/ws-liveness-test.js', // ECHOCAT Web: reconnect when no pong comes back or the screen wakes on a dead socket
   'test/ptt-release-test.js', // ECHOCAT Web: PTT lets go on blur/hidden/cancel, Space up with a box focused, and resends off after a reconnect (#935)
+  'test/ws-limits-test.js', // ECHOCAT: 16 MiB maxPayload, a frame over 64 KiB before sign-in closes the socket unparsed (1009), sstv-photo over 4 MiB refused with sstv-tx-status error and never encoded
   'test/remote-origin-security-test.js', // ECHOCAT: foreign page Origin refused on LAN sockets, /api/ptt cross-site refused with no ACAO, device-writable settings allowlist, public source needs the token, directory cards escaped
   'test/ptt-client-id-test.js', // #941: a reconnecting ECHOCAT Web page releases PTT its own dead socket holds; another id or none never does
   'test/error-banner-text-test.js', // #806: ECHOCAT Web error banner shows the message on iPhone Safari (stack has no message there)
