@@ -167,6 +167,7 @@ The `status` message is a kitchen-sink snapshot. The canonical fields are:
 | `atu` | boolean | ATU enabled |
 | `vfo` | string | "A" or "B" — READBACK-fed since 2026-08-03 (Kenwood `IF;` / rigctld `v`, polled every cycle), so it now follows front-panel and custom-CAT VFO changes instead of only POTACAT-initiated ones |
 | `split` | boolean | rig split on/off, readback-fed (Kenwood `IF;` P12 / rigctld `s`). NEW 2026-08-03 — absent from older desktops. Live split is commanded via `rig-control {action:'set-split', value}`; the similarly-named `set-enable-split` only toggles the spot-tune setting |
+| `capabilities.splitUp` | boolean | Added 2026-11-23 (#689). `true` = the shack can do Split up N in one step: `rig-control {action:'split-up', offsetKhz}` with `offsetKhz` 1, 2, 5 or -1 turns split on and sets the TX VFO to the dial + offset (lib/split-up.js). Back to simplex is `set-split` false. Refused (logged, nothing sent) while the VFO is locked or when the TX frequency is outside the radio's range; refused for a Guest Pass like `set-split`. Never on a Flex. Absent (older desktops) = not offered. From the same date `splitFreq` is `false` where the link would decline the TX frequency (Yaesu other than FT-991/991A, Icom firmware that NAKs 25). |
 | `filterWidth` | number | Hz |
 | `rfgain` | number | 0–255 |
 | `txpower` | number | TX power *setting* (slider) |

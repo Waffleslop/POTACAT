@@ -53,6 +53,7 @@
   <!-- worked-matrix-js -->
   <!-- worked-overlay-js -->
   <!-- rig-bands-js -->
+  <!-- split-up-js -->
   <!-- landmarks-js -->
   <!-- app-theme-js -->
   <!-- look-picker-js -->
@@ -409,6 +410,11 @@
             <button type="button" class="rc-btn rc-vfo" id="rc-vfo-b">B</button>
             <button type="button" class="rc-btn" id="rc-vfo-swap">A&#x21C4;B</button>
             <button type="button" class="rc-btn rc-toggle hidden" id="rc-split" title="Split operation — transmit on the other VFO">Split</button>
+          </div>
+          <!-- Split up N (#689): split on and TX at RX + N in one tap; again for simplex. -->
+          <div id="rc-split-up-group" class="so-toggle-group hidden">
+            <button type="button" class="rc-btn rc-toggle" id="rc-split-up">Split up 1</button>
+            <select id="rc-split-up-n" class="rc-split-up-n" aria-label="Split offset" title="How far from the receive frequency to transmit"></select>
           </div>
           <div id="rc-power" class="so-toggle-group">
             <button type="button" class="rc-btn" id="rc-power-on" style="color:#4ecca3;">On</button>
