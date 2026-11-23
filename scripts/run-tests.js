@@ -24,6 +24,7 @@ const TESTS = [
   'test/guest-pass-state-step2-test.js', // #541 step 2: pass-state, four states with a reason, one wording table, the claim rule
   'test/guest-pass-owner-controls-test.js', // #200 / #541 step 3: Take the radio (Now / In 5 minutes), Give it back, Cancel pass
   'test/guest-pass-handback-test.js', // #200 / #541 step 4: after 5 idle owner minutes the guest may take the radio back; no automatic hand-back
+  'test/rig-group-turns-test.js', // #542 slice 1: rig groups' queue; after 5 idle minutes the first in line is offered the rig; nothing switches on its own
   'test/rigctld-spawn-test.js',
   'test/echocat-connect-diet-test.js',
   'test/cw-live-watchdog-test.js',

@@ -44,56 +44,94 @@ holder is admitted waiting instead. The new rules live in one pure module,
 Slices 1 to 3 need no cloud: tests use a fake validator that returns
 `kind: 'rig_group'` profiles. Slices 4 to 6 need the cloud handoff to have landed.
 
-### Slice 1. `lib/rig-group-turns.js` (pure) and its test
+### Slice 1. `lib/rig-group-turns.js` (pure) and its test (built)
 
 The one place that decides whose turn it is. No timers and no sockets: the clock
-is passed in, like `lib/pass-state.js`.
+is passed in, like `lib/pass-state.js` and `lib/pass-owner-controls.js`. Every
+function takes a state and returns a new one; the input is never changed.
 
 State, one object per shack:
 
 ```js
 {
-  groupId,                 // the holder's group; null when no rig-group pass is loaded
+  groupId,                 // the holder's group, or the waiting members' once it left
   holder: { code, call, lastActiveAt } | null,
-  queue: [ { code, call, joinedAt } ],   // in order
+  queue: [ { code, call, joinedAt } ],   // in the order members asked
   offer: { code, reason: 'member-idle' | 'rig-free', at } | null,
 }
 ```
 
-Functions, each returning a new state plus what changed (`{ state, events }`):
+Functions. Results have the shape `lib/pass-owner-controls.js` uses:
+`{ ok, reason?, state, changed }` plus what the station needs.
 
-- `admit(state, profile)` decides `'load' | 'wait' | 'refuse'`. Load when nothing is
-  loaded. Wait when the holder is a rig-group pass of the same `group_id`. Refuse
-  otherwise, which keeps today's behaviour.
-- `join(state, code, call, now)` and `leave(state, code)` change the queue.
-  Joining twice keeps the first place.
+- `admit(state, profile, liveCode)` returns `{ decision: 'load' | 'wait' | 'refuse' }`.
+  `liveCode` is the code of the pass loaded in `PassEnforcement`.
+  - Load when nothing is loaded, or when this is the loaded pass (a re-attach).
+  - Wait for a rig-group pass of the same `group_id` as the loaded rig-group
+    holder.
+  - Refuse anything else, which keeps today's rule for a second guest. The reason
+    is `not-rig-group`, `holder-not-rig-group` or `other-group`.
+- `holderLoaded(state, profile, now)`: main calls it after `loadPass`. A
+  rig-group pass becomes the holder: it leaves the queue, any offer is settled and
+  its 5 minutes start. An ordinary Guest Pass ends rig-group turns on the shack,
+  and a pass from another group starts a fresh queue.
+- `join(state, { code, call }, now)` and `leave(state, code, now)` change the
+  queue.
+  - Joining twice keeps the first place.
+  - The holder and a shack with no group are refused.
+  - An offered member who leaves passes the offer to the next in line.
 - `noteHolderActive(state, now)` updates `lastActiveAt` and withdraws a
-  `member-idle` offer.
-- `idleDue(state, now, idleMs)` and `offerIdle(state, now)` make the member idle
-  offer. They fire only when the queue is not empty, and offer the first in line.
+  `member-idle` offer (`withdrawn: true`). A `rig-free` offer has no holder to be
+  active.
+- `msUntilIdle(state, now, idleMs)`, `idleDue(...)` and `offerIdle(state, now, idleMs)`
+  make the member idle offer.
+  - It comes only when someone is waiting and no offer is out, 5 minutes
+    (`MEMBER_IDLE_MS`) after the holder's last activity, to the first in line.
+  - The holder keeps the rig until that member takes it: nothing switches on its
+    own.
+  - While the owner holds the radio, the station does not call `offerIdle`. At
+    Give it back it calls `noteHolderActive`.
 - `holderGone(state, now)` is called when the holder leaves or their 60 s hold
-  ends. With a queue, the result is offer `rig-free` to the first in line; without
-  one, nobody holds the rig.
+  ends.
+  - The first in line is offered `rig-free`.
+  - An idle offer already out stays with the same member, now as `rig-free`.
+  - With nobody waiting, turns start over.
 - `canTake(state, code)` is true only for the member who holds the offer.
-- `take(state, code, now)` makes them the holder, removes them from the queue and
-  puts the old holder (if still connected) back as a waiting member, not queued.
+- `take(state, code, now)` makes them the holder and removes them from the queue.
+  It returns `from` (the old holder, or `null` for a free rig) so the station can
+  park that connection waiting, unqueued.
 - `expireQueue(state, now, maxAgeMs)` drops entries older than
-  `QUEUE_MAX_AGE_MS` (2 hours) so a forgotten entry does not fire a push the next
-  day.
-- `offerTimeout(state, now)` (question for Casey): an offer nobody takes passes to
-  the next in line after `OFFER_MS` (5 minutes). It is off until Casey agrees.
+  `QUEUE_MAX_AGE_MS` (2 hours), so a forgotten entry does not fire a push the next
+  day. The offered member is kept.
+- `offerTimeout(state, now, offerMs)` (a question for Casey): an offer nobody
+  takes within `OFFER_MS` (5 minutes) passes to the next in line, and the member
+  who let it pass goes to the back. The station does not call it until Casey
+  agrees, and the test checks that it does not.
+- `position(state, code)` gives the place in line (1 is first, 0 is not queued).
+- `factsFor(state, code)` returns `{ waitingMember, holderCall, queuePosition,
+  offered }`, the facts slice 2's `pass-state` needs.
+- `ownerView(state)` returns `{ holderCall, queue: [{ call, joinedAt }], offeredCall }`
+  for Share My Rig (slice 5). It carries no pass codes.
 
-Constants: `MEMBER_IDLE_MS = 5 * 60 * 1000`, `QUEUE_MAX_AGE_MS`, `OFFER_MS`.
+Constants: `MEMBER_IDLE_MS = 5 * 60 * 1000`, `QUEUE_MAX_AGE_MS` (2 hours),
+`OFFER_MS` (5 minutes), `KIND = 'rig_group'`, `OFFER_REASONS`.
 
-Test: `test/rig-group-turns-test.js`, added to `scripts/run-tests.js`. It covers:
-- admit: same group waits, another group or a plain Guest Pass is refused;
-- queue order, duplicate joins, leaving;
-- no offer with an empty queue;
-- the offer after 5 idle minutes goes only to the first in line;
-- holder activity withdraws a `member-idle` offer, but not a `rig-free` one;
+Test: `test/rig-group-turns-test.js`, listed in `scripts/run-tests.js`. It covers:
+- admit: same group waits; another group, a plain Guest Pass, or a stale loaded
+  code is refused;
+- holderLoaded, including an ordinary Guest Pass and another group;
+- queue order, places, duplicate joins, leaving, and an offer passed on;
+- no offer with an empty queue, and none before 5 minutes;
+- the offer goes to the first in line only, and only one is out at a time;
+- holder activity withdraws a `member-idle` offer;
 - the holder leaving gives a `rig-free` offer;
-- take swaps holder and waiter;
-- old entries expire.
+- take swaps holder and waiter and returns the old holder;
+- a whole evening of turns, end to end;
+- old entries expire; offerTimeout, and that the station does not call it;
+- factsFor and ownerView;
+- the input state is never changed, and the source has no timers, sockets or
+  Electron;
+- this section names every export.
 
 If Casey answers question 1 with "release": `offerIdle` becomes `releaseIdle`. The
 idle holder is parked as waiting at once and the first in line is offered a free
