@@ -33849,8 +33849,8 @@ function connectRemote() {
     // sanitized VFO-profiles echo). The JTTY serial a phone bumps must reach
     // the web pane and vice versa, so those keys push too.
     const jttyKeys = ['jttySerial', 'jttyMacros', 'jttyFt8Macros', 'jttyMacroStyle', 'jttyProfile', 'jtcatFdExch', 'pskMacros'];
-    if (sdrSync || dxeChanged || sstvPowerChanged || jttyKeys.some((k) => Object.prototype.hasOwnProperty.call(partial || {}, k))) updateRemoteSettings();
-    if (sstvPowerChanged) pushSstvRigState();
+    if (sdrSync || dxeChanged || jttyKeys.some((k) => Object.prototype.hasOwnProperty.call(partial || {}, k))) updateRemoteSettings();
+    if (sstvPowerChanged) { updateRemoteSettings(); pushSstvRigState(); }
     rigBandsBroadcast();
   });
 }
@@ -55204,7 +55204,7 @@ function cloudShackNotice(text, kind) {
     // #279 Transmit power for SSTV: watts or null; every device and the SSTV window follow.
     if (newSettings && 'sstvTxPowerW' in newSettings) {
       newSettings.sstvTxPowerW = SstvTxPower.parseWatts(newSettings.sstvTxPowerW);
-      setImmediate(() => { try { updateRemoteSettings(); } catch {} pushSstvRigState(); });
+      setImmediate(pushSstvRigState);
     }
     // #475: the Deleted folder's days reach every Winlink surface (winlink-state.deletedDays).
     if (newSettings && 'winlinkDeletedDays' in newSettings) setImmediate(() => { try { winlinkPush(); } catch {} });
@@ -55892,6 +55892,8 @@ function cloudShackNotice(text, kind) {
     if (has('jtcatNferParks')) updateRemoteSettings();
     // JTCAT calling time (#161): a connected device shows the desktop's change.
     if (has('jtcatCallingTimeMin')) updateRemoteSettings();
+    // Transmit power for SSTV (#279): a connected device shows the desktop's change.
+    if (has('sstvTxPowerW')) updateRemoteSettings();
 
     // Start/stop WSJT-X-binary bridge. HamRS, Logger32, MacLoggerDX, RUMlogNG
     // and Log4OM-binary all share this path — they recognize POTACAT as a
