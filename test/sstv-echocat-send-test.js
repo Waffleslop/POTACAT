@@ -118,7 +118,7 @@ test('main: sstvSendFailed says it in the log, the SSTV window and on every ECHO
   assert.ok(!/dialog\./.test(f));
 });
 test('main: the phone-picture handler fails only through sstvSendFailed, and guards the preview', () => {
-  const h = slice(MAIN, "remoteServer.on('sstv-photo', ({ image, mode, guest, freqKhz }) => {", "remoteServer.on('sstv-stop'");
+  const h = slice(MAIN, "remoteServer.on('sstv-photo', ({ image, mode, guest, freqKhz, waitQuiet }) => {", "remoteServer.on('sstv-stop'");
   assert.ok(!/console\.error\(/.test(h), 'no failure that only reaches a console nobody sees');
   assert.ok(/sstvSendFailed\('Picture not sent: SSTV could not start on this computer\.'\)/.test(h));
   assert.ok(/sstvSendFailed\('Picture not sent: the picture could not be read\.'\)/.test(h));
@@ -127,8 +127,9 @@ test('main: the phone-picture handler fails only through sstvSendFailed, and gua
   assert.ok(/sstvEngine\.encode\(SstvSend\.ownCopy\(rgba\), size\.width, size\.height, mode\)/.test(h), 'the encoder gets its own copy');
 });
 test('main: the encode-complete handler and its audio timer are guarded, and release PTT on a throw', () => {
-  assert.ok(/sstvEngine\.on\('encode-complete', SstvSend\.guard\(\(data\) => \{/.test(MAIN));
-  assert.ok(/\}, sstvSendThrew\)\);/.test(MAIN));
+  // #326: the guarded key-and-send body is held by the quiet gate at encode-complete.
+  assert.ok(/const sstvKeyAndSend = SstvSend\.guard\(\(data\) => \{/.test(MAIN));
+  assert.ok(/\}, sstvSendThrew\);\n    sstvEngine\.on\('encode-complete', \(data\) => sstvHoldPicture\(data, sstvKeyAndSend\)\);/.test(MAIN));
   assert.ok(/setTimeout\(SstvSend\.guard\(fn, sstvSendThrew\), wait\)/.test(MAIN));
   const t = slice(MAIN, 'const sstvSendThrew = (err) => {', '\n    };');
   assert.ok(t.indexOf('handleRemotePtt(false)') >= 0 && t.indexOf('handleRemotePtt(false)') < t.indexOf('sstvSendFailed('), 'PTT released first');
@@ -187,7 +188,7 @@ test('the channels match the SSTV window\'s list', () => {
   for (const list of Object.values(S.CHANNELS_KHZ)) for (const k of list) assert.ok(new RegExp(`value="${k}"`).test(pop), k + ' kHz is in the window\'s list');
 });
 test('main: plan, open the window on that frequency, tune, then encode', () => {
-  const h = slice(MAIN, "remoteServer.on('sstv-photo', ({ image, mode, guest, freqKhz }) => {", "remoteServer.on('sstv-stop'");
+  const h = slice(MAIN, "remoteServer.on('sstv-photo', ({ image, mode, guest, freqKhz, waitQuiet }) => {", "remoteServer.on('sstv-stop'");
   assert.ok(/const plan = guest \? \{ act: 'stay' \} : SstvSend\.sendChannel\(\{/.test(h), 'a guest\'s picture never moves the radio');
   assert.ok(/radioHz: _currentFreqHz, requestedKhz: freqKhz, bands: activeRigBands\(\)/.test(h));
   const tune = h.indexOf("tuneRadio(plan.freqKhz, plan.mode, undefined, { origin: 'SSTV picture from ECHOCAT' })");

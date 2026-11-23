@@ -83,6 +83,10 @@
     /* SWR trip */
     .trip { flex-shrink: 0; display: flex; align-items: center; gap: 10px; padding: 7px 12px; background: rgba(233,69,96,0.14); border-bottom: 1px solid var(--accent-red, #e94560); font-size: 13px; }
     .trip b { color: var(--accent-red, #e94560); }
+    .quiet-wait { flex-shrink: 0; display: flex; align-items: center; flex-wrap: wrap; gap: 10px; padding: 7px 12px; background: rgba(79,195,247,0.12); border-bottom: 1px solid var(--accent-blue, #4fc3f7); font-size: 13px; }
+    .quiet-wait[hidden] { display: none; }
+    .quiet-wait b { color: var(--accent-blue, #4fc3f7); }
+    .quiet-wait #quiet-detail { color: var(--text-primary); }
 
     /* Stage: the two pictures, sized to fit so nothing scrolls */
     .stage { flex: 1; min-height: 0; display: flex; flex-direction: column; }
@@ -310,6 +314,9 @@
       <h4>Saving</h4>
       <label class="check"><span><input type="checkbox" id="save-all-decodes"> Save every picture, even partial ones</span></label>
       <div class="dim">Pictures that start without a header or fade in noise are shown but normally not saved. Turn this on to keep them in the gallery too, marked partial, so you can sort through them yourself.</div>
+      <h4>Sending</h4>
+      <label class="check"><span><input type="checkbox" id="wait-quiet"> Wait for the frequency to be quiet before sending</span></label>
+      <div class="dim">TRANSMIT listens first. If someone is sending, your picture waits until the frequency has been quiet for 5 seconds, then goes by itself. Send now and Cancel are there while it waits; it gives up after 4 minutes.</div>
       <h4>Help</h4>
       <div class="row"><button type="button" class="btn" id="sstv-help-btn">How SSTV contacts work</button></div>
       <div class="dim">Where to call, what "UR P5" and "UR 595" mean, and how a contact goes.</div>
@@ -330,6 +337,14 @@
     <span class="spacer"></span>
     <button type="button" class="btn go" id="trip-atu" hidden>Tune ATU</button>
     <button type="button" class="btn" id="trip-override" title="Allow transmitting again without a tuner match">Override</button>
+  </div>
+
+  <!-- #326: a picture waiting for the frequency to clear -->
+  <div class="quiet-wait" id="quiet-wait" hidden role="status" aria-live="polite">
+    <b id="quiet-title">Waiting for the frequency to clear...</b><span id="quiet-detail"></span>
+    <span class="spacer"></span>
+    <button type="button" class="btn go" id="quiet-send-now">Send now</button>
+    <button type="button" class="btn" id="quiet-cancel">Cancel</button>
   </div>
 
   <!-- Multi-slice config panel (Flex only; opened from settings) -->
@@ -430,6 +445,7 @@
   <div class="ctx" id="ctx-menu" hidden role="menu"></div>
 
   <script src="../lib/freq-dots.js"></script>
+  <script src="../lib/sstv-quiet-wait.js"></script>
   <script src="../lib/waterfall-palettes.js"></script>
   <script src="waterfall.js"></script>
   <script src="../lib/sstv-audio-device.js"></script>

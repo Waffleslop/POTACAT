@@ -20,7 +20,7 @@ const src = readSrc(path.join(__dirname, '..', 'main.js')).replace(/\r\n/g, '\n'
 console.log('sstv tx data mode');
 
 test('SSTV key-down declares audio and forces data mode on an Icom', () => {
-  const at = src.indexOf("sstvEngine.on('encode-complete'");
+  const at = src.indexOf('const sstvKeyAndSend = SstvSend.guard('); // #326: held at encode-complete by the quiet gate
   assert.ok(at > 0, 'encode-complete handler not found');
   const handler = src.slice(at, at + 3000);
   assert.ok(/const _sstvIcom = detectRigType\(\) === 'icom' \|\| \(getActiveRigModel\(\)\?\.brand === 'Icom'\);/.test(handler), 'Icom detection');

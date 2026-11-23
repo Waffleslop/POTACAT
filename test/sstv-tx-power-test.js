@@ -214,7 +214,7 @@ test('every key-up through the dispatcher puts the level back, after the unkey',
   assert.ok(end > b.indexOf('gatedSetTransmit(state, pttEmission);'), 'after the unkey');
 });
 test('paths that end a picture without the dispatcher also end the power session', () => {
-  assert.ok(/function sstvHaltTxNow\(\) \{[\s\S]*?sstvTxPowerEnd\('HALT'\)/.test(MAIN), 'HALT');
+  assert.ok(/function sstvHaltTxNow\(\{ keepWait = false \} = \{\}\) \{[\s\S]*?sstvTxPowerEnd\('HALT'\)/.test(MAIN), 'HALT');
   assert.ok(/ipcMain\.on\('sstv-tx-complete'[\s\S]{0,400}sstvTxPowerEnd\(/.test(MAIN), 'tx-complete');
   assert.ok(/PTT was released before the radio keyed[\s\S]{0,200}sstvTxPowerEnd\(/.test(MAIN) || /sstvTxPowerEnd\('picture not sent'\);\s*sendCatLog\('\[SSTV\] PTT was released before the radio keyed/.test(MAIN), 'not keyed');
 });

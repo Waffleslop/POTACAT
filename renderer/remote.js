@@ -3271,7 +3271,10 @@
       // --- SSTV ---
       case 'sstv-tx-status':
         sstvPhoneRxActive = false;
-        if (msg.state === 'tx') {
+        sstvPhoneShowWait(msg.state === 'waiting' ? msg : null);
+        if (msg.state === 'waiting') {
+          if (sstvPhoneStatus && window.SstvQuietWait) { sstvPhoneStatus.textContent = window.SstvQuietWait.WAIT_TITLE; sstvPhoneStatus.style.color = 'var(--accent-blue, #4fc3f7)'; }
+        } else if (msg.state === 'tx') {
           sstvPhoneStartTxProgress(msg.durationSec || 0);
           if (sstvPhoneStatus) { sstvPhoneStatus.textContent = 'Transmitting...'; sstvPhoneStatus.style.color = 'var(--accent)'; }
         } else if (msg.state === 'auto-rx' && !msg.error) {
@@ -14274,6 +14277,28 @@ var _paddleHoldTimer = { dit: null, dah: null };
       sstvPhoneStopTxProgress();
     });
   }
+
+  // #326: a picture waiting at the shack for a quiet frequency.
+  var sstvPhoneWaitBar = document.getElementById('sstv-phone-wait-bar');
+  function sstvPhoneShowWait(msg) {
+    if (!sstvPhoneWaitBar) return;
+    if (!msg || !window.SstvQuietWait) { sstvPhoneWaitBar.style.display = 'none'; return; }
+    var t = document.getElementById('sstv-phone-wait-title');
+    var d = document.getElementById('sstv-phone-wait-detail');
+    if (t) t.textContent = window.SstvQuietWait.WAIT_TITLE;
+    if (d) d.textContent = window.SstvQuietWait.waitDetail(msg);
+    sstvPhoneWaitBar.style.display = '';
+  }
+  var sstvPhoneSendNowBtn = document.getElementById('sstv-phone-send-now');
+  if (sstvPhoneSendNowBtn) sstvPhoneSendNowBtn.addEventListener('click', function() {
+    if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'sstv-send-now' }));
+    sstvPhoneShowWait(null);
+  });
+  var sstvPhoneWaitCancelBtn = document.getElementById('sstv-phone-wait-cancel');
+  if (sstvPhoneWaitCancelBtn) sstvPhoneWaitCancelBtn.addEventListener('click', function() {
+    if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'sstv-halt-tx' }));
+    sstvPhoneShowWait(null);
+  });
 
   function formatSec(s) {
     var m = Math.floor(s / 60);
