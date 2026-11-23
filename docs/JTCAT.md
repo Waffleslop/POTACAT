@@ -31,7 +31,7 @@ Per profile: jtcatMaxQsoAttempts, jtcatCallingTimeMin, jtcatReworkDays, jtcatHun
 jtcatRelogCooldownMin, jtcatRunPauseAfter, jtcatModeHop*, jtcatFdMode/jtcatFdExch, jtcatHoundMode,
 jtcatSkipTx1, jtcatApDecode, jtcatLateStartTx, jttyMacroStyle, jttyMacros, pskMacros.
 Machine-wide (GLOBAL_KEY): ultracat, jtcatRxGain, jtcatTxGain (desktop-authoritative, one writer
-`applyJtcatTxGain`), jtcatWaterfallSpeed, jtcatWaterfallFloor, jtcatShowBandScope, jtcatStationsExpiryMin.
+`applyJtcatTxGain`), jtcatWaterfallSpeed, jtcatWaterfallFloor, jtcatShowBandScope, jtcatShowWaterfall, jtcatStationsExpiryMin.
 Rule: a setting that is operating policy is per profile; a setting about this machine or its display is GLOBAL.
 
 ## When a QSO is logged (#807, Casey 2026-11-20)
