@@ -989,6 +989,7 @@ const setTgxlLabel3 = document.getElementById('set-tgxl-label-3');
 const tgxlAntButtons = document.getElementById('tgxl-ant-buttons');
 const setVerboseLog = document.getElementById('set-verbose-log');
 const setLightIcon = document.getElementById('set-light-icon');
+const setLinuxNativeFrame = document.getElementById('set-linux-native-frame'); // #345
 const setEnableBandActivity = document.getElementById('set-enable-band-activity');
 const setEnableSplitView = document.getElementById('set-enable-split-view');
 const splitOrientationConfig = document.getElementById('split-orientation-config');
@@ -18541,6 +18542,9 @@ async function openSettingsDialog(tab) {
   setEnableAtu.checked = s.enableAtu === true;
   setVerboseLog.checked = s.verboseLog === true;
   setLightIcon.checked = s.lightIcon === true;
+  // #345: the system title bar is a Linux choice; Windows and macOS keep POTACAT's own.
+  document.getElementById('linux-native-frame-row').classList.toggle('hidden', window.api.platform !== 'linux');
+  setLinuxNativeFrame.checked = s.linuxNativeFrame === true;
   setEnablePota.checked = s.enablePota !== false;
   setEnableSota.checked = s.enableSota === true;
   setEnableWwff.checked = s.enableWwff === true;
@@ -19661,6 +19665,7 @@ settingsSave.addEventListener('click', async () => {
     enableAtu: atuEnabled,
     verboseLog: verboseLogEnabled,
     lightIcon: lightIconEnabled,
+    linuxNativeFrame: setLinuxNativeFrame.checked,
     potaParksPath: potaParksPath,
     potaActivationsPath: setPotaActivationsPath ? (setPotaActivationsPath.value.trim() || '') : '',
     hideWorkedParks: hideWorkedParksEnabled,
@@ -28810,6 +28815,8 @@ function updateTitleBar() {
   } else {
     ttEl.textContent = `POTACAT - Hunter Mode${v ? ` - v${v}` : ''}`;
   }
+  // #345: under the system frame our title bar is hidden; the window manager shows this instead.
+  if (document.documentElement.classList.contains('native-frame')) document.title = ttEl.textContent;
 }
 
 /**

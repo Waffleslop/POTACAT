@@ -1,0 +1,36 @@
+/* #345: the system window frame (Linux, opt-in: Settings > Display).
+   The window manager draws the title bar, its menu and its buttons, so each
+   page drops its own. popout-theme-boot.js / popout-theme-bootstrap.js load
+   this file and add html.native-frame only when main.js passes frame=native;
+   every rule here is scoped to that class.
+
+   A title bar that holds only the title and the window buttons goes entirely.
+   One that holds the window's own controls stays (the APRS views and settings,
+   the JTCAT map's Worked button, the VFO's small/settings/keep-on-top buttons,
+   Mercury's connection note, Winlink's call sign), without its window buttons
+   and no longer a drag region: the system frame moves the window, and a drag
+   region there would only swallow clicks. */
+
+html.native-frame .titlebar:not(:has(.titlebar-keep-on-mac)):not(:has(.mini-strip)),
+html.native-frame .aw-titlebar,
+html.native-frame .sc-titlebar,
+html.native-frame .sstv-titlebar,
+html.native-frame .lp-titlebar {
+  display: none !important;
+}
+
+html.native-frame .titlebar,
+html.native-frame .titlebar-drag,
+html.native-frame .mq-titlebar,
+html.native-frame .wl-titlebar {
+  -webkit-app-region: no-drag;
+}
+
+html.native-frame .titlebar #tb-min,
+html.native-frame .titlebar #tb-max,
+html.native-frame .titlebar #tb-close,
+html.native-frame .titlebar .win-btn,
+html.native-frame .mq-titlebar .mq-winbtn,
+html.native-frame .wl-titlebar .wl-winbtn {
+  display: none !important;
+}

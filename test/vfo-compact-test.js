@@ -106,7 +106,10 @@ test('colours: PTT is POTACAT red at rest, sliders get a dark track, TX power is
 
 test('macOS: the traffic lights keep their room in the Large and the Small VFO (#387)', () => {
   // The window has the system controls on a Mac (hiddenInset), drawn over the page's top-left.
-  assert.ok(/isMac \? \{ titleBarStyle: 'hiddenInset' \}/.test(main), 'the VFO window uses the inset traffic lights on macOS');
+  // #345: the frame comes from windowFrame() (lib/window-frame.js), hiddenInset on a Mac.
+  const vfoWin = main.slice(main.indexOf('vfoPopoutWin = new BrowserWindow({'), main.indexOf('vfoPopoutWin = new BrowserWindow({') + 700);
+  assert.ok(/isMac \? \{ titleBarStyle: 'hiddenInset' \}|\.\.\.windowFrame\(\)/.test(vfoWin), 'the VFO window uses the inset traffic lights on macOS');
+  assert.deepStrictEqual(require('../lib/window-frame').windowFrameFor('darwin', {}), { titleBarStyle: 'hiddenInset' });
   assert.ok(/<script src="popout-theme-boot\.js"><\/script>/.test(vfo), 'the boot script sets .platform-darwin');
   const css = vfo.replace(/\/\*[\s\S]*?\*\//g, '');
   const rule = css.match(/([^{}]+)\{\s*padding-left:\s*(\d+)px;\s*\}/g) || [];
