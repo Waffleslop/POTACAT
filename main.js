@@ -7283,7 +7283,7 @@ function restoreFt891TxAudioInput(reason) {
   _ft891TxAudioInput = null;
   if (!h) return;
   if (!h.controller || !h.controller.connected) {
-    if (Object.keys(h.guard.held).length) sendCatLog(`[FT-891 audio input] the link is already closed (${reason}): the radio keeps POTACAT's transmit audio input until the next connect puts it back or it is changed on the radio`);
+    if (Object.keys(h.guard.held).length) sendCatLog(`[FT-891 audio input] the link is already closed (${reason}): POTACAT could not put the radio's own transmit audio input menus back; set them on the radio if needed`);
     return;
   }
   try { h.guard.restore(reason); } catch (e) { sendCatLog('[FT-891 audio input] ' + e.message); }
@@ -10187,8 +10187,8 @@ async function connectCat() {
     if (hs.source !== 'rig' && SerialHsTrial.trialSkipReason(model, target) === 'ptt-rts') {
       if (_serialHsTrial.get(target.path) !== 'ptt-rts') { _serialHsTrial.set(target.path, 'ptt-rts'); sendCatLog(SerialHsTrial.pttRtsSkipLine(target.path)); }
     } else if (hs.source !== 'rig' && SerialHsTrial.trialApplies(model, target)) armSerialHandshakeNoAnswerTrial(cat, transport, target, hs);
-    // Lines low at open on every Yaesu (holdSerialLinesLow): Windows raises DTR/RTS on open.
     if (model.protocol === 'kenwood') ft891TxAudioInputAttach(cat, transport, target); // #602: FT-891 transmit audio input, put back on disconnect
+    // Lines low at open on every Yaesu (holdSerialLinesLow): Windows raises DTR/RTS on open.
     transport.connect({ path: target.path, baudRate: target.baudRate || 9600, dtrOff: holdSerialLinesLow(model, target), connectDelay: model.connectDelay, serialHandshake: hs.handshake, stopBits: model.serialStopBits });
   }
 
