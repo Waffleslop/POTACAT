@@ -315,6 +315,7 @@ const TESTS = [
   'test/sstv-feed-gate-test.js',
   'test/wrl-packet-test.js',
   'test/jtcat-snr-floor-test.js', // Hunt does not call a CQ below the operator's signal floor (per band)
+  'test/jtcat-spectrum-resume-test.js', // #943: an engine restart (band/mode change) resumes the phone's FT8 waterfall feed
   'test/rx-spectrum-test.js', // the phone's VFO waterfall with no FT8 engine: Flex/Icom streams, the rig's sound card
   'test/ft4222-library-test.js', // #360: FTDI's LibFT4222 names per platform (versioned Mac dylib + libftd2xx), Setup's copy plan, Mach-O archs, the loader's reason in Mac words
   'test/yaesu-scope-test.js', // the FT-710's own scope: frame parser, axis, helper exit codes, remote payload guard (was CI-only)
