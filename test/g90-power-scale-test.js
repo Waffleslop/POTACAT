@@ -117,5 +117,35 @@ test('log line states the full scale actually used', () => {
   assert.ok(/watts use a 20 W full scale/.test(k.logs.find((l) => /cannot convert power/.test(l))));
 });
 
+
+// #993: a G90 set up as Other Rig (Hamlib) with Hamlib model 3088 has no Radio
+// Model picked; the twin lookup must lend hamlibFullScaleW as well as
+// pollDuringTx. main.js calls hamlibTwinQuirks(generic, rigId).
+const { hamlibTwinQuirks } = require('../lib/rig-models');
+const GENERIC_HAMLIB = () => getModel(null, 'rigctld');
+
+test('Other Rig (Hamlib) model 3088 borrows hamlibFullScaleW 20 and sends RFPOWER 1.000 at 20 W (#993)', () => {
+  const m = hamlibTwinQuirks(GENERIC_HAMLIB(), 3088);
+  assert.strictEqual(m.hamlibFullScaleW, 20);
+  const { codec, writes } = make(m);
+  hamlibAnswers(codec, 100000);
+  codec.setTxPowerWatts(20);
+  assert.deepStrictEqual(powerWrites(writes), ['L RFPOWER 1.000\n']);
+});
+
+test('Other Rig (Hamlib) model 3088 still borrows pollDuringTx false (#993)', () => {
+  assert.strictEqual(hamlibTwinQuirks(GENERIC_HAMLIB(), 3088).pollDuringTx, false);
+});
+
+test('Other Rig (Hamlib) with another Hamlib number is unchanged (#993)', () => {
+  const g = GENERIC_HAMLIB();
+  // Hamlib 2029 is the Elecraft KX3; no model entry names it, so nothing is lent.
+  const r = hamlibTwinQuirks(g, 2029);
+  assert.strictEqual(r, g);
+  assert.strictEqual(r.hamlibFullScaleW, undefined);
+  assert.strictEqual(hamlibTwinQuirks(g, 0), g);
+  assert.strictEqual(hamlibTwinQuirks(g, 999999), g);
+});
+
 console.log(`\n${pass} passed, ${fail} failed`);
 if (fail) process.exit(1);

@@ -760,7 +760,7 @@ function parkInfoFor(ref) {
 // the community feed served by worker/dxpeditions — aggregated DX-World +
 // DXNews + NG3K, refreshed server-side every 6h. See README in that
 // worker for the schema served at /feeds/dxpeditions.json.
-const { getModel, getModelList, RIG_MODELS, migrateRigModelNames, modelFromYaesuId } = require('./lib/rig-models');
+const { getModel, getModelList, hamlibTwinQuirks, RIG_MODELS, migrateRigModelNames, modelFromYaesuId } = require('./lib/rig-models');
 const { resolveSetupNotes, radioTypeFromCatTarget, icomScopeBaudAction } = require('./lib/rig-setup-notes');
 const StationSetup = require('./lib/station-setup');
 const ReviewAsk = require('./lib/review-ask'); // one-time "Rate ECHOCAT" card
@@ -3784,9 +3784,7 @@ function _activeRigModelPicked() {
   // TX, #109). Panel caps stay generic.
   if (rigType === 'rigctld' && generic) {
     const ct = activeRig?.catTarget || settings.catTarget || null;
-    const hamlibId = Number(ct && ct.rigId);
-    const twin = hamlibId ? Object.values(RIG_MODELS).find((m) => m && m.hamlib && m.hamlib.rigId === hamlibId) : null;
-    if (twin && twin.pollDuringTx === false) return { ...generic, pollDuringTx: false };
+    return hamlibTwinQuirks(generic, ct && ct.rigId);
   }
   // Icom CI-V rigs are identified by CI-V address, so rigs[].model is usually
   // empty and we land on the conservative generic Icom caps — which assume a
