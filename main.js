@@ -514,6 +514,7 @@ const IcomUsbDataMod = require('./lib/icom-usb-data-mod'); // sweep 1a: DATA MOD
 const AprsRfFrequency = require('./lib/aprs-rf-frequency'); // APRS: the 2 m frequency by grid square (phase 2), 30 m worldwide (phase 3)
 const AprsRfFrames = require('./lib/aprs-rf-frames');       // APRS phase 2: Dire Wolf's AGW monitor frames -> APRS packets
 const AprsRadioReturn = require('./lib/aprs-radio-return'); // APRS phase 2: the radio goes back after listening
+const SstvTxPower = require('./lib/sstv-tx-power'); // #279: Transmit power for SSTV, set before a picture and put back after
 const AprsListenAudio = require('./lib/aprs-listen-audio'); // APRS listening: one line a minute about the audio Dire Wolf gets
 const AprsParser = require('./lib/aprs-parser');
 const AprsIgate = require('./lib/aprs-igate');             // APRS phase 4: the receive-only iGate's rules and the uplink login
@@ -959,6 +960,9 @@ const GLOBAL_KEYS = new Set([
   'aprsRfBeaconLastAt', // when this station last beaconed over its radio (confirmed): the radio timer counts from it after a restart
   'aprsListenReturn',  // {freqHz, mode, rigId, listenHz, state}: where the radio was before APRS
                        // listening tuned it (lib/aprs-radio-return.js) — this machine's radio
+  'sstvTxPowerW',      // #279: Transmit power for SSTV in W (null = the radio's own power) — this machine's radio
+  'sstvTxPowerRestore', // {watts, sstvWatts, rigId, at, state}: the power to put back after an SSTV
+                       // picture (lib/sstv-tx-power.js) — this machine's radio
   'wsprBeaconWatts',   // {watts, rigId}: the beacon's RF power when the operator set one
                        // while it was armed (#268) — also this machine's radio
   'mainMicDeviceId', 'mainPlaybackDeviceId',
@@ -3057,8 +3061,110 @@ function pushSstvRigState() {
     sstvPopoutWin.webContents.send('sstv-rig-state', {
       atu, atuActive: !!_currentAtuState,
       swrTripped: !!_swrTripped, swrMessage: _swrTripMessage || '',
+      power: sstvPowerState(),
     });
   } catch {}
+}
+
+// ---- Transmit power for SSTV (#279, lib/sstv-tx-power.js) --------------------
+// Empty (the default) changes nothing. A level is set just before the picture
+// keys (handleRemotePtt, txKind 'sstv', after every refusal) and the radio's
+// own level goes back at the key-up, however the picture ends. The level to
+// put back is on disk first, so a crash mid-picture is repaired by the next
+// session's first power report (sendCatPower). The commands go through the
+// gated setters, so a Guest Pass cap clamps them; nothing here keys the radio.
+const sstvTxPower = SstvTxPower.createSession({
+  load: () => (settings && settings.sstvTxPowerRestore) || null,
+  save: (m) => {
+    if (m) settings.sstvTxPowerRestore = m; else delete settings.sstvTxPowerRestore;
+    try { saveSettings(settings); } catch {}
+  },
+  setPower: (w) => sstvCommandTxPower(w),
+  log: (s) => sendCatLog(s),
+});
+
+/** Can POTACAT set this radio's power for a picture now? {canSet, why, remote} */
+function sstvPowerControl() {
+  if (isRemoteMode()) return { canSet: false, remote: true, why: 'remote' };
+  if (tciRigTarget()) return { canSet: false, why: 'no-power-control' };
+  const t = settings && settings.catTarget;
+  if (!t || t.type === 'none') return { canSet: false, why: 'no-power-control' };
+  const rigType = detectRigType();
+  if (rigType === 'flex') {
+    if (smartSdr && smartSdr.connected) return { canSet: true };
+    return { canSet: false, why: cat && cat.connected ? 'no-power-control' : 'no-radio' };
+  }
+  if (!cat || !cat.connected) return { canSet: false, why: 'no-radio' };
+  let caps = {};
+  try { caps = getRigCapabilities(rigType) || {}; } catch {}
+  return caps.txpower ? { canSet: true } : { canSet: false, why: 'no-power-control' };
+}
+
+/** The SSTV window's view: the saved level, whether it can be used, the line to show. */
+function sstvPowerState() {
+  const c = sstvPowerControl();
+  return {
+    watts: SstvTxPower.parseWatts(settings && settings.sstvTxPowerW),
+    canSet: !!c.canSet, remote: !!c.remote, why: c.why || '', text: SstvTxPower.stateText(c),
+  };
+}
+
+/** Command the radio's RF power for SSTV. Gated setters only (the Guest Pass cap). */
+function sstvCommandTxPower(watts) {
+  try {
+    const rigType = detectRigType();
+    if (rigType === 'flex') {
+      if (!smartSdr || !smartSdr.connected || !gatedSmartSdrTxPower(watts)) return false;
+    } else if (!cat || !cat.connected || !gatedSetTxPower(watts, { rigType })) {
+      return false;
+    }
+  } catch (e) {
+    sendCatLog('[SSTV] TX power command failed: ' + ((e && e.message) || e));
+    return false;
+  }
+  // Every surface's TX Pwr shows the level now; the radio's readback confirms it.
+  _currentTxPower = watts;
+  broadcastRigState();
+  return true;
+}
+
+/** Just before an SSTV picture keys, after every refusal (handleRemotePtt). */
+function sstvTxPowerBegin() {
+  const want = SstvTxPower.parseWatts(settings.sstvTxPowerW);
+  if (want === null) return; // empty: the radio's own power, nothing changes
+  const ctl = sstvPowerControl();
+  // The Guest Pass cap, asked the same way the gated setter asks it.
+  let capW = 0;
+  try {
+    if (passEnforcement) {
+      const r = passEnforcement.interceptCatCommand({ type: 'tx_power', watts: want });
+      if (r && r.clampTo != null) capW = Number(r.clampTo) || 0;
+    }
+  } catch {}
+  let limitW = 0;
+  try { const m = getActiveRigModel(); if (m && Number(m.maxPower) > 0) limitW = Number(m.maxPower); } catch {}
+  const ampW = activeAmpDriveLimitW();
+  if (ampW > 0 && (!limitW || ampW < limitW)) limitW = ampW;
+  const p = sstvTxPower.begin({ wantW: want, currentW: _currentTxPower, canSet: ctl.canSet, capW, limitW, rigId: settings.activeRigId || null });
+  if (p.action === 'set') {
+    sendCatLog(`[SSTV] TX power ${p.watts} W for this picture (Transmit power for SSTV${p.capped ? ', capped by the Guest Pass' : ''}); ${p.restoreW} W goes back when it ends`);
+  } else if (p.why === 'no-power-control') {
+    sendCatLog(`[SSTV] Transmit power for SSTV is ${want} W, but POTACAT cannot set this radio's power: the picture goes out at the power the radio is set to`);
+  } else if (p.why === 'power-unknown') {
+    sendCatLog(`[SSTV] Transmit power for SSTV is ${want} W, but the radio has not reported its power yet, so POTACAT leaves it as it is (there would be nothing to put back)`);
+  } else if (p.why === 'not-set') {
+    sendCatLog(`[SSTV] Could not set ${want} W for this picture: it goes out at the radio's own power`);
+  }
+}
+
+/** The picture ended, any way. Idempotent: only the first call after a begin acts. */
+function sstvTxPowerEnd(why) {
+  try { sstvTxPower.end(why); } catch (e) { console.error('[SSTV] power restore:', e); }
+}
+
+/** Every power report (sendCatPower): a restore lost to a crash or a slow radio. */
+function sstvTxPowerReconcile(watts) {
+  try { sstvTxPower.onReadback(watts, { rigId: settings.activeRigId || null }); } catch {}
 }
 
 // An ATU tune transmits its own carrier through the WORST of the match while
@@ -5285,6 +5391,8 @@ function sendCatPower(watts) {
   _powerReadbackThisLink = true; // this radio reports its power (#184)
   _lastPowerReadback = { watts: Number(watts) || 0, at: Date.now() };
   if (!isRemoteMode()) stationSetupReconcilePower(Number(watts) || 0);
+  // ...and an SSTV picture's power (#279).
+  if (!isRemoteMode()) sstvTxPowerReconcile(Number(watts) || 0);
 }
 
 // Band change on a radio that cannot report its power (deskHPSDR, Zeus: PC;
@@ -28370,6 +28478,9 @@ function updateRemoteSettings() {
     // hook in startSstv (main.js, generateMorseSamples). Including it
     // here so reconnecting mobiles see the persisted state.
     sstvCwId: !!settings.sstvCwId,
+    // #279 Transmit power for SSTV, watts or null (= the radio's own power).
+    // The shack applies it to every picture, whichever device sends it.
+    sstvTxPowerW: SstvTxPower.parseWatts(settings.sstvTxPowerW),
     // Forwarded so ECHOCAT's phone-side iambic keyer stays in sync with the
     // desktop's. The phone owns the mode selector so this is mostly a fresh-
     // connect snapshot; swap is desktop-only, so the phone needs it to
@@ -33771,6 +33882,9 @@ function connectRemote() {
     // Where the shack's VARA runs is typed at the shack only (#287): Pat
     // connects to that host, so a device never names it.
     if (partial) { delete partial.winlinkVaraHost; delete partial.winlinkVaraFmHost; }
+    // #279: saved as watts or null, whatever the device sent.
+    const sstvPowerChanged = !!partial && 'sstvTxPowerW' in partial;
+    if (sstvPowerChanged) partial.sstvTxPowerW = SstvTxPower.parseWatts(partial.sstvTxPowerW);
     Object.assign(settings, partial);
     saveSettings(settings);
     afterSstvSettingsSaved(partial);
@@ -33782,6 +33896,7 @@ function connectRemote() {
     // the web pane and vice versa, so those keys push too.
     const jttyKeys = ['jttySerial', 'jttyMacros', 'jttyFt8Macros', 'jttyMacroStyle', 'jttyProfile', 'jtcatFdExch', 'pskMacros'];
     if (sdrSync || dxeChanged || jttyKeys.some((k) => Object.prototype.hasOwnProperty.call(partial || {}, k))) updateRemoteSettings();
+    if (sstvPowerChanged) { updateRemoteSettings(); pushSstvRigState(); }
     rigBandsBroadcast();
   });
 }
@@ -34534,6 +34649,10 @@ function handleRemotePtt(state, opts = {}) {
     }
   }
 
+  // Transmit power for SSTV (#279): set now, after every refusal above and
+  // before the key-down below, on the same link, so it lands first.
+  if (state && opts.txKind === 'sstv') sstvTxPowerBegin();
+
   if (isFlexRig) {
     // FlexRadio: prefer SmartSDR API so TX is pinned to POTACAT's slice. If
     // the SmartSDR API isn't available, fall back to the TS-2000 TX;/RX;
@@ -34624,6 +34743,10 @@ function handleRemotePtt(state, opts = {}) {
       pttConfirmRestore(restoreMode, restoreFreq, _restoreIcom, restoreSince).catch(() => {});
     }
   }
+
+  // The SSTV picture's power goes back after the unkey (#279). A no-op unless
+  // a picture set one: every key-up passes here, whatever ended the picture.
+  if (!state) sstvTxPowerEnd('picture ended');
 
   txLimitNote(state, opts);
   if (!state && _fakeIt.active) fakeItRestoreDial('key-up');
@@ -44140,6 +44263,7 @@ function sstvHaltTxNow() {
   // back; it never unkeys another transmitter holding it.
   if (settings.audioSource === 'yaesu-lan') { try { endYaesuLanTx('sstv', 'SSTV halt'); } catch (e) { console.error('[SSTV] halt LAN release:', e); } }
   else { try { handleRemotePtt(false); } catch (e) { console.error('[SSTV] halt PTT release:', e); } }
+  sstvTxPowerEnd('HALT'); // #279: after the unkey; a no-op when the key-up above already put it back
   if (sstvPopoutWin && !sstvPopoutWin.isDestroyed()) {
     sstvPopoutWin.webContents.send('sstv-abort-tx');
   }
@@ -49568,6 +49692,7 @@ function cloudShackNotice(text, kind) {
       const _sstvStartAudio = (fn) => pttKeyGate().then((keyed) => {
         if (!keyed) {
           if (useYaesuLanTx) releaseYaesuLanTx('sstv', 'SSTV not keyed');
+          sstvTxPowerEnd('picture not sent');
           sendCatLog('[SSTV] PTT was released before the radio keyed — picture not sent');
           if (remoteServer) remoteServer.broadcastSstvTxStatus({ state: autoSstvActive ? 'auto-rx' : 'rx' });
           return;
@@ -49669,6 +49794,7 @@ function cloudShackNotice(text, kind) {
           sendCatLog(`[SSTV] TX via Yaesu LAN (SCU-LAN10) — ${outDurSec.toFixed(0)}s (${outSamples.length} samples @48k); ${formatDirectTxAudioStats(txAudio)}`);
           const done = (why) => {
             endYaesuLanTx('sstv', why);
+            sstvTxPowerEnd(why);
             if (remoteServer) remoteServer.broadcastSstvTxStatus({ state: autoSstvActive ? 'auto-rx' : 'rx' });
           };
           if (txAudio.outputPeak < 0.01) {
@@ -49700,6 +49826,7 @@ function cloudShackNotice(text, kind) {
         } else {
           // Failsafe: release PTT if popout never opened
           handleRemotePtt(false);
+          sstvTxPowerEnd('picture not sent');
           sstvSendFailed('Picture not sent: the SSTV window closed before the audio started.');
         }
       });
@@ -50103,6 +50230,7 @@ function cloudShackNotice(text, kind) {
   ipcMain.on('sstv-tx-complete', () => {
     if (settings.audioSource === 'yaesu-lan') endYaesuLanTx('sstv', 'SSTV tx-complete');
     else handleRemotePtt(false);
+    sstvTxPowerEnd('picture sent');
     if (sstvPopoutWin && !sstvPopoutWin.isDestroyed()) {
       sstvPopoutWin.webContents.send('sstv-tx-status', { state: 'rx' });
     }
@@ -52564,6 +52692,8 @@ function cloudShackNotice(text, kind) {
         if (!wsprBeaconArmed()) wsprForgetPreCapPower();
         // ...and while the beacon is armed it is the beacon's level from now on (#268).
         else wsprNoteOperatorPower(value, source);
+        // ...nor an SSTV picture's restore (#279): the level is theirs.
+        if (source !== 'setup' && source !== 'logger-cat') sstvTxPower.operatorSet();
         // ...nor a tuner/test restore (the 1.13.10 knob fight, GitHub #111).
         if (source !== 'setup' && settings.setupTxPowerRestore) {
           delete settings.setupTxPowerRestore;
@@ -55131,6 +55261,11 @@ function cloudShackNotice(text, kind) {
     delete newSettings.jtcatRxSource;
     stampSstvTemplatesPatch(newSettings);
     setImmediate(() => afterSstvSettingsSaved(newSettings));
+    // #279 Transmit power for SSTV: watts or null; every device and the SSTV window follow.
+    if (newSettings && 'sstvTxPowerW' in newSettings) {
+      newSettings.sstvTxPowerW = SstvTxPower.parseWatts(newSettings.sstvTxPowerW);
+      setImmediate(pushSstvRigState);
+    }
     // #475: the Deleted folder's days reach every Winlink surface (winlink-state.deletedDays).
     if (newSettings && 'winlinkDeletedDays' in newSettings) setImmediate(() => { try { winlinkPush(); } catch {} });
     // APRS phase 4: the iGate switch and the callsign decide whether the uplink runs, and as whom.
@@ -55817,6 +55952,8 @@ function cloudShackNotice(text, kind) {
     if (has('jtcatNferParks')) updateRemoteSettings();
     // JTCAT calling time (#161): a connected device shows the desktop's change.
     if (has('jtcatCallingTimeMin')) updateRemoteSettings();
+    // Transmit power for SSTV (#279): a connected device shows the desktop's change.
+    if (has('sstvTxPowerW')) updateRemoteSettings();
 
     // Start/stop WSJT-X-binary bridge. HamRS, Logger32, MacLoggerDX, RUMlogNG
     // and Log4OM-binary all share this path — they recognize POTACAT as a
@@ -58765,6 +58902,7 @@ function gracefulCleanup() {
   // radio before the SmartSDR/CAT/keyer connections close — otherwise the
   // radio can stay keyed with no audio (a silent-carrier FCC issue).
   try { handleRemotePtt(false); } catch {}
+  try { sstvTxPowerEnd('POTACAT closing'); } catch {} // #279: the radio's own power back while CAT is up
   // A tuner-memory run keys tune carriers: stop it, drop the carrier and put
   // the operator's power back while the SmartSDR socket is still open.
   try { atuWizardAbort('app quit'); if (smartSdr && smartSdr.connected && _atuWizardSaved) smartSdr.setTxTune(false); } catch {}

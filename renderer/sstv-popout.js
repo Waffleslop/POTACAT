@@ -183,6 +183,7 @@ const MODE_RES = {
   rebuildLook();
   try { const on = document.getElementById('op-name'); if (on) on.value = settings.sstvOperatorName || ''; } catch {}
   try { const sa = document.getElementById('save-all-decodes'); if (sa) sa.checked = settings.sstvSaveAllDecodes === true; } catch {}
+  try { showSstvTxPower(settings.sstvTxPowerW); } catch {}
   try { await refreshPacks(); } catch (e) { console.error('[SSTV] Packs list error:', e); }
 
   // Load saved templates
@@ -3345,6 +3346,28 @@ function showLookLock() {
   if (shuf) shuf.disabled = !!settings.sstvLookLocked;
 }
 document.getElementById('look-lock').addEventListener('click', () => setLookLocked(!settings.sstvLookLocked));
+// Transmit power for SSTV (#279): empty = the radio's own power. Main sets the
+// level before each picture and puts the radio's power back after it.
+const sstvTxPowerInput = document.getElementById('sstv-tx-power');
+function showSstvTxPower(saved) {
+  if (!sstvTxPowerInput || document.activeElement === sstvTxPowerInput) return;
+  const w = window.SstvTxPower.parseWatts(saved);
+  sstvTxPowerInput.value = w === null ? '' : String(w);
+}
+function showSstvTxPowerState(p) {
+  const el = document.getElementById('sstv-tx-power-state');
+  if (!el || !p) return;
+  el.textContent = p.text || '';
+  el.hidden = !p.text;
+  if (sstvTxPowerInput) sstvTxPowerInput.disabled = !!p.remote;
+}
+if (sstvTxPowerInput) sstvTxPowerInput.addEventListener('change', () => {
+  const w = window.SstvTxPower.parseWatts(sstvTxPowerInput.value);
+  sstvTxPowerInput.value = w === null ? '' : String(w);
+  settings.sstvTxPowerW = w;
+  window.api.saveSettings({ sstvTxPowerW: w });
+  statusBar.textContent = w === null ? "SSTV uses the radio's current power." : 'SSTV transmits at ' + w + " W, and the radio's own power goes back after each picture.";
+});
 document.getElementById('save-all-decodes').addEventListener('change', (e) => {
   settings.sstvSaveAllDecodes = !!e.target.checked;
   window.api.saveSettings({ sstvSaveAllDecodes: settings.sstvSaveAllDecodes });
@@ -3436,6 +3459,7 @@ document.getElementById('trip-atu').addEventListener('click', (e) => runAtu(e.cu
 document.getElementById('trip-override').addEventListener('click', () => { if (window.api.swrGuardOverride) window.api.swrGuardOverride(); });
 if (window.api.onSstvRigState) window.api.onSstvRigState((st) => {
   rigHasAtu = !!(st && st.atu);
+  if (st && st.power) { showSstvTxPowerState(st.power); showSstvTxPower(st.power.watts); }
   atuBtn.hidden = !rigHasAtu;
   document.getElementById('trip-atu').hidden = !rigHasAtu;
   const tripped = !!(st && st.swrTripped);
