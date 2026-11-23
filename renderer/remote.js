@@ -457,8 +457,6 @@
   const dpStepUp = document.getElementById('dp-step-up');
   const dpStepDown = document.getElementById('dp-step-down');
   const dpStepSize = document.getElementById('dp-step-size');
-  const freqUpBtn = document.getElementById('freq-up-btn');
-  const freqDownBtn = document.getElementById('freq-down-btn');
   let spotSort = 'age';
   let spotMap = null;
   let spotMapLayer = null;
@@ -4505,21 +4503,6 @@
     dpInput = newFreq.toString();
     updateDpDisplay();
     dpTune(newFreq);
-  });
-
-  // Status bar up/down buttons — quick step without opening dial pad
-  if (freqUpBtn) freqUpBtn.addEventListener('click', (e) => {
-    e.stopPropagation();
-    const step = STEP_SIZES[dpStepIdx];
-    const newFreq = Math.round((currentFreqKhz + step) * 100) / 100;
-    dpTune(newFreq);
-  });
-
-  if (freqDownBtn) freqDownBtn.addEventListener('click', (e) => {
-    e.stopPropagation();
-    const step = STEP_SIZES[dpStepIdx];
-    const newFreq = Math.round((currentFreqKhz - step) * 100) / 100;
-    if (newFreq >= 100) dpTune(newFreq);
   });
 
   // --- VFO Dial ---
@@ -15566,6 +15549,50 @@ var _paddleHoldTimer = { dit: null, dah: null };
     vfDial.addEventListener('mousedown', dialStart);
     document.addEventListener('mousemove', (e) => { if (isOpen) dialMove(e); });
     document.addEventListener('mouseup', dialEnd);
+
+    // #256 (LZ3AW): the mouse wheel over the dial or the frequency, and the
+    // arrow keys, tune by the step as the desktop VFO window does. Up / Down
+    // tune (hold to repeat), Left / Right make the step smaller / bigger.
+    // dpTune keeps the VFO lock and the range check.
+    function vfStepTune(dir) {
+      if (!currentFreqKhz) return false;
+      const hz = window.VfoStepKeys.stepFreqHz(Math.round(currentFreqKhz * 1000), Math.round(STEP_SIZES[dpStepIdx] * 1000), dir);
+      if (!hz || hz < 100000) return false;
+      dpTune(hz / 1000);
+      if (vfoLocked) return false; // dpTune said so; the hold ends
+      dialRotation += dir * Math.PI / 6;
+      renderAll();
+      drawDial();
+      return true;
+    }
+    function vfMoveStep(delta) {
+      const i = window.VfoStepKeys.stepIndexMove(dpStepIdx, delta, STEP_SIZES.length);
+      if (i === dpStepIdx) return;
+      dpStepIdx = i;
+      try { localStorage.setItem('echocat-step-idx', dpStepIdx); } catch {}
+      renderAll();
+      drawDial();
+    }
+    const vfStepHold = window.VfoStepKeys.createHoldRepeat(vfStepTune);
+    const vfWheel = (e) => {
+      e.preventDefault();
+      const dir = window.WheelTune.wheelDir(e.deltaY);
+      if (dir) vfStepTune(dir);
+    };
+    vfDial.addEventListener('wheel', vfWheel, { passive: false });
+    vfFreq.addEventListener('wheel', vfWheel, { passive: false });
+    document.addEventListener('keydown', (e) => {
+      if (!isOpen || !document.getElementById('dial-pad').classList.contains('hidden')) return;
+      const act = window.VfoStepKeys.keyAction(e, { typing: window.VfoStepKeys.isTypingTarget(document.activeElement) });
+      if (!act) return;
+      e.preventDefault();
+      if (act === 'up' || act === 'down') vfStepHold.start(act === 'up' ? 1 : -1);
+      else vfMoveStep(act === 'step-bigger' ? 1 : -1);
+    });
+    document.addEventListener('keyup', (e) => {
+      if (e.key === 'ArrowUp' || e.key === 'ArrowDown') vfStepHold.stop();
+    });
+    window.addEventListener('blur', () => vfStepHold.stop());
 
     // --- Pill interactions ---
     vfFreq.addEventListener('click', () => {

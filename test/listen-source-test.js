@@ -214,7 +214,10 @@ check('main has BANDS in scope (hoogskev 11-01: the loop threw a ReferenceError,
 
 check('the VFO knob and wheel never step from an unknown dial of 0 (hoogskev 0.017.200)', () => {
   const vfo = readSrc(path.join(ROOT, 'renderer/vfo-popout.html'));
-  assert.strictEqual((vfo.match(/if \(vfoLocked \|\| !currentFreqHz\) return;/g) || []).length, 2);
+  // The knob (processDelta) and stepTune, which the wheel, the Step buttons
+  // and the arrow keys share (#256).
+  assert.strictEqual((vfo.match(/if \(vfoLocked \|\| !currentFreqHz\) return( false)?;/g) || []).length, 2);
+  assert.ok(/function handleFreqWheel\(e\) \{[\s\S]*?stepTune\(dir\);\n\}/.test(vfo), 'the wheel steps through stepTune');
 });
 
 // #329 (Casey 2026-11-10): Channels and Landmarks "on the wire so ECHOCAT
