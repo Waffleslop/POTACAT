@@ -329,6 +329,7 @@ let enableLogging = false;
 let enableBannerLogger = false;
 let n1mmRst = false; // N1MM-style single-field RST inputs
 let defaultPower = 0; // the operator's own Default TX Power (W), 0 = none (#523)
+let fixedLogPower = 0; // "Always log this power" (W), for an amplifier; 0 = off (#837)
 let tuneClick = false;
 let qsoChime = 'off'; // 'off' | 'soft' | 'twotone' | 'bell' | 'morse-r' — see playQsoChime
 let enableSplit = false;
@@ -1381,6 +1382,7 @@ const adifLogBrowseBtn = document.getElementById('adif-log-browse-btn');
 const adifImportBtn = document.getElementById('adif-import-btn');
 const adifImportResult = document.getElementById('adif-import-result');
 const setDefaultPower = document.getElementById('set-default-power');
+const setLogFixedPower = document.getElementById('set-log-fixed-power');
 const setSendToLogbook = document.getElementById('set-send-to-logbook');
 const setLogCommentTags = document.getElementById('set-log-comment-tags');
 const setJtcatLogComment = document.getElementById('set-jtcat-log-comment');
@@ -2332,6 +2334,7 @@ async function loadPrefs() {
   n1mmRst = settings.n1mmRst === true;
   applyRstMode();
   defaultPower = LogTxPower.operatorDefaultPower(settings);
+  fixedLogPower = LogTxPower.fixedLogPower(settings);
   updateLoggingVisibility();
   updateBannerLoggerVisibility();
   showBearing = settings.showBearing === true;
@@ -18755,6 +18758,8 @@ async function openSettingsDialog(tab) {
   }
   // Blank = no default: an unknown power is logged empty (#523).
   { const dp = LogTxPower.operatorDefaultPower(s); setDefaultPower.value = dp ? String(dp) : ''; }
+  // Blank = off: the radio's power is logged as before (#837).
+  { const fx = LogTxPower.fixedLogPower(s); setLogFixedPower.value = fx ? String(fx) : ''; }
   setSendToLogbook.checked = s.sendToLogbook === true;
   setLogbookType.value = s.logbookType || '';
   setLogbookHost.value = s.logbookHost || '127.0.0.1';
@@ -19593,6 +19598,7 @@ settingsSave.addEventListener('click', async () => {
   const n1mmRstEnabled = setN1mmRst.checked;
   const adifLogPath = setAdifLogPath.value.trim() || '';
   const defaultPowerVal = LogTxPower.positiveWatts(setDefaultPower.value.trim()); // 0 = none (#523)
+  const logFixedPowerVal = LogTxPower.positiveWatts(setLogFixedPower.value.trim()); // 0 = off (#837)
   const sendToLogbook = setSendToLogbook.checked;
   const logCommentTagsEnabled = setLogCommentTags ? setLogCommentTags.checked : true;
   const logbookTypeVal = setLogbookType.value;
@@ -19777,6 +19783,7 @@ settingsSave.addEventListener('click', async () => {
     adifLogPath: adifLogPath,
     defaultPower: defaultPowerVal || null,
     defaultPowerSet: defaultPowerVal > 0, // a typed 100 is the operator's, not the old untouched default
+    logFixedPower: logFixedPowerVal || null,
     sendToLogbook: sendToLogbook,
     logbookType: logbookTypeVal,
     logbookHost: logbookHostVal,
@@ -19988,6 +19995,7 @@ settingsSave.addEventListener('click', async () => {
   n1mmRst = n1mmRstEnabled;
   applyRstMode();
   defaultPower = defaultPowerVal;
+  fixedLogPower = logFixedPowerVal;
   updateLoggingVisibility();
   updateBannerLoggerVisibility();
   applyTheme();
@@ -23173,8 +23181,9 @@ let lastLogPower = 0; // last power value entered by user in log dialog (sticky)
 // guessed 100 W (#523, lib/log-tx-power.js).
 function logFormPower() {
   // A TCI rig's level is a drive percent: never offered as watts.
-  if (rigCurrentCaps.powerUnit === '%') return lastLogPower > 0 ? lastLogPower : null;
+  if (rigCurrentCaps.powerUnit === '%') return LogTxPower.txPowerForLog({ fixedW: fixedLogPower, enteredW: lastLogPower });
   return LogTxPower.txPowerForLog({
+    fixedW: fixedLogPower, // the amplifier's power, when the operator set one (#837)
     knownW: rigKnownPower > 0 ? rigKnownPower : radioPower, // main's level is the newer (a set lands there first)
     enteredW: lastLogPower,
     defaultW: defaultPower,

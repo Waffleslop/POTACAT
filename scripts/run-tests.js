@@ -682,6 +682,7 @@ const TESTS = [
   'test/log-freq-test.js',
   'test/log-freq-resolution-test.js',
   'test/log-tx-power-test.js',
+  'test/log-fixed-power-test.js',
   'test/station-clock-test.js', // ECHOCAT device sets the FT8 slot clock
   'test/rig-bands-test.js',
   'test/rotor-bands-test.js', // #356 rotor only on chosen bands

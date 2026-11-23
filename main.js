@@ -19911,21 +19911,22 @@ async function saveQsoRecord(qsoData, opts) {
   // logging path did not supply them (lib/activation-station.js).
   Object.assign(qsoData, stationLocationFillFor(qsoData, ops));
 
-  // Auto-fill TX power when the caller didn't supply one (the Logbook pop-out's
-  // "+ New QSO" form, JTCAT, the banner logger, ECHOCAT): the radio's power as
-  // read or as POTACAT last set it, else the operator's own Default TX Power,
-  // else empty. Never a guessed 100 W (#523, lib/log-tx-power.js).
-  // A supplied value is coerced to a String here rather than trusted: the Log
-  // QSO pop-out sends a Number while every other log path sends text, and the
-  // transports downstream do string work on this field (W9TEF 2026-09-19).
-  if (!qsoData.txPower) {
-    // A TCI rig's level is a drive percent: log the watts it measured, or the operator's default.
-    const w = tciRigTarget()
-      ? (tciMeasuredWattsForLog() || LogTxPower.operatorDefaultPower(ops) || 0)
-      : LogTxPower.txPowerForLog({ knownW: _currentTxPower, defaultW: LogTxPower.operatorDefaultPower(ops) });
-    if (w) qsoData.txPower = String(w);
-  } else {
-    qsoData.txPower = String(qsoData.txPower);
+  // TX power (lib/log-tx-power.js): a power supplied for this contact (a log
+  // form, a device) is kept; otherwise the operator's "Always log this power"
+  // (an amplifier, #837), else the radio's power as read or as POTACAT last
+  // set it, else their own Default TX Power, else empty. Never a guessed
+  // 100 W (#523). Stored as a String: the Log QSO pop-out sends a Number while
+  // every other log path sends text, and the transports downstream do string
+  // work on this field (W9TEF 2026-09-19).
+  {
+    const tp = LogTxPower.txPowerForContact({
+      typed: qsoData.txPower,
+      fixedW: LogTxPower.fixedLogPower(ops),
+      // A TCI rig's level is a drive percent: it logs the watts it measured.
+      knownW: tciRigTarget() ? tciMeasuredWattsForLog() : _currentTxPower,
+      defaultW: LogTxPower.operatorDefaultPower(ops),
+    });
+    if (tp) qsoData.txPower = tp;
   }
 
   // COMMENT tag handling. saveQsoRecord is the single authority: strip the

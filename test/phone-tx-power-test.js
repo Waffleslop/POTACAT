@@ -4,7 +4,8 @@
 // carry txPower, a number in watts. A valid one is kept on the contact as the
 // operator typed it; anything else (absent, 0, negative, NaN, a string, over
 // 10 kW) leaves txPower unset, so saveQsoRecord fills it as it always has
-// (the radio's power, then Default TX Power, then empty; lib/log-tx-power.js).
+// (Always log this power #837, the radio's power, then Default TX Power, then
+// empty; lib/log-tx-power.js).
 // log-ok records carry the saved power, and hello lists 'log-tx-power'.
 // Run: node test/phone-tx-power-test.js
 const assert = require('assert');
@@ -48,8 +49,15 @@ test('log-qso: the entry takes the phone\'s power through deviceTxPower, else le
 
 test('saveQsoRecord still fills only an empty power and keeps a supplied one', () => {
   const save = main.slice(main.indexOf('async function saveQsoRecord(qsoData, opts) {'));
-  const fill = save.slice(save.indexOf('if (!qsoData.txPower) {'));
-  assert.ok(/if \(!qsoData\.txPower\) \{[\s\S]{0,400}\} else \{\s*\n\s*qsoData\.txPower = String\(qsoData\.txPower\);/.test(fill));
+  // #837: saveQsoRecord hands the supplied power to txPowerForContact as
+  // `typed`, which keeps it ahead of the fixed amp power and the radio's.
+  const fill = save.slice(save.indexOf('LogTxPower.txPowerForContact({'));
+  assert.ok(/^LogTxPower\.txPowerForContact\(\{\s*\n\s*typed: qsoData\.txPower,[\s\S]{0,400}?\}\);\s*\n\s*if \(tp\) qsoData\.txPower = tp;/.test(fill));
+  // A device's power wins over "Always log this power" and the radio's.
+  assert.strictEqual(LogTxPower.txPowerForContact({ typed: LogTxPower.deviceTxPower(5), fixedW: 500, knownW: 100, defaultW: 10 }), '5');
+  // None sent: the fixed amp power, then the radio's, as before.
+  assert.strictEqual(LogTxPower.txPowerForContact({ typed: LogTxPower.deviceTxPower(0), fixedW: 500, knownW: 100 }), '500');
+  assert.strictEqual(LogTxPower.txPowerForContact({ typed: null, knownW: 100, defaultW: 10 }), '100');
 });
 
 test('log-ok records include txPower', () => {
