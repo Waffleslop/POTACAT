@@ -27,7 +27,9 @@ test('starting JTCAT still closes SSTV', () => {
 });
 
 test('opening SSTV closes the FT8 and JS8 windows and stops an app-driven engine', () => {
-  const b = body('function releaseJtcatForSstv(');
+  // The hand-over is shared with APRS listening (releaseJtcatFor, 2026-11-22).
+  assert.ok(/function releaseJtcatForSstv\(\) \{ return releaseJtcatFor\('SSTV'\); \}/.test(MAIN));
+  const b = body('function releaseJtcatFor(');
   assert.ok(/jtcatPopoutWin\.close\(\)/.test(b) && /js8PopoutWin\.close\(\)/.test(b));
   assert.ok(/stopJtcat\(\);\n\s+remoteJtcatQso = null;/.test(b) && /'jtcat-stop-for-remote'/.test(b), 'the main window releases its capture');
   assert.ok(/broadcastJtcatStatus\(\{ running: false \}\)/.test(b), 'the ECHOCAT app hears that FT8 stopped');
@@ -35,7 +37,7 @@ test('opening SSTV closes the FT8 and JS8 windows and stops an app-driven engine
 });
 
 test('every name the helper uses is at module scope', () => {
-  const b = body('function releaseJtcatForSstv(').replace(/\/\/.*$/gm, '').replace(/'(?:[^'\\]|\\.)*'/g, "''");
+  const b = body('function releaseJtcatFor(').replace(/\/\/.*$/gm, '').replace(/'(?:[^'\\]|\\.)*'/g, "''");
   for (const n of ['jtcatPopoutWin', 'js8PopoutWin', 'ft8Engine', 'remoteJtcatQso', 'win', 'remoteServer', 'stopJtcat', 'js8SetHeartbeat', 'sendCatLog']) {
     if (new RegExp('\\b' + n + '\\b').test(b)) assert.ok(topLevel(n), n + ' is not declared at module scope');
   }

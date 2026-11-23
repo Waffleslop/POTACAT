@@ -13563,6 +13563,7 @@ const aprsListen = {
   heard: 0,           // frames heard this session
   lastAt: 0,
   note: '',           // the rig's setup line (lib/rig-setup-notes.js), verbatim
+  handover: '',       // "Stopped FT8 so APRS can listen." when this start stopped JTCAT (aprsStopJtcatForListen)
   proc: null,         // its Dire Wolf
   monitor: null,      // its AGW monitor
   lane: null,         // the winlinkAudio lane Dire Wolf was started on
@@ -13915,17 +13916,36 @@ async function aprsRxFilterWiden(seq) {
   if (seq !== aprsListen.seq) return;
   const r = aprsRxFilter.widen(aprsListen.band);
   if (r.action === 'unknown') return; // nothing usable read: the width warning stays
-  aprsListen.note = [aprsSetupLine(), r.sentence, r.rit].filter(Boolean).join(' ');
+  aprsListen.note = [aprsListen.handover, aprsSetupLine(), r.sentence, r.rit].filter(Boolean).join(' ');
   aprsListenPush();
 }
 
-async function aprsListenStart({ resume = false } = {}) {
+/**
+ * The operator pressed Start while FT8 (any JTCAT mode) decodes: hand the
+ * radio over the way opening SSTV does (lib/aprs-listen.js startPlan). Halt
+ * first, so Run, Hunt, a WSPR beacon or a message on the air stop and PTT
+ * drops; then the shared tear-down closes the JTCAT window and stops the
+ * engine, phone-started or not, and every ECHOCAT device hears running:false.
+ * Nothing transmits here and FT8 is not started again when APRS stops.
+ * Returns the one line the window and the log show.
+ */
+function aprsStopJtcatForListen() {
+  const mode = ft8Engine && ft8Engine._mode ? ft8Engine._mode : 'FT8';
+  jtcatHaltTxNow('APRS listening');
+  releaseJtcatFor('APRS');
+  const line = AprsListen.ft8StoppedSentence(mode);
+  aprsLog(line);
+  return line;
+}
+
+async function aprsListenStart({ resume = false, operator = false, guest = false } = {}) {
   const seq = ++aprsListen.seq;
   aprsListen.on = true;
   aprsListen.sentence = '';
   aprsListen.restarts = 0;
   aprsListen.moved = null; // turning it on again after the radio moved: the normal start, it tunes back to APRS
   aprsListen.watch = null;
+  aprsListen.handover = ''; // "Stopped FT8 so APRS can listen." for this start only
   if (!resume) { aprsListen.heard = 0; aprsListen.lastAt = 0; }
   const bands = aprsRigBands();
   aprsListen.band = AprsListen.chooseBand(bands, aprsListen.bandWanted) || '';
@@ -13944,7 +13964,8 @@ async function aprsListenStart({ resume = false } = {}) {
   }
   // The radio is reachable when tuneRadio can tune it: Flex Direct, TCI or CAT.
   const route = radioTuneRoute();
-  const no = AprsListen.whyNot({
+  // FT8 in the way and the operator asked: FT8 stops and APRS listens (startPlan).
+  const start = AprsListen.startPlan({
     remote: isRemoteMode(),
     catConnected: route !== '',
     bands,
@@ -13953,8 +13974,14 @@ async function aprsListenStart({ resume = false } = {}) {
     modemFound: DirewolfProcess.direwolfSupported(process.platform) && findDirewolf().found,
     ft8Decoding: autoSstvBlockedByJtcat(),
     winlinkHasModem: aprsWinlinkHoldsRadio(),
-  });
+  }, { operatorAsked: operator, guest });
+  const no = start.no;
   if (no) { aprsNotNow(no); return; }
+  if (start.stopFt8) {
+    aprsListen.handover = aprsStopJtcatForListen();
+    aprsListen.noteBase = [aprsListen.handover, aprsListen.noteBase].filter(Boolean).join(' ');
+    aprsListen.note = aprsListen.noteBase;
+  }
   aprsListen.state = 'starting';
   aprsListenPush();
   const pm = aprsListen.band === '2m' ? winlinkPacketRigMode('packet') : null;
@@ -14238,11 +14265,16 @@ function aprsAutoListenOnOpen() {
   aprsListenSet(true);
 }
 
-function aprsListenSet(on) {
+/**
+ * opts.operator: the operator pressed Start (the window's switch, a phone's
+ * Listen); only then may FT8 be stopped for it (lib/aprs-listen.js startPlan).
+ * opts.guest: the request came from a Guest Pass guest, who never stops FT8.
+ */
+function aprsListenSet(on, opts = {}) {
   if (on) {
     if (aprsListen.on && aprsListen.state !== 'refused') return;
     if (!_aprsTickTimer) _aprsTickTimer = setInterval(aprsListenTick, 2000);
-    aprsListenStart().catch((e) => { aprsLog('start failed: ' + e.message); aprsListenStop('start failed'); });
+    aprsListenStart({ operator: !!opts.operator, guest: !!opts.guest }).catch((e) => { aprsLog('start failed: ' + e.message); aprsListenStop('start failed'); });
   } else {
     aprsListenStop('switched off');
   }
@@ -15371,7 +15403,7 @@ const aprsEcho = AprsEchocat.createController({
   ownLogin: () => { const l = AprsIgate.uplinkLogin(settings.myCallsign); return l.ok ? l.call : ''; },
   heardChanged: (map) => { if (aprsWin && !aprsWin.isDestroyed()) aprsWin.webContents.send('aprs-heard-you', map); },
   windowOpen: () => !!(aprsWin && !aprsWin.isDestroyed()),
-  listenSet: (on) => aprsListenSet(on),
+  listenSet: (on) => aprsListenSet(on, { operator: true, guest: !!(aprsEcho && aprsEcho.guestListening()) }), // a guest never stops FT8
   listenSetBand: (b) => aprsListenSetBand(b),
   igateSet: (on) => aprsIgateSetFromDevice(on),
   beaconNow: () => aprsBeaconSend('now').catch((e) => aprsLog('beacon failed: ' + e.message)),
@@ -23438,11 +23470,16 @@ function rememberJtcatTxFreq(eng) {
 // Closing the FT8/JS8 windows stops them (the main window's close handler
 // releases capture); an engine the ECHOCAT app is driving has no window to
 // close, so it is stopped here the way the app's own jtcat-stop does.
-function releaseJtcatForSstv() {
+function releaseJtcatForSstv() { return releaseJtcatFor('SSTV'); }
+
+// The hand-over itself, shared by every mode that needs the radio's audio
+// JTCAT holds: SSTV above, APRS listening (aprsStopJtcatForListen, Casey
+// 2026-11-22). `who` names the mode in the log line.
+function releaseJtcatFor(who) {
   const ft8Win = jtcatPopoutWin && !jtcatPopoutWin.isDestroyed();
   const js8Win = js8PopoutWin && !js8PopoutWin.isDestroyed();
   if (!ft8Win && !js8Win && !ft8Engine) return false;
-  sendCatLog('[SSTV] Closing ' + (js8Win && !ft8Win ? 'JS8' : 'JTCAT') + ' — SSTV and JTCAT cannot share the audio input');
+  sendCatLog('[' + who + '] Closing ' + (js8Win && !ft8Win ? 'JS8' : 'JTCAT') + ' — ' + who + ' and JTCAT cannot share the audio input');
   if (ft8Win) { try { jtcatPopoutWin.close(); } catch {} }
   if (js8Win) { try { js8PopoutWin.close(); } catch {} }
   if (ft8Engine) {
@@ -48859,7 +48896,7 @@ function cloudShackNotice(text, kind) {
   ipcMain.on('aprs-igate-set', (_e, on) => aprsIgateSetFromWindow(on === true));
   // APRS phase 2: the "Listen on my radio" switch (receive only).
   // The operator at the switch is using the radio: an APRS idle session ends first.
-  ipcMain.on('aprs-listen-set', (_e, on) => { markUserActive(); aprsListenSet(!!on); if (!on) _aprsListenOffByOperator = true; });
+  ipcMain.on('aprs-listen-set', (_e, on) => { markUserActive(); aprsListenSet(!!on, { operator: true }); if (!on) _aprsListenOffByOperator = true; });
   // The bar asks once its listener is attached: the push after 'aprs-ready' can
   // arrive while its script is still loading (the 8600M's empty bar, 2026-11-18).
   // The iGate mark answered 'aprs-ready' the same way, so it comes too.
