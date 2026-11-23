@@ -1250,6 +1250,10 @@
       <span class="jp-opt-help">Stop repeating an unanswered message after this many transmissions. A contact is logged only when a 73 is sent or received; if it stops before that, it is not logged and you can press Send 73 to log it.</span>
     </label>
     <label class="jp-opt-row jp-opt-num-row">
+      <span class="jp-opt-label">Stop calling after <input id="jp-calling-time" type="number" min="1" max="30" value="6"> minutes with no answer</span>
+      <span class="jp-opt-help">If nobody answers in a way that moves a contact on, and you have not pressed anything, JTCAT stops transmitting after this many minutes. Pressing CQ, turning TX on, replying to a station, or an answer that moves the contact on starts the count again. 1 to 30 minutes; 6 is the same as WSJT-X.</span>
+    </label>
+    <label class="jp-opt-row jp-opt-num-row">
       <span class="jp-opt-label">Call a station again after <input id="jp-rework-days" type="number" min="0" max="3650" value="0"> days</span>
       <span class="jp-opt-help">How long a logged contact keeps Hunt and Auto CQ from calling that station again on the same band and mode. 0 = forever. A station spotted as an activator is always fair game unless you already worked them at that park today — a new park or a new UTC day counts fresh, matching program rules.</span>
     </label>
@@ -1364,6 +1368,7 @@
   <script src="../lib/rig-family.js"></script>
   <script src="../lib/rig-bands.js"></script>
   <script src="../lib/jtcat-snr-floor.js"></script>
+  <script src="../lib/jtcat-calling-time.js"></script>
   <script src="../lib/watchlist-groups.js"></script>
   <script src="jtcat-parser.js"></script>
   <script src="cq-target.js"></script>

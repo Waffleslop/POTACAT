@@ -545,6 +545,7 @@ const { ClublogOutbox } = require('./lib/clublog-outbox');
 const QsoLog = require('./lib/qso-log');
 const StationCounty = require('./lib/station-county');
 const JtcatSnrFloor = require('./lib/jtcat-snr-floor');
+const JtcatCallingTime = require('./lib/jtcat-calling-time');
 const OriginHealth = require('./lib/origin-health');
 const RemoteAccess = require('./lib/remote-access'); // ECHOCAT access: off | cloud | lan (the door itself)
 const { planImport, findDuplicateGroups } = require('./lib/qso-match');
@@ -20528,7 +20529,13 @@ const JTCAT_FULL_AUTO_CQ_WATCHDOG_MS = 30 * 60 * 1000; // 30 min unattended cap
 // operator (lloyd KO4L 2026-10-25: "POTACAT will not cease transmissions").
 // The per-phase tries cap ends a single QSO; this is the backstop no path can
 // skip, Hunt and Run included. ULTRACAT's Run/Hunt keep their own rules.
-const JTCAT_TX_WATCHDOG_MS = 6 * 60 * 1000;
+// The span is the operator's "calling time" (#161), settings.jtcatCallingTimeMin:
+// default 6 minutes (WSJT-X's figure and the old fixed value), 1..30, read live
+// at every key-down. lib/jtcat-calling-time.js holds the rule; its ceiling is
+// the 30-minute attended limit above, which still bounds Run and Hunt.
+function jtcatTxWatchdogMs() {
+  return JtcatCallingTime.callingTimeMs(settings);
+}
 let _jtcatTxWatchArmedAt = 0;
 // Drained-band pause: Run works everyone it can, then used to keep calling CQ
 // into an empty band until the 30-minute watchdog killed it. It now stops
@@ -21844,12 +21851,12 @@ function jtcatTxWatchdogTripped(mode) {
   const now = Date.now();
   const last = Math.max(jtcatFullAutoCqLastActivity || 0, _jtcatTxWatchArmedAt || 0);
   if (!last) { _jtcatTxWatchArmedAt = now; return false; }
-  return now - last > JTCAT_TX_WATCHDOG_MS;
+  return now - last > jtcatTxWatchdogMs();
 }
 
 function jtcatTxWatchdogStop() {
-  const mins = Math.round(JTCAT_TX_WATCHDOG_MS / 60000);
-  const why = `TX watchdog: ${mins} minutes of transmitting with no answer and nothing from the operator. TX stopped. Call CQ or reply again to carry on.`;
+  const mins = Math.round(jtcatTxWatchdogMs() / 60000);
+  const why = `TX watchdog: ${mins} ${mins === 1 ? 'minute' : 'minutes'} of transmitting with no answer and nothing from the operator. TX stopped. Call CQ or reply again to carry on.`;
   jtcatHaltTxNow('TX watchdog');
   _jtcatTxWatchArmedAt = 0;
   if (win && !win.isDestroyed()) win.webContents.send('app-notice', { message: why, warn: true, duration: 12000 });
@@ -28157,6 +28164,10 @@ function updateRemoteSettings() {
     // retry ceiling so the phone's matching control shows the same value.
     ultracat: !!settings.ultracat,
     jtcatMaxQsoAttempts: jtcatMaxQsoRetries(),
+    // JTCAT calling time (#161): minutes the FT8/FT4/FT2 transmit watchdog
+    // allows with no answer and nothing from the operator (1-30, default 6).
+    // Optional; a device sets it with jtcat-set-pref {key:'jtcatCallingTimeMin'}.
+    jtcatCallingTimeMin: JtcatCallingTime.clampMinutes(settings.jtcatCallingTimeMin),
     // Chase target — the entity/tag the operator is chasing. Rides the auth-ok
     // blob so a (re)connecting phone seeds its picker; live changes come via the
     // jtcat-chase-target S2C message.
@@ -32765,6 +32776,7 @@ function connectRemote() {
       if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) jtcatPopoutWin.webContents.send('jtcat-flag-state', { key, enabled: v === true });
     }
     if (key === 'jtcatAutoRespot') updateRemoteSettings(); // every device shows the new state
+    if (key === 'jtcatCallingTimeMin') updateRemoteSettings(); // every device shows the new calling time
   });
   // Hunt filters from a device (Guest Pass refused in remote-server).
   remoteServer.on('jtcat-hunt-filters', (msg = {}) => applyJtcatHuntFilters(msg, 'remote'));
@@ -55735,6 +55747,8 @@ function cloudShackNotice(text, kind) {
     }
     // JTCAT's n-fer option (#353): a connected device shows the desktop's change.
     if (has('jtcatNferParks')) updateRemoteSettings();
+    // JTCAT calling time (#161): a connected device shows the desktop's change.
+    if (has('jtcatCallingTimeMin')) updateRemoteSettings();
 
     // Start/stop WSJT-X-binary bridge. HamRS, Logger32, MacLoggerDX, RUMlogNG
     // and Log4OM-binary all share this path — they recognize POTACAT as a

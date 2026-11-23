@@ -276,6 +276,7 @@ for the history.
 | `jtcat-call-cq` | C→S | CQ message (with optional POTA/SOTA modifier). |
 | `jtcat-reply` | C→S | Reply to a decoded callsign. |
 | `jtcat-cancel-qso` | C→S | Abandon current QSO. |
+| `jtcat-set-pref` | C→S | `{ key, value }`: set one per-profile JTCAT preference from the shack's allow-list (lib/remote-bridge.js `JTCAT_PREFS`); a wrong type is ignored. Refused for a Guest Pass. `jtcatCallingTimeMin` (number, ADDED 2026-11-22, #161): minutes the shack's FT8/FT4/FT2 transmit watchdog allows with no QSO progress and no operator action before it stops TX; the shack clamps it to 1-30, default 6. The settings blob (`auth-ok`, `settings-update`) carries it as an optional field, already clamped, and a change from any device is followed by `settings-update`. Optional: a client that never shows it changes nothing, the shack enforces the watchdog for every owner. |
 | `jtcat-skip-phase` | C→S | Skip to next QSO phase. Optional `unconfirmed: true` (2026-11-20, #807): send the 73 for the QSO the retry cap stopped unlogged, and nothing else. |
 | `jtcat-log-qso` | C→S | Log the current FT8 QSO. |
 | `jtcat-auto-cq-mode` | C→S | Hunt filter `{ mode }`: `off` / `pota` / `sota` / `all` / `fd` (Field Day, seasonal) / `event` (Hunt: Event stations — answer CQs from tracked-event stations still needed; offer it only while `jtcat-auto-cq-state.eventHunt.available`). |

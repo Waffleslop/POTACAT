@@ -126,6 +126,9 @@ function _applyPopoutTheme(payload) {
     if (maxAttemptsInput && typeof s.jtcatMaxQsoAttempts === 'number') {
       maxAttemptsInput.value = s.jtcatMaxQsoAttempts;
     }
+    if (callingTimeInput && window.JtcatCallingTime) {
+      callingTimeInput.value = window.JtcatCallingTime.clampMinutes(s.jtcatCallingTimeMin);
+    }
     logPrompt = s.jtcatLogPrompt === true;
     if (logPromptToggle) logPromptToggle.classList.toggle('active', logPrompt);
     autoRespot = s.jtcatAutoRespot === true;
@@ -269,6 +272,7 @@ function _applyPopoutTheme(payload) {
   var cqBtn = document.getElementById('jp-cq');
   var fullAutoCqBtn = document.getElementById('jp-full-auto-cq');
   var maxAttemptsInput = document.getElementById('jp-max-attempts');
+  var callingTimeInput = document.getElementById('jp-calling-time');  // #161 TX watchdog minutes
   var openWatchlistBtn = document.getElementById('jp-open-watchlist');
   if (openWatchlistBtn) openWatchlistBtn.addEventListener('click', function () {
     if (window.api.openWatchlistSettings) window.api.openWatchlistSettings();
@@ -3093,6 +3097,15 @@ function _applyPopoutTheme(payload) {
       if (n > 60) n = 60;
       maxAttemptsInput.value = n;
       window.api.saveSettings({ jtcatMaxQsoAttempts: n });
+    });
+  }
+  // Calling time (#161): the transmit watchdog's minutes, clamped by the same
+  // rule main.js applies (lib/jtcat-calling-time.js, 1-30, default 6).
+  if (callingTimeInput && window.JtcatCallingTime) {
+    callingTimeInput.addEventListener('change', function() {
+      var n = window.JtcatCallingTime.clampMinutes(callingTimeInput.value);
+      callingTimeInput.value = n;
+      window.api.saveSettings({ jtcatCallingTimeMin: n });
     });
   }
   // Hunt's signal floor (lib/jtcat-snr-floor.js): normalised on change, and

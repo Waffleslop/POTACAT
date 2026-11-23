@@ -187,6 +187,7 @@ const TESTS = [
   'test/rigctld-yaesu-power-read-test.js', // a Yaesu on rigctld reads its power with w PC; (#656); non-Yaesu rigs still send l RFPOWER
   'test/rigctld-kenwood-power-test.js', // a TS-590/TS-2000 behind Hamlib keeps its power: raw PC, never Hamlib's PC000/PC255 probe
   'test/jtcat-tx-watchdog-test.js',
+  'test/jtcat-calling-time-test.js',
   'test/jtcat-replace-log-test.js',
   'test/jtcat-second-caller-test.js',
   'test/jtcat-quiet-freq-test.js', // CQ quiet frequency: main measures the engine audio while no waterfall draws (one rule, lib/jtcat-quiet-freq.js)
