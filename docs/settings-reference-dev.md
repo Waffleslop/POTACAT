@@ -2,6 +2,8 @@
 
 Every key in settings.json as documented in the old CLAUDE.md, moved here verbatim on 2026-11-09. The user-facing list is in the Users Guide (userguide/src/settings-reference.md). Some early entries are out of date: `catTarget` now lives per rig under `rigs[]`, and `watchlist` accepts state codes. Correct an entry when you touch the code behind it. JTCAT keys are summarised in docs/JTCAT.md.
 
+**Which keys a remote device may write (2026-11-22).** An ECHOCAT client's `save-settings` writes only the keys listed in `lib/device-settings.js` (`DEVICE_WRITABLE_KEYS`); everything else is dropped and its name logged once. Keys ending in `Path` or `Host`, keys starting with `remote` or `cloud`, tokens, passwords and the secrets in `lib/settings-secrets.js` are never device-writable. A new setting that the phone or ECHOCAT Web must change goes on that list (and its test, test/remote-origin-security-test.js), or gets its own validated message. The desktop window's own save is not affected.
+
 - `grid` — Maidenhead grid square (default: FN20jb)
 - `catTarget` — `{type, host, port}` or `{type, path}` for serial
 - `distUnit` — 'mi' or 'km'

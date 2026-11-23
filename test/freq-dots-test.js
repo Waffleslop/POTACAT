@@ -110,7 +110,10 @@ test('shortwave broadcast stays in kHz: the one exception (Casey 2026-11-12)', (
     assert.ok(/-freq-col">\$\{entry\.frequency \|\| ''\}<\/td>/.test(body), fn + ' cell is the kHz value');
     assert.ok(/value: entry\.frequency \? `\$\{entry\.frequency\} kHz` : ''/.test(body), fn + ' hover card says kHz');
   }
-  assert.ok(/\(s\.frequency \|\| '\?'\) \+ ' kHz<\/span>'/.test(readSrc(path.join(ROOT, 'renderer/remote.js'))), 'ECHOCAT Web SWL card says kHz');
+  // ECHOCAT Web builds the card in lib/directory-cards.js (fields escaped, 2026-11-22).
+  assert.ok(/window\.DirectoryCards\.swlCardHtml\(s,/.test(readSrc(path.join(ROOT, 'renderer/remote.js'))), 'ECHOCAT Web builds the SWL card with DirectoryCards');
+  assert.ok(/escHtml\(swl\.frequency \|\| '\?'\) \+ ' kHz<\/span>'/.test(readSrc(path.join(ROOT, 'lib/directory-cards.js'))), 'ECHOCAT Web SWL card says kHz');
+  assert.ok(require('../lib/directory-cards').swlCardHtml({ frequency: 9610 }, {}).includes('9610 kHz'), 'and renders it in kHz');
 });
 
 console.log(`\nfreq-dots: ${passed} passed, ${failures.length} failed`);
