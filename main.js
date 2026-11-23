@@ -3215,8 +3215,12 @@ let _currentSplit = false; // rig split state, readback-fed (IF; P12 / rigctld s
 // panel opens; never while transmitting. Results ride the rig state as
 // customCatStates and every surface lights its toggles from them.
 const { createCustomCatReader } = require('./lib/custom-cat-read');
+// #164: up to 25 buttons, each optionally tied to some radios (slot.rigs).
+// One filter (visibleSlots) for every surface and for the reader.
+const CustomCatFollow = require('./lib/custom-cat-follow');
 const customCatReader = createCustomCatReader({
   getSlots: () => (settings && Array.isArray(settings.customCatButtons)) ? settings.customCatButtons : [],
+  getActiveRigId: () => (settings && settings.activeRigId) || null, // a toggle tied to another radio is not read
   query: (cmd) => {
     if (!cat || !cat.connected || typeof cat.queryRaw !== 'function') return Promise.reject(new Error('this rig link cannot read replies to raw commands'));
     return cat.queryRaw(cmd, { timeoutMs: 1200 });
@@ -5736,6 +5740,7 @@ function broadcastRigState() {
     vfo: _currentVfo,
     split: _currentSplit,
     customCatStates: customCatReader.states(), // #242: custom toggles' own reads
+    activeRigId: settings.activeRigId || null, // #164: the Rig panel shows the buttons for this radio
     capabilities: caps,
     // Control registry — lets clients render the rig panel (labels, grouping,
     // TX-only tags, which caps gate each) from one source of truth instead of
@@ -28233,7 +28238,9 @@ function updateRemoteSettings() {
     // localStorage wipes on the phone (Safari ITP, cache clears).
     // Currently: echocatWelcomeDismissed.
     echocatWelcomeDismissed: !!(settings.echocatPrefs && settings.echocatPrefs.echocatWelcomeDismissed),
-    customCatButtons: settings.customCatButtons || null,
+    // Every saved button, up to 25 (#164); the device filters by slot.rigs
+    // against the activeRigId of the `rigs` message.
+    customCatButtons: settings.customCatButtons ? CustomCatFollow.capSlots(settings.customCatButtons) : null,
     // Watchlist groups — three color-coded buckets with optional emoji
     // badges and Ham2K PoLo URL subscriptions. The whole array including
     // each group's remoteEntries cache rides this push so mobile decorates
@@ -31160,7 +31167,7 @@ function connectRemote() {
 
   // Phone updated custom CAT buttons — save to settings and sync desktop
   remoteServer.on('save-custom-cat-buttons', (buttons) => {
-    settings.customCatButtons = buttons;
+    settings.customCatButtons = CustomCatFollow.capSlots(buttons); // #164: at most 25
     saveSettings(settings);
     if (win && !win.isDestroyed()) {
       win.webContents.send('reload-prefs');
@@ -34678,7 +34685,8 @@ function sendVfoState() {
     breakIn: _currentBreakInState,
     catCaps: vfoCatCaps(),          // which CAT buttons this radio can take (lib/vfo-layout.js)
     customCatStates: customCatReader.states(), // #242: custom toggles' own reads
-    customCatButtons: settings.customCatButtons || [],
+    customCatButtons: CustomCatFollow.capSlots(settings.customCatButtons),
+    activeRigId: settings.activeRigId || null, // #164: the custom row shows the buttons for this radio
     meters: vfoMetersAvailable(),   // only these meter rows are drawn
     // Power On/Off at the bottom of the window. From the radio MODEL, never
     // from the CAT link: a switched-off radio does not answer, and the main

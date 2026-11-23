@@ -5460,12 +5460,22 @@
   var customCatEditBtn = document.getElementById('rc-custom-cat-edit');
   var customCatData = [];
   var customCatEditing = false;
+  // #164: up to 25 buttons, never padded; each may be tied to some radios
+  // (entry.rigs). Shown: the programmed ones for the active radio, which the
+  // desktop names in the `rigs` message (activeRigId).
+  var CUSTOM_MAX = (window.CustomCatFollow && CustomCatFollow.MAX_SLOTS) || 25;
+  var customActiveRigId = null;
+  function customCatSetActiveRig(id) {
+    var v = id || null;
+    if (v === customActiveRigId) return;
+    customActiveRigId = v;
+    renderCustomCatButtons();
+  }
 
   function loadCustomCatButtons(buttons) {
     if (!buttons || !Array.isArray(buttons)) return;
     const before = customCatData;
-    customCatData = buttons;
-    while (customCatData.length < 5) customCatData.push({ name: '', command: '' });
+    customCatData = buttons.slice(0, CUSTOM_MAX);
     // A lit toggle describes the last command sent from THAT slot. Forget it
     // only where the slot's commands changed — settings-update arrives on
     // every cluster connect and clock check, and resetting every toggle each
@@ -5573,9 +5583,14 @@
   function renderCustomCatButtons(opts) {
     customCatBtnsEl.innerHTML = '';
     var hasAny = false;
-    for (var i = 0; i < customCatData.length; i++) {
-      var entry = customCatData[i];
-      if (!entry.name && !entry.command) continue;
+    // Only the programmed buttons for the active radio, no empty slots (#164).
+    // Positions are kept, so data-idx still names the saved slot.
+    var shown = window.CustomCatFollow
+      ? CustomCatFollow.visibleSlots(customCatData, customActiveRigId)
+      : customCatData.map(function (e, n) { return { slot: e, index: n }; }).filter(function (v) { return v.slot && (v.slot.name || v.slot.command); });
+    for (var sv = 0; sv < shown.length; sv++) {
+      var i = shown[sv].index;
+      var entry = shown[sv].slot;
       hasAny = true;
       // Slot TYPE, same vocabulary the desktop writes (renderer/app.js
       // createCustomSlot). The web client used to render EVERY slot as a plain
@@ -5676,7 +5691,9 @@
     if (existing) existing.remove();
     var editor = document.createElement('div');
     editor.className = 'rc-custom-cat-editor';
-    for (var i = 0; i < 5; i++) {
+    // Every saved slot, up to 25 (#164), for every radio; fields this editor
+    // does not show (rigs among them) are kept on save.
+    for (var i = 0; i < customCatData.length; i++) {
       var row = document.createElement('div');
       row.className = 'rc-custom-cat-editor-row';
       row.dataset.idx = i;
@@ -5776,13 +5793,30 @@
       }
       editor.appendChild(row);
     }
+    var addBtn = document.createElement('button');
+    addBtn.type = 'button';
+    addBtn.className = 'rc-custom-cat-edit-btn cce-add';
+    addBtn.textContent = '+ Add (' + customCatData.length + ' of ' + CUSTOM_MAX + ')';
+    addBtn.disabled = customCatData.length >= CUSTOM_MAX;
+    addBtn.addEventListener('click', function (ev) {
+      ev.stopPropagation();
+      if (customCatData.length >= CUSTOM_MAX) return;
+      // Keep what was typed: the editor saves on a focusout that leaves it.
+      editor.dispatchEvent(new FocusEvent('focusout'));
+      customCatData.push({ name: '', command: '' });
+      renderCustomCatEditor();
+      var names = customCatSection.querySelectorAll('.rc-custom-cat-editor .cce-name');
+      if (names.length) names[names.length - 1].focus();
+    });
+    editor.appendChild(addBtn);
     customCatSection.appendChild(editor);
     // Auto-save on blur — but a move between the editor's own fields is not
     // a blur worth saving on, and never rebuilds the editor mid-edit.
     editor.addEventListener('focusout', function(ev) {
       if (ev && ev.relatedTarget && editor.contains(ev.relatedTarget)) return;
-      for (var j = 0; j < 5; j++) {
-        var r = editor.querySelectorAll('.rc-custom-cat-editor-row')[j];
+      var rows = editor.querySelectorAll('.rc-custom-cat-editor-row');
+      for (var j = 0; j < rows.length; j++) {
+        var r = rows[j];
         if (!r) continue;
         // PRESERVE the slot fields this editor does not expose. Rebuilding
         // the object from the two inputs silently downgraded a
@@ -5820,10 +5854,14 @@
     customCatEditBtn.textContent = customCatEditing ? 'Done' : 'Edit';
     customCatSection.classList.remove('hidden');
     if (customCatEditing) {
+      if (!customCatData.length) customCatData.push({ name: '', command: '' }); // a row to type into
       renderCustomCatEditor();
     } else {
       var existing = customCatSection.querySelector('.rc-custom-cat-editor');
       if (existing) existing.remove();
+      // Done: rows left empty are dropped (no padding, #164).
+      var kept = customCatData.filter(function (e) { return e && (e.name || e.command); });
+      if (kept.length !== customCatData.length) { customCatData = kept; customToggleState = {}; saveCustomCatButtons(); }
       renderCustomCatButtons();
     }
   });
@@ -8518,6 +8556,7 @@
     // active rig isn't a Flex. Fail open when family is absent (older
     // desktop build) — the desktop side also guards the start message.
     const activeRigEntry = (rigs || []).find(r => r && r.id === activeRigId);
+    customCatSetActiveRig(activeRigId); // #164: this radio's custom CAT buttons
     const famKnown = activeRigEntry && activeRigEntry.family;
     const multiBtnEl = document.getElementById('ft8-multi-btn');
     if (multiBtnEl) multiBtnEl.style.display = (famKnown && famKnown !== 'flex') ? 'none' : '';

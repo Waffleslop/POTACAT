@@ -1986,6 +1986,7 @@ async function openCatPopover(anchor) {
       });
       activeRigName = rig.name || '';
       activeRigCatLabel = rig.catLabel || '';
+      customCatRigSwitched(rig.id); // #164: this radio's custom buttons
       refreshCatPillLabel();
       closeCatPopover();
     });
@@ -2306,13 +2307,19 @@ async function loadPrefs() {
   qrzFullName = settings.qrzFullName === true;
   enableLogging = true; // always on; cloud sync is the choice
   enableBannerLogger = settings.enableBannerLogger === true;
-  // Sync custom CAT buttons from settings.json (authoritative source for ECHOCAT sync)
+  // Sync custom CAT buttons from settings.json (authoritative source for ECHOCAT sync).
+  // #164: up to 25, never padded; the panel shows the ones for the active rig
+  // and the editor offers the operator's rigs by name.
+  customActiveRigId = settings.activeRigId || null;
+  customRigChoices = (settings.rigs || []).filter((r) => r && r.id).map((r) => ({ id: r.id, name: r.name || r.model || 'Radio' }));
   if (settings.customCatButtons && Array.isArray(settings.customCatButtons)) {
-    customCatButtons = settings.customCatButtons;
-    while (customCatButtons.length < 5) customCatButtons.push({ name: '', command: '' });
+    customCatButtons = CustomCatFollow.capSlots(settings.customCatButtons);
+    // Empty slots (the old pad-to-five) are dropped, except under the
+    // operator's hands in the editor.
+    if (!customCatEditing) customCatButtons = customCatButtons.filter((b) => CustomCatFollow.isProgrammed(b));
     localStorage.setItem('custom-cat-buttons', JSON.stringify(customCatButtons));
     if (typeof loadCustomButtons === 'function') loadCustomButtons();
-  }
+  } else if (typeof loadCustomButtons === 'function') loadCustomButtons();
   n1mmRst = settings.n1mmRst === true;
   applyRstMode();
   defaultPower = LogTxPower.operatorDefaultPower(settings);
@@ -26528,6 +26535,7 @@ window.api.onRigState((state) => {
   if (!state) return;
   // Custom toggles that follow a radio state (lib/custom-cat-follow.js) relight.
   customRigState = state;
+  if (state.activeRigId !== undefined) customCatRigSwitched(state.activeRigId); // #164
   for (const reflect of customToggleReflectors) reflect();
   // Apply model capabilities before syncing values so Field-specific power
   // decimals/limits and target-specific preamp labels are already in place.
@@ -26972,15 +26980,22 @@ rigPresetsMount(document.getElementById('settings-preset-root'));
 rigPresetsLoad(); // both surfaces start from main's payload; every change is pushed after that
 
 // --- Custom CAT Buttons ---
+// #164: up to 25 (CustomCatFollow.MAX_SLOTS), never padded. The panel shows
+// the programmed buttons for the active rig; "Edit" opens the editing rows,
+// where each button may be tied to some of the operator's radios (slot.rigs,
+// absent = all radios).
 const rigCustomSlotsContainer = document.getElementById('rig-custom-slots');
 const rigCustomAddBtn = document.getElementById('rig-custom-add');
-let customCatButtons = JSON.parse(localStorage.getItem('custom-cat-buttons') || '[]');
-// Start with at least 1 blank slot
-if (customCatButtons.length === 0) customCatButtons.push({ name: '', command: '' });
-// Clean up legacy: remove trailing empty slots beyond the last non-empty one
-while (customCatButtons.length > 1 && !customCatButtons[customCatButtons.length - 1].name && !customCatButtons[customCatButtons.length - 1].command) {
-  customCatButtons.pop();
-}
+const rigCustomView = document.getElementById('rig-custom-view');
+const rigCustomEditor = document.getElementById('rig-custom-editor');
+const rigCustomEditLink = document.getElementById('rig-custom-edit');
+const rigCustomCount = document.getElementById('rig-custom-count');
+let customCatButtons = [];
+try { customCatButtons = CustomCatFollow.capSlots(JSON.parse(localStorage.getItem('custom-cat-buttons') || '[]')); } catch { customCatButtons = []; }
+customCatButtons = customCatButtons.filter((b) => CustomCatFollow.isProgrammed(b));
+let customCatEditing = false;   // the editing rows are open ("Edit" reads "Done")
+let customActiveRigId = null;   // settings.activeRigId, kept current by loadPrefs and rig-state
+let customRigChoices = [];      // [{ id, name }] from settings.rigs, for the Radios choice
 
 // Session-only last-sent state for custom TOGGLE controls. Deliberately not
 // persisted: POTACAT cannot parse arbitrary rigs' replies for user-typed raw
@@ -27047,7 +27062,7 @@ function createCustomSlot(i) {
     customCatButtons[i].type = typeSel.value;
     customToggleState = {};
     saveCustomButtons();
-    renderCustomSlots();
+    renderCustomCat();
   });
 
   const cmdInput = document.createElement('input');
@@ -27073,10 +27088,9 @@ function createCustomSlot(i) {
   removeBtn.addEventListener('click', (e) => {
     e.stopPropagation();
     customCatButtons.splice(i, 1);
-    if (customCatButtons.length === 0) customCatButtons.push({ name: '', command: '' });
     customToggleState = {};
     saveCustomButtons();
-    renderCustomSlots();
+    renderCustomCat();
   });
 
   slot.appendChild(nameInput);
@@ -27244,20 +27258,194 @@ function createCustomSlot(i) {
     slot.appendChild(sendBtn);
   }
 
+  slot.appendChild(createRigsChoice(i));
   slot.appendChild(removeBtn);
   return slot;
 }
 
+// The per-button "Radios" choice (#164): All (the default, no `rigs` field)
+// or one or more of the operator's rigs by name. A button tied to radios
+// shows only while one of them is the active rig.
+function createRigsChoice(i) {
+  const wrap = document.createElement('details');
+  wrap.className = 'rig-custom-rigs';
+  const sum = document.createElement('summary');
+  wrap.appendChild(sum);
+  const list = document.createElement('div');
+  list.className = 'rig-custom-rigs-list';
+  const mkBox = (value, text) => {
+    const lbl = document.createElement('label');
+    const box = document.createElement('input');
+    box.type = 'checkbox';
+    box.value = value;
+    lbl.appendChild(box);
+    lbl.appendChild(document.createTextNode(' ' + text));
+    list.appendChild(lbl);
+    return box;
+  };
+  const allBox = mkBox('', 'All');
+  const rigBoxes = customRigChoices.map((r) => mkBox(r.id, r.name));
+  if (!customRigChoices.length) {
+    const none = document.createElement('div');
+    none.className = 'rig-custom-rigs-none';
+    none.textContent = 'Add a radio in Settings to pick one here.';
+    list.appendChild(none);
+  }
+  wrap.appendChild(list);
+  const nameOf = (id) => (customRigChoices.find((r) => r.id === id) || {}).name || 'a removed radio';
+  const sync = () => {
+    const ids = CustomCatFollow.slotRigs(customCatButtons[i]);
+    allBox.checked = !ids.length;
+    for (const box of rigBoxes) box.checked = ids.includes(box.value);
+    sum.textContent = !ids.length ? 'Radios: All' : ids.length === 1 ? 'Radios: ' + nameOf(ids[0]) : 'Radios: ' + ids.length;
+    sum.title = !ids.length ? 'Shown for every radio.' : 'Shown only while one of these is the active radio: ' + ids.map(nameOf).join(', ') + '.';
+  };
+  allBox.addEventListener('change', () => {
+    if (!customCatButtons[i]) return;
+    // All cannot be unticked into "no radio": tick a radio instead.
+    if (allBox.checked) { delete customCatButtons[i].rigs; saveCustomButtons(); }
+    sync();
+  });
+  for (const box of rigBoxes) {
+    box.addEventListener('change', () => {
+      if (!customCatButtons[i]) return;
+      const ids = rigBoxes.filter((b) => b.checked).map((b) => b.value);
+      if (ids.length) customCatButtons[i].rigs = ids;
+      else delete customCatButtons[i].rigs;
+      saveCustomButtons();
+      sync();
+    });
+  }
+  wrap.addEventListener('click', (e) => e.stopPropagation());
+  sync();
+  return wrap;
+}
+
 function renderCustomSlots() {
-  customToggleReflectors = [];
   rigCustomSlotsContainer.innerHTML = '';
   for (let i = 0; i < customCatButtons.length; i++) {
     rigCustomSlotsContainer.appendChild(createCustomSlot(i));
   }
 }
 
+// View mode: the programmed buttons for the active rig, wrapping about five
+// to a row; a slider takes a row of its own. A press sends exactly what the
+// editing row's Send / toggle / slider would.
+function renderCustomView() {
+  rigCustomView.innerHTML = '';
+  const shown = CustomCatFollow.visibleSlots(customCatButtons, customActiveRigId);
+  if (!shown.length) {
+    const empty = document.createElement('div');
+    empty.className = 'rig-custom-empty';
+    empty.textContent = customCatButtons.some((b) => CustomCatFollow.isProgrammed(b))
+      ? 'No buttons for this radio. Click Edit to choose the radios for each button.'
+      : 'No buttons yet. Click Edit to add one.';
+    rigCustomView.appendChild(empty);
+    return;
+  }
+  for (const { slot: b, index: i } of shown) {
+    const type = (b.type === 'toggle' || b.type === 'slider') ? b.type : 'button';
+    const label = b.name || ('CAT ' + (i + 1));
+    if (type === 'slider') {
+      const row = document.createElement('div');
+      row.className = 'rig-custom-vslider';
+      const lbl = document.createElement('span');
+      lbl.className = 'rig-custom-vslider-label';
+      lbl.textContent = label;
+      const lo = Number.isFinite(b.min) ? b.min : 0;
+      const hi = Number.isFinite(b.max) ? b.max : 255;
+      const range = document.createElement('input');
+      range.type = 'range';
+      range.className = 'rig-custom-range';
+      range.min = lo;
+      range.max = hi;
+      range.value = Number.isFinite(b.value) ? b.value : lo;
+      range.title = b.command || '';
+      const valOut = document.createElement('span');
+      valOut.className = 'rig-custom-val';
+      valOut.textContent = range.value;
+      range.addEventListener('input', () => {
+        valOut.textContent = range.value;
+        // Same 150 ms debounce as the editing row's slider.
+        clearTimeout(_customSliderTimers['v' + i]);
+        _customSliderTimers['v' + i] = setTimeout(() => {
+          const tpl = String(b.command || '').trim();
+          if (!tpl) return;
+          window.api.rigControl({ action: 'send-custom-cat', command: customSliderCommand(tpl, +range.value) });
+          if (customCatButtons[i]) { customCatButtons[i].value = +range.value; saveCustomButtons(); }
+        }, 150);
+      });
+      row.appendChild(lbl);
+      row.appendChild(range);
+      row.appendChild(valOut);
+      rigCustomView.appendChild(row);
+      continue;
+    }
+    const btn = document.createElement('button');
+    btn.className = 'rig-btn rig-custom-vbtn';
+    if (type === 'toggle') {
+      const reflect = () => {
+        const v = CustomCatFollow.toggleView(customCatButtons[i] || {}, customRigState, customToggleState[i]);
+        btn.textContent = label + ' ' + (v.on === null ? '?' : (v.on ? 'On' : 'Off'));
+        btn.classList.toggle('rig-custom-toggle-on', v.on === true);
+        btn.classList.toggle('rig-custom-toggle-unknown', v.on === null);
+        btn.title = v.fromRadio ? 'Shows what the radio reports.'
+          : v.on === null ? 'State unknown: not read from the radio. A click sends the On command.'
+            : 'Shows the last command sent, not the radio state.';
+      };
+      reflect();
+      customToggleReflectors.push(reflect);
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const goingOn = CustomCatFollow.toggleView(customCatButtons[i] || {}, customRigState, customToggleState[i]).nextCommand === 'on';
+        const cmd = String((goingOn ? b.command : b.commandOff) || '').trim();
+        if (!cmd) return;
+        window.api.rigControl({ action: 'send-custom-cat', command: cmd });
+        customToggleState[i] = goingOn;
+        reflect();
+      });
+    } else {
+      btn.textContent = label;
+      btn.title = b.command || '';
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const cmd = String(b.command || '').trim();
+        if (!cmd) return;
+        window.api.rigControl({ action: 'send-custom-cat', command: cmd });
+        btn.classList.add('rig-custom-sent');
+        setTimeout(() => { btn.classList.remove('rig-custom-sent'); }, 300);
+      });
+    }
+    rigCustomView.appendChild(btn);
+  }
+}
+
+// Header ("Custom CAT  12 / 25  Edit"), + Add, and whichever mode is open.
+function renderCustomCat() {
+  customToggleReflectors = [];
+  if (rigCustomCount) rigCustomCount.textContent = customCatButtons.length + ' / ' + CustomCatFollow.MAX_SLOTS;
+  if (rigCustomEditLink) rigCustomEditLink.textContent = customCatEditing ? 'Done' : 'Edit';
+  if (rigCustomAddBtn) {
+    rigCustomAddBtn.textContent = '+ Add (' + customCatButtons.length + ' of ' + CustomCatFollow.MAX_SLOTS + ')';
+    rigCustomAddBtn.disabled = customCatButtons.length >= CustomCatFollow.MAX_SLOTS;
+    rigCustomAddBtn.title = rigCustomAddBtn.disabled ? CustomCatFollow.MAX_SLOTS + ' buttons is the most.' : 'Add a button';
+  }
+  if (rigCustomView) rigCustomView.classList.toggle('hidden', customCatEditing);
+  if (rigCustomEditor) rigCustomEditor.classList.toggle('hidden', !customCatEditing);
+  if (customCatEditing) renderCustomSlots();
+  else renderCustomView();
+}
+
+/** The active rig changed: show its buttons. */
+function customCatRigSwitched(id) {
+  const v = id || null;
+  if (v === customActiveRigId) return;
+  customActiveRigId = v;
+  if (!customCatEditing) renderCustomCat();
+}
+
 function loadCustomButtons() {
-  renderCustomSlots();
+  renderCustomCat();
 }
 
 function saveCustomButtons() {
@@ -27265,18 +27453,40 @@ function saveCustomButtons() {
   window.api.saveSettings({ customCatButtons });
 }
 
-renderCustomSlots();
+renderCustomCat();
 // Migrate localStorage buttons to settings.json if not already synced
 if (customCatButtons.some(b => b.name || b.command)) {
   window.api.saveSettings({ customCatButtons });
 }
 
+if (rigCustomEditLink) {
+  rigCustomEditLink.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    customCatEditing = !customCatEditing;
+    if (customCatEditing) {
+      // An empty list opens with one row to type into.
+      if (!customCatButtons.length) customCatButtons.push({ name: '', command: '' });
+    } else {
+      // Done: rows left empty are dropped.
+      const kept = customCatButtons.filter((b) => CustomCatFollow.isProgrammed(b));
+      if (kept.length !== customCatButtons.length) {
+        customCatButtons = kept;
+        customToggleState = {};
+        saveCustomButtons();
+      }
+    }
+    renderCustomCat();
+  });
+}
+
 if (rigCustomAddBtn) {
   rigCustomAddBtn.addEventListener('click', (e) => {
     e.stopPropagation();
+    if (customCatButtons.length >= CustomCatFollow.MAX_SLOTS) return;
     customCatButtons.push({ name: '', command: '' });
     saveCustomButtons();
-    renderCustomSlots();
+    renderCustomCat();
     // Focus the new slot's label input
     const slots = rigCustomSlotsContainer.querySelectorAll('.rig-custom-name');
     if (slots.length > 0) slots[slots.length - 1].focus();

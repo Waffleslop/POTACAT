@@ -166,6 +166,7 @@ const TESTS = [
   'test/lan-advertise-test.js',
   'test/custom-cat-parity-test.js',
   'test/vfo-custom-cat-slider-test.js', // #526: a custom CAT slider in the VFO window stays where it is dragged; no rebuild per push
+  'test/custom-cat-25-test.js', // #164: up to 25 custom CAT buttons, no padding, a button may belong to some radios; one filter on every surface and in the reader
   'test/custom-cat-read-test.js', // #242: a custom toggle's own read command + ON-when rule; unknown, not OFF, when unread; no read during TX
   'test/worked-qsos-chunk-test.js',
   'test/worked-incremental-test.js', // #731: a worked-incremental client gets the full worked list once per connection, not after every QSO; ECHOCAT Web merges qso-added with the full list's entry rule
