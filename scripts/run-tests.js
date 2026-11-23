@@ -549,6 +549,7 @@ const TESTS = [
   'test/web-keyer-heard-release-test.js', // #244: a late release never takes back an element that has started to sound
   'test/cw-playout-lateness-test.js', // #244 diagnostic: paddle playout edge lateness, one line per over
   'test/cw-sidetone-air-agree-test.js', // #244: ECHOCAT Web's sidetone and the air agree; an element is committed once it sounds
+  'test/web-paddle-input-first-test.js', // #244 Part A: paddle keys and MIDI reach the web keyer first (capture phase); drawing pauses during a paddle over
   'test/spot-hides-test.js',
   'test/mac-titlebar-test.js',
   'test/vfo-and-greyout-test.js',
