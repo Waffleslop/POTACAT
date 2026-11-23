@@ -1154,6 +1154,11 @@ window.api.onRadioState((s) => {
   }
   if (s && s.meters) { radioMeters = s.meters; applyMeterRows(); }
   if (s) {
+    // #164: a button tied to some radios shows only while one of them is active.
+    if (s.activeRigId !== undefined && (s.activeRigId || null) !== customActiveRigId) {
+      customActiveRigId = s.activeRigId || null;
+      customCatSig = null; // the next push rebuilds the row for this radio
+    }
     // Custom toggles that follow a radio state relight.
     customRadioState = s;
     document.querySelectorAll('.custom-cat-injected').forEach((el) => { if (el._paint) el._paint(); });
@@ -1652,6 +1657,7 @@ buildRigToggles();
 
 // --- Custom CAT buttons ---
 let customCatButtons = [];
+let customActiveRigId = null; // settings.activeRigId from vfo-radio-state (#164)
 
 // Substitute a slider value into a command template — SAME contract as the
 // main window's customSliderCommand() and the web client's copy, pinned
@@ -1735,7 +1741,8 @@ function buildCustomCatBtns() {
   // that only ever sent its On command (LZ3AW #7), and a slider was left out
   // of this window altogether — the operator had to go back to the main
   // window to move it ("not visible in VFO pane", LZ3AW 2026-09-19).
-  const btns = customCatButtons.filter(b => b.name && b.command);
+  // #164: the programmed buttons for the active radio (lib/custom-cat-follow.js).
+  const btns = CustomCatFollow.visibleSlots(customCatButtons, customActiveRigId).map(v => v.slot).filter(b => b.name && b.command);
   if (btns.length === 0) return;
   // Append custom CAT controls into each rig-toggles-shared row. The Large
   // VFO shows every custom button, as it always has; the Small VFO only the

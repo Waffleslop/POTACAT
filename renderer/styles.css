@@ -7390,13 +7390,90 @@ a.settings-echocat-badge-link:hover {
 .rig-preset-bymode { display: grid; grid-template-columns: auto 1fr; gap: 3px 8px; align-items: center; font-size: 11px; }
 .rig-preset-bymode select { background: var(--bg-primary); color: var(--text-primary); border: 1px solid var(--border-secondary); border-radius: 3px; padding: 2px 4px; font-size: 11px; }
 
-/* Custom CAT button slots */
+/* Custom CAT (#164): header, view mode (the buttons), edit mode (the rows) */
+.rig-custom-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.rig-custom-title { font-weight: 600; font-size: 12px; color: var(--text-primary); }
+.rig-custom-count { font-size: 11px; color: var(--text-secondary); }
+.rig-custom-edit-link {
+  margin-left: auto;
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: 12px;
+  color: var(--link, #4fc3f7);
+  text-decoration: underline;
+  cursor: pointer;
+}
+.rig-custom-edit-link:hover { opacity: 0.85; }
+/* The tab is as wide as about five buttons, so the view wraps five to a row
+   and an editing row (label, type, command, Send, Radios, remove) fits one line. */
+#rig-tab-custom { width: 400px; max-width: 100%; }
+/* About five buttons to a row at the panel's width, wrapping */
+.rig-custom-view {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(68px, 1fr));
+  gap: 4px;
+}
+.rig-custom-vbtn {
+  min-height: 28px;
+  padding: 3px 4px;
+  font-size: 11px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 1.2;
+}
+.rig-custom-vbtn.rig-custom-sent { background: #2a6e4e; color: #fff; border-color: #2a6e4e; }
+/* A slider takes a row of its own */
+.rig-custom-vslider {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+}
+.rig-custom-vslider-label { color: var(--text-secondary); min-width: 60px; }
+.rig-custom-empty { grid-column: 1 / -1; font-size: 11px; color: var(--text-secondary); padding: 4px 0; }
+
+/* Custom CAT button slots (edit mode) */
 .rig-custom-slot {
   display: flex;
+  flex-wrap: wrap;
   gap: 4px;
   align-items: center;
   padding: 3px 0;
 }
+/* Command fields share what is left of the line instead of pushing Send,
+   Radios and remove onto a second one. */
+.rig-custom-slot .rig-custom-cmd { width: 0; min-width: 70px; }
+/* Per-button Radios choice: opens on its own line under the row */
+.rig-custom-rigs { font-size: 11px; color: var(--text-secondary); }
+.rig-custom-rigs > summary {
+  cursor: pointer;
+  list-style: none;
+  border: 1px solid var(--border-secondary, #333);
+  border-radius: 3px;
+  padding: 2px 5px;
+  white-space: nowrap;
+  max-width: 130px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.rig-custom-rigs > summary::-webkit-details-marker { display: none; }
+.rig-custom-rigs[open] { flex-basis: 100%; }
+.rig-custom-rigs[open] > summary { display: inline-block; }
+.rig-custom-rigs-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  padding: 4px 2px;
+}
+.rig-custom-rigs-list label { display: inline-flex; align-items: center; gap: 3px; color: var(--text-primary); cursor: pointer; }
+.rig-custom-rigs-none { color: var(--text-secondary); }
 
 /* Custom CAT control extras: type select, slider row, toggle lit state */
 .rig-custom-type {
@@ -7424,8 +7501,10 @@ a.settings-echocat-badge-link:hover {
   color: var(--text-secondary, #ccc);
 }
 .rig-custom-send.rig-custom-toggle-on { background: #2a6e4e; }
+.rig-custom-vbtn.rig-custom-toggle-on { background: #2a6e4e; color: #fff; border-color: #2a6e4e; }
 /* #242: a toggle whose state is not known shows neither On nor Off */
-.rig-custom-send.rig-custom-toggle-unknown { opacity: 0.75; font-style: italic; }
+.rig-custom-send.rig-custom-toggle-unknown,
+.rig-custom-vbtn.rig-custom-toggle-unknown { opacity: 0.75; font-style: italic; }
 .rig-custom-read, .rig-custom-onwhen { flex: 1 1 90px; min-width: 70px; }
 .rig-custom-cmd.rig-custom-invalid { border-color: #e94560; }
 

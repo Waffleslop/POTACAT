@@ -467,9 +467,18 @@
           </div>
         </div>
         <div id="rig-tab-custom" class="rig-tab-panel hidden">
-          <div id="rig-custom-slots"></div>
-          <button class="rig-btn" id="rig-custom-add" style="margin-top:4px;font-size:11px;padding:2px 8px;">+ Add</button>
-          <span class="help-text" style="display:block;margin-top:6px;font-size:11px;">Commands go to the radio as your manual prints them (FA014074000;), or Icom hex (FE FE 94 E0 1C 00 01 FD). With Hamlib (rigctld), start with <code>+</code> or <code>\</code> to send a rigctld command instead, e.g. <code>+V VFOB</code> or <code>\set_vfo VFOB</code>.</span>
+          <!-- #164: buttons by default; Edit opens the editing rows. Up to 25. -->
+          <div class="rig-custom-head">
+            <span class="rig-custom-title">Custom CAT</span>
+            <span id="rig-custom-count" class="rig-custom-count">0 / 25</span>
+            <button type="button" id="rig-custom-edit" class="rig-custom-edit-link">Edit</button>
+          </div>
+          <div id="rig-custom-view" class="rig-custom-view"></div>
+          <div id="rig-custom-editor" class="hidden">
+            <div id="rig-custom-slots"></div>
+            <button class="rig-btn" id="rig-custom-add" style="margin-top:4px;font-size:11px;padding:2px 8px;">+ Add (0 of 25)</button>
+            <span class="help-text" style="display:block;margin-top:6px;font-size:11px;">Commands go to the radio as your manual prints them (FA014074000;), or Icom hex (FE FE 94 E0 1C 00 01 FD). With Hamlib (rigctld), start with <code>+</code> or <code>\</code> to send a rigctld command instead, e.g. <code>+V VFOB</code> or <code>\set_vfo VFOB</code>.</span>
+          </div>
         </div>
         <div id="rig-tab-presets" class="rig-tab-panel hidden">
           <!-- Rig presets (lib/rig-presets.js): list (tap = apply), the editor,
