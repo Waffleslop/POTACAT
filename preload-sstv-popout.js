@@ -19,6 +19,9 @@ contextBridge.exposeInMainWorld('api', {
   // SSTV control
   sstvEncode: (data) => ipcRenderer.send('sstv-encode', data),
   sstvStop: () => ipcRenderer.send('sstv-stop'),
+  // #326: the waiting bar (Send now / Cancel) while a picture waits for a quiet frequency.
+  sstvWaitSendNow: () => ipcRenderer.send('sstv-wait-send-now'),
+  sstvWaitCancel: () => ipcRenderer.send('sstv-wait-cancel'),
   sstvTxComplete: () => ipcRenderer.send('sstv-tx-complete'),
   sstvAudio: (buf) => ipcRenderer.send('sstv-audio', buf),
   sstvRedecode: (opts) => ipcRenderer.send('sstv-redecode', opts),

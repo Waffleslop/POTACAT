@@ -42,6 +42,7 @@
   <!-- vfo-step-keys-js -->
   <!-- Directory cards: sheet fields escaped (lib/directory-cards.js) -->
   <!-- directory-cards-js -->
+  <!-- sstv-quiet-wait-js -->
   <!-- APRS phase 6: the APRS window's icons and station helpers, one copy each -->
   <!-- aprs-symbols-js -->
   <!-- aprs-stations-js -->
@@ -1727,6 +1728,17 @@
         <span style="flex:1"></span>
         <button type="button" id="sstv-phone-wf-toggle" style="font-size:11px;padding:2px 8px;border:1px solid var(--border);border-radius:4px;background:transparent;color:var(--text-dim);">WF</button>
         <span id="sstv-phone-status" style="font-size:12px;color:var(--text-dim)">Ready</span>
+      </div>
+
+      <!-- #326: a picture waiting for the frequency to clear -->
+      <div id="sstv-phone-wait-bar" style="display:none;padding:6px 10px;background:var(--bg-header);border-bottom:1px solid var(--border);flex-shrink:0;">
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+          <span id="sstv-phone-wait-title" style="font-size:13px;font-weight:700;color:var(--accent-blue, #4fc3f7);">Waiting for the frequency to clear...</span>
+          <span style="flex:1"></span>
+          <button type="button" id="sstv-phone-send-now" style="padding:4px 10px;font-size:12px;font-weight:700;border:1px solid var(--accent-blue, #4fc3f7);background:var(--accent-blue, #4fc3f7);color:#06202c;border-radius:4px;">Send now</button>
+          <button type="button" id="sstv-phone-wait-cancel" style="padding:4px 10px;font-size:12px;font-weight:700;border:1px solid var(--border);background:transparent;color:var(--text);border-radius:4px;">Cancel</button>
+        </div>
+        <div id="sstv-phone-wait-detail" style="font-size:12px;color:var(--text-dim);margin-top:3px;"></div>
       </div>
 
       <!-- TX progress bar -->

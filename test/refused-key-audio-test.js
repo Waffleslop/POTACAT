@@ -152,7 +152,7 @@ test('every key-down refusal in handleRemotePtt returns false', () => {
 
 // --- the other callers that play radio audio around a key-down ----------------
 test('SSTV does not send the picture when its key-down is refused', () => {
-  const i = MAIN.indexOf("sstvEngine.on('encode-complete'");
+  const i = MAIN.indexOf('const sstvKeyAndSend = SstvSend.guard('); // #326: held at encode-complete by the quiet gate
   assert.ok(i >= 0);
   const b = MAIN.slice(i, MAIN.indexOf('_sstvStartAudio(() => {', i));
   assert.ok(/if \(handleRemotePtt\(true, \{ audio: true, forceDataMode: _sstvIcom, emission: 'SSTV', txKind: 'sstv'(, lanOwner: [^}]+)? \}\) === false\) \{/.test(b), 'refusal not checked');

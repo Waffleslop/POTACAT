@@ -558,6 +558,7 @@ const { TunerGeniusClient } = require('./lib/tuner-genius');
 const { FreedvEngine } = require('./lib/freedv-engine');
 const { SstvEngine, sstvRxVisLogLine } = require('./lib/sstv-engine');
 const SstvSend = require('./lib/sstv-send'); // #357: a picture from ECHOCAT: copy, tune first, fail as a status line
+const SstvQuietWait = require('./lib/sstv-quiet-wait'); // #326: wait for the frequency to be quiet before a picture keys
 const { decideSstvStop, sstvDecoderState } = require('./lib/sstv-decoder-state');
 const SstvFeedGate = require('./lib/sstv-feed-gate'); // pure ingress-gate decisions (table-tested)
 const HuntedPark = require('./lib/hunted-park'); // worked-call → live program-spot park refs (JTCAT logging)
@@ -33155,7 +33156,7 @@ function connectRemote() {
   // (lib/sstv-send.js): the radio goes to the SSTV frequency before the
   // picture keys, the encoder gets its own copy of the pixels, and a failure
   // is a status line here and on the phone, never a dialog box.
-  remoteServer.on('sstv-photo', ({ image, mode, guest, freqKhz }) => {
+  remoteServer.on('sstv-photo', ({ image, mode, guest, freqKhz, waitQuiet }) => {
     autoSstvOpenedPopout = false; // a picture going out keeps its window (#525)
     if (guest && passEnforcement) {
       const res = passEnforcement.interceptCatCommand({ type: 'sstv_tx', freqHz: effectiveTxFreqHz(), split: _currentSplit });
@@ -33237,6 +33238,9 @@ function connectRemote() {
       }
       // The encoder's own copy: it hands its pixels to a worker, which leaves
       // the array it was given empty, and pushTxImage reads rgba later.
+      // #326: the picture waits at encode-complete for a quiet frequency when
+      // the shack's setting is on, or when this client asked (waitQuiet).
+      _sstvNextPicture = { requested: waitQuiet === true, from: guest ? 'guest ' + (guest.call || '') : 'ECHOCAT' };
       sstvEngine.encode(SstvSend.ownCopy(rgba), size.width, size.height, mode);
     } catch (err) {
       sstvSendFailed(SstvSend.failText(err), { log: 'ECHOCAT picture not sent: ' + err.message });
@@ -33283,6 +33287,7 @@ function connectRemote() {
   // Phone requested an immediate TX abort.
   // Release PTT FIRST (FCC safety — don't leave the Flex keyed), then tell
   // the popout to stop audio playback, then notify all clients.
+  remoteServer.on('sstv-send-now', () => sstvQuietSendNow('ECHOCAT')); // #326: the waiting picture goes now
   remoteServer.on('sstv-halt-tx', () => {
     console.log('[SSTV] ECHOCAT requested TX halt');
     sstvHaltTxNow();
@@ -43264,6 +43269,101 @@ function sstvSendFailed(text, { log } = {}) {
   }
 }
 
+// #326: SSTV waits for the frequency to be quiet before it transmits. The
+// rules are in lib/sstv-quiet-wait.js (the Winlink busy detector and the
+// automatic retry's channel watch, on 1100-2300 Hz); here the picture is held
+// at encode-complete, before PTT, and every way out is wired: the picture
+// goes, it gives up, or Cancel / HALT / window close / SSTV stop drop it.
+let _sstvQuietListener = null; // SstvQuietWait.QuietListener for the dial it is hearing
+let _sstvQuietGate = null;     // SstvQuietWait.SendGate: at most one held picture
+let _sstvQuietTimer = null;
+let _sstvNextPicture = null;   // set by a picture from ECHOCAT: { requested, from } for the next encode-complete
+
+/** The SSTV engine's receive audio, before it goes to the decoder (lib/sstv-engine.js setAudioTap). */
+function sstvQuietFeed(samples, rate) {
+  // Only listen while it can matter: the setting is on, or a client asked for this picture.
+  if (settings.sstvWaitQuiet !== true && !(_sstvQuietGate && _sstvQuietGate.waiting())) return;
+  if (_remoteTxState || (cat && cat._transmitting)) return; // our own transmission is not the band
+  const now = Date.now();
+  const hz = _currentFreqHz || 0;
+  if (!_sstvQuietListener || SstvQuietWait.dialMoved(_sstvQuietListener.hz, hz)) {
+    _sstvQuietListener = new SstvQuietWait.QuietListener({ hz, now });
+  }
+  _sstvQuietListener.push(samples, rate, now);
+}
+
+function sstvQuietShow(status) {
+  if (sstvPopoutWin && !sstvPopoutWin.isDestroyed()) {
+    try { sstvPopoutWin.webContents.send('sstv-tx-status', status); } catch {}
+  }
+}
+
+function sstvQuietStopTimer() {
+  if (_sstvQuietTimer) { clearInterval(_sstvQuietTimer); _sstvQuietTimer = null; }
+}
+
+function sstvQuietGateGet() {
+  if (_sstvQuietGate) return _sstvQuietGate;
+  _sstvQuietGate = new SstvQuietWait.SendGate({
+    onSend: (p, why) => {
+      sstvQuietStopTimer();
+      if (why === 'quiet' && p.waited) sendCatLog(`[SSTV] the frequency has been quiet for ${SstvQuietWait.QUIET_S} s: sending the picture`);
+      if (why === 'now') sendCatLog(`[SSTV] Send now (${p.by || 'the operator'}): sending the picture without waiting for the frequency to clear`);
+      if (p.waited) sstvQuietShow({ state: 'tx' });
+      p.send(p.data);
+    },
+    onStatus: (s) => {
+      sstvQuietShow(s);
+      if (remoteServer) { try { remoteServer.broadcastSstvTxStatus(s); } catch {} }
+    },
+    onGiveUp: (p, text) => {
+      sstvQuietStopTimer();
+      sstvSendFailed(text);
+      sstvQuietShow({ state: 'rx', error: text });
+    },
+    onCancel: (p, reason) => {
+      sstvQuietStopTimer();
+      sendCatLog(`[SSTV] picture not sent: the wait for a quiet frequency was ${reason === 'replaced' ? 'replaced by a newer picture' : 'cancelled (' + reason + ')'}`);
+      if (reason === 'replaced') return;
+      sstvQuietShow({ state: 'rx', error: SstvQuietWait.CANCELLED_TEXT });
+      if (remoteServer) { try { remoteServer.broadcastSstvTxStatus(SstvSend.notSentStatus({ autoActive: autoSstvActive, error: SstvQuietWait.CANCELLED_TEXT })); } catch {} }
+    },
+  });
+  return _sstvQuietGate;
+}
+
+/** encode-complete: send now, or hold until the frequency is quiet (#326). */
+function sstvHoldPicture(data, send) {
+  const want = _sstvNextPicture;
+  _sstvNextPicture = null;
+  const gate = sstvQuietGateGet();
+  const now = Date.now();
+  const opts = { enabled: settings.sstvWaitQuiet === true, requested: !!(want && want.requested), now };
+  if (SstvQuietWait.shouldWait(opts)) {
+    // Listen from here if nothing was listening (or the dial moved: ECHOCAT tunes first).
+    const hz = _currentFreqHz || 0;
+    if (!_sstvQuietListener || SstvQuietWait.dialMoved(_sstvQuietListener.hz, hz)) _sstvQuietListener = new SstvQuietWait.QuietListener({ hz, now });
+  }
+  const picture = { data, send, by: want && want.from, waited: false };
+  const r = gate.hold(picture, { ...opts, listener: _sstvQuietListener });
+  if (r === 'waiting') {
+    picture.waited = true;
+    sendCatLog(`[SSTV] waiting for the frequency to clear before sending${want && want.from ? ' (picture from ' + want.from + ')' : ''}: sends after ${SstvQuietWait.QUIET_S} s of quiet, gives up after ${SstvQuietWait.MAX_WAIT_S / 60} min`);
+    sstvQuietStopTimer();
+    _sstvQuietTimer = setInterval(() => { if (_sstvQuietGate) _sstvQuietGate.tick(Date.now(), _sstvQuietListener); }, 1000);
+  }
+}
+
+function sstvQuietSendNow(by) {
+  if (!_sstvQuietGate || !_sstvQuietGate.waiting()) return;
+  _sstvQuietGate.held.picture.by = by;
+  _sstvQuietGate.sendNow(Date.now(), _sstvQuietListener);
+}
+
+function sstvQuietCancel(reason) {
+  if (_sstvQuietGate) _sstvQuietGate.cancel(reason);
+}
+
 function startAutoSstvTimer() {
   stopAutoSstvTimer();
   if (!settings.enableAutoSstv) return;
@@ -44084,6 +44184,7 @@ function jtcatAnyTxActive() {
 }
 
 function sstvHaltTxNow() {
+  sstvQuietCancel('halt'); // a picture still waiting for a quiet frequency is dropped too (#326)
   // SCU-LAN10: HALT also stops the picture on the wire, and gives the LAN
   // back; it never unkeys another transmitter holding it.
   if (settings.audioSource === 'yaesu-lan') { try { endYaesuLanTx('sstv', 'SSTV halt'); } catch (e) { console.error('[SSTV] halt LAN release:', e); } }
@@ -49425,7 +49526,10 @@ function cloudShackNotice(text, kind) {
       try { handleRemotePtt(false); } catch {}
       sstvSendFailed(SstvSend.failText(err), { log: 'picture not sent, PTT released: ' + ((err && err.stack) || err).toString().split(/\r?\n/).slice(0, 3).join(' | ') });
     };
-    sstvEngine.on('encode-complete', SstvSend.guard((data) => {
+    // #326: every picture (the window's and ECHOCAT's) is held here, before
+    // PTT, until the frequency is quiet when the operator asked for that.
+    sstvEngine.setAudioTap(sstvQuietFeed);
+    const sstvKeyAndSend = SstvSend.guard((data) => {
       // Ensure popout is open for audio playback — open it if needed
       if (!sstvPopoutWin || sstvPopoutWin.isDestroyed()) {
         openSstvPopout();
@@ -49655,7 +49759,8 @@ function cloudShackNotice(text, kind) {
       if (remoteServer) {
         remoteServer.broadcastSstvTxStatus({ state: 'tx', durationSec: outDurSec });
       }
-    }, sstvSendThrew));
+    }, sstvSendThrew);
+    sstvEngine.on('encode-complete', (data) => sstvHoldPicture(data, sstvKeyAndSend));
 
     sstvEngine.on('rx-vis', (data) => {
       // data.mode is the mode KEY ('pd160'), never a number — formatting it as
@@ -49884,6 +49989,7 @@ function cloudShackNotice(text, kind) {
   }
 
   function stopSstv() {
+    sstvQuietCancel('closed');
     // SAFETY: always release PTT. If a TX was in progress when the popout/app
     // closed, the Flex would otherwise keep keyed after we stopped feeding it
     // audio — an FCC problem (silent carrier).
@@ -50049,6 +50155,7 @@ function cloudShackNotice(text, kind) {
   });
 
   ipcMain.on('sstv-tx-complete', () => {
+    sstvQuietCancel('halt'); // HALT TX while the picture waits (#326); no-op after a sent picture
     if (settings.audioSource === 'yaesu-lan') endYaesuLanTx('sstv', 'SSTV tx-complete');
     else handleRemotePtt(false);
     if (sstvPopoutWin && !sstvPopoutWin.isDestroyed()) {
@@ -50058,6 +50165,10 @@ function cloudShackNotice(text, kind) {
       remoteServer.broadcastSstvTxStatus({ state: 'rx' });
     }
   });
+
+  // #326: the waiting bar's buttons in the SSTV window.
+  ipcMain.on('sstv-wait-cancel', () => sstvQuietCancel('cancel'));
+  ipcMain.on('sstv-wait-send-now', () => sstvQuietSendNow('the SSTV window'));
 
   ipcMain.on('sstv-wf-bins', (_e, bins) => {
     if (remoteServer && remoteServer.hasClient()) {
@@ -50073,6 +50184,7 @@ function cloudShackNotice(text, kind) {
   });
 
   ipcMain.on('sstv-stop', () => {
+    sstvQuietCancel('stop');
     if (sstvEngine) sstvEngine.stop();
     pushSstvDecoderState();
   });

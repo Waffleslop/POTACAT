@@ -183,6 +183,7 @@ const MODE_RES = {
   rebuildLook();
   try { const on = document.getElementById('op-name'); if (on) on.value = settings.sstvOperatorName || ''; } catch {}
   try { const sa = document.getElementById('save-all-decodes'); if (sa) sa.checked = settings.sstvSaveAllDecodes === true; } catch {}
+  try { const wq = document.getElementById('wait-quiet'); if (wq) wq.checked = settings.sstvWaitQuiet === true; } catch {}
   try { await refreshPacks(); } catch (e) { console.error('[SSTV] Packs list error:', e); }
 
   // Load saved templates
@@ -1402,6 +1403,7 @@ function renderTemplateStrip() {
 // Abort the current TX: stop audio, release PTT, reset UI. Used both when
 // the operator taps HALT on the desktop and when ECHOCAT halts remotely.
 function abortTxLocal(reason) {
+  showQuietWait(null);
   if (txAudioCtx) { try { txAudioCtx.close(); } catch {} txAudioCtx = null; }
   txPlaying = false;
   isTx = false;
@@ -1456,6 +1458,7 @@ txBtn.addEventListener('click', () => {
 
 // TX audio received — play it
 window.api.onSstvTxAudio(async (data) => {
+  showQuietWait(null);
   // Mark TX active — stops decoder from hearing our own audio
   isTx = true;
   txBtn.textContent = 'HALT TX';
@@ -1580,9 +1583,41 @@ window.api.onSstvTxAudio(async (data) => {
   }
 });
 
+// #326: a picture waiting for the frequency to clear. The words are
+// lib/sstv-quiet-wait.js's, the same on ECHOCAT Web.
+const quietWaitBar = document.getElementById('quiet-wait');
+function showQuietWait(data) {
+  if (!quietWaitBar) return;
+  if (!data) { quietWaitBar.hidden = true; return; }
+  document.getElementById('quiet-title').textContent = window.SstvQuietWait.WAIT_TITLE;
+  document.getElementById('quiet-detail').textContent = window.SstvQuietWait.waitDetail(data);
+  quietWaitBar.hidden = false;
+  statusBar.textContent = window.SstvQuietWait.WAIT_TITLE;
+}
+document.getElementById('quiet-send-now').addEventListener('click', () => {
+  showQuietWait(null);
+  statusBar.textContent = 'Sending...';
+  window.api.sstvWaitSendNow();
+});
+document.getElementById('quiet-cancel').addEventListener('click', () => {
+  showQuietWait(null);
+  window.api.sstvWaitCancel();
+});
+
 // TX status updates
 window.api.onSstvTxStatus((data) => {
+  if (data.state === 'waiting') {
+    isTx = true; // HALT TX also drops the waiting picture
+    txBtn.textContent = 'HALT TX';
+    txBtn.classList.add('transmitting');
+    showQuietWait(data);
+    return;
+  }
+  showQuietWait(null);
+  if (data.state === 'tx') { statusBar.textContent = 'Sending...'; return; }
   if (data.state === 'rx') {
+    progressBar.classList.remove('tx');
+    progressBar.style.width = '0%';
     isTx = false;
     txBtn.textContent = replyImage ? 'REPLY' : 'TRANSMIT';
     txBtn.classList.remove('transmitting');
@@ -3345,6 +3380,10 @@ function showLookLock() {
   if (shuf) shuf.disabled = !!settings.sstvLookLocked;
 }
 document.getElementById('look-lock').addEventListener('click', () => setLookLocked(!settings.sstvLookLocked));
+document.getElementById('wait-quiet').addEventListener('change', (e) => {
+  settings.sstvWaitQuiet = !!e.target.checked;
+  window.api.saveSettings({ sstvWaitQuiet: settings.sstvWaitQuiet });
+});
 document.getElementById('save-all-decodes').addEventListener('change', (e) => {
   settings.sstvSaveAllDecodes = !!e.target.checked;
   window.api.saveSettings({ sstvSaveAllDecodes: settings.sstvSaveAllDecodes });
