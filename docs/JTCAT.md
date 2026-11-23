@@ -27,7 +27,7 @@ lib/ft8_native, renderer/jtcat-popout.* or the ECHOCAT jtcat-* messages.
 - The pop-out to shack bridge is lib/remote-bridge.js (a row per channel; the test fails otherwise).
 
 ## Operating rules that are settings (names only; semantics in each module's header)
-Per profile: jtcatMaxQsoAttempts, jtcatReworkDays, jtcatHuntSpotted, jtcatNferParks, jtcatLogPrompt,
+Per profile: jtcatMaxQsoAttempts, jtcatCallingTimeMin, jtcatReworkDays, jtcatHuntSpotted, jtcatNferParks, jtcatLogPrompt,
 jtcatRelogCooldownMin, jtcatRunPauseAfter, jtcatModeHop*, jtcatFdMode/jtcatFdExch, jtcatHoundMode,
 jtcatSkipTx1, jtcatApDecode, jtcatLateStartTx, jttyMacroStyle, jttyMacros, pskMacros.
 Machine-wide (GLOBAL_KEY): ultracat, jtcatRxGain, jtcatTxGain (desktop-authoritative, one writer
@@ -55,6 +55,9 @@ Departures from WSJT-X (do not "fix"):
    `jtcat-qso-state` `phase: 'error'`, `send73: true`) shows "Not logged: W1ABC never sent RR73.
    Press Send 73 to log it." Send 73 (or Skip) sends the 73, which logs it. In Run the QSO is
    dropped and CQ resumes. (Until #807 the cap logged and sent a 73 by itself.)
+   The Tx watchdog exists too: `jtcatCallingTimeMin` (#161, lib/jtcat-calling-time.js), minutes of
+   FT8/FT4/FT2 transmitting with no QSO progress and no operator action before TX stops, default 6
+   (WSJT-X's figure), 1-30. The ceiling is the 30-minute attended limit on Run and Hunt, which stays.
 3. Field Day, CQ side: the ARRL FD sequence ends on their RR73 and we send no 73; it still logs at
    our R+exchange. The S&P side follows the rule (logs when our RR73 goes out).
 
