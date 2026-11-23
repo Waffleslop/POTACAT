@@ -533,6 +533,8 @@ contextBridge.exposeInMainWorld('api', {
   vfoPopoutOpen: () => ipcRenderer.send('vfo-popout-open'),
   vfoPopoutTheme: (theme) => ipcRenderer.send('vfo-popout-theme', theme),
   vfoTunedSpot: (spot) => ipcRenderer.send('vfo-tuned-spot', spot),
+  // A station the operator picked: its call to N3FJP's entry window (#712; main decides if and when).
+  n3fjpCallInProgress: (call) => ipcRenderer.send('n3fjp-call-in-progress', call),
   onVfoPopoutStatus: (cb) => ipcRenderer.on('vfo-popout-status', (_e, open) => cb(open)),
   // JTCAT pop-out
   // Optional mode ('PSK31' | 'JTTY' | ...): an already-open window switches to it.
