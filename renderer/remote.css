@@ -4896,6 +4896,8 @@ body.popout-mode .popout-only { display: flex; }
 }
 .mail-chip[aria-pressed="true"] { border-color: var(--m-tint); background: var(--m-tint-subtle); color: var(--m-tint); }
 .mail-gw-msg { padding: 12px 0; font-size: 16px; color: var(--m-muted); }
+/* "Needs its own modem (service code X)": the heading over gateways that run a community modem. */
+.mail-gw-group { padding: 10px 0 2px; font-size: 16px; font-weight: 700; color: var(--m-muted); overflow-wrap: anywhere; }
 .mail-note { display: flex; flex-direction: column; gap: 6px; font-size: 16px; line-height: 1.4; color: var(--m-ink); overflow-wrap: anywhere; }
 .mail-note.hidden { display: none; }
 .mail-gw-status { display: flex; flex-direction: column; gap: 8px; }

@@ -1,6 +1,6 @@
 # Add your own Winlink gateways (plan)
 
-Status: plan, 2026-11-22. Casey: "please plan for this." Pieces 2.1 (list refresh on Refresh and daily) and 2.2 (Other service codes) built 2026-11-22 (feat/938); 2.3 (Add a gateway) held by Casey. The codes stay out of session.log (only their count is logged) until Casey answers whether they belong in logs and bug reports.
+Status: plan, 2026-11-22. Casey: "please plan for this." Pieces 2.1 (list refresh on Refresh and daily) and 2.2 (Other service codes) built 2026-11-22 (feat/938); 2.3 (Add a gateway, phase 3) built 2026-11-22 (feat/585-add-a-gateway; Casey: "build the rest to the merged plan"). Changes from the text below: the form also takes an ARDOP bandwidth per gateway (#585 asks for it; stored as `bw`, still capped by the operator's own, #663); copy says "center" (Casey 2026-10-23); Add a gateway, Edit and Remove are links under the Gateway list, so the bar is no wider. Phase 4 (ECHOCAT Web form, the shack capability note, the phone handoff) is not built; the shack invoke and the protocol already carry the new fields. The codes stay out of session.log (only their count is logged) until Casey answers whether they belong in logs and bug reports.
 
 The ask, from an operator: "Also would there be a way to add custom winlink gateways for digital
 section. There is a few on Long Island to my clubs winlink gateways that aren't populating that
@@ -155,6 +155,14 @@ anything; piece 3 covers the rest.
   the list.
 - If PR #929 changes to "MERCURY only when Mercury is chosen" before this lands, the operator's codes
   are added the same way, beside it.
+- Built 2026-11-22 (Casey: "fix community gateways"): Winlink lists gateways that run a
+  community-built modem under a standard mode (VARA, VARA FM, ARDOP, Packet); only the service code
+  tells them apart, and a standard modem cannot connect to them. `OWN_MODEM_CODES` in
+  `lib/winlink-pat.js` (DATA2G, MODEM73, VARDEFM, IONHF; source https://rmsradar.ku0hn.radio/clients.html)
+  marks those rows `ownModem` and moves them after the standard rows (`groupOwnModemGateways`). The
+  mail window and ECHOCAT Web show them under "Needs its own modem (service code X)", tagged, Connect
+  still allowed. Any other code the operator types is an ordinary list. A row with no code (a Pat
+  without our patch) stays where it was. MERCURY keeps #929's rule.
 
 ### 2.3 Add a gateway (the mail window's gateway picker)
 

@@ -17174,6 +17174,9 @@ async function winlinkGateways(mode, band, { refresh = false } = {}) {
     // MERCURY gateways only in the VARA HF list and only when Mercury is chosen;
     // then that list is Mercury gateways only. Before anything sees the list.
     list = WinlinkPat.gatewaysForChoice(list, { mode, mercury: WinlinkPat.mercuryChosen(settings) });
+    // Gateways whose service code says they run a community modem (DATA2G and
+    // the like) go after the standard ones, marked ownModem; Connect stays allowed.
+    list = WinlinkPat.groupOwnModemGateways(list);
     const secs = Math.round((Date.now() - t0) / 1000);
     if (secs >= 20) winlinkLog(`gateway list (${mode}): Pat took ${secs} s to rank ${list.length} gateways by propagation`);
     if (predicting && list.some((g) => g.quality != null)) {
