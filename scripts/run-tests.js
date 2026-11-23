@@ -163,6 +163,7 @@ const TESTS = [
   'test/worked-overlay-test.js',
   'test/remote-scope-freq-test.js',
   'test/protocol-registration-test.js',
+  'test/vara-mac-guide-link-test.js',
   'test/modem-rx-level-test.js',
   'test/watchlist-groups-test.js',
   'test/cert-san-policy-test.js',
@@ -824,6 +825,7 @@ const SERIAL = new Set([
   'test/atu-wizard-test.js', // runs the wizard on a 40x clock over real timers; under load a point times out (K3SBP run 1 case)
   'test/tci-audio-test.js', // 2 s budgets for a loopback TCI server to answer; missed in 2 of 9 parallel runs on a loaded machine, never alone
   'test/paddle-bounce-test.js', // web keyer element timing in real milliseconds; a dash was cut short once under load
+  'test/civ-pacing-test.js', // fixed 60/200 ms waits on a fake CI-V radio; failed four pushes under parallel load on 2026-11-22, passes alone
 ]);
 
 // SERIAL files that may be retried once after a failure (timing under load,
