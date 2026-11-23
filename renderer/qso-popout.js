@@ -242,6 +242,19 @@ const mapContainer = document.getElementById('qso-map-container');
 const mapSplitter = document.getElementById('qso-map-splitter');
 
 // --- Toast ---
+/** Main refused because the log changed under this window (#988): reload it. */
+async function reloadIfRefused(result) {
+  if (!result || !result.reason) return;
+  allQsos = await window.api.getAllQsos();
+  clearSelection();
+  render();
+}
+/** A refusal already says "Nothing was changed: ..."; other failures get the prefix. */
+function refusalText(prefix, result) {
+  if (result && result.reason && result.error) return result.error;
+  return prefix + ': ' + ((result && result.error) || 'unknown error');
+}
+
 function toast(msg) {
   const el = document.getElementById('qso-toast');
   el.textContent = msg;
@@ -882,13 +895,15 @@ tbody.addEventListener('dblclick', async (e) => {
   const fields = { QSL_RCVD: nowReceived ? 'Y' : '' };
   // QSLRDATE rides along like LOTW_QSLSDATE does — blanked when untoggled.
   fields.QSLRDATE = nowReceived ? new Date().toISOString().slice(0, 10).replace(/-/g, '') : '';
-  const result = await window.api.updateQso({ idx, fields });
+  // The identity rides along: main edits only this QSO (lib/qso-identity.js, #988).
+  const result = await window.api.updateQso({ idx, fields, identity: QsoIdentity.of(qso) });
   if (result.success) {
     Object.assign(qso, fields);
     render();
     toast(nowReceived ? `Paper QSL received from ${qso.CALL}` : `Paper QSL cleared for ${qso.CALL}`);
   } else {
-    toast('Update failed: ' + (result.error || 'unknown error'));
+    await reloadIfRefused(result);
+    toast(refusalText('Update failed', result));
   }
 });
 
@@ -961,17 +976,20 @@ tbody.addEventListener('dblclick', (e) => {
     const fields = { [field]: newVal };
     if (field === 'FREQ') fields.BAND = freqMhzToBandLocal(newVal);
 
-    const result = await window.api.updateQso({ idx, fields });
+    const qso = allQsos.find(q => q.idx === idx);
+    if (!qso) { cancel(); return; }
+    // The identity rides along: main edits only this QSO (lib/qso-identity.js, #988).
+    const result = await window.api.updateQso({ idx, fields, identity: QsoIdentity.of(qso) });
     if (result.success) {
-      const qso = allQsos.find(q => q.idx === idx);
       // Main's fields: a My Park edit also writes MY_SIG (#509); a Park edit
       // writes SIG and POTA_REF (or its program's REF), which POTA.app reads.
-      if (qso) Object.assign(qso, result.fields || fields);
+      Object.assign(qso, result.fields || fields);
       render();
-      toast(`Updated ${qso ? qso.CALL : 'QSO'}`);
+      toast(`Updated ${qso.CALL}`);
     } else {
       cancel();
-      toast('Update failed: ' + (result.error || 'unknown error'));
+      await reloadIfRefused(result);
+      toast(refusalText('Update failed', result));
     }
   }
 
@@ -1029,17 +1047,22 @@ tbody.addEventListener('click', async (e) => {
     const tr = btn.closest('tr');
     const idx = parseInt(tr.dataset.idx, 10);
     const qso = allQsos.find(q => q.idx === idx);
-    const call = qso ? qso.CALL : '?';
+    if (!qso) return;
+    const call = qso.CALL || '?';
 
-    const result = await window.api.deleteQso(idx);
+    // The identity rides along: main deletes only this QSO (lib/qso-identity.js, #988).
+    const result = await window.api.deleteQso(idx, QsoIdentity.of(qso));
     if (result.success) {
-      allQsos = allQsos.filter(q => q.idx !== idx);
-      // Re-index to match the rewritten file
-      allQsos.forEach((q, i) => { q.idx = i; });
+      // Reload: every later record moved up one in the file, and idx must
+      // stay the file position (#988: renumbering in display order made the
+      // next delete or edit hit another QSO).
+      allQsos = await window.api.getAllQsos();
+      clearSelection();
       render();
       toast(`Deleted QSO with ${call}`);
     } else {
-      toast('Delete failed: ' + (result.error || 'unknown error'));
+      await reloadIfRefused(result);
+      toast(refusalText('Delete failed', result));
     }
   } else {
     btn.classList.add('confirming');
