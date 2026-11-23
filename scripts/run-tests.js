@@ -201,6 +201,7 @@ const TESTS = [
   'test/elecraft-data-mode-test.js',
   'test/elecraft-atu-tune-test.js', // Elecraft tunes with SWT (K3 19, KX3 44, KX2 20 by OM;), never AC
   'test/ts590-atu-ac111-test.js', // TS-590S/SG starts a tune with AC111; per its PC command guide (VA2PSL #635); other Kenwoods keep AC011;
+  'test/ft2000-atu-cmd-test.js', // #990: FT-2000 tune is AC002; per its CAT reference p. 5, not the Kenwood AC011;
   'test/freedv-spot-merge-test.js', // #742: one row per FreeDV station across PSKReporter + FreeDV Reporter; departed stations leave; rows keyed by mode too
   'test/freedv-display-mode-test.js', // #716: RADE, not DIGU/PKTUSB, on every surface while FreeDV runs
   'test/vfo-ptt-row-test.js', // #190: ECHOCAT Web VFO-tab PTT row shows while the mode is unknown; hidden in CW/data
