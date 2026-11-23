@@ -30619,13 +30619,14 @@ function connectRemote() {
 
   // Scan on/off sync (scan-state-sync-desktop). The scan engine lives in the
   // renderer, so these inbound peer messages are forwarded over IPC.
-  remoteServer.on('scan-control', ({ action, filters, dwellSec, fromFreqKhz }) => {
+  remoteServer.on('scan-control', ({ action, filters, dwellSec, fromFreqKhz, guest }) => {
     // #37 (scan-remote-v1): a start that carries the phone's own scan runs here,
     // in main, with the phone's filters; the desktop's own scan stops first.
     if (action === 'start' && filters && !isRemoteMode()) {
       if (desktopScanning && win && !win.isDestroyed()) win.webContents.send('remote-scan-control', { action: 'stop' });
       markUserActive();
-      phoneScanRun().start({ filters, dwellSec, fromFreqKhz });
+      // #961: who started it, so the end of a Guest Pass stops a guest's scan only.
+      phoneScanRun().start({ filters, dwellSec, fromFreqKhz, by: guest ? 'guest' : 'owner' });
       return;
     }
     if (action === 'stop' && _phoneScanRun && _phoneScanRun.scanning) _phoneScanRun.stop('stop');
@@ -43884,7 +43885,8 @@ function passTxAllowed(mode) {
 /**
  * The end of a Guest Pass stops everything the guest started, whatever
  * surface started it: Run/Hunt, the WSPR beacon, an FT8/JTTY/PSK message in
- * flight, CW text or a held paddle, an SSTV picture, a Mercury session, PTT.
+ * flight, CW text or a held paddle, an SSTV picture, a Mercury session, PTT,
+ * and a desktop-run scan the guest started (#961).
  * Returns what it stopped, for the log. (docs/share-my-rig-lease-plan.md, 8)
  */
 function passLeaseStopTransmitters(reason) {
@@ -43903,6 +43905,8 @@ function passLeaseStopTransmitters(reason) {
   });
   step('SSTV', () => { sstvHaltTxNow(); return false; });
   step('Mercury', () => { if (!mercuryClient) return false; mercuryClient.abort(); return false; });
+  // #961: a desktop-run scan the guest started stops (the owner's never); the radio stays where it is.
+  step('scan', () => { const why = ScanRun.guestScanEndWhy(reason); return !!(why && _phoneScanRun && _phoneScanRun.stopGuestRun(why)); });
   step('PTT', () => {
     handleRemotePtt(false);
     if (cat && cat.connected) gatedSetTransmit(false);
