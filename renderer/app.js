@@ -18817,6 +18817,8 @@ async function openSettingsDialog(tab) {
       winlinkVaraSection.classList.remove('hidden');
       winlinkVaraSection.querySelectorAll('.vara-win-only').forEach((el) => el.classList.toggle('hidden', !onWindows));
       winlinkVaraSection.querySelectorAll('.vara-other-only').forEach((el) => el.classList.toggle('hidden', onWindows));
+      // macOS: a link to the website's VARA-on-a-Mac guide beside Use VARA HF.
+      winlinkVaraSection.querySelectorAll('.vara-mac-only').forEach((el) => el.classList.toggle('hidden', window.api.platform !== 'darwin'));
       const varaDetails = document.getElementById('vara-details');
       if (varaDetails && !onWindows) varaDetails.open = true;
       if (setVaraHfHost) setVaraHfHost.value = s.winlinkVaraHost || '';
