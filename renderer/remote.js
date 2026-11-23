@@ -2993,25 +2993,33 @@
 
       case 'qso-updated':
         if (msg.success && msg.idx !== undefined) {
-          const entry = logbookQsos.find(q => q.idx === msg.idx);
+          // logIdx: where the record really is (#988); older shacks send idx only.
+          const at = typeof msg.logIdx === 'number' ? msg.logIdx : msg.idx;
+          const entry = logbookQsos.find(q => q.idx === at);
           if (entry) Object.assign(entry, msg.fields);
           renderLogbook();
           showLogToast('QSO updated');
         } else {
           showLogToast(msg.error || 'Update failed', true);
+          // Refused because the log changed (#988): reload the list.
+          if (msg.reason && ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'get-all-qsos' }));
         }
         break;
 
       case 'qso-deleted':
         if (msg.success && msg.idx !== undefined) {
-          logbookQsos = logbookQsos.filter(q => q.idx !== msg.idx);
+          // logIdx: the position the record left (#988); older shacks send idx only.
+          const gone = typeof msg.logIdx === 'number' ? msg.logIdx : msg.idx;
+          logbookQsos = logbookQsos.filter(q => q.idx !== gone);
           // Re-index: entries after deleted one shift down
-          logbookQsos.forEach(q => { if (q.idx > msg.idx) q.idx--; });
+          logbookQsos.forEach(q => { if (q.idx > gone) q.idx--; });
           expandedQsoIdx = -1;
           renderLogbook();
           showLogToast('QSO deleted');
         } else {
           showLogToast(msg.error || 'Delete failed', true);
+          // Refused because the log changed (#988): reload the list.
+          if (msg.reason && ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'get-all-qsos' }));
         }
         break;
 
@@ -8846,7 +8854,10 @@
         fields[input.dataset.field] = input.value;
       });
       if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: 'update-qso', idx, fields }));
+        // The record's identity rides along, so the shack edits only this
+        // QSO even if idx went stale (lib/qso-identity.js, #988).
+        const rec = logbookQsos.find(q => q.idx === idx);
+        ws.send(JSON.stringify({ type: 'update-qso', idx, fields, identity: QsoIdentity.of(rec) }));
       }
       return;
     }
@@ -8857,7 +8868,8 @@
       if (deleteBtn.classList.contains('confirming')) {
         const idx = parseInt(deleteBtn.dataset.idx, 10);
         if (ws && ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({ type: 'delete-qso', idx }));
+          const rec = logbookQsos.find(q => q.idx === idx);
+          ws.send(JSON.stringify({ type: 'delete-qso', idx, identity: QsoIdentity.of(rec) }));
         }
       } else {
         deleteBtn.classList.add('confirming');

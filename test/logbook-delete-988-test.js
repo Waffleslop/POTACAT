@@ -246,7 +246,7 @@ test('renderer/remote.js (ECHOCAT Web): sends the identity and re-indexes by the
   const html = readSrc(path.join(ROOT, 'renderer', 'remote.html'));
   assert.ok(html.indexOf('<!-- qso-identity-js -->') !== -1, 'ECHOCAT Web gets lib/qso-identity.js inlined');
   const rs = readSrc(path.join(ROOT, 'lib', 'remote-server.js'));
-  assert.ok(/\['qso-identity-js', 'qso-identity\.js'\]/.test(rs));
+  assert.ok(/html\.replace\('<!-- qso-identity-js -->'/.test(rs), 'remote-server inlines it');
 });
 
 fs.rmSync(dir, { recursive: true, force: true });
