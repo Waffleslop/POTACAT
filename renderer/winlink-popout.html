@@ -93,6 +93,7 @@
     .wl-add-hint { font-size: 13px; color: var(--text-secondary); max-width: 300px; }
     .wl-add-hint:empty, .wl-add-err:empty { display: none; }
     .wl-add-err { font-size: 13px; font-weight: 600; color: var(--accent-red-text, var(--accent-red, #e94560)); max-width: 300px; }
+    .wl-add-older { display: block; max-width: none; margin-bottom: 8px; }
     .wl-add-actions { display: flex; gap: 8px; align-items: center; margin-top: 10px; flex-wrap: wrap; }
 
     /* Templates menu (Casey 2026-11-11): opens beside the Templates button. */
@@ -433,6 +434,8 @@
   <!-- Add a gateway (#585, plan docs/winlink-custom-gateways-plan.md 2.3). -->
   <div class="wl-add-card" id="wl-add-card" role="group" aria-labelledby="wl-add-title">
     <span class="wl-add-title" id="wl-add-title">Add a gateway</span>
+    <!-- Driving a shack whose hello lacks winlink-mine (#585 phase 4): one line, the shack needs an update. -->
+    <span class="wl-add-hint wl-add-older" id="wl-add-older" role="note"></span>
     <div class="wl-add-grid">
       <label class="wl-add-f"><span>Call</span>
         <input id="wl-add-call" maxlength="12" placeholder="W2XYZ-10" autocomplete="off" spellcheck="false">

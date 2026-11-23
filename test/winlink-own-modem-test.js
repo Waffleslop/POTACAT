@@ -103,7 +103,8 @@ test('wiring: the shack groups after the Mercury rule and before the list goes a
   assert.ok(b.includes('<option value="\' + row.i + \'"'), 'option values stay indices into the list');
   const web = readSrc(path.join(__dirname, '..', 'renderer', 'remote.js'));
   const r = web.slice(web.indexOf('function mailRenderGateways()'), web.indexOf('function mailPickGateway('));
-  assert.ok(r.includes('MailView.gatewaySections(mailGateways, 80)'), 'ECHOCAT Web draws the sections');
+  // #585 phase 4: My own gateways come first; the sections are drawn over Pat's rows after them.
+  assert.ok(r.includes('MailView.gatewaySections(mailGateways.slice(mailMineCount), 80)'), 'ECHOCAT Web draws the sections');
   assert.ok(r.includes("mailMake('div', 'mail-gw-group', sec.heading)"), 'with the heading');
   assert.ok(r.includes("g.serviceTag || ''"), 'each row shows its code');
   const css = readSrc(path.join(__dirname, '..', 'renderer', 'remote.css'));

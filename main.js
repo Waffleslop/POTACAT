@@ -485,6 +485,7 @@ const WinlinkAutoRetry = require('./lib/winlink-auto-retry'); // one automatic r
 const WinlinkPatRecover = require('./lib/winlink-pat-recover'); // Pat still on a call nobody owns: restart it, never refuse for ever (#430)
 const WinlinkSummaryStore = require('./lib/winlink-summary-store'); // the session summary lines, kept across a restart (#425)
 const WinlinkFav = require('./lib/winlink-favourites');
+const WinlinkMine = require('./lib/winlink-my-gateways'); // #585: the shack's check of a typed gateway
 const WinlinkTemplates = require('./lib/winlink-templates');
 const WinlinkContacts = require('./lib/winlink-contacts');
 const WinlinkReach = require('./lib/winlink-reach');
@@ -8007,6 +8008,7 @@ function bridgeInboundFromShack(msg) {
   const rule = RemoteBridge.IN[msg.type];
   if (!rule) return false;
   RemoteBridge.trackState(_remoteBridgeState, msg);
+  _remoteBridgeState.serverCaps = (remoteClient && remoteClient.state && remoteClient.state().serverCapabilities) || null; // the shack's hello (#585 winlink-mine)
   const out = rule(msg, _remoteBridgeState) || [];
   for (const [ch, payload] of out) {
     if (ch.startsWith('winlink-')) { remoteWinlinkToWindow(ch, payload); continue; }
@@ -17291,6 +17293,12 @@ function winlinkFavouriteFields(r = {}) {
 
 /** Save ('add'), change ('edit', #585) or remove a gateway in My gateways; every surface gets the list on winlink-state. */
 function winlinkFavourite(op, g) {
+  // A gateway typed in (#585) is checked here too, with the form's words, so
+  // a device shows the shack's answer as it is. No band check, ever.
+  if ((op === 'add' || op === 'edit') && g.mine) {
+    const chk = WinlinkMine.checkSaved(g);
+    if (!chk.ok) return { ok: false, error: chk.error };
+  }
   const before = WinlinkFav.normalize(settings.winlinkFavourites);
   let list;
   if (op === 'add') {

@@ -1140,6 +1140,8 @@
     $('wl-add-via').value = entry && entry.via ? entry.via.join(' ') : '';
     $('wl-add-note').value = entry && entry.note ? entry.note : '';
     $('wl-add-msg').textContent = '';
+    // A shack on an older POTACAT saves a plain favourite (no Mine tag, no note): say so.
+    $('wl-add-older').textContent = state && state.shackLacksMine ? WinlinkMine.OLDER_SHACK : '';
     addShowErrors(null);
     addSyncFields();
     $('wl-add-card').classList.add('show');

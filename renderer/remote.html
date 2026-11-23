@@ -22,6 +22,7 @@
   <!-- sstv-templates-js -->
   <!-- favorites-js -->
   <!-- winlink-mail-view-js -->
+  <!-- winlink-my-gateways-js -->
   <!-- winlink-mail-actions-js -->
   <!-- wspr-dbm-js -->
   <!-- cloud-billing-ui-js -->
@@ -1969,6 +1970,61 @@
                   <div id="mail-gw-status" class="mail-gw-status hidden">
                     <span id="mail-gw-note" class="mail-note-text"></span>
                     <button type="button" id="mail-gw-retry" class="mail-btn mail-btn-main hidden">Try again</button>
+                  </div>
+                  <!-- My own gateways (#585 phase 4): Add a gateway; Edit and Remove for a picked Mine row -->
+                  <div id="mail-gw-links" class="mail-gw-links">
+                    <button type="button" id="mail-gw-add" class="mail-link" aria-controls="mail-add-card">Add a gateway</button>
+                    <button type="button" id="mail-mine-edit" class="mail-link hidden">Edit</button>
+                    <button type="button" id="mail-mine-remove" class="mail-link hidden">Remove</button>
+                  </div>
+                  <!-- The desktop mail window's form: same fields, labels and words (lib/winlink-my-gateways.js) -->
+                  <div id="mail-add-card" class="mail-card mail-add-card hidden" role="group" aria-labelledby="mail-add-title">
+                    <div id="mail-add-title" class="mail-add-title">Add a gateway</div>
+                    <div id="mail-add-older" class="mail-add-hint hidden"></div>
+                    <div class="mail-add-f">
+                      <label for="mail-add-call" class="mail-add-label">Call</label>
+                      <input id="mail-add-call" class="mail-input mail-add-mono" maxlength="12" placeholder="W2XYZ-10" autocomplete="off" autocapitalize="characters" spellcheck="false">
+                      <div id="mail-add-call-err" class="mail-add-err" role="alert"></div>
+                    </div>
+                    <div class="mail-add-f">
+                      <label for="mail-add-mode" class="mail-add-label">Mode</label>
+                      <select id="mail-add-mode" class="mail-input"></select>
+                      <div id="mail-add-mode-err" class="mail-add-err" role="alert"></div>
+                    </div>
+                    <div class="mail-add-f">
+                      <label for="mail-add-freq" id="mail-add-freq-label" class="mail-add-label">Center frequency</label>
+                      <input id="mail-add-freq" class="mail-input mail-add-mono" inputmode="decimal" autocomplete="off" spellcheck="false">
+                      <div id="mail-add-dial" class="mail-add-hint" aria-live="polite"></div>
+                      <div id="mail-add-freq-err" class="mail-add-err" role="alert"></div>
+                    </div>
+                    <div id="mail-add-bw-row" class="mail-add-f">
+                      <label for="mail-add-bw" class="mail-add-label">ARDOP bandwidth</label>
+                      <select id="mail-add-bw" class="mail-input">
+                        <option value="0">My own setting</option>
+                        <option value="200">200 Hz</option>
+                        <option value="500">500 Hz</option>
+                        <option value="1000">1000 Hz</option>
+                        <option value="2000">2000 Hz</option>
+                      </select>
+                      <div class="mail-add-hint">The widest this gateway takes. POTACAT never goes wider than your own setting.</div>
+                      <div id="mail-add-bw-err" class="mail-add-err" role="alert"></div>
+                    </div>
+                    <div id="mail-add-via-row" class="mail-add-f hidden">
+                      <label for="mail-add-via" class="mail-add-label">Via (optional)</label>
+                      <input id="mail-add-via" class="mail-input mail-add-mono" placeholder="W2ABC-1" autocomplete="off" autocapitalize="characters" spellcheck="false">
+                      <div class="mail-add-hint">Up to two digipeaters, in order.</div>
+                      <div id="mail-add-via-err" class="mail-add-err" role="alert"></div>
+                    </div>
+                    <div class="mail-add-f">
+                      <label for="mail-add-note" class="mail-add-label">Note (optional)</label>
+                      <input id="mail-add-note" class="mail-input" maxlength="60" placeholder="club net Tuesdays" autocomplete="off">
+                      <div id="mail-add-note-err" class="mail-add-err" role="alert"></div>
+                    </div>
+                    <div class="mail-add-actions">
+                      <button type="button" id="mail-add-save" class="mail-btn mail-btn-main">Save</button>
+                      <button type="button" id="mail-add-cancel" class="mail-btn">Cancel</button>
+                    </div>
+                    <div id="mail-add-msg" class="mail-add-err" role="alert"></div>
                   </div>
                 </div>
               </div>
