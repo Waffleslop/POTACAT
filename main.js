@@ -24525,6 +24525,7 @@ function startJtcat(mode) {
   // Emit it again now that the listeners exist. K3SBP 2026-09-10.
   ft8Engine.emit('status', { state: 'running', mode: mode || 'FT8' });
   console.log('[JTCAT] Engine started, mode:', mode || 'FT8');
+  resumeMobileSpectrum(); // #943: the stopJtcat() above stopped the phone's waterfall feed
 }
 
 // --- JTCAT clock-offset monitor -----------------------------------------
@@ -25186,6 +25187,15 @@ function stopInProcessSpectrum() {
   console.log('[JTCAT] In-process spectrum loop stopped');
 }
 
+// An engine start (band change, mode change, a fresh Start) runs stopJtcat()
+// first, which stops the loop above. The phone's waterfall panel stays open
+// through that and never re-subscribes, so its feed went grey until the
+// operator toggled the waterfall (#943). Resume from the sticky intent, as a
+// reconnect does. Idempotent; the loop self-guards on hasClient().
+function resumeMobileSpectrum() {
+  if (_mobileWantsSpectrum) startInProcessSpectrum();
+}
+
 // JS8 waterfall spectrum. The JS8 popout has no renderer audio graph (JS8
 // decodes in MAIN, unlike FT8's WebAudio path), so main runs the same FFT
 // over Js8Engine._specBuffer and pushes bins to the popout at ~10 fps. Runs
@@ -25264,8 +25274,9 @@ function stopJtcat() {
     try { setWsprBeacon(false, { immediate: true, why: 'stopped with JTCAT' }); } catch {}
   }
   // Spectrum loop has no reason to keep running once the engine is
-  // gone — audioBuffer reads would all return zeros anyway. Mobile
-  // re-subscribes on the next FT8-tab open.
+  // gone — audioBuffer reads would all return zeros anyway. The phone's
+  // intent (_mobileWantsSpectrum) stays: the next engine start resumes the
+  // feed (resumeMobileSpectrum, #943), since an open panel never re-subscribes.
   stopInProcessSpectrum();
 
   // Clean up any active QSOs to prevent stuck state
@@ -57578,6 +57589,7 @@ function cloudShackNotice(text, kind) {
     // directly — N slices on one PC clock still need exactly one check.
     startJtcatClockMonitor();
     console.log(`[JTCAT] Multi-slice started: ${slices.map(s => s.sliceId + '/' + s.band).join(', ')}`);
+    resumeMobileSpectrum(); // #943: the stopJtcat() above stopped the phone's waterfall feed
   });
 
   ipcMain.on('jtcat-quiet-freq', (_e, hz) => {
