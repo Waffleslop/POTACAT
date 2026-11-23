@@ -286,7 +286,7 @@ test('#227: SSTV sends its picture over the LAN; HALT and tx-complete stop it on
   assert.ok(/if \(useYaesuLanTx\) releaseYaesuLanTx\('sstv', 'SSTV refused'\);/.test(enc) && /if \(useYaesuLanTx\) releaseYaesuLanTx\('sstv', 'SSTV not keyed'\);/.test(enc));
   assert.ok(/const t = yaesuLanTransport\(\);\n\s*if \(!t\) \{/.test(enc), 'null-checked');
   assert.ok(/t\.sendTxAudio\(txAudio\.samples, \{ offsetMs: 0, inputSampleRate: SSTV_SAMPLE_RATE, startDelayMs: 100, tailSilenceMs: 200 \}\)/.test(enc));
-  const halt = bodyOf(main, 'function sstvHaltTxNow() {', '\n}');
+  const halt = bodyOf(main, 'function sstvHaltTxNow({ keepWait = false } = {}) {', '\n}');
   assert.ok(/if \(settings\.audioSource === 'yaesu-lan'\) \{ try \{ endYaesuLanTx\('sstv', 'SSTV halt'\);/.test(halt));
   const done = bodyOf(main, "ipcMain.on('sstv-tx-complete', () => {", '\n  });');
   assert.ok(/if \(settings\.audioSource === 'yaesu-lan'\) endYaesuLanTx\('sstv', 'SSTV tx-complete'\);/.test(done));

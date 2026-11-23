@@ -139,6 +139,7 @@ const TESTS = [
   'test/sstv-audio-device-test.js',
   'test/sstv-live-path-test.js',
   'test/sstv-drive-test.js', // #279: the SSTV Drive slider keeps 0, shows its value, and is never squeezed
+  'test/sstv-tx-power-test.js', // #279: Transmit power for SSTV, set before a picture and put back after it, every way it ends
   'test/sstv-start-band-test.js', // #292: SSTV never tunes a radio to a band it is not set up for
   'test/sstv-quiet-wait-test.js', // #326: SSTV waits for a quiet frequency: busy waits, quiet sends, Send now, Cancel, the 4-minute give-up, off by default, the phone path, wiring
   'test/sstv-echocat-send-test.js', // #357: a picture from ECHOCAT: its own copy for the encoder, a status line not a dialog, tuned before it keys
@@ -273,6 +274,7 @@ const TESTS = [
   'test/aprs-beacon-tx-readback-test.js', // #856: the radio beacon hears the radio's TX readback while POTACAT holds PTT (IC-7300 over CI-V), not only TX-state changes
   'test/aprs-listen-moved-test.js', // APRS listening pauses when the radio moves off the APRS frequency (any cause), the return is dropped; the once-a-minute audio line
   'test/aprs-auto-listen-test.js', // APRS window: listen on open (receive only), once per open, every switch refusal plus TX / JTCAT QSO / owner / Guest Pass, off stays off
+  'test/aprs-start-stops-ft8-test.js', // APRS Start with FT8 decoding: halts JTCAT TX, stops FT8 the SSTV way, says so; automatic starts and guests keep the refusal
   'test/tune-link-pending-test.js', // a potacat://tune link that launches POTACAT waits for the radio (link up + a readback), tunes once; 60 s then a notice; only the latest link counts
   'test/radio-tune-route-test.js', // the one "radio reachable for tuning" decision: TCI, Flex Direct, CAT (APRS on a FLEX-8600M, 2026-11-18)
   'test/aprs-window-test.js', // APRS window layout: status cards (no heading), timer banner only with an interval, on-air banner only while keyed + Stop = the close abort, one-click beacon buttons, TX power -/+, two-line stations, "Within" in round units -> whole km, one-time range conversion
@@ -618,6 +620,7 @@ const TESTS = [
   'test/window-min-size-test.js',     // N0KAH: no window shrinks past its own controls
   'test/window-rules-test.js',        // every window opens in the theme and remembers its place
   'test/mac-frameless-windows-test.js', // #866: every visible frameless window keeps the macOS traffic lights; the APRS and JTCAT map title bars keep their own controls on a Mac
+  'test/linux-native-frame-test.js',  // #345: optional system title bar on Linux (off by default); one rule in lib/window-frame.js, the pages hide their own buttons
   'test/meter-box-test.js', // NJ2DX 2026-11-21: the S-meter box is clamped on screen as it appears, and draws with the theme's colours
   'test/yaesu-fa-digits-test.js',
   'test/yaesu-audit-ft891-test.js', // Yaesu CAT audit: FT-891 preamp, AGC, PROC, CW text, RTTY

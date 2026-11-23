@@ -20,7 +20,10 @@ function test(name, fn) {
   catch (e) { fail++; console.log('  FAIL ' + name + '\n       ' + (e.message || e)); }
 }
 const read = (f) => fs.readFileSync(path.join(__dirname, '..', f), 'utf8');
-const main = read('main.js');
+const main = read('main.js').replace(/\r\n/g, '\n');
+const WF = require('../lib/window-frame');
+// #345: the frame now comes from windowFrame() (lib/window-frame.js), still hiddenInset on a Mac.
+const MAC_FORM = /isMac \? \{ titleBarStyle: 'hiddenInset' \}|\.\.\.windowFrame\(\)/;
 
 console.log('Frameless windows on macOS (#866)');
 
@@ -34,6 +37,7 @@ test('every visible frameless window keeps the macOS traffic lights (hiddenInset
     if (!/frame: false/.test(opts)) continue;
     if (/offscreen: true/.test(opts) || /show: false/.test(opts) && /offscreen/.test(opts)) continue; // an off-screen render, never seen
     if (/isMac \? \{ titleBarStyle: 'hiddenInset' \} : \{ frame: false \}/.test(opts)) continue;
+    if (/\.\.\.windowFrame\(\)/.test(opts)) continue; // #345: the one rule, hiddenInset on a Mac (tested below)
     const line = main.slice(0, m.index).split('\n').length;
     bad.push('main.js:' + line + ' ' + (opts.match(/title: '([^']+)'/) || ['', '(untitled)'])[1]);
   }
@@ -42,9 +46,15 @@ test('every visible frameless window keeps the macOS traffic lights (hiddenInset
 
 test('the APRS window, the JTCAT map and the JS8 Heartbeat Map use the Mac form', () => {
   const at = (needle) => main.slice(main.indexOf(needle), main.indexOf(needle) + 700);
-  assert.ok(/isMac \? \{ titleBarStyle: 'hiddenInset' \}/.test(at("aprsWin = new BrowserWindow({")));
-  assert.ok(/isMac \? \{ titleBarStyle: 'hiddenInset' \}/.test(at("jtcatMapPopoutWin = new BrowserWindow({")));
-  assert.ok(/isMac \? \{ titleBarStyle: 'hiddenInset' \}/.test(at("js8MapWin = new BrowserWindow({")));
+  assert.ok(MAC_FORM.test(at("aprsWin = new BrowserWindow({")));
+  assert.ok(MAC_FORM.test(at("jtcatMapPopoutWin = new BrowserWindow({")));
+  assert.ok(MAC_FORM.test(at("js8MapWin = new BrowserWindow({")));
+});
+
+test('windowFrame() (lib/window-frame.js, #345) gives a Mac hiddenInset whatever the Linux setting says', () => {
+  assert.deepStrictEqual(WF.windowFrameFor('darwin', {}), { titleBarStyle: 'hiddenInset' });
+  assert.deepStrictEqual(WF.windowFrameFor('darwin', { linuxNativeFrame: true }), { titleBarStyle: 'hiddenInset' });
+  assert.ok(/function windowFrame\(\) \{\s*return WindowFrame\.windowFrameFor\(process\.platform/.test(main));
 });
 
 test('on a Mac the APRS views and settings, and the JTCAT map Worked button, stay; only the drawn window buttons go', () => {

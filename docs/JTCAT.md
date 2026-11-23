@@ -81,6 +81,11 @@ Departures from WSJT-X (do not "fix"):
   A link never starts the band-change ATU tune ("Auto-tune ATU on band change" keys a carrier):
   bandChangeAtuTune asks tuneLinkAutoAtu, logs the skip to the CAT log, and the link's notice adds
   one clause when it is shown anyway.
+- A mode that needs the radio's audio takes it from JTCAT by one tear-down (main.js releaseJtcatFor:
+  windows closed, engine stopped whoever started it, the main window's capture released, ECHOCAT told
+  running:false). Opening SSTV does it; so does the operator's APRS Start (2026-11-22), which halts
+  JTCAT TX first (jtcatHaltTxNow) and says "Stopped FT8 so APRS can listen." (lib/aprs-listen.js
+  startPlan). Automatic starts and Guest Pass guests never take it. Nothing restarts FT8 afterwards.
 - Wrong-band and out-of-privilege TX guards trust only a LIVE dial reading.
 - ULTRACAT (hidden, `settings.ultracat`): Run mode and unattended Hunt are the operator's
   responsibility; without it Hunt stops after 30 min idle (test/jtcat-hunt-off-test.js).

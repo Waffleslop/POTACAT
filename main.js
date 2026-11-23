@@ -455,6 +455,7 @@ const AmpDrive = require('./lib/amp-drive-limit'); // per-rig amplifier drive li
 const { decideBandPowerReapply } = require('./lib/band-power-reapply');
 const AtuWizard = require('./lib/atu-wizard');
 const AppTheme = require('./lib/app-theme');
+const WindowFrame = require('./lib/window-frame');
 const { stripSecrets, restoreSecrets, stripSdrUserinfo, sdrUserinfo } = require('./lib/settings-secrets');
 const { buildContestHistory } = require('./lib/contest-history');
 const contestsDb = require('./lib/contests-db');
@@ -513,6 +514,7 @@ const IcomUsbDataMod = require('./lib/icom-usb-data-mod'); // sweep 1a: DATA MOD
 const AprsRfFrequency = require('./lib/aprs-rf-frequency'); // APRS: the 2 m frequency by grid square (phase 2), 30 m worldwide (phase 3)
 const AprsRfFrames = require('./lib/aprs-rf-frames');       // APRS phase 2: Dire Wolf's AGW monitor frames -> APRS packets
 const AprsRadioReturn = require('./lib/aprs-radio-return'); // APRS phase 2: the radio goes back after listening
+const SstvTxPower = require('./lib/sstv-tx-power'); // #279: Transmit power for SSTV, set before a picture and put back after
 const AprsListenAudio = require('./lib/aprs-listen-audio'); // APRS listening: one line a minute about the audio Dire Wolf gets
 const AprsParser = require('./lib/aprs-parser');
 const AprsIgate = require('./lib/aprs-igate');             // APRS phase 4: the receive-only iGate's rules and the uplink login
@@ -959,6 +961,9 @@ const GLOBAL_KEYS = new Set([
   'aprsRfBeaconLastAt', // when this station last beaconed over its radio (confirmed): the radio timer counts from it after a restart
   'aprsListenReturn',  // {freqHz, mode, rigId, listenHz, state}: where the radio was before APRS
                        // listening tuned it (lib/aprs-radio-return.js) — this machine's radio
+  'sstvTxPowerW',      // #279: Transmit power for SSTV in W (null = the radio's own power) — this machine's radio
+  'sstvTxPowerRestore', // {watts, sstvWatts, rigId, at, state}: the power to put back after an SSTV
+                       // picture (lib/sstv-tx-power.js) — this machine's radio
   'wsprBeaconWatts',   // {watts, rigId}: the beacon's RF power when the operator set one
                        // while it was armed (#268) — also this machine's radio
   'mainMicDeviceId', 'mainPlaybackDeviceId',
@@ -3057,8 +3062,110 @@ function pushSstvRigState() {
     sstvPopoutWin.webContents.send('sstv-rig-state', {
       atu, atuActive: !!_currentAtuState,
       swrTripped: !!_swrTripped, swrMessage: _swrTripMessage || '',
+      power: sstvPowerState(),
     });
   } catch {}
+}
+
+// ---- Transmit power for SSTV (#279, lib/sstv-tx-power.js) --------------------
+// Empty (the default) changes nothing. A level is set just before the picture
+// keys (handleRemotePtt, txKind 'sstv', after every refusal) and the radio's
+// own level goes back at the key-up, however the picture ends. The level to
+// put back is on disk first, so a crash mid-picture is repaired by the next
+// session's first power report (sendCatPower). The commands go through the
+// gated setters, so a Guest Pass cap clamps them; nothing here keys the radio.
+const sstvTxPower = SstvTxPower.createSession({
+  load: () => (settings && settings.sstvTxPowerRestore) || null,
+  save: (m) => {
+    if (m) settings.sstvTxPowerRestore = m; else delete settings.sstvTxPowerRestore;
+    try { saveSettings(settings); } catch {}
+  },
+  setPower: (w) => sstvCommandTxPower(w),
+  log: (s) => sendCatLog(s),
+});
+
+/** Can POTACAT set this radio's power for a picture now? {canSet, why, remote} */
+function sstvPowerControl() {
+  if (isRemoteMode()) return { canSet: false, remote: true, why: 'remote' };
+  if (tciRigTarget()) return { canSet: false, why: 'no-power-control' };
+  const t = settings && settings.catTarget;
+  if (!t || t.type === 'none') return { canSet: false, why: 'no-power-control' };
+  const rigType = detectRigType();
+  if (rigType === 'flex') {
+    if (smartSdr && smartSdr.connected) return { canSet: true };
+    return { canSet: false, why: cat && cat.connected ? 'no-power-control' : 'no-radio' };
+  }
+  if (!cat || !cat.connected) return { canSet: false, why: 'no-radio' };
+  let caps = {};
+  try { caps = getRigCapabilities(rigType) || {}; } catch {}
+  return caps.txpower ? { canSet: true } : { canSet: false, why: 'no-power-control' };
+}
+
+/** The SSTV window's view: the saved level, whether it can be used, the line to show. */
+function sstvPowerState() {
+  const c = sstvPowerControl();
+  return {
+    watts: SstvTxPower.parseWatts(settings && settings.sstvTxPowerW),
+    canSet: !!c.canSet, remote: !!c.remote, why: c.why || '', text: SstvTxPower.stateText(c),
+  };
+}
+
+/** Command the radio's RF power for SSTV. Gated setters only (the Guest Pass cap). */
+function sstvCommandTxPower(watts) {
+  try {
+    const rigType = detectRigType();
+    if (rigType === 'flex') {
+      if (!smartSdr || !smartSdr.connected || !gatedSmartSdrTxPower(watts)) return false;
+    } else if (!cat || !cat.connected || !gatedSetTxPower(watts, { rigType })) {
+      return false;
+    }
+  } catch (e) {
+    sendCatLog('[SSTV] TX power command failed: ' + ((e && e.message) || e));
+    return false;
+  }
+  // Every surface's TX Pwr shows the level now; the radio's readback confirms it.
+  _currentTxPower = watts;
+  broadcastRigState();
+  return true;
+}
+
+/** Just before an SSTV picture keys, after every refusal (handleRemotePtt). */
+function sstvTxPowerBegin() {
+  const want = SstvTxPower.parseWatts(settings.sstvTxPowerW);
+  if (want === null) return; // empty: the radio's own power, nothing changes
+  const ctl = sstvPowerControl();
+  // The Guest Pass cap, asked the same way the gated setter asks it.
+  let capW = 0;
+  try {
+    if (passEnforcement) {
+      const r = passEnforcement.interceptCatCommand({ type: 'tx_power', watts: want });
+      if (r && r.clampTo != null) capW = Number(r.clampTo) || 0;
+    }
+  } catch {}
+  let limitW = 0;
+  try { const m = getActiveRigModel(); if (m && Number(m.maxPower) > 0) limitW = Number(m.maxPower); } catch {}
+  const ampW = activeAmpDriveLimitW();
+  if (ampW > 0 && (!limitW || ampW < limitW)) limitW = ampW;
+  const p = sstvTxPower.begin({ wantW: want, currentW: _currentTxPower, canSet: ctl.canSet, capW, limitW, rigId: settings.activeRigId || null });
+  if (p.action === 'set') {
+    sendCatLog(`[SSTV] TX power ${p.watts} W for this picture (Transmit power for SSTV${p.capped ? ', capped by the Guest Pass' : ''}); ${p.restoreW} W goes back when it ends`);
+  } else if (p.why === 'no-power-control') {
+    sendCatLog(`[SSTV] Transmit power for SSTV is ${want} W, but POTACAT cannot set this radio's power: the picture goes out at the power the radio is set to`);
+  } else if (p.why === 'power-unknown') {
+    sendCatLog(`[SSTV] Transmit power for SSTV is ${want} W, but the radio has not reported its power yet, so POTACAT leaves it as it is (there would be nothing to put back)`);
+  } else if (p.why === 'not-set') {
+    sendCatLog(`[SSTV] Could not set ${want} W for this picture: it goes out at the radio's own power`);
+  }
+}
+
+/** The picture ended, any way. Idempotent: only the first call after a begin acts. */
+function sstvTxPowerEnd(why) {
+  try { sstvTxPower.end(why); } catch (e) { console.error('[SSTV] power restore:', e); }
+}
+
+/** Every power report (sendCatPower): a restore lost to a crash or a slow radio. */
+function sstvTxPowerReconcile(watts) {
+  try { sstvTxPower.onReadback(watts, { rigId: settings.activeRigId || null }); } catch {}
 }
 
 // An ATU tune transmits its own carrier through the WORST of the match while
@@ -5285,6 +5392,8 @@ function sendCatPower(watts) {
   _powerReadbackThisLink = true; // this radio reports its power (#184)
   _lastPowerReadback = { watts: Number(watts) || 0, at: Date.now() };
   if (!isRemoteMode()) stationSetupReconcilePower(Number(watts) || 0);
+  // ...and an SSTV picture's power (#279).
+  if (!isRemoteMode()) sstvTxPowerReconcile(Number(watts) || 0);
 }
 
 // Band change on a radio that cannot report its power (deskHPSDR, Zeus: PC;
@@ -13563,6 +13672,7 @@ const aprsListen = {
   heard: 0,           // frames heard this session
   lastAt: 0,
   note: '',           // the rig's setup line (lib/rig-setup-notes.js), verbatim
+  handover: '',       // "Stopped FT8 so APRS can listen." when this start stopped JTCAT (aprsStopJtcatForListen)
   proc: null,         // its Dire Wolf
   monitor: null,      // its AGW monitor
   lane: null,         // the winlinkAudio lane Dire Wolf was started on
@@ -13915,17 +14025,36 @@ async function aprsRxFilterWiden(seq) {
   if (seq !== aprsListen.seq) return;
   const r = aprsRxFilter.widen(aprsListen.band);
   if (r.action === 'unknown') return; // nothing usable read: the width warning stays
-  aprsListen.note = [aprsSetupLine(), r.sentence, r.rit].filter(Boolean).join(' ');
+  aprsListen.note = [aprsListen.handover, aprsSetupLine(), r.sentence, r.rit].filter(Boolean).join(' ');
   aprsListenPush();
 }
 
-async function aprsListenStart({ resume = false } = {}) {
+/**
+ * The operator pressed Start while FT8 (any JTCAT mode) decodes: hand the
+ * radio over the way opening SSTV does (lib/aprs-listen.js startPlan). Halt
+ * first, so Run, Hunt, a WSPR beacon or a message on the air stop and PTT
+ * drops; then the shared tear-down closes the JTCAT window and stops the
+ * engine, phone-started or not, and every ECHOCAT device hears running:false.
+ * Nothing transmits here and FT8 is not started again when APRS stops.
+ * Returns the one line the window and the log show.
+ */
+function aprsStopJtcatForListen() {
+  const mode = ft8Engine && ft8Engine._mode ? ft8Engine._mode : 'FT8';
+  jtcatHaltTxNow('APRS listening');
+  releaseJtcatFor('APRS');
+  const line = AprsListen.ft8StoppedSentence(mode);
+  aprsLog(line);
+  return line;
+}
+
+async function aprsListenStart({ resume = false, operator = false, guest = false } = {}) {
   const seq = ++aprsListen.seq;
   aprsListen.on = true;
   aprsListen.sentence = '';
   aprsListen.restarts = 0;
   aprsListen.moved = null; // turning it on again after the radio moved: the normal start, it tunes back to APRS
   aprsListen.watch = null;
+  aprsListen.handover = ''; // "Stopped FT8 so APRS can listen." for this start only
   if (!resume) { aprsListen.heard = 0; aprsListen.lastAt = 0; }
   const bands = aprsRigBands();
   aprsListen.band = AprsListen.chooseBand(bands, aprsListen.bandWanted) || '';
@@ -13944,7 +14073,8 @@ async function aprsListenStart({ resume = false } = {}) {
   }
   // The radio is reachable when tuneRadio can tune it: Flex Direct, TCI or CAT.
   const route = radioTuneRoute();
-  const no = AprsListen.whyNot({
+  // FT8 in the way and the operator asked: FT8 stops and APRS listens (startPlan).
+  const start = AprsListen.startPlan({
     remote: isRemoteMode(),
     catConnected: route !== '',
     bands,
@@ -13953,8 +14083,14 @@ async function aprsListenStart({ resume = false } = {}) {
     modemFound: DirewolfProcess.direwolfSupported(process.platform) && findDirewolf().found,
     ft8Decoding: autoSstvBlockedByJtcat(),
     winlinkHasModem: aprsWinlinkHoldsRadio(),
-  });
+  }, { operatorAsked: operator, guest });
+  const no = start.no;
   if (no) { aprsNotNow(no); return; }
+  if (start.stopFt8) {
+    aprsListen.handover = aprsStopJtcatForListen();
+    aprsListen.noteBase = [aprsListen.handover, aprsListen.noteBase].filter(Boolean).join(' ');
+    aprsListen.note = aprsListen.noteBase;
+  }
   aprsListen.state = 'starting';
   aprsListenPush();
   const pm = aprsListen.band === '2m' ? winlinkPacketRigMode('packet') : null;
@@ -14238,11 +14374,16 @@ function aprsAutoListenOnOpen() {
   aprsListenSet(true);
 }
 
-function aprsListenSet(on) {
+/**
+ * opts.operator: the operator pressed Start (the window's switch, a phone's
+ * Listen); only then may FT8 be stopped for it (lib/aprs-listen.js startPlan).
+ * opts.guest: the request came from a Guest Pass guest, who never stops FT8.
+ */
+function aprsListenSet(on, opts = {}) {
   if (on) {
     if (aprsListen.on && aprsListen.state !== 'refused') return;
     if (!_aprsTickTimer) _aprsTickTimer = setInterval(aprsListenTick, 2000);
-    aprsListenStart().catch((e) => { aprsLog('start failed: ' + e.message); aprsListenStop('start failed'); });
+    aprsListenStart({ operator: !!opts.operator, guest: !!opts.guest }).catch((e) => { aprsLog('start failed: ' + e.message); aprsListenStop('start failed'); });
   } else {
     aprsListenStop('switched off');
   }
@@ -15371,7 +15512,7 @@ const aprsEcho = AprsEchocat.createController({
   ownLogin: () => { const l = AprsIgate.uplinkLogin(settings.myCallsign); return l.ok ? l.call : ''; },
   heardChanged: (map) => { if (aprsWin && !aprsWin.isDestroyed()) aprsWin.webContents.send('aprs-heard-you', map); },
   windowOpen: () => !!(aprsWin && !aprsWin.isDestroyed()),
-  listenSet: (on) => aprsListenSet(on),
+  listenSet: (on) => aprsListenSet(on, { operator: true, guest: !!(aprsEcho && aprsEcho.guestListening()) }), // a guest never stops FT8
   listenSetBand: (b) => aprsListenSetBand(b),
   igateSet: (on) => aprsIgateSetFromDevice(on),
   beaconNow: () => aprsBeaconSend('now').catch((e) => aprsLog('beacon failed: ' + e.message)),
@@ -23438,11 +23579,16 @@ function rememberJtcatTxFreq(eng) {
 // Closing the FT8/JS8 windows stops them (the main window's close handler
 // releases capture); an engine the ECHOCAT app is driving has no window to
 // close, so it is stopped here the way the app's own jtcat-stop does.
-function releaseJtcatForSstv() {
+function releaseJtcatForSstv() { return releaseJtcatFor('SSTV'); }
+
+// The hand-over itself, shared by every mode that needs the radio's audio
+// JTCAT holds: SSTV above, APRS listening (aprsStopJtcatForListen, Casey
+// 2026-11-22). `who` names the mode in the log line.
+function releaseJtcatFor(who) {
   const ft8Win = jtcatPopoutWin && !jtcatPopoutWin.isDestroyed();
   const js8Win = js8PopoutWin && !js8PopoutWin.isDestroyed();
   if (!ft8Win && !js8Win && !ft8Engine) return false;
-  sendCatLog('[SSTV] Closing ' + (js8Win && !ft8Win ? 'JS8' : 'JTCAT') + ' — SSTV and JTCAT cannot share the audio input');
+  sendCatLog('[' + who + '] Closing ' + (js8Win && !ft8Win ? 'JS8' : 'JTCAT') + ' — ' + who + ' and JTCAT cannot share the audio input');
   if (ft8Win) { try { jtcatPopoutWin.close(); } catch {} }
   if (js8Win) { try { js8PopoutWin.close(); } catch {} }
   if (ft8Engine) {
@@ -28333,6 +28479,9 @@ function updateRemoteSettings() {
     // hook in startSstv (main.js, generateMorseSamples). Including it
     // here so reconnecting mobiles see the persisted state.
     sstvCwId: !!settings.sstvCwId,
+    // #279 Transmit power for SSTV, watts or null (= the radio's own power).
+    // The shack applies it to every picture, whichever device sends it.
+    sstvTxPowerW: SstvTxPower.parseWatts(settings.sstvTxPowerW),
     // Forwarded so ECHOCAT's phone-side iambic keyer stays in sync with the
     // desktop's. The phone owns the mode selector so this is mostly a fresh-
     // connect snapshot; swap is desktop-only, so the phone needs it to
@@ -33749,6 +33898,9 @@ function connectRemote() {
     // Where the shack's VARA runs is typed at the shack only (#287): Pat
     // connects to that host, so a device never names it.
     if (partial) { delete partial.winlinkVaraHost; delete partial.winlinkVaraFmHost; }
+    // #279: saved as watts or null, whatever the device sent.
+    const sstvPowerChanged = !!partial && 'sstvTxPowerW' in partial;
+    if (sstvPowerChanged) partial.sstvTxPowerW = SstvTxPower.parseWatts(partial.sstvTxPowerW);
     Object.assign(settings, partial);
     saveSettings(settings);
     afterSstvSettingsSaved(partial);
@@ -33760,6 +33912,7 @@ function connectRemote() {
     // the web pane and vice versa, so those keys push too.
     const jttyKeys = ['jttySerial', 'jttyMacros', 'jttyFt8Macros', 'jttyMacroStyle', 'jttyProfile', 'jtcatFdExch', 'pskMacros'];
     if (sdrSync || dxeChanged || jttyKeys.some((k) => Object.prototype.hasOwnProperty.call(partial || {}, k))) updateRemoteSettings();
+    if (sstvPowerChanged) { updateRemoteSettings(); pushSstvRigState(); }
     rigBandsBroadcast();
   });
 }
@@ -34512,6 +34665,10 @@ function handleRemotePtt(state, opts = {}) {
     }
   }
 
+  // Transmit power for SSTV (#279): set now, after every refusal above and
+  // before the key-down below, on the same link, so it lands first.
+  if (state && opts.txKind === 'sstv') sstvTxPowerBegin();
+
   if (isFlexRig) {
     // FlexRadio: prefer SmartSDR API so TX is pinned to POTACAT's slice. If
     // the SmartSDR API isn't available, fall back to the TS-2000 TX;/RX;
@@ -34602,6 +34759,10 @@ function handleRemotePtt(state, opts = {}) {
       pttConfirmRestore(restoreMode, restoreFreq, _restoreIcom, restoreSince).catch(() => {});
     }
   }
+
+  // The SSTV picture's power goes back after the unkey (#279). A no-op unless
+  // a picture set one: every key-up passes here, whatever ended the picture.
+  if (!state) sstvTxPowerEnd('picture ended');
 
   txLimitNote(state, opts);
   if (!state && _fakeIt.active) fakeItRestoreDial('key-up');
@@ -41002,10 +41163,24 @@ function resolveTheme() {
   try { dark = !!nativeTheme.shouldUseDarkColors; } catch { /* no nativeTheme in a test harness */ }
   return AppTheme.resolveAppTheme(settings, dark);
 }
+// #345: the frame every visible window opens with (lib/window-frame.js). The
+// setting is read once, at the first window, so a change applies on restart and
+// every window of a run matches the main window.
+let _windowFrameSettings = null;
+function windowFrameSettings() {
+  if (!_windowFrameSettings && settings) _windowFrameSettings = { linuxNativeFrame: settings.linuxNativeFrame === true };
+  return _windowFrameSettings || {};
+}
+function windowFrame() {
+  return WindowFrame.windowFrameFor(process.platform, windowFrameSettings());
+}
+
 function themeQuery() {
   const r = resolveTheme();
   const q = { theme: r.theme, variant: r.variant };
   if (r.ds) q.ds = r.ds;
+  // The page hides its own window buttons under the system frame (native-frame.css).
+  if (WindowFrame.usesNativeFrame(process.platform, windowFrameSettings())) q.frame = 'native';
   return q;
 }
 
@@ -41056,7 +41231,7 @@ function createWindow() {
     height: defaultH,
     title: `POTACAT - v${getAppDisplayVersion()}`,
     backgroundColor: getThemeWindowBg(),
-    ...(isMac ? { titleBarStyle: 'hiddenInset' } : { frame: false }),
+    ...windowFrame(),
     icon: getIconPath(),
     show: false,
     webPreferences: {
@@ -44208,6 +44383,7 @@ function sstvHaltTxNow({ keepWait = false } = {}) {
   // back; it never unkeys another transmitter holding it.
   if (settings.audioSource === 'yaesu-lan') { try { endYaesuLanTx('sstv', 'SSTV halt'); } catch (e) { console.error('[SSTV] halt LAN release:', e); } }
   else { try { handleRemotePtt(false); } catch (e) { console.error('[SSTV] halt PTT release:', e); } }
+  sstvTxPowerEnd('HALT'); // #279: after the unkey; a no-op when the key-up above already put it back
   if (sstvPopoutWin && !sstvPopoutWin.isDestroyed()) {
     sstvPopoutWin.webContents.send('sstv-abort-tx');
   }
@@ -46890,7 +47066,7 @@ function cloudShackNotice(text, kind) {
       title: 'POTACAT Map',
       backgroundColor: getThemeWindowBg(),
       show: false,
-      ...(isMac ? { titleBarStyle: 'hiddenInset' } : { frame: false }),
+      ...windowFrame(),
       icon: getIconPath(),
       webPreferences: {
         preload: path.join(__dirname, 'preload-popout.js'),
@@ -46979,7 +47155,7 @@ function cloudShackNotice(text, kind) {
       title: 'POTACAT — Propagation',
       backgroundColor: getThemeWindowBg(),
       show: false,
-      ...(isMac ? { titleBarStyle: 'hiddenInset' } : { frame: false }),
+      ...windowFrame(),
       icon: getIconPath(),
       webPreferences: {
         preload: path.join(__dirname, 'preload-prop-popout.js'),
@@ -47056,7 +47232,7 @@ function cloudShackNotice(text, kind) {
       backgroundColor: getThemeWindowBg(),
       show: false,
       resizable: true,
-      ...(isMac ? { titleBarStyle: 'hiddenInset' } : { frame: false }),
+      ...windowFrame(),
       icon: getIconPath(),
       webPreferences: {
         preload: path.join(__dirname, 'preload-pair-popout.js'),
@@ -47107,7 +47283,7 @@ function cloudShackNotice(text, kind) {
       backgroundColor: getThemeWindowBg(),
       resizable: false,
       alwaysOnTop: true,
-      ...(isMac ? { titleBarStyle: 'hiddenInset' } : { frame: false }),
+      ...windowFrame(),
       icon: getIconPath(),
       webPreferences: {
         preload: path.join(__dirname, 'preload-pair-request-popout.js'),
@@ -47299,7 +47475,7 @@ function cloudShackNotice(text, kind) {
       title: 'POTACAT Logbook',
       show: false,
       backgroundColor: getThemeWindowBg(),
-      ...(isMac ? { titleBarStyle: 'hiddenInset' } : { frame: false }),
+      ...windowFrame(),
       icon: getIconPath(),
       webPreferences: {
         preload: path.join(__dirname, 'preload-qso-popout.js'),
@@ -47426,7 +47602,7 @@ function cloudShackNotice(text, kind) {
       title: 'Log QSO',
       backgroundColor: getThemeWindowBg(),
       show: false,
-      ...(isMac ? { titleBarStyle: 'hiddenInset' } : { frame: false }),
+      ...windowFrame(),
       icon: getIconPath(),
       webPreferences: {
         preload: path.join(__dirname, 'preload-log-popout.js'),
@@ -47570,7 +47746,7 @@ function cloudShackNotice(text, kind) {
       title: 'POTACAT Spots',
       backgroundColor: getThemeWindowBg(),
       show: false,
-      ...(isMac ? { titleBarStyle: 'hiddenInset' } : { frame: false }),
+      ...windowFrame(),
       icon: getIconPath(),
       webPreferences: {
         preload: path.join(__dirname, 'preload-spots-popout.js'),
@@ -47661,7 +47837,7 @@ function cloudShackNotice(text, kind) {
       title: 'DX Cluster Terminal',
       backgroundColor: getThemeWindowBg(),
       show: false,
-      ...(isMac ? { titleBarStyle: 'hiddenInset' } : { frame: false }),
+      ...windowFrame(),
       icon: getIconPath(),
       webPreferences: {
         preload: path.join(__dirname, 'preload-cluster-popout.js'),
@@ -47742,7 +47918,7 @@ function cloudShackNotice(text, kind) {
       title: 'Bandspread',
       backgroundColor: getThemeWindowBg(),
       show: false,
-      ...(isMac ? { titleBarStyle: 'hiddenInset' } : { frame: false }),
+      ...windowFrame(),
       icon: getIconPath(),
       webPreferences: {
         preload: path.join(__dirname, 'preload-bandspread-popout.js'),
@@ -47876,7 +48052,7 @@ function cloudShackNotice(text, kind) {
       title: 'Activation Map',
       backgroundColor: getThemeWindowBg(),
       show: false,
-      ...(isMac ? { titleBarStyle: 'hiddenInset' } : { frame: false }),
+      ...windowFrame(),
       icon: getIconPath(),
       webPreferences: {
         preload: path.join(__dirname, 'preload-actmap-popout.js'),
@@ -48073,7 +48249,7 @@ function cloudShackNotice(text, kind) {
       backgroundColor: getThemeWindowBg(),
       show: false,
       alwaysOnTop: vfoAlwaysOnTop,
-      ...(isMac ? { titleBarStyle: 'hiddenInset' } : { frame: false }),
+      ...windowFrame(),
       icon: getIconPath(),
       webPreferences: {
         preload: path.join(__dirname, 'preload-vfo-popout.js'),
@@ -48247,7 +48423,7 @@ function cloudShackNotice(text, kind) {
       width: 1100, height: 720, title: 'POTACAT — Conditions',
       backgroundColor: getThemeWindowBg(),
       show: false,
-      ...(isMac ? { titleBarStyle: 'hiddenInset' } : { frame: false }),
+      ...windowFrame(),
       icon: getIconPath(),
       webPreferences: {
         preload: path.join(__dirname, 'preload-conditions-popout.js'),
@@ -48410,7 +48586,7 @@ function cloudShackNotice(text, kind) {
       title: 'POTACAT — JTCAT',
       backgroundColor: getThemeWindowBg(),
       show: false,
-      ...(isMac ? { titleBarStyle: 'hiddenInset' } : { frame: false }),
+      ...windowFrame(),
       icon: getIconPath(),
       webPreferences: {
         preload: path.join(__dirname, 'preload-jtcat-popout.js'),
@@ -48596,7 +48772,7 @@ function cloudShackNotice(text, kind) {
       minWidth: 480, minHeight: 360, // never smaller than its own controls (N0KAH 2026-10-24)
       width: 720, height: 560, title: 'POTACAT — Mercury HF Data',
       backgroundColor: getThemeWindowBg(), show: false,
-      ...(isMac ? { titleBarStyle: 'hiddenInset' } : { frame: false }),
+      ...windowFrame(),
       icon: getIconPath(),
       webPreferences: {
         preload: path.join(__dirname, 'preload-mercury-popout.js'),
@@ -48636,7 +48812,7 @@ function cloudShackNotice(text, kind) {
       minWidth: 600, minHeight: 420, // never smaller than its own controls (N0KAH 2026-10-24)
       width: 900, height: 640, title: 'POTACAT — Winlink Mail',
       backgroundColor: getThemeWindowBg(), show: false,
-      ...(isMac ? { titleBarStyle: 'hiddenInset' } : { frame: false }),
+      ...windowFrame(),
       icon: getIconPath(),
       webPreferences: {
         preload: path.join(__dirname, 'preload-winlink-popout.js'),
@@ -48699,7 +48875,7 @@ function cloudShackNotice(text, kind) {
       minWidth: 560, minHeight: 420, // never smaller than its own controls (N0KAH 2026-10-24)
       width: 760, height: 600, title: 'POTACAT — JS8Call',
       backgroundColor: getThemeWindowBg(), show: false,
-      ...(isMac ? { titleBarStyle: 'hiddenInset' } : { frame: false }),
+      ...windowFrame(),
       icon: getIconPath(),
       webPreferences: {
         preload: path.join(__dirname, 'preload-js8call-popout.js'),
@@ -48793,7 +48969,7 @@ function cloudShackNotice(text, kind) {
       minWidth: 400, minHeight: 300, // never smaller than its own controls (N0KAH 2026-10-24)
       width: 700, height: 500, title: 'JS8 Heartbeat Map',
       backgroundColor: getThemeWindowBg(),
-      ...(isMac ? { titleBarStyle: 'hiddenInset' } : { frame: false }), // #866: the macOS traffic lights, as every other pop-out
+      ...windowFrame(), // #866: the macOS traffic lights, as every other pop-out
       icon: getIconPath(),
       webPreferences: { preload: path.join(__dirname, 'preload-js8-map-popout.js'), contextIsolation: true, nodeIntegration: false },
     });
@@ -48867,7 +49043,7 @@ function cloudShackNotice(text, kind) {
       minWidth: 640, minHeight: 400,
       width: 1280, height: 860, title: 'APRS', // the approved layout's size; a saved place wins (rememberWindowPlace)
       backgroundColor: getThemeWindowBg(),
-      ...(isMac ? { titleBarStyle: 'hiddenInset' } : { frame: false }), // #866: plain frame:false left a Mac with no way to close it
+      ...windowFrame(), // #866: plain frame:false left a Mac with no way to close it
       icon: getIconPath(),
       webPreferences: { preload: path.join(__dirname, 'preload-aprs-popout.js'), contextIsolation: true, nodeIntegration: false },
     });
@@ -48964,7 +49140,7 @@ function cloudShackNotice(text, kind) {
   ipcMain.on('aprs-igate-set', (_e, on) => aprsIgateSetFromWindow(on === true));
   // APRS phase 2: the "Listen on my radio" switch (receive only).
   // The operator at the switch is using the radio: an APRS idle session ends first.
-  ipcMain.on('aprs-listen-set', (_e, on) => { markUserActive(); aprsListenSet(!!on); if (!on) _aprsListenOffByOperator = true; });
+  ipcMain.on('aprs-listen-set', (_e, on) => { markUserActive(); aprsListenSet(!!on, { operator: true }); if (!on) _aprsListenOffByOperator = true; });
   // The bar asks once its listener is attached: the push after 'aprs-ready' can
   // arrive while its script is still loading (the 8600M's empty bar, 2026-11-18).
   // The iGate mark answered 'aprs-ready' the same way, so it comes too.
@@ -49498,7 +49674,7 @@ function cloudShackNotice(text, kind) {
       minWidth: 360, minHeight: 300, // never smaller than its own controls (N0KAH 2026-10-24)
       width: 700, height: 500,
       backgroundColor: getThemeWindowBg(),
-      ...(isMac ? { titleBarStyle: 'hiddenInset' } : { frame: false }), // #866: same as the APRS window, the Mac had no way to close it
+      ...windowFrame(), // #866: same as the APRS window, the Mac had no way to close it
       webPreferences: { preload: path.join(__dirname, 'preload-jtcat-popout.js'), contextIsolation: true, nodeIntegration: false },
     });
     rememberWindowPlace(jtcatMapPopoutWin, 'jtcatMapPopoutBounds', { minWidth: 360, minHeight: 300 });
@@ -49639,6 +49815,7 @@ function cloudShackNotice(text, kind) {
       const _sstvStartAudio = (fn) => pttKeyGate().then((keyed) => {
         if (!keyed) {
           if (useYaesuLanTx) releaseYaesuLanTx('sstv', 'SSTV not keyed');
+          sstvTxPowerEnd('picture not sent');
           sendCatLog('[SSTV] PTT was released before the radio keyed — picture not sent');
           if (remoteServer) remoteServer.broadcastSstvTxStatus({ state: autoSstvActive ? 'auto-rx' : 'rx' });
           return;
@@ -49740,6 +49917,7 @@ function cloudShackNotice(text, kind) {
           sendCatLog(`[SSTV] TX via Yaesu LAN (SCU-LAN10) — ${outDurSec.toFixed(0)}s (${outSamples.length} samples @48k); ${formatDirectTxAudioStats(txAudio)}`);
           const done = (why) => {
             endYaesuLanTx('sstv', why);
+            sstvTxPowerEnd(why);
             if (remoteServer) remoteServer.broadcastSstvTxStatus({ state: autoSstvActive ? 'auto-rx' : 'rx' });
           };
           if (txAudio.outputPeak < 0.01) {
@@ -49771,6 +49949,7 @@ function cloudShackNotice(text, kind) {
         } else {
           // Failsafe: release PTT if popout never opened
           handleRemotePtt(false);
+          sstvTxPowerEnd('picture not sent');
           sstvSendFailed('Picture not sent: the SSTV window closed before the audio started.');
         }
       });
@@ -50177,6 +50356,7 @@ function cloudShackNotice(text, kind) {
     sstvQuietCancel('halt'); // HALT TX while the picture waits (#326); no-op after a sent picture
     if (settings.audioSource === 'yaesu-lan') endYaesuLanTx('sstv', 'SSTV tx-complete');
     else handleRemotePtt(false);
+    sstvTxPowerEnd('picture sent');
     if (sstvPopoutWin && !sstvPopoutWin.isDestroyed()) {
       sstvPopoutWin.webContents.send('sstv-tx-status', { state: 'rx' });
     }
@@ -50425,7 +50605,7 @@ function cloudShackNotice(text, kind) {
       title: 'POTACAT — SSTV',
       backgroundColor: getThemeWindowBg(),
       show: false,
-      ...(isMac ? { titleBarStyle: 'hiddenInset' } : { frame: false }),
+      ...windowFrame(),
       icon: getIconPath(),
       webPreferences: {
         preload: path.join(__dirname, 'preload-sstv-popout.js'),
@@ -50495,7 +50675,7 @@ function cloudShackNotice(text, kind) {
       title: 'POTACAT — Band Scope',
       backgroundColor: getThemeWindowBg(),
       show: false,
-      ...(isMac ? { titleBarStyle: 'hiddenInset' } : { frame: false }),
+      ...windowFrame(),
       icon: getIconPath(),
       webPreferences: {
         preload: path.join(__dirname, 'preload-scope-popout.js'),
@@ -50546,7 +50726,7 @@ function cloudShackNotice(text, kind) {
       title: 'POTACAT — Tuner Memories',
       backgroundColor: getThemeWindowBg(),
       show: false,
-      ...(isMac ? { titleBarStyle: 'hiddenInset' } : { frame: false }),
+      ...windowFrame(),
       icon: getIconPath(),
       webPreferences: {
         preload: path.join(__dirname, 'preload-atu-wizard-popout.js'),
@@ -52643,6 +52823,8 @@ function cloudShackNotice(text, kind) {
         if (!wsprBeaconArmed()) wsprForgetPreCapPower();
         // ...and while the beacon is armed it is the beacon's level from now on (#268).
         else wsprNoteOperatorPower(value, source);
+        // ...nor an SSTV picture's restore (#279): the level is theirs.
+        if (source !== 'setup' && source !== 'logger-cat') sstvTxPower.operatorSet();
         // ...nor a tuner/test restore (the 1.13.10 knob fight, GitHub #111).
         if (source !== 'setup' && settings.setupTxPowerRestore) {
           delete settings.setupTxPowerRestore;
@@ -55210,6 +55392,11 @@ function cloudShackNotice(text, kind) {
     delete newSettings.jtcatRxSource;
     stampSstvTemplatesPatch(newSettings);
     setImmediate(() => afterSstvSettingsSaved(newSettings));
+    // #279 Transmit power for SSTV: watts or null; every device and the SSTV window follow.
+    if (newSettings && 'sstvTxPowerW' in newSettings) {
+      newSettings.sstvTxPowerW = SstvTxPower.parseWatts(newSettings.sstvTxPowerW);
+      setImmediate(pushSstvRigState);
+    }
     // #475: the Deleted folder's days reach every Winlink surface (winlink-state.deletedDays).
     if (newSettings && 'winlinkDeletedDays' in newSettings) setImmediate(() => { try { winlinkPush(); } catch {} });
     // APRS phase 4: the iGate switch and the callsign decide whether the uplink runs, and as whom.
@@ -55896,6 +56083,8 @@ function cloudShackNotice(text, kind) {
     if (has('jtcatNferParks')) updateRemoteSettings();
     // JTCAT calling time (#161): a connected device shows the desktop's change.
     if (has('jtcatCallingTimeMin')) updateRemoteSettings();
+    // Transmit power for SSTV (#279): a connected device shows the desktop's change.
+    if (has('sstvTxPowerW')) updateRemoteSettings();
 
     // Start/stop WSJT-X-binary bridge. HamRS, Logger32, MacLoggerDX, RUMlogNG
     // and Log4OM-binary all share this path — they recognize POTACAT as a
@@ -58844,6 +59033,7 @@ function gracefulCleanup() {
   // radio before the SmartSDR/CAT/keyer connections close — otherwise the
   // radio can stay keyed with no audio (a silent-carrier FCC issue).
   try { handleRemotePtt(false); } catch {}
+  try { sstvTxPowerEnd('POTACAT closing'); } catch {} // #279: the radio's own power back while CAT is up
   // A tuner-memory run keys tune carriers: stop it, drop the carrier and put
   // the operator's power back while the SmartSDR socket is still open.
   try { atuWizardAbort('app quit'); if (smartSdr && smartSdr.connected && _atuWizardSaved) smartSdr.setTxTune(false); } catch {}

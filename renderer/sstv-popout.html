@@ -70,6 +70,10 @@
     .pop select, .pop input[type=text] { font-size: 12px; background: var(--bg-primary); color: var(--text-primary); border: 1px solid var(--border-primary); border-radius: 3px; padding: 4px 6px; }
     .pop .dim { color: var(--text-dim); font-size: 11px; line-height: 1.4; }
     .pop .row { display: flex; gap: 6px; align-items: center; }
+    /* Transmit power for SSTV (#279): one number box, W after it. */
+    .pop .pwr-row { display: flex; align-items: center; gap: 6px; color: var(--text-primary); }
+    .pop input[type=number] { width: 80px; font-size: 12px; background: var(--bg-primary); color: var(--text-primary); border: 1px solid var(--border-primary); border-radius: 3px; padding: 4px 6px; }
+    .pop .pwr-state { color: var(--text-secondary); }
     #freq-pop { top: 36px; left: 0; width: 230px; }
     #freq-select { width: 100%; }
     #freq-input { width: 104px; font-family: Consolas, monospace; }
@@ -303,6 +307,10 @@
       <label>Receive <select id="audio-input"></select></label>
       <label>Transmit <select id="audio-output"></select></label>
       <div class="dim">SSTV follows the radio's audio (Settings &gt; Radio, Edit the rig, Audio Devices). Pick a device here only if SSTV should use a different one.</div>
+      <h4>Transmit power</h4>
+      <label>Transmit power for SSTV <span class="pwr-row"><input type="number" id="sstv-tx-power" min="0" max="2000" step="1" inputmode="decimal" placeholder="radio's power" aria-describedby="sstv-tx-power-help sstv-tx-power-state"> W</span></label>
+      <div class="dim" id="sstv-tx-power-help">Leave empty to use the radio's current power. With a level here, POTACAT sets it before each picture and puts the radio's own power back afterwards.</div>
+      <div class="dim pwr-state" id="sstv-tx-power-state" hidden></div>
       <h4>Saving</h4>
       <label class="check"><span><input type="checkbox" id="save-all-decodes"> Save every picture, even partial ones</span></label>
       <div class="dim">Pictures that start without a header or fade in noise are shown but normally not saved. Turn this on to keep them in the gallery too, marked partial, so you can sort through them yourself.</div>
@@ -442,6 +450,7 @@
   <script src="waterfall.js"></script>
   <script src="../lib/sstv-audio-device.js"></script>
   <script src="../lib/sstv-drive.js"></script>
+  <script src="../lib/sstv-tx-power.js"></script>
   <script src="../lib/rig-family.js"></script>
   <script src="../lib/rig-bands.js"></script>
   <script src="../lib/ssb-sideband.js"></script>

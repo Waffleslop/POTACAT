@@ -100,7 +100,7 @@ test('main: the window open arms it once; the first aprs-ready runs it; a reload
   assert.ok(/const firstOpen = _aprsAutoListenPending;\s*_aprsAutoListenPending = false;\s*if \(!firstOpen\) return;/.test(b), 'used up at once');
 });
 test('main: the operator switching off keeps it off until the window opens again', () => {
-  assert.ok(/ipcMain\.on\('aprs-listen-set', \(_e, on\) => \{ markUserActive\(\); aprsListenSet\(!!on\); if \(!on\) _aprsListenOffByOperator = true; \}\);/.test(main));
+  assert.ok(/ipcMain\.on\('aprs-listen-set', \(_e, on\) => \{ markUserActive\(\); aprsListenSet\(!!on, \{ operator: true \}\); if \(!on\) _aprsListenOffByOperator = true; \}\);/.test(main));
   assert.ok(/operatorOff: _aprsListenOffByOperator/.test(fnBody('aprsAutoListenOnOpen')));
 });
 test('main: the guards are the live ones (PTT, JTCAT, Winlink, the phone, Flex, tune, owner, Guest Pass, the switch\'s own)', () => {
