@@ -1198,7 +1198,7 @@ function loadSettingsFromDisk() {
     // mode is WSPR (Casey 2026-09-25). Written here, not as read-side
     // fallbacks, so installs that never chose keep what they were looking at:
     // the theme migration maps them once, idle stays SSTV.
-    return { grid: 'FN20jb', catTarget: null, enablePota: true, enableSota: false, enableRbn: true, enablePskrMap: true, firstRun: true, watchlist: 'K3SBP', ...AppTheme.DEFAULTS, idleRxMode: 'wspr', enableTelemetry: true };
+    return { grid: 'FN20jb', catTarget: null, enablePota: true, enableSota: false, enableRbn: true, enablePskrMap: true, firstRun: true, watchlist: 'K3SBP', ...AppTheme.DEFAULTS, idleRxMode: 'wspr', enableTelemetry: true, jtcatFakeIt: FakeIt.NEW_SETUP_DEFAULT };
   }
   // Migration path: legacy settings.json (no activeProfile) gets migrated
   // when it has a myCallsign. We do this lazily on first save rather than
@@ -4666,15 +4666,22 @@ function fakeItSetDial(hz) {
   if (route === 'cat') return cat.setDialNow(hz) !== false;
   return false;
 }
-// The engine renders shifted audio only where this PC can move the dial: one
-// band (multi-band engines are built fresh and never shift), a radio with
-// CAT, not driving a remote shack (the shack applies its own). A link that is
-// down at transmit time is fakeItShiftForTx's refusal, not this one's.
+// The engine renders shifted audio only where this PC can move the dial
+// (lib/jtcat-fake-it.js engineCanShift): one band (multi-band engines are
+// built fresh and never shift), a CAT radio that is not TCI and not in split,
+// not driving a remote shack (the shack applies its own). Anywhere else the
+// tone goes out at the plain offset. A link that is down at transmit time is
+// fakeItShiftForTx's refusal, not this one's.
 function fakeItSyncEngine() {
   if (!ft8Engine || typeof ft8Engine.setFakeIt !== 'function') return;
-  const multi = !!(jtcatManager && jtcatManager.sliceCount > 1);
-  const noCat = !!(settings.catTarget && settings.catTarget.type === 'none');
-  ft8Engine.setFakeIt(fakeItEnabled() && !multi && !isRemoteMode() && !noCat);
+  ft8Engine.setFakeIt(FakeIt.engineCanShift({
+    enabled: fakeItEnabled(),
+    multiBand: !!(jtcatManager && jtcatManager.sliceCount > 1),
+    remote: isRemoteMode(),
+    catTarget: settings.catTarget,
+    catNone: !!settings.catNone,
+    split: _currentSplit,
+  }));
 }
 // A read at the shifted dial after the restore sends the dial back again
 // (lib/jtcat-fake-it.js onDialRead): a late poll answer or a dropped restore.
@@ -5551,6 +5558,7 @@ function sendCatSplit(on) {
   if (v === _currentSplit) return false;
   _currentSplit = v;
   sendCatLog(`[CAT] Split ${v ? 'ON' : 'OFF'}`);
+  fakeItSyncEngine();   // a radio in split transmits on the other VFO: no Fake It shift
   if (!v) sendCatFreqOther(0);   // split off -> hide the TX line everywhere
   broadcastRigState();
   return true;
@@ -9442,6 +9450,7 @@ async function connectCat() {
   killRigctld();
   healActiveRigNow('connect');
   let target = settings.catTarget;
+  fakeItSyncEngine();   // the rig changed: Fake It shifts only on a CAT radio (not TCI, not None)
   if (!target && settings.catNone) {
     // The operator picked "None": no radio, and no auto-activating the only
     // configured rig behind their back (G90 owner, 2026-10-24: "even when I
@@ -9469,6 +9478,7 @@ async function connectCat() {
       if (rig.audioSource) settings.audioSource = rig.audioSource; // per-rig mirror rides activation
       saveSettings(settings);
       target = settings.catTarget;
+      fakeItSyncEngine();
       sendCatLog('[CAT] No active rig was selected — auto-activating the only configured rig (' + (rig.name || rig.model || 'rig') + ').');
     } else if (rigsWithTarget.length > 1) {
       sendCatLog('[CAT] Not connecting: ' + rigsWithTarget.length + ' rigs are configured but none is set ACTIVE. Pick one in Settings > Radio.');
@@ -45985,6 +45995,13 @@ app.whenReady().then(() => {
     } catch (err) {
       console.error('[multi-op] activeProfile self-heal failed:', err.message);
     }
+  }
+  // JTCAT split "Fake It" is on for new installs (Casey 2026-11-23). A
+  // station set up before that never had the key: write it off, once, so
+  // nothing changes for it. A saved choice is never touched.
+  if (FakeIt.seedSetting(settings)) {
+    saveSettings(settings);
+    console.log('[JTCAT] Fake It: this station set up before it was on by default; kept off (turn it on in the FT8 window Options)');
   }
   // One-time defaults (lib/install-defaults.js): SOTA/WWFF/LLOTA spots on,
   // a DX cluster node picked at random for a station that never set one, and
