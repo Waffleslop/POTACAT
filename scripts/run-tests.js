@@ -579,6 +579,7 @@ const TESTS = [
   'test/commander-codec-test.js',
   'test/logger-cat-test.js',
   'test/cm108-ptt-test.js',
+  'test/window-security-test.js', // app windows: only the permissions POTACAT uses (mic, MIDI, CM108 WebHID, copy, audio output, full screen) for its own pages; no navigation away; no new windows, web links through the open-external allowlist
   'test/removed-features-test.js',
   'test/dxpedition-contests-test.js',
   'test/vfo-meters-test.js',

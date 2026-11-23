@@ -629,6 +629,7 @@ const MacMicAccess = require('./lib/mac-mic-access'); // #463: macOS microphone 
 const { healActiveRig } = require('./lib/active-rig');
 const { healRigAudioMirror } = require('./lib/rig-audio-mirror');
 const Cm108Ptt = require('./lib/cm108-ptt');
+const WindowSecurity = require('./lib/window-security');
 const { decideAtuKeepOn, ATU_KEEP_ON_POLL_MS, ATU_KEEP_ON_FIRST_POLL_MS } = require('./lib/atu-keep-on');
 // Per-rig "Keep the tuner on after a tune cycle" (lib/atu-keep-on.js): after
 // the tune command, ask `AC;` until the radio reports the tuner off, then
@@ -13177,7 +13178,6 @@ function ensureModemBridgeWindow() {
       backgroundThrottling: false, // a throttled worklet starves the modem
     },
   });
-  modemBridgeWin.webContents.session.setPermissionRequestHandler((_wc, _perm, cb) => cb(true));
   modemBridgeWin.loadFile(path.join(__dirname, 'renderer', 'modem-audio-bridge.html'));
   modemBridgeWin.webContents.on('did-finish-load', () => {
     if (!modemBridgeWin || modemBridgeWin.isDestroyed()) return;
@@ -35534,7 +35534,6 @@ async function startRemoteClientAudio() {
       backgroundThrottling: false,
     },
   });
-  remoteAudioClientWin.webContents.session.setPermissionRequestHandler((_wc, _perm, cb) => cb(true));
   // Chromium can mute getUserMedia in a never-shown window — show off-screen.
   remoteAudioClientWin.setPosition(-9999, -9999);
   remoteAudioClientWin.showInactive();
@@ -35921,9 +35920,6 @@ function prewarmRemoteAudioWindow() {
       backgroundThrottling: false,
     },
   });
-
-  // Grant media permissions to the audio window's session
-  remoteAudioWin.webContents.session.setPermissionRequestHandler((_wc, perm, cb) => cb(true));
 
   remoteAudioWin.loadFile(path.join(__dirname, 'renderer', 'remote-audio.html'));
 
@@ -41386,14 +41382,11 @@ function createWindow() {
     win.maximize();
   }
 
-  // Allow MIDI device access for CW keyer
-  win.webContents.session.setPermissionRequestHandler((wc, perm, cb) => cb(true));
+  // Permissions (mic, MIDI paddles, WebHID, ...) are set once for the default
+  // session before this window opens: lib/window-security.js.
   // Sound-card PTT (CM108 GPIO, lib/cm108-ptt.js): WebHID may open C-Media /
   // SSS sound cards and nothing else, and a PTT from a phone must work with
   // no click on this PC, so those devices are granted without a chooser.
-  // Electron allows every permission check by default; saying so for 'hid'
-  // keeps WebHID on whatever Electron's default becomes.
-  win.webContents.session.setPermissionCheckHandler(() => true);
   win.webContents.session.setDevicePermissionHandler((d) => d.deviceType === 'hid' && !!(d.device && Cm108Ptt.isCm108(d.device.vendorId, d.device.productId)));
   win.webContents.session.on('select-hid-device', (event, details, callback) => {
     event.preventDefault();
@@ -46177,6 +46170,18 @@ app.whenReady().then(() => {
   {
     const preWindowModules = Object.keys(require.cache);
     setTimeout(() => StartupPrefetch.record({ appDir: __dirname, userDataDir: app.getPath('userData'), fs, path, moduleKeys: preWindowModules }), 15000);
+  }
+  // Every app window: only the permissions POTACAT uses, for its own pages;
+  // no navigating away from them; no new windows, a web link opens in the
+  // browser through the open-external allowlist (lib/window-security.js).
+  {
+    const { session } = require('electron');
+    const securityLog = (m) => appendSessionLog(`[security ${new Date().toISOString().slice(11, 23)}] ${m}`);
+    WindowSecurity.install({
+      app, session: session.defaultSession, appRoot: __dirname,
+      openExternal: (u) => { if (!openExternalIfAllowed(u)) securityLog(`link not on the open-external allowlist: ${String(u).slice(0, 160)}`); },
+      log: securityLog,
+    });
   }
   createWindow();
   logStartupStage('createWindow returned (BrowserWindow constructed)');
@@ -52269,13 +52274,17 @@ function cloudShackNotice(text, kind) {
     }
   });
 
-  ipcMain.on('open-external', (_e, url) => {
+  ipcMain.on('open-external', (_e, url) => { openExternalIfAllowed(url); });
+  // The one gate for a link leaving the app: the IPC above, and a link or
+  // window.open in any app window (lib/window-security.js).
+  function openExternalIfAllowed(url) {
+    if (typeof url !== 'string') return false;
     const { shell } = require('electron');
     // Allow opening local log files
     if (url.startsWith('file://')) {
       const filePath = url.replace('file://', '');
       shell.showItemInFolder(filePath);
-      return;
+      return true;
     }
     // Only allow known URLs
     const allowed = [
@@ -52313,6 +52322,8 @@ function cloudShackNotice(text, kind) {
       'https://api.potacat.com/',
       'https://login.potacat.com/',
       'http://rx.linkfanel.net', 'http://kiwisdr.com', 'http://websdr.org',
+      // CW Club Spotter (DJ5CW): the two links in Settings > CW spots.
+      'https://rbn.telegraphy.de/',
       // ECHOCAT mobile app store links (Settings footer promo).
       'https://apps.apple.com/', 'https://play.google.com/',
       // Rig editor Setup instructions: "email us your setup".
@@ -52326,8 +52337,10 @@ function cloudShackNotice(text, kind) {
       && [...expeditionMeta.values()].some((m) => m && m.link === url);
     if (allowed.some(prefix => url.startsWith(prefix)) || eventUrlAllowed(url) || landmarksFeed.urlAllowed(url) || dxpLink) {
       shell.openExternal(url);
+      return true;
     }
-  });
+    return false;
+  }
 
   // Open a URL that came from the contests DB. The allow-list above is
   // intentionally tight; contest sponsor sites are spread across 80+
