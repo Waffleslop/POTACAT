@@ -161,12 +161,69 @@ test('wire and glue: capability, parsed fields, main loop, every end hook', () =
   assert.ok(/this\.emit\('scan-control', \{[\s\S]{0,400}filters:[\s\S]{0,200}dwellSec:[\s\S]{0,200}fromFreqKhz:/.test(rs), 'the start fields reach main');
   assert.ok(/'scan-control': \{ dir: Dir\.BOTH, feature: 'rig', fields: \{ action: f\.string, filters: f\.optObject, dwellSec: f\.optNumber, fromFreqKhz: f\.optNumber \} \}/.test(read('lib/echocat-protocol.js')));
   const main = read('main.js');
-  assert.ok(/if \(action === 'start' && filters && !isRemoteMode\(\)\) \{[\s\S]{0,300}phoneScanRun\(\)\.start\(\{ filters, dwellSec, fromFreqKhz \}\)/.test(main), 'a start with filters runs in main');
+  assert.ok(/if \(action === 'start' && filters && !isRemoteMode\(\)\) \{[\s\S]{0,400}phoneScanRun\(\)\.start\(\{ filters, dwellSec, fromFreqKhz(, by: [^}]+)? \}\)/.test(main), 'a start with filters runs in main');
   assert.ok(/_phoneScanRun\.noteDial\(hz \/ 1000\)/.test(main), 'hand tune ends it (the one frequency sink)');
   assert.ok(/if \(state && _phoneScanRun && _phoneScanRun\.scanning\) _phoneScanRun\.noteTransmit\(\)/.test(main), 'every key-down ends it');
   assert.ok(/_phoneScanRun\.stop\('desktop-scan'\)/.test(main), 'the desktop Scan button takes over');
   assert.ok(/remoteServer\.sendToClient\(\{ type: 'scan-state', scanning: scanStateNow\(\) \}\)/.test(main), 'scan-state on change and at connect');
   assert.ok(/setTimer: \(fn, ms\) => setTimeout\(fn, ms\)/.test(main), 'a main-process timer, not the renderer');
+});
+
+// #961: a desktop-run scan a Guest Pass phone started stops when the pass
+// ends (every reason) or the owner takes the radio back; the owner's never.
+const PASS_END_REASONS = ['expired', 'revoked', 'owner_override', 'disconnected', 'superseded', 'left', 'paused'];
+
+test('#961: a guest-started scan stops on every pass end reason and on pause, and nothing is tuned', () => {
+  for (const reason of PASS_END_REASONS) {
+    const h = harness(V.spots);
+    h.run.start({ filters: { sort: 'freq' }, by: 'guest' });
+    assert.strictEqual(h.run.startedBy, 'guest');
+    const tunedBefore = h.tuned.length;
+    const why = S.guestScanEndWhy(reason);
+    assert.strictEqual(why, reason === 'paused' ? 'pass-paused' : 'pass-ended', reason);
+    assert.strictEqual(h.run.stopGuestRun(why), true, reason + ' stops it');
+    assert.strictEqual(h.run.scanning, false, reason);
+    assert.deepStrictEqual(h.states[h.states.length - 1], [false, why], reason + ': every phone told scanning off');
+    assert.ok(h.logs[h.logs.length - 1].includes(S.END_WORDS[why]), reason + ': one log line says why');
+    h.advance(60000);
+    assert.strictEqual(h.tuned.length, tunedBefore, reason + ': no further tune, the radio stays where it is');
+  }
+  assert.strictEqual(S.guestScanEndWhy('resumed'), null, 'resume stops nothing');
+});
+
+test('#961: an owner-started scan is never stopped by a pass end or pause', () => {
+  for (const reason of PASS_END_REASONS) {
+    for (const by of ['owner', undefined]) {
+      const h = harness(V.spots);
+      h.run.start({ filters: { sort: 'freq' }, by });
+      assert.strictEqual(h.run.startedBy, 'owner');
+      assert.strictEqual(h.run.stopGuestRun(S.guestScanEndWhy(reason)), false, reason);
+      assert.strictEqual(h.run.scanning, true, reason + ': the owner scan runs on');
+    }
+  }
+  const h = harness(V.spots);
+  h.run.start({ filters: {}, by: 'guest' });
+  h.run.start({ filters: {}, by: 'owner' }); // the owner restarts it: now the owner's
+  assert.strictEqual(h.run.stopGuestRun('pass-ended'), false);
+  assert.strictEqual(h.run.scanning, true);
+  const idle = harness(V.spots);
+  assert.strictEqual(idle.run.stopGuestRun('pass-ended'), false, 'no run: nothing to stop');
+  assert.strictEqual(idle.run.startedBy, '');
+});
+
+test('#961 wiring: the guest flag reaches main, the start records it, every pass end path stops the guest scan', () => {
+  const read = (f) => fs.readFileSync(path.join(__dirname, '..', f), 'utf8');
+  const rs = read('lib/remote-server.js');
+  const c = rs.indexOf("case 'scan-control':");
+  assert.ok(/guest: !!ws\._passSession/.test(rs.slice(c, c + 900)), 'scan-control carries whether a Guest Pass phone sent it');
+  const main = read('main.js');
+  assert.ok(/remoteServer\.on\('scan-control', \(\{ action, filters, dwellSec, fromFreqKhz, guest \}\)/.test(main), 'main reads the guest flag');
+  assert.ok(/phoneScanRun\(\)\.start\(\{ filters, dwellSec, fromFreqKhz, by: guest \? 'guest' : 'owner' \}\)/.test(main), 'the start records who started it');
+  const i = main.indexOf('function passLeaseStopTransmitters(');
+  const body = main.slice(i, main.indexOf('\n}\n', i));
+  assert.ok(/step\('scan', \(\) => \{ const why = ScanRun\.guestScanEndWhy\(reason\); return !!\(why && _phoneScanRun && _phoneScanRun\.stopGuestRun\(why\)\); \}\)/.test(body), 'the lease end stops the guest scan, the owner scan never');
+  assert.ok(/const stopped = info\.wasPaused \? \[\] : passLeaseStopTransmitters\(info\.reason\)/.test(main), 'ended (expired, revoked, left, disconnected, ...) runs it');
+  assert.ok(/const stopped = passLeaseStopTransmitters\('paused'\);\s*passEnforcement\.pause\(\)/.test(main), 'the owner taking the radio back runs it');
 });
 
 console.log(`\n${pass} passed, ${fail} failed`);
