@@ -112,4 +112,82 @@ test('Other Rig (Hamlib) 3088 with no Radio Model borrows the quirk', () => {
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);
+process.exit(failed ? 1 : 0);  // The lookup moved to lib/rig-models.js hamlibTwinQuirks (#993); main.js calls it.
+  assert.ok(/return hamlibTwinQuirks(generic, ct && ct.rigId)/.test(fn), 'main.js uses the twin lookup');
+  const { hamlibTwinQuirks, getModel } = require('../lib/rig-models');
+  const generic = getModel(null, 'rigctld');
+  const r = hamlibTwinQuirks(generic, 3088);
+  assert.strictEqual(r.pollDuringTx, false, 'the quirk is borrowed by Hamlib number');
+  assert.strictEqual(r.caps, generic.caps, 'panel caps stay generic');
+  assert.strictEqual(hamlibTwinQuirks(generic, 2029), generic, 'an unmatched number lends nothing');
+});
+
+test('a real RigController + rigctld codec writes nothing during an over and resumes after', () => {
+  withFakeTimers((advance) => {
+    const transport = new EventEmitter();
+    transport.connect = () => {}; transport.disconnect = () => {}; transport.write = () => {};
+    const writes = [];
+    const r = new RigController(G90, transport, new RigctldCodec(G90, (d) => writes.push(String(d))));
+    r.connected = true; r._target = { host: '127.0.0.1', port: 4532 }; r._lastReadOkMs = Date.now();
+    r._startPolling();
+    advance(2_000);
+    assert.ok(writes.length > 0, 'polls while receiving');
+    r._transmitting = true;
+    const before = writes.length;
+    advance(15_000);
+    assert.strictEqual(writes.length, before, `sent during TX: ${writes.slice(before).join(' | ')}`);
+    r._transmitting = false;
+    advance(2_000);
+    assert.ok(writes.length > before, 'polling resumes after TX');
+    r._stopPolling();
+  });
+});
+
+test('R2: no poll in the first 400 ms after an over ends (the G90 is still unkeying)', () => {
+  withFakeTimers((advance) => {
+    const transport = new EventEmitter();
+    transport.connect = () => {}; transport.disconnect = () => {}; transport.write = () => {};
+    const writes = [];
+    const r = new RigController(G90, transport, new RigctldCodec(G90, (d) => writes.push(String(d))));
+    r.connected = true; r._target = { host: '127.0.0.1', port: 4532 }; r._lastReadOkMs = Date.now();
+    r._startPolling();
+    r._transmitting = true;
+    advance(15_200); // ticks every 500 ms; the over ends 200 ms after one
+    r._transmitting = false;
+    const before = writes.length;
+    advance(300); // the tick 300 ms after key-up
+    assert.strictEqual(writes.length, before, `polled ${writes.slice(before).join(' | ')} while the radio unkeys`);
+    advance(500); // 800 ms after key-up
+    assert.ok(writes.length > before, 'polling (and the PTT read) resumes right after the grace');
+    r._stopPolling();
+  });
+});
+
+test('R2: a radio that answers CAT in TX keeps polling straight after an over', () => {
+  withFakeTimers((advance) => {
+    const transport = new EventEmitter();
+    transport.connect = () => {}; transport.disconnect = () => {}; transport.write = () => {};
+    const writes = [];
+    const model = GENERIC_CAPS.rigctld;
+    const r = new RigController(model, transport, new RigctldCodec(model, (d) => writes.push(String(d))));
+    r.connected = true; r._target = { host: '127.0.0.1', port: 4532 }; r._lastReadOkMs = Date.now();
+    r._startPolling();
+    r._transmitting = true;
+    advance(15_200);
+    r._transmitting = false;
+    const before = writes.length;
+    advance(300);
+    assert.ok(writes.length > before, 'no grace for a model without pollDuringTx:false');
+    r._stopPolling();
+  });
+});
+
+test('Other Rig (Hamlib) 3088 with no Radio Model borrows the quirk', () => {
+  const main = readSrc(path.join(__dirname, '..', 'main.js'));
+  const fn = main.slice(main.indexOf('function getActiveRigModel()'), main.indexOf('function getActiveRigModel()') + 2500);
+  assert.ok(/m\.hamlib && m\.hamlib\.rigId === hamlibId/.test(fn), 'matched by Hamlib number');
+  assert.ok(/twin\.pollDuringTx === false\) return \{ \.\.\.generic, pollDuringTx: false \}/.test(fn), 'only the quirk is borrowed');
+});
+
+console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);
