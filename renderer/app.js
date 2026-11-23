@@ -16146,7 +16146,19 @@ function render() {
           else if (s.source === 'gma') url = `https://www.cqgma.org/`; // was falling through to a bogus POTA link
           else url = `https://pota.app/#/park/${s.reference}`;
           const a = document.createElement('a');
-          a.textContent = cell.val;
+          if (cell.col === 'reference') {
+            // Each ref is its own nowrap unit so a long cell wraps between
+            // refs, never inside "US-1234" (#999).
+            String(cell.val || '').split(' / ').forEach((ref, i) => {
+              if (i > 0) a.appendChild(document.createTextNode(' / '));
+              const part = document.createElement('span');
+              part.className = 'ref-part';
+              part.textContent = ref;
+              a.appendChild(part);
+            });
+          } else {
+            a.textContent = cell.val;
+          }
           a.href = '#';
           a.className = 'park-link';
           a.addEventListener('click', (e) => {
@@ -16155,9 +16167,18 @@ function render() {
             window.api.openExternal(url);
           });
           td.appendChild(a);
+        } else if (cell.col === 'reference') {
+          String(cell.val || '').split(' / ').forEach((ref, i) => {
+            if (i > 0) td.appendChild(document.createTextNode(' / '));
+            const part = document.createElement('span');
+            part.className = 'ref-part';
+            part.textContent = ref;
+            td.appendChild(part);
+          });
         } else {
           td.textContent = cell.val;
         }
+        if (cell.col === 'reference') td.classList.add('ref-wrap');
         if (cell.col) td.setAttribute('data-col', cell.col);
         if (cell.cls) td.className = cell.cls;
         // Bearing column: clickable in manual rotor mode
@@ -16196,6 +16217,7 @@ function render() {
         if (cell.wwff) {
           const badge = document.createElement('span');
           badge.textContent = 'WWFF';
+          badge.className = 'ref-wwff-pill';
           badge.style.cssText = `background:${SOURCE_COLORS_ACTIVE.wwff};color:#000;font-size:9px;font-weight:bold;padding:1px 3px;border-radius:3px;margin-left:4px;`;
           td.appendChild(badge);
         }

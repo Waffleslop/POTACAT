@@ -4567,6 +4567,11 @@ tr.wl-group-2 td:last-child {
 /* A spot on several programs (POTA + SOTA): wrap the program pills instead of
    clipping all but the first (lib/spot-programs.js). */
 tbody td.source-multi-program { white-space: normal; text-overflow: clip; line-height: 1.6; }
+/* The Park cell wraps the same way (#999): a long ref, several program refs
+   joined with " / ", or the NEW / DX / state pills no longer clip behind the
+   "...". Each ref and pill is a nowrap unit, so lines break only between them. */
+tbody td.ref-wrap { white-space: normal; text-overflow: clip; line-height: 1.6; }
+.ref-wrap .ref-part, .ref-wrap .ref-new-pill, .ref-wrap .ref-dx-pill, .ref-wrap .ref-state-pill, .ref-wrap .ref-wwff-pill { white-space: nowrap; }
 
 /* When row tinting is disabled, remove backgrounds but keep left borders */
 .no-source-tint .spot-pota,

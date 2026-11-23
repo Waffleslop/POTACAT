@@ -2,6 +2,7 @@
 //   #285 the Hunter table's Log button read "L" after the Nets/SW page
 //   #284 a net added from Directory > HF Nets showed only a check mark
 //   #298 a long remote shack name pushed HOLD TO TALK off the screen
+//   #999 a long Park (reference) cell was clipped while Source wrapped
 // Run: node test/main-window-layout-fixes-test.js
 'use strict';
 const { readSrc } = require('./_src');
@@ -37,6 +38,13 @@ test('#298: only the shack chip shrinks, with "...", and its title carries the w
   assert.ok(/\.status-bar > \* \{ flex: none; \}/.test(css));
   assert.ok(/\.status-bar > #remote-shack-status \{ flex: 0 1 auto; min-width: 64px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; \}/.test(css));
   assert.ok(/chip\.title = \(name \+ rig \+ leg \+ rtt \+ also \+ silent\) \+ '\\n' \+/.test(app));
+});
+
+test('#999: the Park cell wraps like Source: refs and pills are nowrap units, lines break only between them', () => {
+  assert.ok(/tbody td\.ref-wrap \{ white-space: normal; text-overflow: clip; line-height: 1\.6; \}/.test(css), 'wrap rule');
+  assert.ok(/\.ref-wrap \.ref-part, \.ref-wrap \.ref-new-pill, \.ref-wrap \.ref-dx-pill, \.ref-wrap \.ref-state-pill, \.ref-wrap \.ref-wwff-pill \{ white-space: nowrap; \}/.test(css), 'nowrap units');
+  assert.ok(/if \(cell\.col === 'reference'\) td\.classList\.add\('ref-wrap'\);/.test(app), 'class on the reference cell');
+  assert.ok(/String\(cell\.val \|\| ''\)\.split\(' \/ '\)/.test(app) && /className = 'ref-part'/.test(app), 'each ref in its own span');
 });
 
 test('this test is in the list CI runs', () => {
