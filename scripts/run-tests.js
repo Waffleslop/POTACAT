@@ -206,6 +206,7 @@ const TESTS = [
   'test/ft2000-atu-cmd-test.js', // #990: FT-2000 tune is AC002; per its CAT reference p. 5, not the Kenwood AC011;
   'test/freedv-spot-merge-test.js', // #742: one row per FreeDV station across PSKReporter + FreeDV Reporter; departed stations leave; rows keyed by mode too
   'test/freedv-display-mode-test.js', // #716: RADE, not DIGU/PKTUSB, on every surface while FreeDV runs
+  'test/echocat-web-data-mode-test.js', // DIGU / DIGL in ECHOCAT Web's mode picker for radios that have them (lib/data-mode-picker.js)
   'test/vfo-ptt-row-test.js', // #190: ECHOCAT Web VFO-tab PTT row shows while the mode is unknown; hidden in CW/data
   'test/ws-liveness-test.js', // ECHOCAT Web: reconnect when no pong comes back or the screen wakes on a dead socket
   'test/ptt-release-test.js', // ECHOCAT Web: PTT lets go on blur/hidden/cancel, Space up with a box focused, and resends off after a reconnect (#935)

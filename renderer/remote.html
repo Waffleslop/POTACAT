@@ -35,6 +35,7 @@
   <!-- pass-wording-js -->
   <!-- wsjtx-mode-notice-js -->
   <!-- freedv-display-mode-js -->
+  <!-- data-mode-picker-js -->
   <!-- vfo-ptt-row-js -->
   <!-- ws-liveness-js -->
   <!-- ptt-release-js -->
@@ -145,6 +146,9 @@
     <div id="mode-picker" class="hidden">
       <button class="mp-btn" data-mode="USB">USB</button>
       <button class="mp-btn" data-mode="LSB">LSB</button>
+      <!-- Data sub-modes (USB-D / LSB-D), shown when capabilities.dataModes lists them (lib/data-mode-picker.js) -->
+      <button class="mp-btn hidden" data-mode="DIGU" data-data-mode>DIGU</button>
+      <button class="mp-btn hidden" data-mode="DIGL" data-data-mode>DIGL</button>
       <button class="mp-btn" data-mode="CW">CW</button>
       <button class="mp-btn" data-mode="FT8">FT8</button>
       <button class="mp-btn" data-mode="FT4">FT4</button>

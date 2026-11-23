@@ -158,6 +158,7 @@ The `status` message is a kitchen-sink snapshot. The canonical fields are:
 | `freq` | number | Hz. **Not `frequency`.** |
 | `mode` | string | "USB", "LSB", "CW", "PKTUSB", "FREEDV-RADEV1", … |
 | `band` | string | "20m", "40m", … (derived from freq) |
+| `modeData` | boolean | Added 2026-11-23. The radio's DATA flag where it reports it apart from the mode (an Icom in USB or LSB with `1A 06` on): `true` = the radio is in USB-D / LSB-D although `mode` says USB / LSB, so show DIGU / DIGL. Sent only with a `mode`, never while transmitting; absent = keep the last value (every other radio names its data mode in `mode`: PKTUSB, DIGU, ...). Older desktops never send it. |
 | `catConnected` | boolean | true when CAT or SmartSDR is up |
 | `txState` | boolean | true while transmitting |
 | `rigType` | string | "flex", "yaesu", "icom", "kenwood", "rigctld", "wsjtx" |
@@ -167,6 +168,7 @@ The `status` message is a kitchen-sink snapshot. The canonical fields are:
 | `atu` | boolean | ATU enabled |
 | `vfo` | string | "A" or "B" — READBACK-fed since 2026-08-03 (Kenwood `IF;` / rigctld `v`, polled every cycle), so it now follows front-panel and custom-CAT VFO changes instead of only POTACAT-initiated ones |
 | `split` | boolean | rig split on/off, readback-fed (Kenwood `IF;` P12 / rigctld `s`). NEW 2026-08-03 — absent from older desktops. Live split is commanded via `rig-control {action:'set-split', value}`; the similarly-named `set-enable-split` only toggles the spot-tune setting |
+| `capabilities.dataModes` | string[] | Added 2026-11-23. The data sub-modes the radio can be set to, a subset of `["DIGU", "DIGL"]` (lib/data-mode-picker.js): both on Flex, TCI, Hamlib/rigctld (the Xiegu G90 included), DXLab Commander, Icom CI-V (none once the radio has refused the DATA flag), flrig (what the radio lists) and Yaesu / Kenwood / Elecraft text CAT where the model's codes give a real data mode; `["DIGU"]` on a radio with one data code for both sidebands (QMX); `[]` on the FT-817/818/857/897 legacy CAT, a (tr)uSDX and a radio with no CAT. Set them with the existing `set-mode` (`mode: "DIGU"` or `"DIGL"`), as the ECHOCAT app already does; the shack maps them to the radio's own (PKTUSB/PKTLSB, USB/LSB + DATA, MD0C/MD08, MD + DA1, ...). ECHOCAT Web shows DIGU / DIGL buttons in its mode picker only for the entries listed. Absent (older desktops) = not offered. |
 | `capabilities.splitUp` | boolean | Added 2026-11-23 (#689). `true` = the shack can do Split up N in one step: `rig-control {action:'split-up', offsetKhz}` with `offsetKhz` 1, 2, 5 or -1 turns split on and sets the TX VFO to the dial + offset (lib/split-up.js). Back to simplex is `set-split` false. Refused (logged, nothing sent) while the VFO is locked or when the TX frequency is outside the radio's range; refused for a Guest Pass like `set-split`. Never on a Flex. Absent (older desktops) = not offered. From the same date `splitFreq` is `false` where the link would decline the TX frequency (Yaesu other than FT-991/991A, Icom firmware that NAKs 25). |
 | `filterWidth` | number | Hz |
 | `rfgain` | number | 0–255 |
@@ -194,7 +196,7 @@ for the history.
 | `tune-blocked` | S→C | Tune was rejected (VFO locked, out of band, etc.). |
 | `rig-reconnect` | C→S | "My radio is back on, retry now." Rate-limited (5 s). The desktop re-dials the active rig unless WSJT-X Mode is on. |
 | `rig-reconnect-ack` | S→C | Answer to `rig-reconnect`. Since 2026-11-14 (#547) it carries `ok` (boolean). `{ ok: true }`: reconnecting; the outcome follows in `status` (`catConnected`). `{ ok: false, code: "wsjtx-mode", reason }`: nothing reconnects because WSJT-X Mode is on; `reason` is the display string "WSJT-X Mode is on: WSJT-X has the radio. Untick WSJT-X Mode (click CAT in the top bar) for POTACAT to tune it". Older desktops send `{ type }` alone: treat a missing `ok` as `true`. |
-| `set-mode` | C→S | Change mode without retuning frequency. |
+| `set-mode` | C→S | Change mode without retuning frequency. `mode` is a POTACAT mode name; `DIGU` / `DIGL` set the radio's data sub-mode (see `capabilities.dataModes`). |
 | `set-vfo` | C→S | Switch VFO A/B. |
 | `swap-vfo` | C→S | A↔B swap. |
 | `set-filter` | C→S | Set filter width in Hz. |
