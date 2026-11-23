@@ -544,6 +544,11 @@
     /* A Flex's own waterfall replaces the audio waterfall (jtcat-popout.js bsRadioWf):
        no header, no trace, the frequency scale over a taller waterfall. */
     #jp-wf-single.jp-wf-replaced { display: none !important; }
+    /* #391 "Show the audio waterfall" off: the picture goes, the decoder does not.
+       A warning (RX gain at 0, silent DAX, audio stalled) stays as a strip. */
+    #jp-wf-single.jp-wf-off > canvas, #jp-wf-single.jp-wf-off > #jp-wf-tx-marker { display: none; }
+    #jp-wf-single.jp-wf-off #jp-wf-silent.show { position: static; padding: 6px 10px; border-top: 1px solid var(--border-primary); }
+    #jp-wf-multi.jp-wf-off { display: none !important; }
     #jp-bandscope.jp-bs-radio-wf > div:first-child, #jp-bandscope.jp-bs-radio-wf #jp-bs-trace { display: none !important; }
     #jp-bandscope.jp-bs-radio-wf #jp-bs-wf { height: 120px !important; }
 
@@ -1306,6 +1311,10 @@
       <span class="jp-opt-help">The Stations view of Band Activity shows one line per station heard. A station not heard again within this time leaves the list. Changing band or mode, or pressing Clear, empties it.</span>
     </label>
     <div class="jp-opt-section">The picture</div>
+    <button id="jp-wf-show" class="jp-opt-row active">
+      <span class="jp-opt-label">Show the audio waterfall</span>
+      <span class="jp-opt-help">The waterfall across the middle of this window. Turn it off if your radio's own band scope already shows you the band; the decodes get the room. Decoding, transmitting and the phone's waterfall carry on as before. To set your TX frequency without it, click the red TX frequency at the top and type it.</span>
+    </button>
     <label class="jp-opt-row jp-opt-num-row">
       <span class="jp-opt-label">Waterfall speed <input id="jp-wf-speed" type="number" min="1" max="60" step="1" value="60"> lines/sec</span>
       <span class="jp-opt-help" id="jp-wf-speed-help">How fast the waterfall scrolls.</span>
