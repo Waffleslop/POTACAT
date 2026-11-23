@@ -499,6 +499,13 @@ function refreshVfoCardAge() {
 }
 
 /** Send tuned spot info to VFO popout */
+// The operator picked this station: main shows its call in N3FJP's entry
+// window when that setting is on (#712). Scan and frequency-follow do not call
+// this; only a pick does.
+function n3fjpPick(spot) {
+  try { if (spot && spot.callsign && window.api.n3fjpCallInProgress) window.api.n3fjpCallInProgress(spot.callsign); } catch { /* older preload */ }
+}
+
 function notifyVfoTunedSpot(spot) {
   vfoCardSpot = spot || null;
   if (!spot) { window.api.vfoTunedSpot(null); return; }
@@ -1388,6 +1395,7 @@ const logbookWavelogConfig = document.getElementById('logbook-wavelog-config');
 const logbookLog4omConfig = document.getElementById('logbook-log4om-config');
 const setLog4omWsjtxBinary = document.getElementById('set-log4om-wsjtx-binary');
 const setN3fjpPull = document.getElementById('set-n3fjp-pull');
+const setN3fjpCallInProgress = document.getElementById('set-n3fjp-call-in-progress');
 const setWavelogUrl = document.getElementById('set-wavelog-url');
 const setWavelogApiKey = document.getElementById('set-wavelog-api-key');
 const setWavelogStationId = document.getElementById('set-wavelog-station-id');
@@ -13047,7 +13055,7 @@ function bindPopupClickHandlers(mapInstance) {
         if (!isNaN(lat) && !isNaN(lon)) showTuneArc(lat, lon, btn.dataset.freq, btn.dataset.source);
         // Find matching spot in allSpots for quick respot
         const match = allSpots.find(s => s.frequency === btn.dataset.freq && s.callsign === btn.dataset.call && s.mode === btn.dataset.mode);
-        if (match) { lastTunedSpot = match; prefillDxCommand(match); notifyVfoTunedSpot(match); }
+        if (match) { lastTunedSpot = match; prefillDxCommand(match); notifyVfoTunedSpot(match); n3fjpPick(match); }
         // Activator mode: fill QSO form from spot
         if (appMode === 'activator' && activationActive && match) {
           fillActivatorFromSpot(match);
@@ -13329,6 +13337,7 @@ document.addEventListener('keydown', (e) => {
     if (!spot) return;
     lastTunedSpot = spot;
     notifyVfoTunedSpot(spot);
+    n3fjpPick(spot);
     prefillDxCommand(spot);
     window.api.tune(spot.frequency, spot.mode, spot.bearing);
     if (spot.lat != null && spot.lon != null) showTuneArc(spot.lat, spot.lon, spot.frequency, spot.source);
@@ -14240,6 +14249,7 @@ if (window.api.onBandspreadTunedSpot) {
     if (!match) return;
     lastTunedSpot = match;
     notifyVfoTunedSpot(match);
+    n3fjpPick(match);
     if (typeof prefillDxCommand === 'function') prefillDxCommand(match);
     render();
     const onFreqRow = tbody && (tbody.querySelector('.tuned-spot') || tbody.querySelector('.on-freq'));
@@ -15817,6 +15827,7 @@ function render() {
         }
         lastTunedSpot = s;
         notifyVfoTunedSpot(s);
+        n3fjpPick(s);
         cwSpotWpm = s.wpm || null;
         updateCwSpotWpm();
         prefillDxCommand(s);
@@ -16494,6 +16505,7 @@ window.api.onCatFrequency((hz) => { logFreqFollowRadio(hz); });
 
 function openLogPopup(spot) {
   currentLogSpot = spot;
+  n3fjpPick(spot);
   logFreqFollow.typed = false;
   logFreqFollow.pinnedKhz = parseFloat(spot.frequency) || 0;
   const nowKhz = radioFreqKhzExact || radioFreqKhz;
@@ -18719,6 +18731,7 @@ async function openSettingsDialog(tab) {
   setLogbookPort.value = s.logbookPort || '';
   setLog4omWsjtxBinary.checked = s.log4omWsjtxBinary === true;
   if (setN3fjpPull) setN3fjpPull.checked = s.n3fjpPull === true;
+  if (setN3fjpCallInProgress) setN3fjpCallInProgress.checked = s.n3fjpCallInProgress === true;
   setWavelogUrl.value = s.wavelogUrl || '';
   setWavelogApiKey.value = s.wavelogApiKey || '';
   setWavelogStationId.value = s.wavelogStationId || '';
@@ -19740,6 +19753,7 @@ settingsSave.addEventListener('click', async () => {
     logbookPort: logbookPortVal,
     log4omWsjtxBinary: setLog4omWsjtxBinary.checked,
     n3fjpPull: !!(setN3fjpPull && setN3fjpPull.checked),
+    n3fjpCallInProgress: !!(setN3fjpCallInProgress && setN3fjpCallInProgress.checked),
     wavelogUrl: setWavelogUrl.value.trim(),
     wavelogApiKey: setWavelogApiKey.value.trim(),
     wavelogStationId: setWavelogStationId.value.trim(),

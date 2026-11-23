@@ -3470,6 +3470,7 @@ function setTypedCall(source, call) {
   const prev = typedCalls.current();
   const now = typedCalls.set(source, call);
   if (now === prev) return;
+  if (now) n3fjpCip.note(now, 'typed'); // #712: debounced in the module
   if (win && !win.isDestroyed()) win.webContents.send('log-popout-callsign', now);
   if (vfoPopoutWin && !vfoPopoutWin.isDestroyed()) vfoPopoutWin.webContents.send('log-popout-callsign', now);
   if (remoteServer && remoteServer.running) remoteServer.sendTypedCall(now);
@@ -22808,6 +22809,7 @@ function remoteJtcatBroadcastQso() {
   if (remoteServer) remoteServer.broadcastJtcatQsoState(remoteJtcatQso || { phase: 'idle' });
   wsjtxStatusOnQsoChange();
   jtcatNferPrefetch('remote', remoteJtcatQso);
+  if (remoteJtcatQso && remoteJtcatQso.call) n3fjpCip.note(remoteJtcatQso.call, 'jtcat'); // #712
 }
 
 // WSJT-X sends a Status whenever its QSO state changes; GridTracker's roster
@@ -22829,6 +22831,7 @@ function popoutBroadcastQso() {
   }
   wsjtxStatusOnQsoChange();
   jtcatNferPrefetch('popout', popoutJtcatQso);
+  if (popoutJtcatQso && popoutJtcatQso.call) n3fjpCip.note(popoutJtcatQso.call, 'jtcat'); // #712
 }
 
 // call|band|mode -> ms of the last JTCAT auto-log (lib/jtcat-relog-guard.js).
@@ -40908,18 +40911,25 @@ function sendN3fjpTcp(qsoData, host, port) {
     });
 
     // Wait for socket to fully close + brief delay — N3FJP needs time
-    // between connections before it can accept the next one
+    // between connections before it can accept the next one. The call in
+    // progress (#712) learns the call is logged (N3FJP's entry window is
+    // emptied after it) and whether N3FJP is there at all.
     sock.on('close', () => {
-      if (!settled) { settled = true; setTimeout(resolve, 250); }
+      if (!settled) {
+        settled = true;
+        n3fjpCip.reachable(true);
+        n3fjpCip.logged(qsoData.callsign);
+        setTimeout(resolve, 250);
+      }
     });
 
     sock.setTimeout(5000);
     sock.on('timeout', () => {
       sock.destroy();
-      if (!settled) { settled = true; reject(new Error('N3FJP connection timed out')); }
+      if (!settled) { settled = true; n3fjpCip.reachable(false); reject(new Error('N3FJP connection timed out')); }
     });
     sock.on('error', (err) => {
-      if (!settled) { settled = true; reject(new Error(`N3FJP: ${err.message}`)); }
+      if (!settled) { settled = true; n3fjpCip.reachable(false); reject(new Error(`N3FJP: ${err.message}`)); }
     });
   });
 }
@@ -40931,6 +40941,50 @@ function n3fjpQueue(fn) {
   const run = _n3fjpChain.then(fn, fn);
   _n3fjpChain = run.catch(() => {});
   return run;
+}
+
+// The call in progress in N3FJP's entry window (#712, lib/n3fjp-call-in-progress.js):
+// a spot pick, a call typed in a log field, the JTCAT QSO partner. Only the
+// documented UPDATE TXTENTRYCALL + ACTION CALLTAB (and CLEAR after logging);
+// nothing is logged here. N3FJP closed: nothing is said.
+const N3fjpCip = require('./lib/n3fjp-call-in-progress');
+const n3fjpCip = new N3fjpCip.CallInProgress({
+  isEnabled: () => N3fjpCip.wanted(settings),
+  send: (job) => n3fjpQueue(() => {
+    // Waited behind a QSO send or the log pull: a newer call may have come.
+    if (job.kind === 'call' && !n3fjpCip.isCurrent(job.call)) return { skipped: true };
+    return sendN3fjpCommands(job.commands, settings.logbookHost || '127.0.0.1', parseInt(settings.logbookPort, 10) || 1100);
+  }),
+});
+
+/**
+ * Write N3FJP API commands on one connection, a short pause between them
+ * (the API page asks for at least 5 ms after an ACTION). A short timeout: a
+ * closed N3FJP must not hold up a real QSO waiting in the same queue.
+ */
+function sendN3fjpCommands(commands, host, port) {
+  return new Promise((resolve, reject) => {
+    const net = require('net');
+    let settled = false;
+    const done = (err) => {
+      if (settled) return;
+      settled = true;
+      if (err) reject(err); else setTimeout(resolve, 250); // N3FJP needs a moment between connections
+    };
+    const sock = net.createConnection({ host, port }, async () => {
+      try {
+        for (let i = 0; i < commands.length; i++) {
+          if (i) await new Promise((r) => setTimeout(r, 30));
+          await new Promise((r) => sock.write(commands[i], 'utf-8', r));
+        }
+      } catch { /* the error handler settles */ }
+      sock.end();
+    });
+    sock.on('close', () => done());
+    sock.setTimeout(1500);
+    sock.on('timeout', () => { sock.destroy(); done(new Error('N3FJP connection timed out')); });
+    sock.on('error', (err) => done(new Error(`N3FJP: ${err.message}`)));
+  });
 }
 
 // Bring in contacts logged in N3FJP on its own (W6ING, lib/n3fjp-pull.js).
@@ -40991,6 +41045,7 @@ async function n3fjpPull(reason) {
   try {
     const reply = await n3fjpQueue(() => N3fjpPull.requestList(host, port, N3fjpPull.listCommand({ recent: (full || daily) ? 0 : N3FJP_PULL_RECENT })));
     _n3fjpPullUnreachableLogged = false;
+    n3fjpCip.reachable(true); // N3FJP is open again: the call in progress may go (#712)
     const { records, dropped } = N3fjpPull.parseListReply(reply);
     if (!_n3fjpPullSampleLogged || (!records.length && reply.trim())) {
       _n3fjpPullSampleLogged = true;
@@ -47756,6 +47811,9 @@ function cloudShackNotice(text, kind) {
   // the other's call and the macro went out addressed to the wrong station.
   // Every callsign field reports here, naming itself; a sender that predates
   // the source argument is the main log dialog or the Log pop-out.
+  // A station picked in the main window (spot row, arrow keys, map, Bandspread,
+  // Log dialog): its call goes to N3FJP's entry window (#712).
+  ipcMain.on('n3fjp-call-in-progress', (_e, call) => n3fjpCip.note(call, 'spot'));
   ipcMain.on('log-popout-callsign', (_e, call, source) => {
     const from = source || ((win && !win.isDestroyed() && _e.sender === win.webContents) ? 'main:log' : 'popout');
     setTypedCall(from, call);

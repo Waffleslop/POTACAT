@@ -790,6 +790,7 @@ const TESTS = [
   'test/log-false-p2p-test.js', // no false park-to-park: a General contact after a POTA spot or contact carries no park (web sheet, desktop banner)
   'test/n3fjp-confirm-keep-test.js', // N3FJP pull never deletes a confirmation; eQSL and ClubLog count as confirmed
   'test/n3fjp-deleted-test.js', // a contact deleted after an N3FJP pull is not brought back by the daily re-read
+  'test/n3fjp-call-in-progress-test.js', // #712 the call in progress goes to N3FJP's entry window; debounced; never logs
   'test/kenwood-tx-latch-test.js', // a Kenwood is not latched in transmit after a hand-mic over (IF; P8 asked during TX)
   'test/civ-pacing-ptt-order-test.js', // CI-V pacing never sends TX OFF before TX ON; the newest key state wins
   'test/forced-data-no-tune-test.js', // a forced-DATA key-down sets the mode only; never a frequency write (Icom repeater memories)
