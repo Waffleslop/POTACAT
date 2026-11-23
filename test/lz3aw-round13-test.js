@@ -86,8 +86,14 @@ test('13 + 20/21: readable greys — tokens raised on every theme, JTCAT cells s
   assert.ok(lum(m[1]) < lum('#a0a0c0') && lum(m[2]) < lum(m[1]) && lum(m[3]) < lum(m[2]), 'still a ladder below secondary');
   assert.ok(/--text-dim: #9a9ab0;/.test(webCss) && /--text-dim: #5e5e76;/.test(webCss), 'web dark and light tokens');
   assert.ok(!/\.ft8-row \.ft8-dt \{ color: #666/.test(webCss) && /\.ft8-entity \{ font-size: 11px; color: var\(--text-dim\);/.test(webCss), 'web FT8 greys are tokens');
-  assert.ok(/\.jp-row \.jp-time \{[^}]*color: var\(--text-secondary\); font-size: 12px;/.test(popHtml));
-  assert.ok(/\.jp-row \.jp-dt \{[^}]*color: var\(--text-secondary\); font-size: 12px; \}/.test(popHtml));
+  // JTCAT time and DT cells: the secondary token at 12 px or larger (the
+  // 2026-11-02 larger-lists change raised them to 14 px; 12 px is the floor).
+  for (const cls of ['jp-time', 'jp-dt']) {
+    const rule = popHtml.match(new RegExp(String.raw`\.jp-row \.` + cls + String.raw` \{([^}]*)\}`));
+    assert.ok(rule && /color: var\(--text-secondary\);/.test(rule[1]), cls + ' uses --text-secondary');
+    const px = rule && rule[1].match(/font-size: (\d+)px;/);
+    assert.ok(px && Number(px[1]) >= 12, cls + ' font-size at least 12 px (' + (px && px[1]) + ')');
+  }
   assert.ok(/\.jp-entity \{ font-size: 11px; color: var\(--text-secondary\);/.test(popHtml));
 });
 
