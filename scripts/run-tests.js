@@ -401,6 +401,7 @@ const TESTS = [
   'test/mercury-process-test.js',
   'test/mercury-offer-test.js', // Mercury experimental: no 2750 bandwidth; the chat window hidden until on-air use (Casey 2026-11-22)
   'test/winlink-pat-test.js',
+  'test/winlink-own-modem-test.js', // 2026-11-22 community-modem gateways (DATA2G and the like) after the standard rows, under their own heading
   'test/winlink-list-refresh-test.js', // the gateway list downloads again on Refresh and daily; Other service codes (plan docs/winlink-custom-gateways-plan.md 1-2)
   'test/winlink-reach-test.js',      // a radio session goes only where this radio can transmit
   'test/winlink-units-test.js',
@@ -422,6 +423,7 @@ const TESTS = [
   'test/winlink-busy-wait-test.js', // #296: Keep waiting stays chosen, Stop ends Pat's busy wait, the watchdog does not call the wait a stall
   'test/modem-audio-lane-test.js', // #187: the modem's audio off the main process; credit, drain, counted cuts
   'test/winlink-awake-test.js', // #187: a radio Winlink session holds off App Nap (the hidden bridge window starved on a Mac)
+  'test/winlink-my-gateways-test.js', // #585: Add a gateway: the form's checks, the dial from the centre, Mine entries (note, via, ARDOP bandwidth), Edit and Remove, their own group in the list
   'test/winlink-history-test.js', // #254: gateway history from Pat's event log, My gateways (saved gateways)
   'test/winlink-outcome-test.js', // #425: how a session ended is worded in one place; Pat's reply never reaches a status; one summary line per session
   'test/winlink-pat-recover-test.js', // #430: after an Abort, Connect restarts a Pat that is stuck on the last call; a session never starts on top of a dial (VARA)

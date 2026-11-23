@@ -16812,22 +16812,28 @@ var _paddleHoldTimer = { dit: null, dah: null };
     var box = mailEl('mail-gateway');
     if (!mailGateways.length) { mailGwMessage('No gateways for that band'); mailRenderBar(); return; }
     box.textContent = '';
-    mailGateways.slice(0, 80).forEach(function (g, i) {
-      var b = mailMake('button', 'mail-gw');
-      b.type = 'button';
-      b.setAttribute('data-i', String(i));
-      b.setAttribute('aria-pressed', i === mailPick ? 'true' : 'false');
-      b.setAttribute('aria-label', mailGatewayLabel(g));
-      var main = mailMake('span', 'mail-row-main');
-      main.appendChild(mailMake('span', 'mail-row-who', g.call));
-      main.appendChild(mailMake('span', 'mail-row-line', [g.dialKhz ? FreqDots.khzMhz(g.dialKhz) : '', g.distKm != null ? g.distKm + ' km' : ''].filter(Boolean).join(' · ')));
-      b.appendChild(main);
-      var tag = MailView.qualityTag(g);
-      if (tag) b.appendChild(mailMake('span', 'mail-tag mail-tag-' + tag.tone, tag.text));
-      b.onclick = function () { mailPickGateway(i); };
-      box.appendChild(b);
+    // Ordinary gateways first; then any the shack marked ownModem (a community
+    // modem listed under this mode) under their own heading, as on the desktop.
+    MailView.gatewaySections(mailGateways, 80).forEach(function (sec) {
+      if (sec.heading && sec.rows.length) box.appendChild(mailMake('div', 'mail-gw-group', sec.heading));
+      sec.rows.forEach(function (row) { mailGatewayButton(box, row.g, row.i); });
     });
     mailRenderBar();
+  }
+  function mailGatewayButton(box, g, i) {
+    var b = mailMake('button', 'mail-gw');
+    b.type = 'button';
+    b.setAttribute('data-i', String(i));
+    b.setAttribute('aria-pressed', i === mailPick ? 'true' : 'false');
+    b.setAttribute('aria-label', mailGatewayLabel(g));
+    var main = mailMake('span', 'mail-row-main');
+    main.appendChild(mailMake('span', 'mail-row-who', g.call));
+    main.appendChild(mailMake('span', 'mail-row-line', [g.serviceTag || '', g.dialKhz ? FreqDots.khzMhz(g.dialKhz) : '', g.distKm != null ? g.distKm + ' km' : ''].filter(Boolean).join(' · ')));
+    b.appendChild(main);
+    var tag = MailView.qualityTag(g);
+    if (tag) b.appendChild(mailMake('span', 'mail-tag mail-tag-' + tag.tone, tag.text));
+    b.onclick = function () { mailPickGateway(i); };
+    box.appendChild(b);
   }
   function mailPickGateway(i) {
     var g = mailGateways[i];
