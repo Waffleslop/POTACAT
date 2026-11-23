@@ -162,6 +162,7 @@ function _applyPopoutTheme(payload) {
     }
     if (typeof s.jtcatWaterfallSpeed === 'number') setWfSpeed(s.jtcatWaterfallSpeed, false);
     if (typeof s.jtcatWaterfallFloor === 'number') setWfFloor(s.jtcatWaterfallFloor, false);
+    wfSetShown(s.jtcatShowWaterfall !== false, false); // #391, default on
     if (s.jtcatStationsExpiryMin != null && typeof applyStationsExpiry === 'function') applyStationsExpiry(s.jtcatStationsExpiryMin, false);
     if (typeof s.jtcatShowBandScope === 'boolean') bsSetOn(s.jtcatShowBandScope, false);
     else updateWfSpeedHelp();
@@ -2802,6 +2803,8 @@ function _applyPopoutTheme(payload) {
       multiWfPanes.push({ sliceId: cfg.sliceId, canvas: canvas, ctx: canvas.getContext('2d'), analyser: analyser, sampleRate: entry ? entry.ctx.sampleRate : 48000, txLine: txLine, txHz: txHz });
     });
 
+    // "Show the audio waterfall" off (#391): the panes exist, hidden, and are never drawn.
+    if (!wfShown) return;
     // Start waterfall animation loop
     function drawMultiWf() {
       for (var p of multiWfPanes) {
@@ -3210,6 +3213,39 @@ function _applyPopoutTheme(payload) {
   if (wfSpeedInput) {
     wfSpeedInput.addEventListener('change', function() { setWfSpeed(wfSpeedInput.value, true); });
   }
+  // "Show the audio waterfall" (#391): an operator whose radio's own band scope
+  // already shows the band can switch this one off. Off hides the pane and
+  // stops drawing it: the loop leaves at its first line and no frame is asked
+  // for. The decoder is fed by the capture worklet (startPopoutAudio), never by
+  // the waterfall, so decoding and TX carry on; main measures the quiet TX
+  // frequency itself when no window reports, and phones get main's own
+  // spectrum. The warnings the loop raised (RX gain at 0, silent DAX) and the
+  // JTTY Clear-spot levels keep running on a slow tick (wfOffTick).
+  var wfShowToggle = document.getElementById('jp-wf-show');
+  var wfShown = true;
+  function wfApplyShown() {
+    if (wfShowToggle) wfShowToggle.classList.toggle('active', wfShown);
+    var single = document.getElementById('jp-wf-single');
+    if (single) single.classList.toggle('jp-wf-off', !wfShown);
+    var multi = document.getElementById('jp-wf-multi');
+    if (multi) multi.classList.toggle('jp-wf-off', !wfShown);
+  }
+  function wfSetShown(on, persist) {
+    var was = wfShown;
+    wfShown = on !== false;
+    wfApplyShown();
+    if (!wfShown) {
+      if (popoutWaterfallAnim) { cancelAnimationFrame(popoutWaterfallAnim); popoutWaterfallAnim = null; }
+      if (multiWfAnim) { cancelAnimationFrame(multiWfAnim); multiWfAnim = null; }
+    } else if (!was) {
+      resizeWaterfall();   // the canvas measured 0x0 while hidden
+      wfResetAccum();
+      if (popoutAnalyser && !popoutWaterfallAnim) popoutWaterfallAnim = requestAnimationFrame(popoutWaterfallLoop);
+      if (multiActive) buildMultiWaterfalls();
+    }
+    if (persist) window.api.saveSettings({ jtcatShowWaterfall: wfShown });
+  }
+  if (wfShowToggle) wfShowToggle.addEventListener('click', function() { wfSetShown(!wfShown, true); });
   // Display floor — the FT-710 scope's Floor slider, on this waterfall too
   // (Casey 2026-09-21). Applied AFTER the silence watchdog reads the raw
   // bins, so a high floor can never fake an 'RX audio silent' verdict.
@@ -6837,8 +6873,69 @@ function _applyPopoutTheme(payload) {
     if (jpWfSilentEl) jpWfSilentEl.classList.toggle('show', !!on);
   }
 
+  // Everything the loop does besides drawing: the RX-gain-at-0 notice, the
+  // Flex silent-DAX watchdog and the JTTY Clear-spot levels. The loop runs
+  // it every frame; with the waterfall off (#391) wfOffTick runs it twice a second.
+  function wfWatchFrame(freqData, passbandBins) {
+    // RX gain at 0 — the analyser (and, on device-audio paths, the capture
+    // worklet feeding the decoder) sits DOWNSTREAM of popoutRxGainNode, so
+    // a zeroed slider makes the waterfall deterministically black no matter
+    // what the radio sends. This exact case used to be EXCUSED by the
+    // watchdog below ("user muted on purpose") and cost a full night of
+    // DAX-routing archaeology while the fault was the slider (K3SBP
+    // 2026-07-18). Name the slider instead of staying quiet. Any source,
+    // any TX state — the message is statically true.
+    if (popoutRxGainLevel <= 0.001) {
+      if (!wfSilentShown || wfSilentCause !== 'gain') {
+        if (jpWfSilentEl) jpWfSilentEl.innerHTML = '<strong>Waterfall muted — RX gain is at 0</strong><span>drag the RX slider up to bring it back</span>';
+        wfSilentCause = 'gain';
+        setWfSilentOverlay(true); wfSilentShown = true;
+      }
+      wfLastSignalTs = Date.now(); // fresh window once the slider comes back up
+    } else if (popoutIsFlex && !transmitting) {
+      // RX-silent watchdog (Flex only) — see notes above popoutWaterfallLoop.
+      var wfMax = 0;
+      for (var pb = 0; pb < passbandBins; pb++) { if (freqData[pb] > wfMax) wfMax = freqData[pb]; }
+      var wfNow = Date.now();
+      if (wfMax > WF_SILENCE_FLOOR) {
+        wfLastSignalTs = wfNow;
+        if (wfSilentShown) { setWfSilentOverlay(false); wfSilentShown = false; }
+      } else if ((!wfSilentShown || wfSilentCause !== 'silent') && (wfNow - wfLastSignalTs) > WF_SILENCE_MS) {
+        // Restore the default DAX text — the overlay may carry gain/stall
+        // wording from an earlier cause.
+        if (jpWfSilentEl) jpWfSilentEl.innerHTML = '<strong>RX audio silent — check DAX routing</strong><span>slice may not be on POTACAT\'s DAX RX channel</span>';
+        wfSilentCause = 'silent';
+        setWfSilentOverlay(true); wfSilentShown = true;
+      }
+    } else {
+      // Not applicable (non-Flex or transmitting): no verdict. Clear any
+      // warning and reset the clock so a fresh window is measured when we
+      // requalify (e.g. the moment TX ends).
+      wfLastSignalTs = Date.now();
+      if (wfSilentShown) { setWfSilentOverlay(false); wfSilentShown = false; }
+    }
+
+    // JTTY "Clear spot" listens to the raw levels too (never our own TX).
+    if (modeSelect.value === 'JTTY' && !transmitting) jttyFeedLevels(freqData, passbandBins);
+  }
+  function wfOffTick() {
+    if (wfShown || !popoutAnalyser) return;
+    try {
+      var freqData = new Uint8Array(popoutAnalyser.frequencyBinCount);
+      popoutAnalyser.getByteFrequencyData(freqData);
+      var nyquist = (popoutAudioCtx ? popoutAudioCtx.sampleRate : 12000) / 2;
+      wfWatchFrame(freqData, Math.floor(3000 / nyquist * freqData.length));
+    } catch (err) {
+      console.error('[JTCAT popout] Waterfall-off watchdog error:', err.message || err);
+    }
+  }
+  setInterval(wfOffTick, 500);
+
   // Waterfall rendering loop — driven by local AnalyserNode (no IPC)
   function popoutWaterfallLoop() {
+    // "Show the audio waterfall" off (#391): no drawing and no next frame.
+    // wfSetShown starts the loop again when it is turned back on.
+    if (!wfShown) { popoutWaterfallAnim = null; return; }
     if (!popoutAnalyser) {
       // A transiently-null analyser (mid device-change stop/start) used to
       // RETURN here, skipping the re-arm at the bottom — the loop died
@@ -6855,46 +6952,8 @@ function _applyPopoutTheme(payload) {
       var nyquist = (popoutAudioCtx ? popoutAudioCtx.sampleRate : 12000) / 2;
       var passbandBins = Math.floor(3000 / nyquist * freqData.length);
 
-      // RX gain at 0 — the analyser (and, on device-audio paths, the capture
-      // worklet feeding the decoder) sits DOWNSTREAM of popoutRxGainNode, so
-      // a zeroed slider makes the waterfall deterministically black no matter
-      // what the radio sends. This exact case used to be EXCUSED by the
-      // watchdog below ("user muted on purpose") and cost a full night of
-      // DAX-routing archaeology while the fault was the slider (K3SBP
-      // 2026-07-18). Name the slider instead of staying quiet. Any source,
-      // any TX state — the message is statically true.
-      if (popoutRxGainLevel <= 0.001) {
-        if (!wfSilentShown || wfSilentCause !== 'gain') {
-          if (jpWfSilentEl) jpWfSilentEl.innerHTML = '<strong>Waterfall muted — RX gain is at 0</strong><span>drag the RX slider up to bring it back</span>';
-          wfSilentCause = 'gain';
-          setWfSilentOverlay(true); wfSilentShown = true;
-        }
-        wfLastSignalTs = Date.now(); // fresh window once the slider comes back up
-      } else if (popoutIsFlex && !transmitting) {
-        // RX-silent watchdog (Flex only) — see notes above popoutWaterfallLoop.
-        var wfMax = 0;
-        for (var pb = 0; pb < passbandBins; pb++) { if (freqData[pb] > wfMax) wfMax = freqData[pb]; }
-        var wfNow = Date.now();
-        if (wfMax > WF_SILENCE_FLOOR) {
-          wfLastSignalTs = wfNow;
-          if (wfSilentShown) { setWfSilentOverlay(false); wfSilentShown = false; }
-        } else if ((!wfSilentShown || wfSilentCause !== 'silent') && (wfNow - wfLastSignalTs) > WF_SILENCE_MS) {
-          // Restore the default DAX text — the overlay may carry gain/stall
-          // wording from an earlier cause.
-          if (jpWfSilentEl) jpWfSilentEl.innerHTML = '<strong>RX audio silent — check DAX routing</strong><span>slice may not be on POTACAT\'s DAX RX channel</span>';
-          wfSilentCause = 'silent';
-          setWfSilentOverlay(true); wfSilentShown = true;
-        }
-      } else {
-        // Not applicable (non-Flex or transmitting): no verdict. Clear any
-        // warning and reset the clock so a fresh window is measured when we
-        // requalify (e.g. the moment TX ends).
-        wfLastSignalTs = Date.now();
-        if (wfSilentShown) { setWfSilentOverlay(false); wfSilentShown = false; }
-      }
-
-      // JTTY "Clear spot" listens to the raw levels too (never our own TX).
-      if (modeSelect.value === 'JTTY' && !transmitting) jttyFeedLevels(freqData, passbandBins);
+      // The warnings and JTTY levels, from the raw bins (before the floor).
+      wfWatchFrame(freqData, passbandBins);
 
       // Display floor, after the watchdog has seen the raw levels.
       if (wfFloor > 0 && window.ScopeAxis) freqData = window.ScopeAxis.applyFloor(freqData, wfFloor);
