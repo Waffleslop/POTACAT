@@ -15,7 +15,7 @@ contextBridge.exposeInMainWorld('api', {
   getAllQsos: () => ipcRenderer.invoke('get-all-qsos'),
   updateQso: (data) => ipcRenderer.invoke('update-qso', data),
   expandQsoMultipark: (data) => ipcRenderer.invoke('expand-qso-multipark', data),
-  deleteQso: (idx) => ipcRenderer.invoke('delete-qso', idx),
+  deleteQso: (idx, identity) => ipcRenderer.invoke('delete-qso', idx, identity), // identity: lib/qso-identity.js (#988)
   exportAdif: (qsos) => ipcRenderer.invoke('export-adif', qsos),
   importAdif: () => ipcRenderer.invoke('import-adif'),
   findDuplicateQsos: () => ipcRenderer.invoke('find-duplicate-qsos'),

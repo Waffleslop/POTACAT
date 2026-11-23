@@ -263,10 +263,10 @@ for the history.
 | `get-all-qsos` | C→S | Request the full QSO log. |
 | `all-qsos` | S→C | Full QSO log payload. Chunked when the client hello advertises `chunked-all-qsos`; otherwise one frame capped to the most-recent 2000 records AND 256KB (`truncated: true` when cut). |
 | `qso-added` | S→C | Incremental append after a QSO save, sent only to clients advertising `qso-delta` — replaces the full `all-qsos` re-push on every save. `data` = one record in `all-qsos` shape, `total` = new log length; if `total` ≠ local count + 1 the client should resync via `get-all-qsos`. |
-| `update-qso` | C→S | Edit a QSO by index. |
-| `qso-updated` | S→C | Edit confirmation broadcast. |
-| `delete-qso` | C→S | Delete a QSO by index. |
-| `qso-deleted` | S→C | Delete confirmation broadcast. |
+| `update-qso` | C→S | Edit a QSO by index. Optional `identity` (#988): the record's `APP_POTACAT_UUID`, `CALL`, `QSO_DATE`, `TIME_ON`, `BAND`, `MODE` as received; the shack then edits only that QSO and refuses (`success: false`, `reason: 'not-found'` or `'ambiguous'`) when no single record matches. |
+| `qso-updated` | S→C | Edit confirmation broadcast. `idx` is the record's position in the log at the time of the edit. |
+| `delete-qso` | C→S | Delete a QSO by index. Optional `identity`, as for `update-qso`. |
+| `qso-deleted` | S→C | Delete confirmation broadcast. `success: true` only when the record left the log file; `idx` is the position it was removed from (shift later records down by one). |
 | `lookup-call` | C→S | QRZ lookup proxied through the desktop (avoids storing creds on phone). |
 | `qrz-lookup` | C→S | Alternate alias used in some paths. |
 | `call-lookup` | S→C | Lookup result. |
