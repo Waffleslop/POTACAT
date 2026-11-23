@@ -3316,6 +3316,11 @@
           </select>
         </label>
       </div>
+      <!-- #345: Linux only (app.js shows the row there). -->
+      <div id="linux-native-frame-row" class="hidden">
+        <label class="checkbox-label"><input type="checkbox" id="set-linux-native-frame"> Use the system title bar (window manager menu and buttons)</label>
+        <span class="help-text" style="margin-left:12px;margin-bottom:6px;display:block;">Every POTACAT window gets your desktop's own title bar, with its window menu (move to another workspace, always on top) and buttons, in place of POTACAT's. Takes effect when POTACAT restarts.</span>
+      </div>
     </fieldset>
     <!-- Panadapter Spots -->
     <fieldset class="source-toggles" data-settings-tab="spots">

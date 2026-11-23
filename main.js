@@ -455,6 +455,7 @@ const AmpDrive = require('./lib/amp-drive-limit'); // per-rig amplifier drive li
 const { decideBandPowerReapply } = require('./lib/band-power-reapply');
 const AtuWizard = require('./lib/atu-wizard');
 const AppTheme = require('./lib/app-theme');
+const WindowFrame = require('./lib/window-frame');
 const { stripSecrets, restoreSecrets, stripSdrUserinfo, sdrUserinfo } = require('./lib/settings-secrets');
 const { buildContestHistory } = require('./lib/contest-history');
 const contestsDb = require('./lib/contests-db');
@@ -40978,10 +40979,24 @@ function resolveTheme() {
   try { dark = !!nativeTheme.shouldUseDarkColors; } catch { /* no nativeTheme in a test harness */ }
   return AppTheme.resolveAppTheme(settings, dark);
 }
+// #345: the frame every visible window opens with (lib/window-frame.js). The
+// setting is read once, at the first window, so a change applies on restart and
+// every window of a run matches the main window.
+let _windowFrameSettings = null;
+function windowFrameSettings() {
+  if (!_windowFrameSettings && settings) _windowFrameSettings = { linuxNativeFrame: settings.linuxNativeFrame === true };
+  return _windowFrameSettings || {};
+}
+function windowFrame() {
+  return WindowFrame.windowFrameFor(process.platform, windowFrameSettings());
+}
+
 function themeQuery() {
   const r = resolveTheme();
   const q = { theme: r.theme, variant: r.variant };
   if (r.ds) q.ds = r.ds;
+  // The page hides its own window buttons under the system frame (native-frame.css).
+  if (WindowFrame.usesNativeFrame(process.platform, windowFrameSettings())) q.frame = 'native';
   return q;
 }
 
@@ -41032,7 +41047,7 @@ function createWindow() {
     height: defaultH,
     title: `POTACAT - v${getAppDisplayVersion()}`,
     backgroundColor: getThemeWindowBg(),
-    ...(isMac ? { titleBarStyle: 'hiddenInset' } : { frame: false }),
+    ...windowFrame(),
     icon: getIconPath(),
     show: false,
     webPreferences: {
@@ -46762,7 +46777,7 @@ function cloudShackNotice(text, kind) {
       title: 'POTACAT Map',
       backgroundColor: getThemeWindowBg(),
       show: false,
-      ...(isMac ? { titleBarStyle: 'hiddenInset' } : { frame: false }),
+      ...windowFrame(),
       icon: getIconPath(),
       webPreferences: {
         preload: path.join(__dirname, 'preload-popout.js'),
@@ -46851,7 +46866,7 @@ function cloudShackNotice(text, kind) {
       title: 'POTACAT — Propagation',
       backgroundColor: getThemeWindowBg(),
       show: false,
-      ...(isMac ? { titleBarStyle: 'hiddenInset' } : { frame: false }),
+      ...windowFrame(),
       icon: getIconPath(),
       webPreferences: {
         preload: path.join(__dirname, 'preload-prop-popout.js'),
@@ -46928,7 +46943,7 @@ function cloudShackNotice(text, kind) {
       backgroundColor: getThemeWindowBg(),
       show: false,
       resizable: true,
-      ...(isMac ? { titleBarStyle: 'hiddenInset' } : { frame: false }),
+      ...windowFrame(),
       icon: getIconPath(),
       webPreferences: {
         preload: path.join(__dirname, 'preload-pair-popout.js'),
@@ -46979,7 +46994,7 @@ function cloudShackNotice(text, kind) {
       backgroundColor: getThemeWindowBg(),
       resizable: false,
       alwaysOnTop: true,
-      ...(isMac ? { titleBarStyle: 'hiddenInset' } : { frame: false }),
+      ...windowFrame(),
       icon: getIconPath(),
       webPreferences: {
         preload: path.join(__dirname, 'preload-pair-request-popout.js'),
@@ -47171,7 +47186,7 @@ function cloudShackNotice(text, kind) {
       title: 'POTACAT Logbook',
       show: false,
       backgroundColor: getThemeWindowBg(),
-      ...(isMac ? { titleBarStyle: 'hiddenInset' } : { frame: false }),
+      ...windowFrame(),
       icon: getIconPath(),
       webPreferences: {
         preload: path.join(__dirname, 'preload-qso-popout.js'),
@@ -47298,7 +47313,7 @@ function cloudShackNotice(text, kind) {
       title: 'Log QSO',
       backgroundColor: getThemeWindowBg(),
       show: false,
-      ...(isMac ? { titleBarStyle: 'hiddenInset' } : { frame: false }),
+      ...windowFrame(),
       icon: getIconPath(),
       webPreferences: {
         preload: path.join(__dirname, 'preload-log-popout.js'),
@@ -47442,7 +47457,7 @@ function cloudShackNotice(text, kind) {
       title: 'POTACAT Spots',
       backgroundColor: getThemeWindowBg(),
       show: false,
-      ...(isMac ? { titleBarStyle: 'hiddenInset' } : { frame: false }),
+      ...windowFrame(),
       icon: getIconPath(),
       webPreferences: {
         preload: path.join(__dirname, 'preload-spots-popout.js'),
@@ -47533,7 +47548,7 @@ function cloudShackNotice(text, kind) {
       title: 'DX Cluster Terminal',
       backgroundColor: getThemeWindowBg(),
       show: false,
-      ...(isMac ? { titleBarStyle: 'hiddenInset' } : { frame: false }),
+      ...windowFrame(),
       icon: getIconPath(),
       webPreferences: {
         preload: path.join(__dirname, 'preload-cluster-popout.js'),
@@ -47614,7 +47629,7 @@ function cloudShackNotice(text, kind) {
       title: 'Bandspread',
       backgroundColor: getThemeWindowBg(),
       show: false,
-      ...(isMac ? { titleBarStyle: 'hiddenInset' } : { frame: false }),
+      ...windowFrame(),
       icon: getIconPath(),
       webPreferences: {
         preload: path.join(__dirname, 'preload-bandspread-popout.js'),
@@ -47748,7 +47763,7 @@ function cloudShackNotice(text, kind) {
       title: 'Activation Map',
       backgroundColor: getThemeWindowBg(),
       show: false,
-      ...(isMac ? { titleBarStyle: 'hiddenInset' } : { frame: false }),
+      ...windowFrame(),
       icon: getIconPath(),
       webPreferences: {
         preload: path.join(__dirname, 'preload-actmap-popout.js'),
@@ -47945,7 +47960,7 @@ function cloudShackNotice(text, kind) {
       backgroundColor: getThemeWindowBg(),
       show: false,
       alwaysOnTop: vfoAlwaysOnTop,
-      ...(isMac ? { titleBarStyle: 'hiddenInset' } : { frame: false }),
+      ...windowFrame(),
       icon: getIconPath(),
       webPreferences: {
         preload: path.join(__dirname, 'preload-vfo-popout.js'),
@@ -48119,7 +48134,7 @@ function cloudShackNotice(text, kind) {
       width: 1100, height: 720, title: 'POTACAT — Conditions',
       backgroundColor: getThemeWindowBg(),
       show: false,
-      ...(isMac ? { titleBarStyle: 'hiddenInset' } : { frame: false }),
+      ...windowFrame(),
       icon: getIconPath(),
       webPreferences: {
         preload: path.join(__dirname, 'preload-conditions-popout.js'),
@@ -48282,7 +48297,7 @@ function cloudShackNotice(text, kind) {
       title: 'POTACAT — JTCAT',
       backgroundColor: getThemeWindowBg(),
       show: false,
-      ...(isMac ? { titleBarStyle: 'hiddenInset' } : { frame: false }),
+      ...windowFrame(),
       icon: getIconPath(),
       webPreferences: {
         preload: path.join(__dirname, 'preload-jtcat-popout.js'),
@@ -48468,7 +48483,7 @@ function cloudShackNotice(text, kind) {
       minWidth: 480, minHeight: 360, // never smaller than its own controls (N0KAH 2026-10-24)
       width: 720, height: 560, title: 'POTACAT — Mercury HF Data',
       backgroundColor: getThemeWindowBg(), show: false,
-      ...(isMac ? { titleBarStyle: 'hiddenInset' } : { frame: false }),
+      ...windowFrame(),
       icon: getIconPath(),
       webPreferences: {
         preload: path.join(__dirname, 'preload-mercury-popout.js'),
@@ -48508,7 +48523,7 @@ function cloudShackNotice(text, kind) {
       minWidth: 600, minHeight: 420, // never smaller than its own controls (N0KAH 2026-10-24)
       width: 900, height: 640, title: 'POTACAT — Winlink Mail',
       backgroundColor: getThemeWindowBg(), show: false,
-      ...(isMac ? { titleBarStyle: 'hiddenInset' } : { frame: false }),
+      ...windowFrame(),
       icon: getIconPath(),
       webPreferences: {
         preload: path.join(__dirname, 'preload-winlink-popout.js'),
@@ -48571,7 +48586,7 @@ function cloudShackNotice(text, kind) {
       minWidth: 560, minHeight: 420, // never smaller than its own controls (N0KAH 2026-10-24)
       width: 760, height: 600, title: 'POTACAT — JS8Call',
       backgroundColor: getThemeWindowBg(), show: false,
-      ...(isMac ? { titleBarStyle: 'hiddenInset' } : { frame: false }),
+      ...windowFrame(),
       icon: getIconPath(),
       webPreferences: {
         preload: path.join(__dirname, 'preload-js8call-popout.js'),
@@ -48665,7 +48680,7 @@ function cloudShackNotice(text, kind) {
       minWidth: 400, minHeight: 300, // never smaller than its own controls (N0KAH 2026-10-24)
       width: 700, height: 500, title: 'JS8 Heartbeat Map',
       backgroundColor: getThemeWindowBg(),
-      ...(isMac ? { titleBarStyle: 'hiddenInset' } : { frame: false }), // #866: the macOS traffic lights, as every other pop-out
+      ...windowFrame(), // #866: the macOS traffic lights, as every other pop-out
       icon: getIconPath(),
       webPreferences: { preload: path.join(__dirname, 'preload-js8-map-popout.js'), contextIsolation: true, nodeIntegration: false },
     });
@@ -48739,7 +48754,7 @@ function cloudShackNotice(text, kind) {
       minWidth: 640, minHeight: 400,
       width: 1280, height: 860, title: 'APRS', // the approved layout's size; a saved place wins (rememberWindowPlace)
       backgroundColor: getThemeWindowBg(),
-      ...(isMac ? { titleBarStyle: 'hiddenInset' } : { frame: false }), // #866: plain frame:false left a Mac with no way to close it
+      ...windowFrame(), // #866: plain frame:false left a Mac with no way to close it
       icon: getIconPath(),
       webPreferences: { preload: path.join(__dirname, 'preload-aprs-popout.js'), contextIsolation: true, nodeIntegration: false },
     });
@@ -49370,7 +49385,7 @@ function cloudShackNotice(text, kind) {
       minWidth: 360, minHeight: 300, // never smaller than its own controls (N0KAH 2026-10-24)
       width: 700, height: 500,
       backgroundColor: getThemeWindowBg(),
-      ...(isMac ? { titleBarStyle: 'hiddenInset' } : { frame: false }), // #866: same as the APRS window, the Mac had no way to close it
+      ...windowFrame(), // #866: same as the APRS window, the Mac had no way to close it
       webPreferences: { preload: path.join(__dirname, 'preload-jtcat-popout.js'), contextIsolation: true, nodeIntegration: false },
     });
     rememberWindowPlace(jtcatMapPopoutWin, 'jtcatMapPopoutBounds', { minWidth: 360, minHeight: 300 });
@@ -50286,7 +50301,7 @@ function cloudShackNotice(text, kind) {
       title: 'POTACAT — SSTV',
       backgroundColor: getThemeWindowBg(),
       show: false,
-      ...(isMac ? { titleBarStyle: 'hiddenInset' } : { frame: false }),
+      ...windowFrame(),
       icon: getIconPath(),
       webPreferences: {
         preload: path.join(__dirname, 'preload-sstv-popout.js'),
@@ -50356,7 +50371,7 @@ function cloudShackNotice(text, kind) {
       title: 'POTACAT — Band Scope',
       backgroundColor: getThemeWindowBg(),
       show: false,
-      ...(isMac ? { titleBarStyle: 'hiddenInset' } : { frame: false }),
+      ...windowFrame(),
       icon: getIconPath(),
       webPreferences: {
         preload: path.join(__dirname, 'preload-scope-popout.js'),
@@ -50407,7 +50422,7 @@ function cloudShackNotice(text, kind) {
       title: 'POTACAT — Tuner Memories',
       backgroundColor: getThemeWindowBg(),
       show: false,
-      ...(isMac ? { titleBarStyle: 'hiddenInset' } : { frame: false }),
+      ...windowFrame(),
       icon: getIconPath(),
       webPreferences: {
         preload: path.join(__dirname, 'preload-atu-wizard-popout.js'),

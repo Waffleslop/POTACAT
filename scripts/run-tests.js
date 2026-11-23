@@ -616,6 +616,7 @@ const TESTS = [
   'test/window-min-size-test.js',     // N0KAH: no window shrinks past its own controls
   'test/window-rules-test.js',        // every window opens in the theme and remembers its place
   'test/mac-frameless-windows-test.js', // #866: every visible frameless window keeps the macOS traffic lights; the APRS and JTCAT map title bars keep their own controls on a Mac
+  'test/linux-native-frame-test.js',  // #345: optional system title bar on Linux (off by default); one rule in lib/window-frame.js, the pages hide their own buttons
   'test/meter-box-test.js', // NJ2DX 2026-11-21: the S-meter box is clamped on screen as it appears, and draws with the theme's colours
   'test/yaesu-fa-digits-test.js',
   'test/yaesu-audit-ft891-test.js', // Yaesu CAT audit: FT-891 preamp, AGC, PROC, CW text, RTTY

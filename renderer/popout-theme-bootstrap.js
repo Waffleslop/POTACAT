@@ -33,4 +33,20 @@
   } catch (e) {
     // Falls through to :root defaults — better than crashing the popout.
   }
+
+  // #345: under the system window frame (Linux, opt-in) main.js adds
+  // frame=native to the query. Mark <html> and load native-frame.css before
+  // first paint, so the page hides its own window buttons and there are never
+  // two title bars.
+  try {
+    var fq = new URLSearchParams(window.location.search || '');
+    // A page that loads both boot scripts marks it once.
+    if (fq.get('frame') === 'native' && !document.documentElement.classList.contains('native-frame')) {
+      document.documentElement.classList.add('native-frame');
+      var nf = document.createElement('link');
+      nf.rel = 'stylesheet';
+      nf.href = 'native-frame.css';
+      (document.head || document.documentElement).appendChild(nf);
+    }
+  } catch (e) { /* no query: POTACAT's own title bar stays */ }
 })();
