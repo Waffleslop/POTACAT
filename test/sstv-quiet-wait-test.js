@@ -246,21 +246,97 @@ test('the phone path is gated too: a client may ask for the wait, never skip the
   const rs = src('lib/remote-server.js');
   const photo = handler(rs, "case 'sstv-photo':");
   assert.ok(/waitQuiet: msg\.waitQuiet === true/.test(photo), 'remote-server: waitQuiet === true');
-  assert.ok(/case 'sstv-send-now':[\s\S]{0,200}this\.emit\('sstv-send-now'\)/.test(rs), 'remote-server: sstv-send-now');
-  assert.ok(/'sstv-wait-quiet'/.test(rs), 'capability sstv-wait-quiet advertised');
+    assert.ok(/'sstv-wait-quiet'/.test(rs), 'capability sstv-wait-quiet advertised');
   // main: the phone's picture is marked and goes through the same encode-complete gate
   const mainPhoto = handler(main, "remoteServer.on('sstv-photo'");
   assert.ok(/waitQuiet/.test(mainPhoto.slice(0, 120)), 'main reads waitQuiet');
   assert.ok(/_sstvNextPicture = \{ requested: waitQuiet === true/.test(main), 'main marks the next picture');
-  assert.ok(/remoteServer\.on\('sstv-send-now', \(\) => sstvQuietSendNow\('ECHOCAT'\)\)/.test(main), 'phone Send now');
-  assert.ok(/function sstvHaltTxNow\(\) \{[\s\S]{0,200}sstvQuietCancel\('halt'\)/.test(main), 'phone HALT cancels the wait');
-  // the protocol: registry and doc
+      // the protocol: registry and doc
   const proto = src('lib/echocat-protocol.js');
   assert.ok(/'sstv-photo': \{[^\n]*waitQuiet: f\.optBoolean/.test(proto), 'registry: sstv-photo waitQuiet');
   assert.ok(/'sstv-send-now': \{ dir: Dir\.C2S, feature: 'sstv' \}/.test(proto), 'registry: sstv-send-now');
   assert.ok(/'sstv-tx-status': \{[^\n]*waitedSec: f\.optNumber[^\n]*maxWaitSec: f\.optNumber[^\n]*quietSec: f\.optNumber[^\n]*heard: f\.optString/.test(proto), 'registry: waiting fields');
   const doc = src('docs/echocat-protocol.md');
   assert.ok(/`waitQuiet`/.test(doc) && /`sstv-send-now`/.test(doc) && /`waiting`/.test(doc) && /sstv-wait-quiet/.test(doc), 'protocol doc');
+});
+
+// ---- Guest Pass: Send now / Cancel only on the guest's own picture (Casey on #974) ----
+const OWNER = null;
+const GUEST_A = { code: 'PASS-A', call: 'K1AAA' };
+const GUEST_B = { code: 'PASS-B', call: 'K2BBB' };
+function heldBy(queuedBy) {
+  const r = recorder();
+  r.gate.hold('pic', { enabled: true, now: 0, listener: null, queuedBy });
+  assert.strictEqual(r.gate.waiting(), true);
+  return r;
+}
+
+test('a guest pressing Send now or Cancel on the owner\'s waiting picture is refused: nothing sent, nothing cancelled', () => {
+  const r = heldBy(OWNER);
+  const may = r.gate.mayAct(GUEST_A);
+  assert.strictEqual(may.ok, false);
+  assert.strictEqual(may.why, Q.GUEST_NOT_YOURS);
+  assert.strictEqual(r.gate.sendNow(1000, null, GUEST_A), false);
+  assert.strictEqual(r.gate.cancel('halt', GUEST_A), false);
+  assert.strictEqual(r.sent.length, 0, 'not sent');
+  assert.strictEqual(r.cancelled.length, 0, 'not cancelled');
+  assert.strictEqual(r.gate.waiting(), true, 'still waiting');
+});
+
+test('a guest cannot act on another guest\'s waiting picture either', () => {
+  const r = heldBy(GUEST_B);
+  assert.strictEqual(r.gate.mayAct(GUEST_A).ok, false);
+  assert.strictEqual(r.gate.sendNow(1000, null, GUEST_A), false);
+  assert.strictEqual(r.gate.cancel('halt', GUEST_A), false);
+  assert.strictEqual(r.gate.waiting(), true);
+});
+
+test('a guest acting on its own waiting picture works: Send now and Cancel', () => {
+  const r = heldBy(GUEST_A);
+  assert.strictEqual(r.gate.mayAct(GUEST_A).ok, true);
+  assert.strictEqual(r.gate.sendNow(1000, null, { code: 'PASS-A' }), true);
+  assert.deepStrictEqual(r.sent.map((s) => s.why), ['now']);
+  const r2 = heldBy(GUEST_A);
+  assert.strictEqual(r2.gate.cancel('halt', GUEST_A), true);
+  assert.strictEqual(r2.cancelled.length, 1);
+});
+
+test('the owner can Send now or Cancel any waiting picture, the owner\'s or a guest\'s', () => {
+  for (const by of [OWNER, GUEST_A]) {
+    const r = heldBy(by);
+    assert.strictEqual(r.gate.mayAct(OWNER).ok, true);
+    assert.strictEqual(r.gate.sendNow(1000, null, OWNER), true);
+    assert.strictEqual(r.sent.length, 1);
+    const r2 = heldBy(by);
+    assert.strictEqual(r2.gate.cancel('cancel', OWNER), true);
+    assert.strictEqual(r2.cancelled.length, 1);
+    const r3 = heldBy(by);
+    assert.strictEqual(r3.gate.cancel('closed'), true, 'window close / SSTV stop (no actor) always drops it');
+  }
+});
+
+test('wiring: who queued the picture and who pressed are carried; a refused guest is told why; a real transmission still stops', () => {
+  const rs = src('lib/remote-server.js');
+  const sendNow = handler(rs, "case 'sstv-send-now':");
+  assert.ok(/this\.emit\('sstv-send-now', \{ guest: this\._sstvGuestOf\(ws\), refuse: \(text\) => this\._guestRefuse\(ws, 'sstv-send-now', msg\.reqId, text\) \}\)/.test(sendNow), 'send-now carries the guest');
+  const halt = handler(rs, "case 'sstv-halt-tx':");
+  assert.ok(/this\.emit\('sstv-halt-tx', \{ guest: this\._sstvGuestOf\(ws\), refuse: \(text\) => this\._guestRefuse\(ws, 'sstv-halt-tx', msg\.reqId, text\) \}\)/.test(halt), 'halt carries the guest');
+  assert.ok(/_sstvGuestOf\(ws\) \{[\s\S]{0,200}ws\._passSession \? \{ code: ws\._passSession\.code/.test(rs));
+  // main: the picture records who queued it
+  assert.ok(/queuedBy: guest \? \{ code: guest\.code, call: guest\.call \|\| '' \} : null/.test(main), 'sstv-photo records the guest');
+  assert.ok(/queuedBy: want && want\.queuedBy \? want\.queuedBy : null/.test(fnBody(main, 'sstvHoldPicture')), 'the gate gets queuedBy');
+  // Send now
+  assert.ok(/remoteServer\.on\('sstv-send-now', \(\{ guest, refuse \} = \{\}\) => sstvQuietSendNow\('ECHOCAT', guest, refuse\)\)/.test(main));
+  const sn = fnBody(main, 'sstvQuietSendNow');
+  assert.ok(/_sstvQuietGate\.mayAct\(guest\)/.test(sn) && /refuse\(may\.why\)/.test(sn) && sn.indexOf('refuse(may.why)') < sn.indexOf('sendNow('), 'refused before anything is sent');
+  // HALT: refused for the waiting picture, but a real transmission is still stopped
+  const h = handler(main, "remoteServer.on('sstv-halt-tx'");
+  assert.ok(/\(\{ guest, refuse \} = \{\}\)/.test(h.slice(0, 80)));
+  assert.ok(/_sstvQuietGate\.mayAct\(guest\)/.test(h) && /refuse\(may\.why\)/.test(h));
+  assert.ok(/if \(_remoteTxState \|\| \(cat && cat\._transmitting\)\) sstvHaltTxNow\(\{ keepWait: true \}\);/.test(h), 'a guest HALT during real TX still stops TX');
+  assert.ok(/function sstvHaltTxNow\(\{ keepWait = false \} = \{\}\) \{\s*if \(!keepWait\) sstvQuietCancel\('halt'\);/.test(main));
+  assert.strictEqual(Q.GUEST_NOT_YOURS, 'Not sent or cancelled: that picture was queued by someone else. Only they or the station owner can send it now or cancel it.');
+  assert.ok(/GUEST_NOT_YOURS|queued by someone else/.test(src('docs/echocat-protocol.md')), 'protocol doc says so');
 });
 
 // ---- wiring ----

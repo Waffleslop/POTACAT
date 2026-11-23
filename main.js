@@ -33240,7 +33240,7 @@ function connectRemote() {
       // the array it was given empty, and pushTxImage reads rgba later.
       // #326: the picture waits at encode-complete for a quiet frequency when
       // the shack's setting is on, or when this client asked (waitQuiet).
-      _sstvNextPicture = { requested: waitQuiet === true, from: guest ? 'guest ' + (guest.call || '') : 'ECHOCAT' };
+      _sstvNextPicture = { requested: waitQuiet === true, from: guest ? 'guest ' + (guest.call || '') : 'ECHOCAT', queuedBy: guest ? { code: guest.code, call: guest.call || '' } : null };
       sstvEngine.encode(SstvSend.ownCopy(rgba), size.width, size.height, mode);
     } catch (err) {
       sstvSendFailed(SstvSend.failText(err), { log: 'ECHOCAT picture not sent: ' + err.message });
@@ -33287,8 +33287,19 @@ function connectRemote() {
   // Phone requested an immediate TX abort.
   // Release PTT FIRST (FCC safety — don't leave the Flex keyed), then tell
   // the popout to stop audio playback, then notify all clients.
-  remoteServer.on('sstv-send-now', () => sstvQuietSendNow('ECHOCAT')); // #326: the waiting picture goes now
-  remoteServer.on('sstv-halt-tx', () => {
+  remoteServer.on('sstv-send-now', ({ guest, refuse } = {}) => sstvQuietSendNow('ECHOCAT', guest, refuse)); // #326: the waiting picture goes now
+  remoteServer.on('sstv-halt-tx', ({ guest, refuse } = {}) => {
+    // #974: a guest's HALT while someone else's picture waits does not cancel
+    // that picture (refused, with the reason); a real transmission still stops.
+    if (guest && _sstvQuietGate && _sstvQuietGate.waiting()) {
+      const may = _sstvQuietGate.mayAct(guest);
+      if (!may.ok) {
+        if (refuse) refuse(may.why);
+        sendCatLog(`[SSTV] Cancel from guest ${guest.call || '(no callsign)'} refused: the waiting picture is not theirs`);
+        if (_remoteTxState || (cat && cat._transmitting)) sstvHaltTxNow({ keepWait: true });
+        return;
+      }
+    }
     console.log('[SSTV] ECHOCAT requested TX halt');
     sstvHaltTxNow();
   });
@@ -43338,7 +43349,7 @@ function sstvHoldPicture(data, send) {
   _sstvNextPicture = null;
   const gate = sstvQuietGateGet();
   const now = Date.now();
-  const opts = { enabled: settings.sstvWaitQuiet === true, requested: !!(want && want.requested), now };
+  const opts = { enabled: settings.sstvWaitQuiet === true, requested: !!(want && want.requested), now, queuedBy: want && want.queuedBy ? want.queuedBy : null };
   if (SstvQuietWait.shouldWait(opts)) {
     // Listen from here if nothing was listening (or the dial moved: ECHOCAT tunes first).
     const hz = _currentFreqHz || 0;
@@ -43354,10 +43365,18 @@ function sstvHoldPicture(data, send) {
   }
 }
 
-function sstvQuietSendNow(by) {
+// guest (#974): a Guest Pass device acts only on a picture it queued; the
+// owner (no guest) on any. A refusal tells that device why and changes nothing.
+function sstvQuietSendNow(by, guest, refuse) {
   if (!_sstvQuietGate || !_sstvQuietGate.waiting()) return;
-  _sstvQuietGate.held.picture.by = by;
-  _sstvQuietGate.sendNow(Date.now(), _sstvQuietListener);
+  const may = _sstvQuietGate.mayAct(guest);
+  if (!may.ok) {
+    if (refuse) refuse(may.why);
+    sendCatLog(`[SSTV] Send now from guest ${(guest && guest.call) || '(no callsign)'} refused: the waiting picture is not theirs`);
+    return;
+  }
+  _sstvQuietGate.held.picture.by = guest ? 'guest ' + (guest.call || '') : by;
+  _sstvQuietGate.sendNow(Date.now(), _sstvQuietListener, guest);
 }
 
 function sstvQuietCancel(reason) {
@@ -44183,8 +44202,8 @@ function jtcatAnyTxActive() {
   return false;
 }
 
-function sstvHaltTxNow() {
-  sstvQuietCancel('halt'); // a picture still waiting for a quiet frequency is dropped too (#326)
+function sstvHaltTxNow({ keepWait = false } = {}) {
+  if (!keepWait) sstvQuietCancel('halt'); // a picture still waiting for a quiet frequency is dropped too (#326)
   // SCU-LAN10: HALT also stops the picture on the wire, and gives the LAN
   // back; it never unkeys another transmitter holding it.
   if (settings.audioSource === 'yaesu-lan') { try { endYaesuLanTx('sstv', 'SSTV halt'); } catch (e) { console.error('[SSTV] halt LAN release:', e); } }
