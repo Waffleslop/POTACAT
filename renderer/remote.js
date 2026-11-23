@@ -16321,10 +16321,13 @@ var _paddleHoldTimer = { dit: null, dah: null };
   // is set with textContent; rows and cards are built with createElement.
   var MailView = window.WinlinkMailView;
   var MailActions = window.WinlinkMailActions;
+  var Mine = window.WinlinkMine;   // #585 phase 4: My own gateways (lib/winlink-my-gateways.js)
   var mailState = null;
   var mailLists = { in: [], out: [], sent: [], archive: [], deleted: [] };
   var mailBox = 'in';
-  var mailGateways = [];
+  var mailGateways = [];      // what the list shows: My own gateways first, then Pat's rows
+  var mailPatRows = [];       // Pat's list as the shack sent it (winlink-gateways)
+  var mailMineCount = 0;      // how many of mailGateways are the operator's own (Mine)
   var mailPick = -1;          // index into mailGateways of the gateway picked
   var mailMode = '';          // the "Send via" mode chosen on this page
   var mailBand = '';          // '' = all bands
@@ -16364,6 +16367,7 @@ var _paddleHoldTimer = { dit: null, dah: null };
         mailState = msg;
         mailSessionSeen(mailState.session);
         mailRenderState();
+        mailFavouritesSeen();
         // A pick made before the link dropped, and the tab left meanwhile: put the radio back now.
         if (!mailOpen) mailQsyRestore();
         break;
@@ -16398,6 +16402,7 @@ var _paddleHoldTimer = { dit: null, dah: null };
         } catch (e) { showToast('Could not save the attachment', 3000, true); }
         break;
       case 'winlink-result':
+        if (msg.op === 'favourite' && mailAddResult(msg)) break;
         if (msg.op === 'account-check' || msg.op === 'register' || msg.op === 'set-password') { mailAcctResult(msg); break; }
         // 'gateways-get' is the shack's answer when the request itself threw (#435).
         if (msg.op === 'gateways' || msg.op === 'gateways-get') { if (!msg.ok) mailGatewaysFailed(msg); break; }
@@ -16585,6 +16590,8 @@ var _paddleHoldTimer = { dit: null, dah: null };
     mailMode = id;
     mailSend({ type: 'winlink-set-mode', mode: id });
     mailGateways = [];
+    mailPatRows = [];
+    mailMineCount = 0;
     mailPick = -1;
     mailBand = '';
     // Back to the internet without connecting: the gateway picker is closed, the radio goes back (W1).
@@ -16906,6 +16913,7 @@ var _paddleHoldTimer = { dit: null, dah: null };
 
   // ── Send / Receive: the gateway list ──────────────────────────────────
   function mailGatewayLabel(g) {
+    if (g.mine) return [g.call, Mine.MINE_TAG, FreqDots.khzMhz(g.dialKhz), mailMineLine(g)].filter(Boolean).join('  ');
     var parts = [g.call];
     if (g.serviceTag) parts.push(g.serviceTag); // MERCURY and other non-PUBLIC service codes, as on the desktop
     if (g.dialKhz) parts.push(FreqDots.khzMhz(g.dialKhz));
@@ -16933,15 +16941,28 @@ var _paddleHoldTimer = { dit: null, dah: null };
   function mailGwStopTimer() { if (mailGwTimer) { clearInterval(mailGwTimer); mailGwTimer = null; } }
   function mailRenderGateways() {
     var box = mailEl('mail-gateway');
-    if (!mailGateways.length) { mailGwMessage('No gateways for that band'); mailRenderBar(); return; }
+    if (!mailGateways.length) { mailGwMessage('No gateways for that band'); mailRenderMineLinks(); mailRenderBar(); return; }
     box.textContent = '';
-    // Ordinary gateways first; then any the shack marked ownModem (a community
+    // The operator's own gateways first, under their own heading, each tagged
+    // Mine (#585, as the desktop's "My own gateways" group).
+    if (mailMineCount) {
+      box.appendChild(mailMake('div', 'mail-gw-group', Mine.MINE_GROUP));
+      for (var m = 0; m < mailMineCount; m++) mailGatewayButton(box, mailGateways[m], m);
+    }
+    // Ordinary gateways next; then any the shack marked ownModem (a community
     // modem listed under this mode) under their own heading, as on the desktop.
-    MailView.gatewaySections(mailGateways, 80).forEach(function (sec) {
+    MailView.gatewaySections(mailGateways.slice(mailMineCount), 80).forEach(function (sec) {
       if (sec.heading && sec.rows.length) box.appendChild(mailMake('div', 'mail-gw-group', sec.heading));
-      sec.rows.forEach(function (row) { mailGatewayButton(box, row.g, row.i); });
+      sec.rows.forEach(function (row) { mailGatewayButton(box, row.g, row.i + mailMineCount); });
     });
+    mailRenderMineLinks();
     mailRenderBar();
+  }
+  // A Mine row's second line: the note, or the packet via path.
+  function mailMineLine(g) {
+    var e = g.entry || {};
+    if (e.note) return e.note;
+    return Array.isArray(e.via) && e.via.length ? 'via ' + e.via.join(' ') : '';
   }
   function mailGatewayButton(box, g, i) {
     var b = mailMake('button', 'mail-gw');
@@ -16951,10 +16972,16 @@ var _paddleHoldTimer = { dit: null, dah: null };
     b.setAttribute('aria-label', mailGatewayLabel(g));
     var main = mailMake('span', 'mail-row-main');
     main.appendChild(mailMake('span', 'mail-row-who', g.call));
-    main.appendChild(mailMake('span', 'mail-row-line', [g.serviceTag || '', g.dialKhz ? FreqDots.khzMhz(g.dialKhz) : '', g.distKm != null ? g.distKm + ' km' : ''].filter(Boolean).join(' · ')));
+    var line = g.mine
+      ? [FreqDots.khzMhz(g.dialKhz), mailMineLine(g)]
+      : [g.serviceTag || '', g.dialKhz ? FreqDots.khzMhz(g.dialKhz) : '', g.distKm != null ? g.distKm + ' km' : ''];
+    main.appendChild(mailMake('span', 'mail-row-line', line.filter(Boolean).join(' · ')));
     b.appendChild(main);
-    var tag = MailView.qualityTag(g);
-    if (tag) b.appendChild(mailMake('span', 'mail-tag mail-tag-' + tag.tone, tag.text));
+    if (g.mine) b.appendChild(mailMake('span', 'mail-tag mail-tag-mine', Mine.MINE_TAG));
+    else {
+      var tag = MailView.qualityTag(g);
+      if (tag) b.appendChild(mailMake('span', 'mail-tag mail-tag-' + tag.tone, tag.text));
+    }
     b.onclick = function () { mailPickGateway(i); };
     box.appendChild(b);
   }
@@ -16965,17 +16992,49 @@ var _paddleHoldTimer = { dit: null, dah: null };
     Array.prototype.forEach.call(mailEl('mail-gateway').querySelectorAll('.mail-gw'), function (b) {
       b.setAttribute('aria-pressed', b.getAttribute('data-i') === String(i) ? 'true' : 'false');
     });
-    if (g.dialKhz) mailSend({ type: 'winlink-qsy', dialKhz: g.dialKhz, mode: mailCurrentMode() });
+    // A Mine row names its call: the shack looks it up in its own My gateways
+    // for the typed-gateway rule (the radio's range only, never the bands).
+    if (g.dialKhz) mailSend(g.mine ? { type: 'winlink-qsy', dialKhz: g.dialKhz, mode: mailCurrentMode(), gateway: g.call } : { type: 'winlink-qsy', dialKhz: g.dialKhz, mode: mailCurrentMode() });
+    mailRenderMineLinks();
     mailRenderBar();
+  }
+  // The list for this mode and band: My own gateways (winlink-state.favourites)
+  // then Pat's rows; a Mine entry Pat also lists shows once, as Mine. The pick
+  // is kept by call and dial; with none, Pat's best path is picked.
+  var mailPendingPick = null;  // a gateway just saved: picked once it is in the list
+  function mailBuildGateways(keep) {
+    var groups = Mine.pickerGroups({ favourites: (mailState && mailState.favourites) || [], gateways: mailPatRows, mode: mailCurrentMode(), band: mailBand });
+    mailMineCount = groups.mine.length;
+    mailGateways = groups.mine.map(function (f) { return { call: f.call, dialKhz: f.dialKhz, mine: true, entry: f }; }).concat(groups.ranked);
+    var find = function (want) {
+      if (!want) return -1;
+      for (var i = 0; i < mailGateways.length; i++) if (!!mailGateways[i].mine === !!want.mine && Mine.sameGw(mailGateways[i], want)) return i;
+      return -1;
+    };
+    var at = find(mailPendingPick);
+    if (at >= 0) mailPendingPick = null;
+    else at = find(keep);
+    if (at < 0) at = mailGateways.length > mailMineCount ? mailMineCount : (mailGateways.length ? 0 : -1);
+    mailPick = at;
+  }
+  // winlink-state brought a changed My gateways: redraw a list that is in.
+  var mailFavSig = '';
+  function mailFavouritesSeen() {
+    var sig = JSON.stringify(((mailState && mailState.favourites) || []).filter(function (f) { return f && f.mine; }));
+    if (sig === mailFavSig && !mailPendingPick) return;   // a gateway just saved is picked once the state is in
+    mailFavSig = sig;
+    if (!mailGwLoaded || !mailGwReqId) return;   // nothing drawn yet, or the list did not load
+    mailBuildGateways(mailGateways[mailPick] || null);
+    mailRenderGateways();
   }
   function mailGatewaysArrived(msg) {
     if (msg.reqId && msg.reqId !== mailGwReqId) return; // an answer to an earlier band or mode
     mailGwStopTimer();
     mailGwLoaded = true;
-    mailGateways = msg.list || [];
-    mailPick = mailGateways.length ? 0 : -1;   // the first is picked; a tap on it (or another) tunes the radio
+    mailPatRows = msg.list || [];
+    mailBuildGateways(null);   // Pat's best path is picked; a tap on it (or another) tunes the radio
     var head = mailEl('mail-gw-head');
-    if (head) head.textContent = mailGateways.length ? (msg.predicted ? 'Best path now' : 'Nearest first') : 'Gateway';
+    if (head) head.textContent = mailPatRows.length ? (msg.predicted ? 'Best path now' : 'Nearest first') : 'Gateway';
     mailRenderGateways();
     mailGwStatus(MailView.gatewayNote(msg), false);
   }
@@ -16985,6 +17044,8 @@ var _paddleHoldTimer = { dit: null, dah: null };
     mailGwLoaded = true;
     mailGwReqId = '';   // a late answer to the request given up on is not drawn
     mailGateways = [];
+    mailPatRows = [];
+    mailMineCount = 0;
     mailPick = -1;
     f = f || MailView.gatewaysFailed(msg.error);
     mailGwMessage(f.option);
@@ -16998,6 +17059,8 @@ var _paddleHoldTimer = { dit: null, dah: null };
     if (mode === 'telnet') { mailGwStatus('', false); return; }
     var s = mailState || {};
     mailGateways = [];
+    mailPatRows = [];
+    mailMineCount = 0;
     mailPick = -1;
     mailGwLoaded = false;
     var head = mailEl('mail-gw-head');
@@ -17023,6 +17086,150 @@ var _paddleHoldTimer = { dit: null, dah: null };
     mailRenderBar();
     mailSend({ type: 'winlink-gateways-get', mode: mode, band: mailBand, reqId: mailGwReqId });
   }
+  // ── Add a gateway (#585 phase 4; the desktop window's form, plan 3.6) ──
+  // A gateway Pat does not list, typed in and saved in the shack's My gateways
+  // as the operator's own (Mine). The fields, labels, dial line and error
+  // words are the desktop's (lib/winlink-my-gateways.js). Saving tunes the
+  // radio only after the shack has saved it, as a pick does; nothing transmits.
+  var mailAddEditing = null;   // the Mine entry being changed, or null for a new one
+  var mailAddSeq = 0;
+  var mailAddReqId = '';
+  var mailAddSaving = null;    // { call, mode, dialKhz } waiting for the shack's answer
+  function mailAddModes() {
+    return ((mailState && mailState.modes) || []).filter(function (m) { return m.available && Mine.MODES.indexOf(m.id) >= 0; });
+  }
+  function mailAddFreqText(mode, khz) {
+    var c = Mine.centerKhz(mode, khz);
+    if (!c) return '';
+    return c >= 30000 ? String(+(c / 1000).toFixed(5)) : String(+c.toFixed(2));
+  }
+  function mailAddSync() {
+    var mode = mailEl('mail-add-mode').value;
+    var hf = Mine.CENTER_MODES.indexOf(mode) >= 0;
+    mailShow('mail-add-bw-row', mode === 'ardop');
+    mailShow('mail-add-via-row', mode === 'packet');
+    mailEl('mail-add-freq-label').textContent = hf ? 'Center frequency' : 'Channel frequency';
+    mailEl('mail-add-freq').placeholder = hf ? 'for example 7101.4' : 'for example 145.05';
+    mailEl('mail-add-dial').textContent = Mine.dialLine(mode, mailEl('mail-add-freq').value);
+  }
+  function mailAddErrors(errors) {
+    ['call', 'mode', 'freq', 'bw', 'via', 'note'].forEach(function (k) {
+      var el = mailEl('mail-add-' + k + '-err');
+      if (el) el.textContent = (errors && errors[k]) || '';
+    });
+  }
+  function mailAddOpen(entry) {
+    var modes = mailAddModes();
+    if (!modes.length) { showToast('No radio mode is available on this station right now', 4000, true); return; }
+    mailAddEditing = entry || null;
+    mailAddReqId = '';
+    mailAddSaving = null;
+    var cur = mailCurrentMode();
+    var mode = entry ? entry.mode : (modes.some(function (m) { return m.id === cur; }) ? cur : modes[0].id);
+    var sel = mailEl('mail-add-mode');
+    sel.textContent = '';
+    var ids = modes.map(function (m) { return m.id; });
+    if (entry && ids.indexOf(entry.mode) < 0) ids.push(entry.mode);
+    ids.forEach(function (id) {
+      var o = mailMake('option', '', MailView.MODE_WORDS[id] || id);
+      o.value = id;
+      sel.appendChild(o);
+    });
+    sel.value = mode;
+    mailEl('mail-add-title').textContent = entry ? 'Change ' + entry.call : 'Add a gateway';
+    mailEl('mail-add-call').value = entry ? entry.call : '';
+    mailEl('mail-add-freq').value = entry ? mailAddFreqText(entry.mode, entry.khz != null ? entry.khz : entry.dialKhz) : '';
+    mailEl('mail-add-bw').value = entry && entry.bw ? String(entry.bw) : '0';
+    mailEl('mail-add-via').value = entry && entry.via ? entry.via.join(' ') : '';
+    mailEl('mail-add-note').value = entry && entry.note ? entry.note : '';
+    mailEl('mail-add-msg').textContent = '';
+    mailEl('mail-add-save').disabled = false;
+    // An older shack drops the new fields and saves a plain favourite: say so, in one line.
+    var older = mailEl('mail-add-older');
+    var lacks = !Mine.shackHasMine(ws && ws._serverCapabilities);
+    older.textContent = lacks ? Mine.OLDER_SHACK : '';
+    older.classList.toggle('hidden', !lacks);
+    mailAddErrors(null);
+    mailAddSync();
+    mailShow('mail-add-card', true);
+    mailEl('mail-add-call').focus();
+  }
+  function mailAddClose() {
+    mailShow('mail-add-card', false);
+    mailAddEditing = null;
+    mailAddReqId = '';
+    mailAddSaving = null;
+  }
+  function mailAddSave() {
+    if (mailAddReqId) return;   // one Save at a time
+    var r = Mine.validate({
+      call: mailEl('mail-add-call').value, mode: mailEl('mail-add-mode').value, freq: mailEl('mail-add-freq').value,
+      bw: mailEl('mail-add-bw').value, via: mailEl('mail-add-via').value, note: mailEl('mail-add-note').value,
+    }, { modes: (mailState && mailState.modes) || null });
+    mailAddErrors(r.errors);
+    mailEl('mail-add-msg').textContent = '';
+    if (!r.ok) return;
+    var e = r.entry;
+    var w = mailAddEditing;
+    var was = w ? { call: w.call, mode: w.mode, dialKhz: w.khz != null ? w.khz : w.dialKhz } : null;
+    var m = Mine.favouriteMessage(was ? 'edit' : 'add', e, was);
+    mailAddReqId = m.reqId = 'fav' + (++mailAddSeq);
+    mailAddSaving = { call: e.call, mode: e.mode, dialKhz: e.dialKhz };
+    mailEl('mail-add-save').disabled = true;
+    mailSend(m);
+  }
+  // The shack's answer to a Save: true when it was this form's.
+  function mailAddResult(msg) {
+    if (!mailAddReqId || msg.reqId !== mailAddReqId) return false;
+    var saved = mailAddSaving;
+    mailEl('mail-add-save').disabled = false;
+    mailAddReqId = '';
+    mailAddSaving = null;
+    if (!msg.ok) { mailEl('mail-add-msg').textContent = msg.error || 'Could not save that gateway'; return true; }
+    mailAddClose();
+    if (saved) mailUseSaved(saved);
+    return true;
+  }
+  // Picked at once and the radio tuned there, the way a favourite pick is.
+  function mailUseSaved(g) {
+    if (g.mode !== mailCurrentMode()) mailChooseMode(g.mode);
+    mailPendingPick = { call: g.call, dialKhz: g.dialKhz, mine: true };
+    mailSend({ type: 'winlink-qsy', dialKhz: g.dialKhz, mode: g.mode, gateway: g.call });
+  }
+  // Edit and Remove show for a picked Mine row; Remove asks once.
+  var mailRemoveArmed = null;
+  function mailDisarmRemove() {
+    mailRemoveArmed = null;
+    var b = mailEl('mail-mine-remove');
+    if (!b) return;
+    b.textContent = 'Remove';
+    b.classList.remove('mail-link-danger');
+  }
+  function mailRenderMineLinks() {
+    var g = mailGateways[mailPick];
+    var mine = !!(g && g.mine);
+    if (mailRemoveArmed && !(mine && Mine.sameGw(mailRemoveArmed, g))) mailDisarmRemove();
+    mailShow('mail-mine-edit', mine);
+    mailShow('mail-mine-remove', mine);
+  }
+  function mailRemovePicked() {
+    var g = mailGateways[mailPick];
+    if (!g || !g.mine) return;
+    if (!mailRemoveArmed || !Mine.sameGw(mailRemoveArmed, g)) {
+      var armed = mailRemoveArmed = { call: g.call, dialKhz: g.dialKhz };
+      var b = mailEl('mail-mine-remove');
+      b.textContent = 'Remove ' + g.call + '? Click again';
+      b.classList.add('mail-link-danger');
+      setTimeout(function () { if (mailRemoveArmed === armed) mailDisarmRemove(); }, 6000);
+      return;
+    }
+    mailDisarmRemove();
+    if (mailAddEditing && Mine.sameGw(mailAddEditing, g)) mailAddClose();
+    var m = Mine.favouriteMessage('remove', g.entry || g);
+    m.reqId = 'favrm' + (++mailAddSeq);
+    mailSend(m);
+  }
+
   // Opening Send / Receive in a radio mode loads the list once.
   function mailOpenConnect() {
     mailRenderModes();
@@ -17101,6 +17308,25 @@ var _paddleHoldTimer = { dit: null, dah: null };
       mailSend(out);
     });
     mailEl('mail-gw-retry').addEventListener('click', mailLoadGateways);
+    // My own gateways (#585 phase 4)
+    mailEl('mail-gw-add').addEventListener('click', function () {
+      if (!mailEl('mail-add-card').classList.contains('hidden') && !mailAddEditing) mailAddClose(); else mailAddOpen(null);
+    });
+    mailEl('mail-mine-edit').addEventListener('click', function () {
+      var g = mailGateways[mailPick];
+      if (g && g.mine) mailAddOpen(g.entry);
+    });
+    mailEl('mail-mine-remove').addEventListener('click', mailRemovePicked);
+    mailEl('mail-add-cancel').addEventListener('click', mailAddClose);
+    mailEl('mail-add-save').addEventListener('click', mailAddSave);
+    mailEl('mail-add-mode').addEventListener('change', mailAddSync);
+    mailEl('mail-add-freq').addEventListener('input', function () {
+      mailEl('mail-add-dial').textContent = Mine.dialLine(mailEl('mail-add-mode').value, mailEl('mail-add-freq').value);
+    });
+    mailEl('mail-add-card').addEventListener('keydown', function (e) {
+      if (e.key === 'Escape') { e.preventDefault(); mailAddClose(); }
+      else if (e.key === 'Enter' && e.target && e.target.tagName === 'INPUT') { e.preventDefault(); mailAddSave(); }
+    });
     mailEl('mail-acct-retry').addEventListener('click', mailAcctCheck);
     mailEl('mail-connect').addEventListener('click', mailConnect);
     mailEl('mail-abort').addEventListener('click', function () { mailSend({ type: 'winlink-abort' }); });

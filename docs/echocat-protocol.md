@@ -644,6 +644,66 @@ sent `winlink-mail-view {open: true}`, by its connection. With no view open, a s
 - A Guest Pass is refused (no Mail tab). A shack without the capability does not count devices: do
   not send the message to it; the radio goes back after a session as before.
 
+#### My own gateways (#585, added 2026-11-22)
+
+A gateway the operator types in ("Add a gateway") is a My gateways entry with `mine: true`. The
+desktop mail window, ECHOCAT Web and the phone show the same form, the same words and the same
+list. The rules live in `lib/winlink-my-gateways.js`.
+
+**Capability.** A shack that lists `winlink-mine` in its hello's `capabilities`:
+- checks and stores `mine`, `note`, `via` and `bw` from `winlink-favourite`;
+- answers `op: 'edit'` (with `was`);
+- sends the fields back in `winlink-state.favourites`.
+
+An older shack's registry does not declare those fields, so its demux drops them and it saves a
+plain favourite (call, mode, dial): the gateway works, without the Mine tag, the note or the path.
+`edit` is unknown there. A client whose shack lacks `winlink-mine` still sends the message and shows
+one line on its Add form: "The shack is on an older POTACAT: it saves this as a plain favorite,
+without the Mine tag or the note. Update POTACAT on the shack to keep them."
+
+**Fields** (`winlink-favourite`, C→S, and each `winlink-state.favourites[]` entry):
+
+| Field | Type | Rule |
+|---|---|---|
+| `call` | string | A callsign with an optional `-SSID` from 0 to 15 (`W2XYZ-10`), upper case. |
+| `mode` | string | `ardop`, `vara`, `varafm`, `packet` or `mercury`, one the shack has available. |
+| `dialKhz` | number | The radio dial in kHz, up to 1,500,000. For `ardop`, `vara` and `mercury` it is the center frequency minus 1.5 kHz; for `packet` and `varafm` it is the channel frequency. |
+| `mine` | boolean | `true` for a typed gateway. |
+| `note` | string | Up to 60 characters, printable, trimmed. |
+| `via` | string array | Packet only: 0 to 2 digipeater calls, in order. |
+| `bw` | number | ARDOP only: 200, 500, 1000 or 2000 Hz. Absent or 0 is the operator's own setting, which always caps it. |
+| `was` | object | `edit` only: `{call, mode, dialKhz}` of the entry it replaces. |
+
+- **Limits.** Mine entries are capped at 40 per profile, separately from the 40 starred gateways.
+- **Checking.** The shack checks a Mine entry before saving it and refuses with the form's words
+  (`winlink-result {op: 'favourite', ok: false, error}`):
+  - "That is not a callsign. Use the gateway's call, with -10 or similar if it has one."
+  - "Enter the frequency, for example 145.05 or 7101.4."
+  - "Via takes up to two digipeater calls, for example W2ABC-1."
+  - "Keep the note to 60 characters or fewer."
+- **Band rule.** A typed gateway skips the band checks and keeps only the radio-range check. The
+  shack decides that from its own saved entry, looked up by the `gateway` call on `winlink-qsy` and
+  `winlink-connect`. It never reads `mine` from a request.
+- **Connecting.** Send `winlink-connect {mode, gateway, dialKhz}` with no `url`. The shack builds
+  the URL with the entry's via path and bandwidth.
+- **Guest Pass.** Refused, as every `winlink-*` message is. The owner's gateways are not shown to a
+  guest and cannot be changed by one.
+
+Examples:
+
+```json
+{"type":"winlink-favourite","op":"add","call":"K4SPB","mode":"ardop","dialKhz":7099.9,"mine":true,"note":"club net Tuesdays","bw":500,"reqId":"fav1"}
+{"type":"winlink-favourite","op":"add","call":"W2XYZ-10","mode":"packet","dialKhz":145050,"mine":true,"via":["W2ABC-1"],"reqId":"fav2"}
+{"type":"winlink-favourite","op":"edit","call":"K4SPB","mode":"ardop","dialKhz":7099.9,"mine":true,"note":"club net Thursdays","bw":500,"was":{"call":"K4SPB","mode":"ardop","dialKhz":7099.9},"reqId":"fav3"}
+{"type":"winlink-favourite","op":"remove","call":"K4SPB","mode":"ardop","dialKhz":7099.9,"reqId":"fav4"}
+{"type":"winlink-result","op":"favourite","ok":true,"reqId":"fav1"}
+```
+
+ECHOCAT Web (`renderer/remote.js`) shows "My own gateways" above Pat's rows on the Send / Receive
+screen, each row tagged `Mine`, with "Add a gateway" under the list and Edit and Remove for a picked
+Mine row. Remove asks once ("Remove K4SPB? Click again"). After a save the shack answers, then the
+page picks the gateway and sends `winlink-qsy` with its call, as a pick does. Nothing transmits.
+
 #### Account
 
 A shack that handles these lists `winlink-account` in its hello's `capabilities`
