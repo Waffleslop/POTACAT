@@ -169,6 +169,16 @@
     .freq-other { font-size: 18px; font-weight: 600; color: var(--amber); }
     .freq-other-tag { font-size: 11px; color: var(--amber); font-weight: 700; }
     .freq-unit { font-size: 12px; color: var(--t3); }
+    /* Split up N (#689): beside the TX line. While split is on it reads in
+       the TX line's amber, on an amber tint (amber text keeps its contrast in
+       the light themes, where a dark amber fill under #111 did not). */
+    .split-up-row { display: none; align-items: center; gap: 6px; }
+    .split-up-row.show { display: flex; }
+    .chip.split-up-btn { color: var(--t); font-weight: 600; }
+    .chip.split-up-btn.on, .chip.split-up-btn.on:hover {
+      background: color-mix(in srgb, var(--amber) 18%, transparent); color: var(--amber);
+      box-shadow: inset 0 0 0 1px var(--amber);
+    }
     /* Audio on / Audio off in words: green while you can hear the radio, red
        (slashed speaker) while you cannot, whether muted or not started. */
     .audio-btn { width: auto; padding: 0 10px 0 8px; gap: 6px; font-size: 12px; font-weight: 600; white-space: nowrap; }
@@ -353,6 +363,7 @@
     .mini-strip .freq-display .fq-unit { display: none; }
     .mini-strip .freq-other-row { margin-top: 0; }
     .mini-strip .freq-other { font-size: 14px; }
+    .mini-strip .split-up-row { gap: 4px; }
     .mini-strip .chip { padding: 5px 7px; }
     .mini-strip .band-chip:not(:empty) { display: inline-block; }
     .mini-strip .audio-btn { width: 36px; height: 36px; padding: 0; justify-content: center; border-radius: 9px; }
@@ -564,6 +575,12 @@
         <span class="freq-other-tag">TX</span>
         <span class="freq-other mono" id="freq-other">---.---.---</span>
         <span class="freq-unit">kHz</span>
+      </div>
+      <!-- Split up N (#689): split on and the TX VFO at RX + N in one click;
+           again for simplex. Only where the radio can set its TX VFO. -->
+      <div class="split-up-row" id="split-up-row">
+        <button class="chip split-up-btn" id="split-up-btn">Split up 1</button>
+        <select class="chip" id="split-up-n" title="How far from the receive frequency to transmit" aria-label="Split offset"></select>
       </div>
       <div class="widget-section" id="widget-smeter">
         <div class="meter-row">
@@ -928,6 +945,7 @@
 <script src="../lib/rig-power-view.js"></script>
 <script src="../lib/rig-bands.js"></script>
 <script src="../lib/vfo-layout.js"></script>
+<script src="../lib/split-up.js"></script>
 <script src="../lib/freq-paste.js"></script>
 <script src="../lib/vfo-freq-entry.js"></script>
 <script src="../lib/wheel-tune.js"></script>
@@ -1210,6 +1228,7 @@ window.api.onRadioState((s) => {
   if (s.catCaps !== undefined && JSON.stringify(s.catCaps) !== JSON.stringify(vfoCatCaps)) {
     vfoCatCaps = s.catCaps;
     buildRigToggles();
+    paintSplitUp();
     if (sheetOpen()) renderLayoutLists();
   }
   // A .tool-card shows only with the "visible" class (vfo-popout.css): an
@@ -1249,6 +1268,7 @@ window.api.onRadioState((s) => {
   if (s.split != null) {
     const sb = document.getElementById('split-badge');
     if (sb) sb.style.display = s.split ? '' : 'none';
+    if (splitOn !== !!s.split) { splitOn = !!s.split; paintSplitUp(); }
   }
   if (s.customCatButtons) applyCustomCatPush(s.customCatButtons);
   updateDisplay();
@@ -1660,6 +1680,61 @@ function buildRigToggles() {
 }
 buildRigToggles();
 // Custom CAT buttons injected after rig toggles since they share the same row
+
+// --- Split up N (#689, DA2PK) ---
+// One click: split on and the TX VFO at the receive frequency + N kHz (main's
+// split-up action, lib/split-up.js). Pressed again: split off, simplex. A new
+// N while split is on moves the TX VFO. It sets VFOs only; it never keys the
+// radio. The TX line above shows what the radio took (readback), never this.
+const splitUpRow = document.getElementById('split-up-row');
+const splitUpBtn = document.getElementById('split-up-btn');
+const splitUpN = document.getElementById('split-up-n');
+let splitOn = false;             // from vfo-radio-state (the radio's readback)
+let splitUpKhz = SplitUp.DEFAULT_KHZ;
+try { splitUpKhz = SplitUp.normalizeOffset(localStorage.getItem('vfoSplitUpKhz') || SplitUp.DEFAULT_KHZ); } catch {}
+for (const n of SplitUp.OFFSETS_KHZ) {
+  const o = document.createElement('option');
+  o.value = String(n);
+  o.textContent = SplitUp.optionText(n);
+  splitUpN.appendChild(o);
+}
+splitUpN.value = String(splitUpKhz);
+function paintSplitUp() {
+  splitUpRow.classList.toggle('show', SplitUp.available(vfoCatCaps));
+  const f = SplitUp.buttonFace(splitOn, splitUpKhz);
+  splitUpBtn.textContent = f.text;
+  splitUpBtn.title = f.title;
+  splitUpBtn.classList.toggle('on', f.on);
+}
+function showSplitUpRefusal(p) {
+  if (p.reason === 'locked') { showLockedToast(); return; }
+  vfoLockToast.textContent = p.message;
+  vfoLockToast.classList.add('show');
+  clearTimeout(_lockToastTimer);
+  _lockToastTimer = setTimeout(() => vfoLockToast.classList.remove('show'), 3000);
+}
+// Off -> split up N; on -> simplex (set-split false). Main checks the lock and
+// the radio's range again: this window may not know the range.
+function splitUpSend(p) {
+  if (!p.ok) { showSplitUpRefusal(p); return; }
+  const req = p.steps.length === 1 && p.steps[0].action === 'set-split' && p.steps[0].value === false
+    ? { action: 'set-split', value: false }
+    : { action: 'split-up', offsetKhz: splitUpKhz };
+  Promise.resolve(window.api.rigControl(req)).then((r) => {
+    if (r && r.ok === false && r.error) showSplitUpRefusal({ reason: '', message: r.error });
+  }).catch(() => {});
+}
+splitUpBtn.addEventListener('click', () => {
+  splitUpSend(SplitUp.press({ rxHz: currentFreqHz, offsetKhz: splitUpKhz, split: splitOn, locked: vfoLocked, available: SplitUp.available(vfoCatCaps) }));
+});
+splitUpN.addEventListener('change', () => {
+  splitUpKhz = SplitUp.normalizeOffset(splitUpN.value);
+  try { localStorage.setItem('vfoSplitUpKhz', String(splitUpKhz)); } catch {}
+  paintSplitUp();
+  // Already in split: the new N moves the TX VFO now.
+  if (splitOn) splitUpSend(SplitUp.plan({ rxHz: currentFreqHz, offsetKhz: splitUpKhz, split: true, locked: vfoLocked, available: SplitUp.available(vfoCatCaps) }));
+});
+paintSplitUp();
 
 // --- Custom CAT buttons ---
 let customCatButtons = [];
@@ -3125,6 +3200,7 @@ function miniParts(key) {
     mode: ['mode-badge', 'vfo-badge', 'split-badge', 'kiwi-rx-badge', 'tx-chip'],
     band: ['band-chip'], scan: ['mini-scan-btn'], audio: ['audio-btn'], ptt: ['ptt-btn'],
     log: ['log-btn-vfo'], cat: ['mini-cat'], filter: ['filter-badge'], step: ['sec-step'], lock: ['vfo-lock-btn'],
+    splitup: ['split-up-row'],
   }[key];
   if (ids) return ids.map($).filter(Boolean);
   if (key === 'smeter') { const b = $('smeter-bar'); return b ? [b.parentElement] : []; }

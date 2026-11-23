@@ -385,6 +385,7 @@ const LogGear = require('./lib/log-gear'); // the rig and antenna a device sends
 const LogTxPower = require('./lib/log-tx-power'); // the power a contact is logged at, never a guessed 100 W (#523)
 const RigBands = require('./lib/rig-bands');
 const RotorBands = require('./lib/rotor-bands'); // rotor only on chosen bands (#356)
+const SplitUp = require('./lib/split-up'); // #689: split up N from the VFO window
 const SpotBandFilter = require('./lib/spot-band-filter');
 const SstvStartBand = require('./lib/sstv-start-band');
 const AwardTables = require('./lib/award-tables');
@@ -3870,6 +3871,9 @@ function getRigCapabilities(rigType) {
   // FB/FA, rigctld I. Clients show the TX-frequency editor only where this is
   // true, so a radio that lacks the command never gets a dead field.
   caps.splitFreq = !!(caps.split && cat && cat.connected && cat.hasFrequencyOther);
+  // Split up N (#689): split on and the TX VFO at RX + N in one click. Not on
+  // a Flex, where a second TX frequency is a second slice (set-freq-other).
+  caps.splitUp = !!(caps.splitFreq && rigType !== 'flex');
   // The band scope's synthetic signal needs no radio, but every client gates
   // its scope controls on nativeScope — so with the switch on, any rig
   // reports one. That is how all three clients get bench-tested without an
@@ -34971,7 +34975,7 @@ function vfoCatCaps() {
   try {
     const caps = getRigCapabilities(detectRigType()) || {};
     const out = {};
-    for (const k of ['nb', 'nr', 'anf', 'apf', 'preamp', 'att', 'comp', 'vox', 'mon', 'rit', 'split', 'atu']) out[k] = !!caps[k];
+    for (const k of ['nb', 'nr', 'anf', 'apf', 'preamp', 'att', 'comp', 'vox', 'mon', 'rit', 'split', 'splitUp', 'atu']) out[k] = !!caps[k];
     return out;
   } catch { return null; }
 }
@@ -53019,6 +53023,40 @@ function cloudShackNotice(text, kind) {
           sendCatLog(`[CAT] TX (other VFO) frequency set to ${(hz / 1e6).toFixed(6)} MHz${_currentSplit ? '' : ' — split is off, so it is not shown until split is on'}`);
         }
         break;
+      }
+      // Split up N from the VFO window and ECHOCAT Web (#689, DA2PK): split on,
+      // then the TX VFO at the dial + N kHz, through the same two paths as
+      // above. Refused while the VFO is locked, where the radio has no
+      // TX-frequency command, and outside the radio's range (never for being
+      // outside a ham band: that is the operator's call). Sets VFOs only; it
+      // never keys the radio. Back to simplex is set-split false.
+      case 'split-up': {
+        const offsetKhz = SplitUp.normalizeOffset(data.offsetKhz);
+        const p = SplitUp.plan({
+          rxHz: _currentFreqHz, offsetKhz, split: _currentSplit,
+          locked: _vfoLocked, available: SplitUp.available(getRigCapabilities(rigType)), reach: rigReachNow(),
+        });
+        if (!p.ok) {
+          sendCatLog(`[CAT] Split ${SplitUp.label(offsetKhz).toLowerCase()} not done: ${p.message}`);
+          return { ok: false, error: p.message };
+        }
+        sendCatLog(`[CAT] Split ${SplitUp.label(offsetKhz).toLowerCase()}: RX ${(_currentFreqHz / 1e6).toFixed(6)} MHz, TX ${(p.txHz / 1e6).toFixed(6)} MHz`);
+        // DXLab Commander sets the TX frequency only once IT reports split on,
+        // so it gets a few tries; every other link takes it on the first.
+        const tries = rigType === 'commander' ? 6 : 0;
+        const sendTx = (left) => {
+          if (!cat || !cat.connected || !_currentSplit) return;
+          if (cat.setFrequencyOther(p.txHz) !== false) return;
+          if (left > 0) setTimeout(() => sendTx(left - 1), 400);
+          else sendCatLog('[CAT] The radio did not take the split TX frequency');
+        };
+        let wait = 0;
+        for (const st of p.steps) {
+          if (st.action === 'set-split') { applyRigControl(st, source, meta); wait = 150; }
+          else if (wait) setTimeout(() => sendTx(tries), wait);
+          else sendTx(tries);
+        }
+        return { ok: true, txHz: p.txHz };
       }
       case 'set-comp': {
         if (flexNeedsApi) { _flexWarnOnce('Compressor requires SmartSDR API — not connected'); break; }

@@ -184,16 +184,18 @@ test('the Logbook loads lib/adif-mode.js before qso-popout.js and reads modes th
   const js = R('renderer/qso-popout.js');
   assert.ok(/get: \(q\) => qsoMode\(q\)/.test(js), 'Mode column');
   assert.ok(!/q\.MODE \|\| ''\)\.toUpperCase\(\) === filterMode/.test(js), 'Mode filter');
-  // The filter rule itself.
+  // The filter rule itself lives in lib/logbook-filter.js since #702 (shared
+  // with the Logbook map and ECHOCAT Web).
   const body = (name) => { const i = js.indexOf('function ' + name + '('); return js.slice(i, js.indexOf('\n}\n', i) + 2); };
-  const f = new Function('AdifMode', body('qsoMode') + body('qsoModeMatches') + 'return { qsoMode, qsoModeMatches };')(AdifMode);
+  const f = new Function('AdifMode', body('qsoMode') + 'return { qsoMode };')(AdifMode);
+  const LF = require('../lib/logbook-filter');
   assert.strictEqual(f.qsoMode({ MODE: 'MFSK', SUBMODE: 'JS8' }), 'JS8');
-  assert.ok(f.qsoModeMatches({ MODE: 'MFSK', SUBMODE: 'FT4' }, 'FT4'));
-  assert.ok(f.qsoModeMatches({ MODE: 'FT4' }, 'FT4'));
-  assert.ok(f.qsoModeMatches({ MODE: 'MFSK', SUBMODE: 'FT2' }, 'FT2'));
-  assert.ok(f.qsoModeMatches({ MODE: 'PSK', SUBMODE: 'PSK63' }, 'PSK'));
-  assert.ok(f.qsoModeMatches({ MODE: 'DIGI' }, 'DIGI'));
-  assert.ok(!f.qsoModeMatches({ MODE: 'FT8' }, 'FT4'));
+  assert.ok(LF.modeMatches({ MODE: 'MFSK', SUBMODE: 'FT4' }, 'FT4'));
+  assert.ok(LF.modeMatches({ MODE: 'FT4' }, 'FT4'));
+  assert.ok(LF.modeMatches({ MODE: 'MFSK', SUBMODE: 'FT2' }, 'FT2'));
+  assert.ok(LF.modeMatches({ MODE: 'PSK', SUBMODE: 'PSK63' }, 'PSK'));
+  assert.ok(LF.modeMatches({ MODE: 'DIGI' }, 'DIGI'));
+  assert.ok(!LF.modeMatches({ MODE: 'FT8' }, 'FT4'));
 });
 test('ECHOCAT Web inlines lib/adif-mode.js and writes its exports through it', () => {
   assert.ok(R('renderer/remote.html').includes('<!-- adif-mode-js -->'));
