@@ -992,6 +992,28 @@ reply is `{ptt: true|false}`. Since 2026-11-22:
 - From a public address with the Cloud Tunnel off it is refused unless a
   token is set (see "Who may connect").
 
+Since 2026-11-23 (lib/ptt-api-gate.js), when the server is in its plain-HTTP
+fallback (it could not create its TLS certificate at start and the Cloud
+Tunnel is off). Browsers send no `Sec-Fetch-*` to an `http://` URL and an
+image request carries no `Origin`, so the rule above cannot see a web page
+there:
+
+- A call that would key the radio (`on`, or `toggle` while receiving) is
+  refused with 403 and nothing keys, unless "Require a password" is on and
+  the right `?token=` is given. The reply is
+  `{error: "PTT over plain HTTP is refused: ..."}` and says to restart
+  POTACAT or use the password; POTACAT logs it once a minute.
+- Releasing is never refused by this rule: `off`, and `toggle` while
+  transmitting, unkey as before (with the token when the password is on,
+  as on HTTPS). Unkeying is the safe direction.
+- Over HTTPS nothing changed.
+
+Each successful call writes `pttApiLastUsed` (ISO time) and
+`pttApiLastRoute` (`https` or `http`) to `ptt-api-usage.json` in POTACAT's
+user-data folder, at most once a minute. It is local only: not in the
+settings object, so never exported, sent to a device, device-writable or
+sent to POTACAT Cloud.
+
 #### ECHOCAT Web over POTACAT Cloud (HTTP, 2026-09-11)
 
 A browser on the public tunnel (`https://<callsign>.potacat.com`) never
