@@ -34982,15 +34982,17 @@ function vfoWfmAvailable() {
     return !!(m && m.wfm);
   } catch { return false; }
 }
-// The caps flags the VFO's CAT buttons check (VfoLayout.CAT_CHOICES), or null
-// when the radio is not known yet (the VFO then offers them all).
-/** Preamp / Att ladder for the VFO window (#997), [] when the radio has none. */
+/** Preamp / Att ladder for the VFO window (#997), [] when the radio has none.
+ *  Band from the RADIO's own frequency (the codec's rule), not the display: an SDR
+ *  holding the dial at 100 MHz+ must not cut an HF radio's ladder. */
 function vfoGainLadder(key, perBand) {
   try {
     const caps = getRigCapabilities(detectRigType()) || {};
-    return _rigGainSteps.ladderForFreq(caps[key], perBand ? caps.preampTargets : undefined, displayFreqHz() || 0);
+    return _rigGainSteps.ladderForFreq(caps[key], perBand ? caps.preampTargets : undefined, _currentFreqHz || 0);
   } catch { return []; }
 }
+// The caps flags the VFO's CAT buttons check (VfoLayout.CAT_CHOICES), or null
+// when the radio is not known yet (the VFO then offers them all).
 function vfoCatCaps() {
   try {
     const caps = getRigCapabilities(detectRigType()) || {};

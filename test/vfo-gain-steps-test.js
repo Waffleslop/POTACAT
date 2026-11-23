@@ -113,6 +113,19 @@ test('main sends the step and the ladder to the VFO window', () => {
   assert.ok(j > 0 && main.slice(j, j + 500).includes('_rigGainSteps.ladderForFreq('));
 });
 
+test('an SDR display above 100 MHz with the radio on 20 m keeps the full ladder: the band is the radio\'s own', () => {
+  const main = read('main.js');
+  const j = main.indexOf('function vfoGainLadder');
+  const body = main.slice(j, main.indexOf('\n}\n', j));
+  assert.ok(body.includes('_currentFreqHz'), 'the radio\'s own frequency');
+  assert.ok(!body.includes('displayFreqHz'), 'never the SDR-held display');
+  // The radio is on 20 m (14.074 MHz) while an SDR shows 145 MHz: full ladder.
+  const m = RIG_MODELS['FTX-1 Optima'];
+  const radioHz = 14074000;
+  assert.strictEqual(G.ladderForFreq(m.preampSteps, m.preampTargets, radioHz).length, 3);
+  assert.strictEqual(G.ladderForFreq(m.preampSteps, m.preampTargets, 145000000).length, 2, 'the display would have cut it');
+});
+
 test('the VFO window loads the ladder module and sends clickValue(step, ladder)', () => {
   const vfo = read('renderer', 'vfo-popout.html');
   assert.ok(/<script src="\.\.\/lib\/rig-gain-steps\.js"><\/script>/.test(vfo));
