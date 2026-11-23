@@ -634,6 +634,38 @@
     .jp-pk-hint { font-size: 14px; line-height: 1.4; color: var(--text-dim, #888); text-align: center; }
     .jp-pk-keys { font-size: 13px; color: var(--text-dim, #888); text-align: center; }
     .jp-pk-mode:focus-visible, .jp-pk-band:focus-visible, .jp-pk-apply:focus-visible { outline: 2px solid var(--accent-blue, #4fc3f7); outline-offset: 2px; }
+    /* #857 Compact layout: lib/jtcat-layout.js picks it on a short window
+       (under 800 px, back to Full from 840 px), or the operator does in
+       Options > The picture > Layout. The chrome gets shorter; the text keeps
+       its size (13 px and up). Nothing here moves or resizes the window. */
+    body.jp-compact .jtcat-toolbar { padding: 2px 8px; }
+    body.jp-compact .jp-bandmode { height: 34px; }
+    body.jp-compact .jp-bandmode .jp-bm-band, body.jp-compact .jp-bandmode .jp-bm-mode { font-size: 16px; }
+    body.jp-compact .jtcat-toolbar .jtcat-filter-btn { height: 30px; padding: 0 10px; font-size: 14px; }
+    body.jp-compact .jp-decode-header { padding: 2px 10px; row-gap: 2px; }
+    body.jp-compact .jp-decode-header .jtcat-filter-btn, body.jp-compact .jp-decode-header #jp-search, body.jp-compact .jp-decode-header .jp-view-select { height: 28px; }
+    body.jp-compact .jp-mini-btn { height: 26px; }
+    body.jp-compact .jp-decode-list { line-height: 1.35; padding: 2px 0; }
+    body.jp-compact .jp-row { padding: 1px 10px; }
+    body.jp-compact .jp-row.jp-directed { padding-left: 5px; }
+    body.jp-compact .jp-audio-row { padding: 3px 12px; gap: 4px 10px; }
+    body.jp-compact .jp-waterfall { height: 48px; }
+    body.jp-compact .jp-controls { gap: 6px; padding: 5px 10px; }
+    body.jp-compact .jp-btn.jp-big { height: 34px; }
+    body.jp-compact .jp-btn.jp-mid, body.jp-compact .jp-ctl-row .jp-select, body.jp-compact .jp-ctl-row .jp-mode-chip { height: 32px; }
+    body.jp-compact #jp-chase-custom, body.jp-compact #jp-fd-exch { height: 32px !important; }
+    body.jp-compact .jp-hunt-box { padding: 2px; }
+    body.jp-compact .jp-hunt-box .jp-btn, body.jp-compact .jp-hunt-box .jp-select { height: 30px; }
+    body.jp-compact .jp-qso-tracker { padding: 5px 12px; }
+    body.jp-compact .jp-qso-header { margin-bottom: 4px; }
+    body.jp-compact .jp-qso-step, body.jp-compact .jp-qso-skip { height: 28px; }
+    body.jp-compact .jp-qso-cancel { width: 30px; height: 30px; }
+    body.jp-compact .jp-hunt-status { padding: 3px 12px; }
+    body.jp-compact .jp-status-strip { padding: 3px 12px; }
+    body.jp-compact .jp-countdown-big { font-size: 16px; }
+    /* The one-time "compact layout" note (#857): theme colours, readable sub-line. */
+    .jp-qso-toast.info { background: var(--bg-secondary); color: var(--text-primary); border: 1px solid var(--border-primary); font-size: 14px; }
+    .jp-qso-toast.info .jp-toast-sub { font-size: 13px; opacity: 0.9; }
   </style>
 </head>
 <body>
@@ -989,7 +1021,7 @@
   </div>
 
   <!-- Audio controls -->
-  <div style="display:flex;align-items:center;flex-wrap:wrap;gap:8px 10px;padding:6px 12px;font-size:14px;color:var(--text-secondary);background:var(--bg-secondary);border-top:1px solid var(--border-primary);flex-shrink:0;">
+  <div class="jp-audio-row" style="display:flex;align-items:center;flex-wrap:wrap;gap:8px 10px;padding:6px 12px;font-size:14px;color:var(--text-secondary);background:var(--bg-secondary);border-top:1px solid var(--border-primary);flex-shrink:0;">
     <span style="flex-shrink:0;">RX</span>
     <input type="range" id="jp-rx-gain" min="0" max="300" value="100" style="width:110px;" title="RX Gain % — remembered per band, so changing band restores the level you last used there">
     <span id="jp-rx-gain-val" style="min-width:32px;text-align:right;">100%</span>
@@ -1331,6 +1363,14 @@
       <span class="jp-opt-label"><input type="checkbox" id="jp-bandscope-toggle"> Band scope strip</span>
       <span class="jp-opt-help">The radio's own spectrum above the audio waterfall — the FT-710 streams it over USB. Click it to tune. The floor above applies to it too.</span>
     </label>
+    <label class="jp-opt-row jp-opt-num-row">
+      <span class="jp-opt-label">Layout <select id="jp-layout">
+        <option value="auto" selected>Automatic</option>
+        <option value="full">Full</option>
+        <option value="compact">Compact</option>
+      </select></span>
+      <span class="jp-opt-help">Compact makes the bars, buttons and waterfall shorter so Band Activity has more lines; the text stays the same size. Automatic picks Compact when this window is under 800 pixels tall (a 1366 x 768 laptop) and Full again from 840. Full or Compact keeps that layout at any size. Ctrl and minus zooms the window out for still more room.</span>
+    </label>
     <div class="jp-opt-section">Special events only</div>
     <div class="jp-opt-warn">Leave these off for normal FT8 and POTA. Each one changes what goes on the air.</div>
     <button id="jp-fd-toggle" class="jp-opt-row">
@@ -1399,6 +1439,7 @@
   <script src="../lib/mac-mic-access.js"></script>
   <script src="../lib/waterfall-palettes.js"></script>
   <script src="waterfall.js"></script>
+  <script src="../lib/jtcat-layout.js"></script>
   <script src="jtcat-popout.js"></script>
 </body>
 </html>

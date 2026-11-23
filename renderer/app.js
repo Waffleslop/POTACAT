@@ -329,6 +329,7 @@ let enableLogging = false;
 let enableBannerLogger = false;
 let n1mmRst = false; // N1MM-style single-field RST inputs
 let defaultPower = 0; // the operator's own Default TX Power (W), 0 = none (#523)
+let fixedLogPower = 0; // "Always log this power" (W), for an amplifier; 0 = off (#837)
 let tuneClick = false;
 let qsoChime = 'off'; // 'off' | 'soft' | 'twotone' | 'bell' | 'morse-r' — see playQsoChime
 let enableSplit = false;
@@ -499,6 +500,13 @@ function refreshVfoCardAge() {
 }
 
 /** Send tuned spot info to VFO popout */
+// The operator picked this station: main shows its call in N3FJP's entry
+// window when that setting is on (#712). Scan and frequency-follow do not call
+// this; only a pick does.
+function n3fjpPick(spot) {
+  try { if (spot && spot.callsign && window.api.n3fjpCallInProgress) window.api.n3fjpCallInProgress(spot.callsign); } catch { /* older preload */ }
+}
+
 function notifyVfoTunedSpot(spot) {
   vfoCardSpot = spot || null;
   if (!spot) { window.api.vfoTunedSpot(null); return; }
@@ -1374,6 +1382,7 @@ const adifLogBrowseBtn = document.getElementById('adif-log-browse-btn');
 const adifImportBtn = document.getElementById('adif-import-btn');
 const adifImportResult = document.getElementById('adif-import-result');
 const setDefaultPower = document.getElementById('set-default-power');
+const setLogFixedPower = document.getElementById('set-log-fixed-power');
 const setSendToLogbook = document.getElementById('set-send-to-logbook');
 const setLogCommentTags = document.getElementById('set-log-comment-tags');
 const setJtcatLogComment = document.getElementById('set-jtcat-log-comment');
@@ -1388,6 +1397,7 @@ const logbookWavelogConfig = document.getElementById('logbook-wavelog-config');
 const logbookLog4omConfig = document.getElementById('logbook-log4om-config');
 const setLog4omWsjtxBinary = document.getElementById('set-log4om-wsjtx-binary');
 const setN3fjpPull = document.getElementById('set-n3fjp-pull');
+const setN3fjpCallInProgress = document.getElementById('set-n3fjp-call-in-progress');
 const setWavelogUrl = document.getElementById('set-wavelog-url');
 const setWavelogApiKey = document.getElementById('set-wavelog-api-key');
 const setWavelogStationId = document.getElementById('set-wavelog-station-id');
@@ -2324,6 +2334,7 @@ async function loadPrefs() {
   n1mmRst = settings.n1mmRst === true;
   applyRstMode();
   defaultPower = LogTxPower.operatorDefaultPower(settings);
+  fixedLogPower = LogTxPower.fixedLogPower(settings);
   updateLoggingVisibility();
   updateBannerLoggerVisibility();
   showBearing = settings.showBearing === true;
@@ -2668,6 +2679,10 @@ function updateRadioSubPanels() {
   const audioJackRow = document.getElementById('rig-audio-jack');
   if (audioJackRow) audioJackRow.classList.toggle('hidden', !(window.RigAudioJack && RigAudioJack.appliesToRadioType(type)));
   syncAudioJackRows();
+  // CW sideband (#753, lib/cw-sideband.js): radios whose link can set both CW modes.
+  const cwSidebandRow = document.getElementById('rig-cw-sideband');
+  if (cwSidebandRow) cwSidebandRow.classList.toggle('hidden', !(window.CwSideband && CwSideband.appliesToRadioType(type)));
+  syncCwSidebandRow();
   // Packet mode on the radio (#128): for every radio, shown once Winlink is on.
   const packetModeRow = document.getElementById('rig-packet-mode');
   if (packetModeRow) packetModeRow.classList.toggle('hidden', !(typeof setWinlinkEnable !== 'undefined' && setWinlinkEnable && setWinlinkEnable.checked));
@@ -3819,6 +3834,24 @@ function syncAudioJackRows() {
   const vad = document.getElementById('rig-voice-as-data');
   if (vad) vad.style.display = mic ? 'none' : '';
 }
+// CW sideband (#753): the choices in the radio's own words (CW-U / CW-L on a
+// Yaesu, CW / CW-R elsewhere), from lib/cw-sideband.js.
+function syncCwSidebandRow() {
+  const sel = document.getElementById('set-cw-sideband');
+  if (!sel || !window.CwSideband) return;
+  const model = rigModelSelect ? rigModelSelect.value : '';
+  let brand = null;
+  for (const group of (typeof rigModelData !== 'undefined' ? rigModelData : [])) {
+    if (group.models && group.models.includes(model)) { brand = group.brand; break; }
+  }
+  for (const c of CwSideband.choices(brand)) {
+    const opt = sel.querySelector('option[value="' + c.value + '"]');
+    if (opt) opt.textContent = c.label;
+  }
+  const help = document.getElementById('cw-sideband-help');
+  if (help) help.textContent = CwSideband.helpText(brand);
+}
+if (rigModelSelect) rigModelSelect.addEventListener('change', syncCwSidebandRow);
 function loadRigAudioJack(rig) {
   const mic = !!(rig && rig.audioJack === 'mic');
   const d = document.getElementById('set-audio-jack-data');
@@ -3870,6 +3903,7 @@ async function openRigEditor(mode, rigId) {
       { const t = document.getElementById('set-tx-audio-input'); if (t) t.value = rig.txAudioInput === 'front' || rig.txAudioInput === 'rear' ? rig.txAudioInput : ''; syncTxAudioInputRow(); }
       { const t = document.getElementById('set-tx-channel'); if (t) t.value = rig.txChannel === 'left' ? 'left' : 'both'; } // #654
       { const t = document.getElementById('set-icom-usb-data-mod'); if (t) t.checked = !rig.icomUsbDataModOff; syncIcomUsbDataModRow(); } // sweep 1a: absent = on
+      { const t = document.getElementById('set-cw-sideband'); if (t) t.value = window.CwSideband ? CwSideband.settingOf(rig) : 'band'; syncCwSidebandRow(); } // #753: absent = Automatic
       await populateRadioSection(rig.catTarget);
       // Per-rig audio source — populateRadioSection just rebuilt the options
       // for this rig's radio type, so the stored value (validated) sticks.
@@ -3940,6 +3974,7 @@ async function openRigEditor(mode, rigId) {
     { const v = document.getElementById('set-amp-drive-on'); if (v) v.checked = false; }
     { const v = document.getElementById('set-amp-drive-w'); if (v) v.value = 10; }
     { const v = document.getElementById('set-packet-mode'); if (v) v.value = 'auto'; }
+    { const v = document.getElementById('set-cw-sideband'); if (v) v.value = 'band'; syncCwSidebandRow(); } // #753: a new rig starts on Automatic
     await populateRigAudioDevices('', '');
   }
 
@@ -4105,6 +4140,10 @@ async function saveRigEditor() {
   const rigTxLeftOnly = !!(txChannelEl && txChannelEl.value === 'left'); // #654: absent = both channels
   const lanVoiceSsbEl = document.getElementById('set-lan-voice-ssb');
   const rigLanVoiceInSsb = !!(lanVoiceSsbEl && lanVoiceSsbEl.checked);
+  const cwSidebandEl = document.getElementById('set-cw-sideband');
+  // #753: stored only when not Automatic, and only for a radio type that shows the question.
+  const rigCwSideband = cwSidebandEl && window.CwSideband && CwSideband.appliesToRadioType(getSelectedRadioType())
+    && CwSideband.normalizeSetting(cwSidebandEl.value) !== CwSideband.AUTO ? CwSideband.normalizeSetting(cwSidebandEl.value) : '';
   const packetModeEl = document.getElementById('set-packet-mode');
   const rigPacketMode = packetModeEl && (packetModeEl.value === 'fm' || packetModeEl.value === 'fmdata') ? packetModeEl.value : '';
 
@@ -4143,6 +4182,7 @@ async function saveRigEditor() {
       if (rigIcomUsbDataModOff) rig.icomUsbDataModOff = true; else delete rig.icomUsbDataModOff;
       if (rigLanVoiceInSsb) rig.lanVoiceInSsb = true; else delete rig.lanVoiceInSsb;
       if (rigPacketMode) rig.packetMode = rigPacketMode; else delete rig.packetMode; // absent = Automatic
+      if (rigCwSideband) rig.cwSideband = rigCwSideband; else delete rig.cwSideband; // absent = Automatic (#753)
       rig.flexBandAntennaMap = flexBandAntennaMap;
       if (rigSdrScope) rig.sdrScope = rigSdrScope;
       rig.setupDone = [...rigSetupDone];
@@ -4179,6 +4219,7 @@ async function saveRigEditor() {
       ...(rigIcomUsbDataModOff ? { icomUsbDataModOff: true } : {}),
       ...(rigLanVoiceInSsb ? { lanVoiceInSsb: true } : {}),
       ...(rigPacketMode ? { packetMode: rigPacketMode } : {}),
+      ...(rigCwSideband ? { cwSideband: rigCwSideband } : {}),
       flexBandAntennaMap,
       ...(rigSdrScope ? { sdrScope: rigSdrScope } : {}),
       setupDone: [...rigSetupDone],
@@ -13047,7 +13088,7 @@ function bindPopupClickHandlers(mapInstance) {
         if (!isNaN(lat) && !isNaN(lon)) showTuneArc(lat, lon, btn.dataset.freq, btn.dataset.source);
         // Find matching spot in allSpots for quick respot
         const match = allSpots.find(s => s.frequency === btn.dataset.freq && s.callsign === btn.dataset.call && s.mode === btn.dataset.mode);
-        if (match) { lastTunedSpot = match; prefillDxCommand(match); notifyVfoTunedSpot(match); }
+        if (match) { lastTunedSpot = match; prefillDxCommand(match); notifyVfoTunedSpot(match); n3fjpPick(match); }
         // Activator mode: fill QSO form from spot
         if (appMode === 'activator' && activationActive && match) {
           fillActivatorFromSpot(match);
@@ -13329,6 +13370,7 @@ document.addEventListener('keydown', (e) => {
     if (!spot) return;
     lastTunedSpot = spot;
     notifyVfoTunedSpot(spot);
+    n3fjpPick(spot);
     prefillDxCommand(spot);
     window.api.tune(spot.frequency, spot.mode, spot.bearing);
     if (spot.lat != null && spot.lon != null) showTuneArc(spot.lat, spot.lon, spot.frequency, spot.source);
@@ -14240,6 +14282,7 @@ if (window.api.onBandspreadTunedSpot) {
     if (!match) return;
     lastTunedSpot = match;
     notifyVfoTunedSpot(match);
+    n3fjpPick(match);
     if (typeof prefillDxCommand === 'function') prefillDxCommand(match);
     render();
     const onFreqRow = tbody && (tbody.querySelector('.tuned-spot') || tbody.querySelector('.on-freq'));
@@ -15817,6 +15860,7 @@ function render() {
         }
         lastTunedSpot = s;
         notifyVfoTunedSpot(s);
+        n3fjpPick(s);
         cwSpotWpm = s.wpm || null;
         updateCwSpotWpm();
         prefillDxCommand(s);
@@ -16494,6 +16538,7 @@ window.api.onCatFrequency((hz) => { logFreqFollowRadio(hz); });
 
 function openLogPopup(spot) {
   currentLogSpot = spot;
+  n3fjpPick(spot);
   logFreqFollow.typed = false;
   logFreqFollow.pinnedKhz = parseFloat(spot.frequency) || 0;
   const nowKhz = radioFreqKhzExact || radioFreqKhz;
@@ -18713,12 +18758,15 @@ async function openSettingsDialog(tab) {
   }
   // Blank = no default: an unknown power is logged empty (#523).
   { const dp = LogTxPower.operatorDefaultPower(s); setDefaultPower.value = dp ? String(dp) : ''; }
+  // Blank = off: the radio's power is logged as before (#837).
+  { const fx = LogTxPower.fixedLogPower(s); setLogFixedPower.value = fx ? String(fx) : ''; }
   setSendToLogbook.checked = s.sendToLogbook === true;
   setLogbookType.value = s.logbookType || '';
   setLogbookHost.value = s.logbookHost || '127.0.0.1';
   setLogbookPort.value = s.logbookPort || '';
   setLog4omWsjtxBinary.checked = s.log4omWsjtxBinary === true;
   if (setN3fjpPull) setN3fjpPull.checked = s.n3fjpPull === true;
+  if (setN3fjpCallInProgress) setN3fjpCallInProgress.checked = s.n3fjpCallInProgress === true;
   setWavelogUrl.value = s.wavelogUrl || '';
   setWavelogApiKey.value = s.wavelogApiKey || '';
   setWavelogStationId.value = s.wavelogStationId || '';
@@ -19550,6 +19598,7 @@ settingsSave.addEventListener('click', async () => {
   const n1mmRstEnabled = setN1mmRst.checked;
   const adifLogPath = setAdifLogPath.value.trim() || '';
   const defaultPowerVal = LogTxPower.positiveWatts(setDefaultPower.value.trim()); // 0 = none (#523)
+  const logFixedPowerVal = LogTxPower.positiveWatts(setLogFixedPower.value.trim()); // 0 = off (#837)
   const sendToLogbook = setSendToLogbook.checked;
   const logCommentTagsEnabled = setLogCommentTags ? setLogCommentTags.checked : true;
   const logbookTypeVal = setLogbookType.value;
@@ -19734,12 +19783,14 @@ settingsSave.addEventListener('click', async () => {
     adifLogPath: adifLogPath,
     defaultPower: defaultPowerVal || null,
     defaultPowerSet: defaultPowerVal > 0, // a typed 100 is the operator's, not the old untouched default
+    logFixedPower: logFixedPowerVal || null,
     sendToLogbook: sendToLogbook,
     logbookType: logbookTypeVal,
     logbookHost: logbookHostVal,
     logbookPort: logbookPortVal,
     log4omWsjtxBinary: setLog4omWsjtxBinary.checked,
     n3fjpPull: !!(setN3fjpPull && setN3fjpPull.checked),
+    n3fjpCallInProgress: !!(setN3fjpCallInProgress && setN3fjpCallInProgress.checked),
     wavelogUrl: setWavelogUrl.value.trim(),
     wavelogApiKey: setWavelogApiKey.value.trim(),
     wavelogStationId: setWavelogStationId.value.trim(),
@@ -19944,6 +19995,7 @@ settingsSave.addEventListener('click', async () => {
   n1mmRst = n1mmRstEnabled;
   applyRstMode();
   defaultPower = defaultPowerVal;
+  fixedLogPower = logFixedPowerVal;
   updateLoggingVisibility();
   updateBannerLoggerVisibility();
   applyTheme();
@@ -23129,8 +23181,9 @@ let lastLogPower = 0; // last power value entered by user in log dialog (sticky)
 // guessed 100 W (#523, lib/log-tx-power.js).
 function logFormPower() {
   // A TCI rig's level is a drive percent: never offered as watts.
-  if (rigCurrentCaps.powerUnit === '%') return lastLogPower > 0 ? lastLogPower : null;
+  if (rigCurrentCaps.powerUnit === '%') return LogTxPower.txPowerForLog({ fixedW: fixedLogPower, enteredW: lastLogPower });
   return LogTxPower.txPowerForLog({
+    fixedW: fixedLogPower, // the amplifier's power, when the operator set one (#837)
     knownW: rigKnownPower > 0 ? rigKnownPower : radioPower, // main's level is the newer (a set lands there first)
     enteredW: lastLogPower,
     defaultW: defaultPower,

@@ -82,7 +82,7 @@ test('the SWR guard stops a TCI over', () => {
 
 test('a drive percent is never logged or capped as watts', () => {
   const save = MAIN.slice(MAIN.indexOf('async function saveQsoRecord('));
-  assert.match(save.slice(0, 20000), /const w = tciRigTarget\(\)\s*\? \(tciMeasuredWattsForLog\(\) \|\| LogTxPower\.operatorDefaultPower\(ops\) \|\| 0\)\s*: LogTxPower\.txPowerForLog\(\{ knownW: _currentTxPower, defaultW: LogTxPower\.operatorDefaultPower\(ops\) \}\);/, 'a CAT rig logs as before; a TCI rig logs measured watts');
+  assert.match(save.slice(0, 20000), /LogTxPower\.txPowerForContact\(\{[\s\S]*?knownW: tciRigTarget\(\) \? tciMeasuredWattsForLog\(\) : _currentTxPower,\s*defaultW: LogTxPower\.operatorDefaultPower\(ops\),/, 'a CAT rig logs as before; a TCI rig logs measured watts (#837: through txPowerForContact)');
   const caps = fnBody(MAIN, 'function getRigCapabilities(rigType) {');
   assert.match(caps, /if \(ampLimitW > 0 && caps\.powerUnit === '%'\) \{[\s\S]*?caps\.maxPower = Math\.max\(1, tciDriveCapPct\(\) \|\| 100\);/);
   assert.match(fnBody(MAIN, 'function tciDriveCapPct() {'), /return AmpDrive\.currentFlexPctLimit\(\);/);

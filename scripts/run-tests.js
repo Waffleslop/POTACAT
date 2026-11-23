@@ -48,6 +48,7 @@ const TESTS = [
   'test/cw-tx-lockout-timer-test.js', // #583: the TX lockout ends when its timer fires a millisecond early
   'test/pass-radio-free-notify-test.js', // #541: the station tells Cloud the radio is free, once per idle offer
   'test/space-ptt-not-scan-test.js', // Space as Hold-a-key-to-talk never toggles scan (B9)
+  'test/cw-sideband-test.js', // #753: CW or CW-R (CW-U or CW-L) per rig; Automatic is the rule before #753 on every band; one rule in lib/cw-sideband.js
   'test/rig-audio-jack-test.js', // #153: sound card on the data or mic jack, per rig: the one DATA-mode rule for every transmission
   'test/plain-ssb-for-digital-test.js', // a Winlink session keeps the data mode with JTCAT's plain-USB setting off (FTDX10 on flrig)
   'test/lz3aw-web-parity-test.js',
@@ -681,6 +682,7 @@ const TESTS = [
   'test/log-freq-test.js',
   'test/log-freq-resolution-test.js',
   'test/log-tx-power-test.js',
+  'test/log-fixed-power-test.js',
   'test/station-clock-test.js', // ECHOCAT device sets the FT8 slot clock
   'test/rig-bands-test.js',
   'test/rotor-bands-test.js', // #356 rotor only on chosen bands
@@ -734,6 +736,7 @@ const TESTS = [
   'test/layout-alignment-test.js',
   'test/jtcat-stations-test.js', // #557: the Stations view, one line per station heard (fold, expiry, clear, sort, row, click)
   'test/jtcat-stations-needed-test.js', // #557 part 2: needed marks from the roster under the map's scope, the Park column, Wanted in Stations
+  'test/jtcat-auto-compact-test.js', // #857: the JTCAT window picks a compact layout by itself when short (hysteresis; an explicit Full/Compact wins; never resizes the window)
   'test/jtcat-own-tx-offset-test.js', // #503: our own TX rows show the offset that slot went out on
   'test/net-reminder-row-test.js', // a Net Reminders row always names its net (#284)
   'test/freq-dots-test.js', // every frequency an operator reads is written the VFO way, 14.074.00 (Casey 2026-11-11)
@@ -790,6 +793,7 @@ const TESTS = [
   'test/log-false-p2p-test.js', // no false park-to-park: a General contact after a POTA spot or contact carries no park (web sheet, desktop banner)
   'test/n3fjp-confirm-keep-test.js', // N3FJP pull never deletes a confirmation; eQSL and ClubLog count as confirmed
   'test/n3fjp-deleted-test.js', // a contact deleted after an N3FJP pull is not brought back by the daily re-read
+  'test/n3fjp-call-in-progress-test.js', // #712 the call in progress goes to N3FJP's entry window; debounced; never logs
   'test/kenwood-tx-latch-test.js', // a Kenwood is not latched in transmit after a hand-mic over (IF; P8 asked during TX)
   'test/civ-pacing-ptt-order-test.js', // CI-V pacing never sends TX OFF before TX ON; the newest key state wins
   'test/forced-data-no-tune-test.js', // a forced-DATA key-down sets the mode only; never a frequency write (Icom repeater memories)
