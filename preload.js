@@ -19,6 +19,7 @@ contextBridge.exposeInMainWorld('api', {
   // receive) — the Landmarks tab shows stations the SDR can hear (lib/listen-source.js).
   onKiwiStatus: (cb) => ipcRenderer.on('kiwi-status', (_e, s) => cb(s)),
   rigBandsNative: (model) => ipcRenderer.invoke('rig-bands-native', model),
+  rotorBandChoices: () => ipcRenderer.invoke('rotor-band-choices'),
   platform: process.platform,
   openExternal: (url) => ipcRenderer.send('open-external', url),
   pairRedeemUrl: (url) => ipcRenderer.invoke('pair-redeem-url', url),

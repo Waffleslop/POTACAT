@@ -381,8 +381,11 @@ const { gridToLatLon, latLonToGrid, haversineDistanceMiles, bearing } = require(
 const ActivationMapData = require('./lib/activation-map-data');
 const LogFreq = require('./lib/log-freq');
 const LogFreqField = require('./lib/log-freq-field'); // kHz to the hertz (#794)
+const LogGear = require('./lib/log-gear'); // the rig and antenna a device sends with a contact (#975)
 const LogTxPower = require('./lib/log-tx-power'); // the power a contact is logged at, never a guessed 100 W (#523)
 const RigBands = require('./lib/rig-bands');
+const RotorBands = require('./lib/rotor-bands'); // rotor only on chosen bands (#356)
+const SplitUp = require('./lib/split-up'); // #689: split up N from the VFO window
 const SpotBandFilter = require('./lib/spot-band-filter');
 const SstvStartBand = require('./lib/sstv-start-band');
 const AwardTables = require('./lib/award-tables');
@@ -511,6 +514,7 @@ const IdleRadioUse = require('./lib/idle-radio-use');      // Idle Mode yields t
 const RadioTuneRoute = require('./lib/radio-tune-route'); // the path tuneRadio drives the radio on: TCI, Flex Direct, CAT, or none
 const IcomNetworkDataMod = require('./lib/icom-network-data-mod'); // #853: which DATA MOD item gets LAN over the network (DATA1/2/3 on an IC-7610)
 const IcomUsbDataMod = require('./lib/icom-usb-data-mod'); // sweep 1a: DATA MOD to USB for a data session over USB, put back after
+const Ft891TxAudioInput = require('./lib/ft891-tx-audio-input'); // #602: FT-891 MIC SELECT / DATA IN SELECT per rig, put back after
 const AprsRfFrequency = require('./lib/aprs-rf-frequency'); // APRS: the 2 m frequency by grid square (phase 2), 30 m worldwide (phase 3)
 const AprsRfFrames = require('./lib/aprs-rf-frames');       // APRS phase 2: Dire Wolf's AGW monitor frames -> APRS packets
 const AprsRadioReturn = require('./lib/aprs-radio-return'); // APRS phase 2: the radio goes back after listening
@@ -953,6 +957,7 @@ const GLOBAL_KEYS = new Set([
   'jtcatWaterfallSpeed', // waterfall lines/sec — display property of this screen
   'jtcatWaterfallFloor', // waterfall display noise floor (0..200) — same nature
   'jtcatShowBandScope',  // band-scope strip in the JTCAT pop-out (FT-710) — display
+  'jtcatShowWaterfall',  // #391: the JTCAT pop-out's audio waterfall shown (default on) — display
   'jtcatStationsExpiryMin', // JTCAT Stations view: minutes a station stays (2/5/10) — display (#557)
   'waterfallPalette',  // waterfall / band scope colours (lib/waterfall-palettes.js) — display
                        // (same reasoning as lightMode/darkVariant above)
@@ -3867,6 +3872,9 @@ function getRigCapabilities(rigType) {
   // FB/FA, rigctld I. Clients show the TX-frequency editor only where this is
   // true, so a radio that lacks the command never gets a dead field.
   caps.splitFreq = !!(caps.split && cat && cat.connected && cat.hasFrequencyOther);
+  // Split up N (#689): split on and the TX VFO at RX + N in one click. Not on
+  // a Flex, where a second TX frequency is a second slice (set-freq-other).
+  caps.splitUp = !!(caps.splitFreq && rigType !== 'flex');
   // The band scope's synthetic signal needs no radio, but every client gates
   // its scope controls on nativeScope — so with the switch on, any rig
   // reports one. That is how all three clients get bench-tested without an
@@ -7249,8 +7257,47 @@ function restoreIcomUsbDataMod(reason) {
   try { h.guard.restore(reason); } catch (e) { sendCatLog('[Icom DATA MOD] ' + e.message); }
 }
 
+// #602: the FT-891's transmit audio input (rig.txAudioInput), set on its
+// MIC SELECT / DATA IN SELECT menus while POTACAT is connected over serial CAT,
+// and put back when it disconnects (lib/ft891-tx-audio-input.js).
+let _ft891TxAudioInput = null; // { guard, controller }
+function ft891TxAudioInputAttach(controller, transport, target) {
+  _ft891TxAudioInput = null;
+  const modelName = getActiveRigModelName();
+  if (!Ft891TxAudioInput.hasChoice(modelName) || !Ft891TxAudioInput.appliesToLink(target && target.type)) return;
+  const rigOf = () => (settings.rigs || []).find((r) => r && r.id === settings.activeRigId);
+  if (!Ft891TxAudioInput.choiceFor(rigOf())) return; // the default: the radio's menus are not touched
+  const guard = Ft891TxAudioInput.createGuard({
+    choice: () => Ft891TxAudioInput.choiceFor(rigOf()),
+    query: (cmd) => controller.queryRaw(cmd, { timeoutMs: 1500 }).catch(() => null),
+    send: (cmd) => controller.sendRaw(cmd),
+    log: (line) => sendCatLog('[FT-891 audio input] ' + line),
+    notice: (message) => { if (win && !win.isDestroyed()) win.webContents.send('app-notice', { message, duration: 15000 }); },
+  });
+  _ft891TxAudioInput = { guard, controller };
+  // Each time the link comes up (a dropped USB cable reconnects the same
+  // controller); menus already set stay set and keep the operator's values.
+  transport.on('connect', () => {
+    setTimeout(() => {
+      if (cat !== controller || !_ft891TxAudioInput || _ft891TxAudioInput.guard !== guard || !controller.connected) return;
+      guard.apply().catch((e) => sendCatLog('[FT-891 audio input] ' + e.message));
+    }, 1000);
+  });
+}
+function restoreFt891TxAudioInput(reason) {
+  const h = _ft891TxAudioInput;
+  _ft891TxAudioInput = null;
+  if (!h) return;
+  if (!h.controller || !h.controller.connected) {
+    if (Object.keys(h.guard.held).length) sendCatLog(`[FT-891 audio input] the link is already closed (${reason}): POTACAT could not put the radio's own transmit audio input menus back; set them on the radio if needed`);
+    return;
+  }
+  try { h.guard.restore(reason); } catch (e) { sendCatLog('[FT-891 audio input] ' + e.message); }
+}
+
 async function restoreIcomNetworkDataMod(reason = 'disconnect') {
   restoreIcomUsbDataMod(reason); // every disconnect path calls this one: the USB DATA MOD goes back first
+  restoreFt891TxAudioInput(reason); // and the FT-891's transmit audio input menus (#602)
   const state = _icomNetworkDataModRestore;
   if (!state) return false;
   _icomNetworkDataModRestore = null;
@@ -8455,6 +8502,7 @@ function ensureRemoteClient() {
   // already early-returns in remote mode, but an ALREADY-running `cat` was never
   // torn down. The user re-selects a local rig (→ connectCat) to come back.
   if (cat) {
+    restoreFt891TxAudioInput('remote shack'); // #602: the radio's own menus back before the port closes
     try { cat.removeAllListeners(); cat.disconnect(); _rememberCatClose(cat); } catch {}
     cat = null;
   }
@@ -10145,6 +10193,7 @@ async function connectCat() {
     if (hs.source !== 'rig' && SerialHsTrial.trialSkipReason(model, target) === 'ptt-rts') {
       if (_serialHsTrial.get(target.path) !== 'ptt-rts') { _serialHsTrial.set(target.path, 'ptt-rts'); sendCatLog(SerialHsTrial.pttRtsSkipLine(target.path)); }
     } else if (hs.source !== 'rig' && SerialHsTrial.trialApplies(model, target)) armSerialHandshakeNoAnswerTrial(cat, transport, target, hs);
+    if (model.protocol === 'kenwood') ft891TxAudioInputAttach(cat, transport, target); // #602: FT-891 transmit audio input, put back on disconnect
     // Lines low at open on every Yaesu (holdSerialLinesLow): Windows raises DTR/RTS on open.
     transport.connect({ path: target.path, baudRate: target.baudRate || 9600, dtrOff: holdSerialLinesLow(model, target), connectDelay: model.connectDelay, serialHandshake: hs.handshake, stopBits: model.serialStopBits });
   }
@@ -19459,7 +19508,7 @@ function logQsoReplyFromLog(uuid) {
 
 // The saved record's own fields for a log-ok `records[]` entry (additive;
 // older devices ignore them). Only fields the record actually holds.
-const LOG_OK_SAVED_FIELDS = ['frequency', 'band', 'mode', 'state', 'gridsquare', 'country', 'dxcc', 'name', 'county'];
+const LOG_OK_SAVED_FIELDS = ['frequency', 'band', 'mode', 'state', 'gridsquare', 'country', 'dxcc', 'name', 'county', 'txPower'];
 function logOkSavedFields(r) {
   const out = {};
   for (const k of LOG_OK_SAVED_FIELDS) {
@@ -20356,6 +20405,7 @@ function connectWsjtx() {
         rstRcvd: f.RST_RCVD || '',
         txPower: f.TX_PWR || '',
         myRig: f.MY_RIG || '',
+        myAntenna: f.MY_ANTENNA || '',
         band: f.BAND || '',
         sig: f.SIG || '',
         sigInfo: f.SIG_INFO || '',
@@ -32367,6 +32417,21 @@ function connectRemote() {
       // The state the activator was in, for a park spanning several
       // (lib/qso-expand.js parkStateFor: "NJ", "US-NJ" or "US-0001:NJ,...").
       if (typeof data.parkState === 'string' && data.parkState.length <= 200) entry.parkState = data.parkState;
+      // The power the operator typed on the device (ECHOCAT #85), in watts.
+      // Unset when absent or not a sane number: saveQsoRecord then fills it
+      // (radio, Default TX Power, empty). A guest's is the guest's own; kept.
+      {
+        const tp = LogTxPower.deviceTxPower(data.txPower);
+        if (tp) entry.txPower = tp;
+      }
+      // The activation's rig and antenna from the device (#975). The phone's
+      // rig wins over the desktop's station rig; none sent, logContact fills it.
+      {
+        const rig = LogGear.gearText(data.myRig);
+        if (rig) entry.myRig = rig;
+        const ant = LogGear.gearText(data.myAntenna);
+        if (ant) entry.myAntenna = ant;
+      }
       // One cloud record, shared with the device's own copy (dupe fix 2026-07-08).
       if (data.uuid && typeof data.uuid === 'string' && data.uuid.length <= 64) entry.uuid = data.uuid;
       for (const k of ['respot', 'wwffRespot', 'llotaRespot', 'wwbotaRespot', 'dxcRespot']) if (data[k]) entry[k] = true;
@@ -34902,7 +34967,7 @@ function vfoCatCaps() {
   try {
     const caps = getRigCapabilities(detectRigType()) || {};
     const out = {};
-    for (const k of ['nb', 'nr', 'anf', 'apf', 'preamp', 'att', 'comp', 'vox', 'mon', 'rit', 'split', 'atu']) out[k] = !!caps[k];
+    for (const k of ['nb', 'nr', 'anf', 'apf', 'preamp', 'att', 'comp', 'vox', 'mon', 'rit', 'split', 'splitUp', 'atu']) out[k] = !!caps[k];
     return out;
   } catch { return null; }
 }
@@ -40615,6 +40680,7 @@ function rawQsoToQsoData(raw) {
     rstRcvd: raw.RST_RCVD || '',
     txPower: raw.TX_PWR || '',
     myRig: raw.MY_RIG || '',
+    myAntenna: raw.MY_ANTENNA || '',
     band: raw.BAND || '',
     sig: raw.SIG || '',
     sigInfo: raw.SIG_INFO || '',
@@ -44793,7 +44859,16 @@ function tuneRadio(freqKhz, mode, brng, { clearXit, origin, purpose } = {}) {
   }
 
   if (settings.enableRotor && settings.rotorActive !== false && settings.rotorMode !== 'manual' && brng != null && !isNaN(brng)) {
-    sendRotorBearing(Math.round(brng));
+    // Rotor only on chosen bands (#356, lib/rotor-bands.js): off = every band.
+    const rotorBand = freqToBand(freqHz / 1e6) || '';
+    const rotorRule = RotorBands.decide(settings, rotorBand);
+    if (rotorRule.turn) {
+      tuneRadio._rotorBandSkipNoted = null;
+      sendRotorBearing(Math.round(brng));
+    } else if (tuneRadio._rotorBandSkipNoted !== rotorBand) {
+      tuneRadio._rotorBandSkipNoted = rotorBand;   // one line per band, not one per click
+      sendCatLog(rotorRule.line);
+    }
   } else if (settings.enableRotor && settings.rotorActive !== false && settings.rotorMode === 'manual'
       && brng != null && !isNaN(brng) && !tuneRadio._rotorManualNoted) {
     // Say once why a spot click did not turn the antenna (IK4IDF 2026-10-05).
@@ -52941,6 +53016,40 @@ function cloudShackNotice(text, kind) {
         }
         break;
       }
+      // Split up N from the VFO window and ECHOCAT Web (#689, DA2PK): split on,
+      // then the TX VFO at the dial + N kHz, through the same two paths as
+      // above. Refused while the VFO is locked, where the radio has no
+      // TX-frequency command, and outside the radio's range (never for being
+      // outside a ham band: that is the operator's call). Sets VFOs only; it
+      // never keys the radio. Back to simplex is set-split false.
+      case 'split-up': {
+        const offsetKhz = SplitUp.normalizeOffset(data.offsetKhz);
+        const p = SplitUp.plan({
+          rxHz: _currentFreqHz, offsetKhz, split: _currentSplit,
+          locked: _vfoLocked, available: SplitUp.available(getRigCapabilities(rigType)), reach: rigReachNow(),
+        });
+        if (!p.ok) {
+          sendCatLog(`[CAT] Split ${SplitUp.label(offsetKhz).toLowerCase()} not done: ${p.message}`);
+          return { ok: false, error: p.message };
+        }
+        sendCatLog(`[CAT] Split ${SplitUp.label(offsetKhz).toLowerCase()}: RX ${(_currentFreqHz / 1e6).toFixed(6)} MHz, TX ${(p.txHz / 1e6).toFixed(6)} MHz`);
+        // DXLab Commander sets the TX frequency only once IT reports split on,
+        // so it gets a few tries; every other link takes it on the first.
+        const tries = rigType === 'commander' ? 6 : 0;
+        const sendTx = (left) => {
+          if (!cat || !cat.connected || !_currentSplit) return;
+          if (cat.setFrequencyOther(p.txHz) !== false) return;
+          if (left > 0) setTimeout(() => sendTx(left - 1), 400);
+          else sendCatLog('[CAT] The radio did not take the split TX frequency');
+        };
+        let wait = 0;
+        for (const st of p.steps) {
+          if (st.action === 'set-split') { applyRigControl(st, source, meta); wait = 150; }
+          else if (wait) setTimeout(() => sendTx(tries), wait);
+          else sendTx(tries);
+        }
+        return { ok: true, txHz: p.txHz };
+      }
       case 'set-comp': {
         if (flexNeedsApi) { _flexWarnOnce('Compressor requires SmartSDR API — not connected'); break; }
         const on = !!data.value;
@@ -57521,6 +57630,16 @@ function cloudShackNotice(text, kind) {
   // The active rig's bands (null = not restricted) for any window's first paint.
   ipcMain.handle('rig-bands-get', () => ({ bands: activeRigBands(), all: RigBands.ALL_BANDS }));
   // The rig editor's checkboxes: a model's native bands, before the rig is saved.
+  // Settings > Tuning > Antenna, "Turn the rotor only on these bands" (#356):
+  // the bands any configured rig covers, plus bands already ticked.
+  ipcMain.handle('rotor-band-choices', () => {
+    const lists = (settings.rigs || []).filter(Boolean).map((rig) => {
+      let name = rig.model || '';
+      if (!getModel(name, null) && rig.catTarget && rig.catTarget.civModel) name = rig.catTarget.civModel;
+      return RigBands.bandsForRig(rig, name, getModel(name, null));
+    });
+    return { bands: RotorBands.choices(lists, settings.rotorBands) };
+  });
   ipcMain.handle('rig-bands-native', (_e, modelName) => ({ bands: RigBands.nativeBands(String(modelName || ''), getModel(String(modelName || ''), null)), all: RigBands.ALL_BANDS }));
   // TX power from any window's slider — one writer, synced everywhere else
   // (applyJtcatTxGain); the origin is skipped so a dragging slider isn't
@@ -58333,6 +58452,7 @@ function cloudShackNotice(text, kind) {
           sig: q.SIG || '',
           sigInfo: q.SIG_INFO || '',
           myRig: q.MY_RIG || '',
+          myAntenna: q.MY_ANTENNA || '',
           myGridsquare: q.MY_GRIDSQUARE || '',
         });
       }

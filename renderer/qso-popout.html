@@ -206,7 +206,15 @@
       flex-shrink: 0;
     }
     #qso-map-splitter:hover { background: var(--accent-blue); }
-    #qso-map-container { display: none; flex-shrink: 0; overflow: hidden; }
+    #qso-map-container { display: none; flex-shrink: 0; overflow: hidden; position: relative; }
+    /* What the map plots: it follows the filter above (#702). */
+    .qso-map-note {
+      position: absolute; left: 8px; bottom: 8px; z-index: 500; pointer-events: none;
+      padding: 3px 8px; border-radius: 3px; font-size: 12px;
+      background: var(--bg-secondary); color: var(--text-secondary); border: 1px solid var(--border-primary);
+    }
+    .qso-map-note:empty { display: none; }
+    .qso-map-note.capped { color: var(--text-primary); border-color: var(--accent-blue); }
     #qso-map { width: 100%; height: 100%; }
     body.map-visible #qso-map-splitter { display: block; }
     body.map-visible #qso-map-container { display: block; }
@@ -328,7 +336,7 @@
   <div id="qso-col-menu" class="qso-col-menu hidden"></div>
 
   <div id="qso-map-splitter"></div>
-  <div id="qso-map-container"><div id="qso-map"></div></div>
+  <div id="qso-map-container"><div id="qso-map"></div><div id="qso-map-note" class="qso-map-note"></div></div>
 
   <div class="qso-footer">
     <div class="qso-stats">
@@ -368,6 +376,7 @@
   <script src="../lib/freq-dots.js"></script>
   <script src="../lib/log-freq-field.js"></script>
   <script src="../lib/adif-mode.js"></script>
+  <script src="../lib/logbook-filter.js"></script>
   <script src="../node_modules/leaflet/dist/leaflet.js"></script>
   <script src="qso-popout.js"></script>
 </body>

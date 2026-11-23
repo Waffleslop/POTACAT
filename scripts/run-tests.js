@@ -163,6 +163,7 @@ const TESTS = [
   'test/worked-overlay-test.js',
   'test/remote-scope-freq-test.js',
   'test/protocol-registration-test.js',
+  'test/vara-mac-guide-link-test.js',
   'test/modem-rx-level-test.js',
   'test/watchlist-groups-test.js',
   'test/cert-san-policy-test.js',
@@ -347,6 +348,7 @@ const TESTS = [
   'test/look-picker-test.js', // #376: Light / Dark / System, the six swatches in order, contrast 4.5:1 per theme
   'test/vfo-compact-test.js', // VFO window: Audio on/off, the mini VFO strip, POTACAT colours for PTT, sliders and CW
   'test/vfo-layout-test.js', // VFO window: Large and Small VFO layouts, one-line Small VFO, CAT buttons, Scan
+  'test/split-up-test.js', // #689: Split up N from the VFO window and ECHOCAT Web (TX = RX + N, lock, caps)
   'test/vfo-freq-entry-test.js', // #672: the Small VFO's frequency is typed in place, a click grows to the keypad; Enter never tunes a hidden buffer
   'test/main-window-layout-fixes-test.js', // #285 Log button "L", #284 HF Nets check mark, #298 HOLD TO TALK off screen
   'test/wd3d-activator-test.js', // WD3D: toolbar wraps at full screen; a two-fer/n-fer spot fills every P2P park
@@ -366,6 +368,7 @@ const TESTS = [
   'test/operating-entity-test.js', // W1AW/KL7 is Alaska; the log takes QRZ's DXCC entity, not its mailing country
   'test/hound-log-call-test.js', // a hound calls the fox's base call but logs the full call (level_death 6W/IK2HKT)
   'test/jtcat-hound-chip-test.js', // #160: HOUND chip is a two-way toggle on the main screen
+  'test/jtcat-waterfall-off-test.js', // #391: Show the audio waterfall (off hides the pane and stops drawing; decoding unaffected)
   'test/qrz-login-message-test.js', // Settings > Logging QRZ line: signed in vs no subscription vs bad password (K0DHW)
   'test/voice-tx-check-test.js', // 0 W / no ALC on a voice over: one hint naming the radio's audio-input menu
   'test/rig-test-saved-note-test.js', // a passing rig-editor Test says when its port is not saved yet
@@ -379,6 +382,7 @@ const TESTS = [
   'test/yaesu-audit-ftdx101-test.js', // Yaesu CAT audit: FTDX101 width SH00nn + its Table 3, AGC GT0 order, MD0 9/E/F, PC from 5 (2308-L)
   'test/yaesu-sd-break-in-delay-test.js', // Yaesu CAT audit: FT-710/FTDX10/FTDX101 SD is a two-digit index 00-33, sent and read
   'test/tx-audio-input-test.js', // TS-480/590/890/990 transmit audio input per rig; TS-480 asks on first transmit (#594)
+  'test/ft891-tx-audio-input-test.js', // FT-891 transmit audio input per rig: MIC SELECT / DATA IN SELECT set while connected, put back after (#602)
   'test/tx-channel-test.js', // transmit on left only or both channels, per rig: modem bridge, FT8, Tune (#654)
   'test/rig-list-a11y-test.js', // #603: every rig-list control names its rig for VoiceOver
   'test/split-first-tune-test.js', // #113 item 2: no split OFF unless POTACAT turned split on
@@ -665,6 +669,7 @@ const TESTS = [
   'test/landmarks-test.js', // Directory > Landmarks: the catalog gate, hours, rig coverage, the NCDXF clock, the feed, wiring
   'test/directory-key-nav-test.js', // #501: Directory arrow keys move from the row you clicked; ends clamp; a tab switch resets
   'test/lz3aw-round14-test.js',
+  'test/logbook-map-filter-test.js', // #702: the Logbook map plots exactly the filtered rows; one filter for list, map and ECHOCAT Web
   'test/lz3aw-batch-b-test.js',
   'test/lotw-report-test.js',
   'test/import-confirmations-test.js', // Import Log merges QSL / LoTW confirmations into QSOs already logged (#461)
@@ -678,6 +683,7 @@ const TESTS = [
   'test/log-tx-power-test.js',
   'test/station-clock-test.js', // ECHOCAT device sets the FT8 slot clock
   'test/rig-bands-test.js',
+  'test/rotor-bands-test.js', // #356 rotor only on chosen bands
   'test/band-last-freq-test.js',
   'test/spot-band-filter-test.js',
   'test/award-tables-test.js',
@@ -793,6 +799,8 @@ const TESTS = [
   'test/qrz-late-backfill-test.js', // a late QRZ answer fills the saved record's empty fields
   'test/qrz-request-timeout-test.js', // a stalled QRZ socket gives up at its timeout (activation review fix 1)
   'test/log-qso-fast-reply-test.js', // #732: ECHOCAT's log-ok at the disk write; uploads and respots after, respot outcome as a follow-up
+  'test/phone-tx-power-test.js', // ECHOCAT #85: log-qso keeps the phone's txPower (else the usual fill), log-ok records carry it, hello lists log-tx-power
+  'test/phone-activation-gear-test.js', // #975: log-qso keeps the phone's rig and antenna (64 chars), desktop rig otherwise; MY_ANTENNA written and read back
   'test/log-qso-idempotent-test.js', // #733: log-qso idempotent by uuid; the log's uuid index; no duplicate uuid reaches the Cloud
   'test/qso-identity-test.js', // #988: which QSO a Logbook edit/delete means: uuid, else CALL+QSO_DATE+TIME_ON+BAND+MODE; refuse when no single match
   'test/logbook-delete-988-test.js', // #988: Logbook deletes/edits hit the clicked QSO after a delete; a uuid-less delete is written; ECHOCAT reports the real result
@@ -823,6 +831,7 @@ const SERIAL = new Set([
   'test/atu-wizard-test.js', // runs the wizard on a 40x clock over real timers; under load a point times out (K3SBP run 1 case)
   'test/tci-audio-test.js', // 2 s budgets for a loopback TCI server to answer; missed in 2 of 9 parallel runs on a loaded machine, never alone
   'test/paddle-bounce-test.js', // web keyer element timing in real milliseconds; a dash was cut short once under load
+  'test/civ-pacing-test.js', // fixed 60/200 ms waits on a fake CI-V radio; failed four pushes under parallel load on 2026-11-22, passes alone
 ]);
 
 // SERIAL files that may be retried once after a failure (timing under load,
