@@ -8738,33 +8738,12 @@
   const lbFilterClear = document.getElementById('lb-filter-clear');
 
   /**
-   * The mode a QSO is filed under in the Mode filter — the family, as the
-   * desktop Logbook shows it: USB/LSB are SSB, MFSK+SUBMODE FT4 is FT4,
-   * PSK31/63 are PSK.
+   * Pure: the QSOs a search + filter set shows. The rules are the desktop
+   * Logbook's own, in lib/logbook-filter.js (inlined), so this list, the
+   * desktop list and the desktop Logbook map agree (#702).
    */
-  function lbModeFamily(q) {
-    const v = AdifMode.recordMode(q);
-    if (v === 'USB' || v === 'LSB') return 'SSB';
-    if (/^PSK/.test(v)) return 'PSK';
-    return v;
-  }
-
-  /** Pure: the QSOs a search + filter set shows. test/lz3aw-round14-test.js. */
   function lbFilterQsos(qsos, f) {
-    const query = String(f.query || '').trim().toUpperCase();
-    const band = String(f.band || '').toUpperCase();
-    const mode = String(f.mode || '').toUpperCase();
-    const from = String(f.from || '').replace(/-/g, '');
-    const to = String(f.to || '').replace(/-/g, '');
-    return qsos.filter(q => {
-      if (band && String(q.BAND || '').toUpperCase() !== band) return false;
-      if (mode && lbModeFamily(q) !== mode) return false;
-      const d = String(q.QSO_DATE || '');
-      if (from && d < from) return false;
-      if (to && d > to) return false;
-      if (!query) return true;
-      return [q.CALL, q.SIG_INFO, q.COMMENT, AdifMode.recordMode(q), q.MODE, q.BAND].some(v => String(v || '').toUpperCase().includes(query));
-    });
+    return LogbookFilter.filterQsos(qsos, f);
   }
 
   function getFilteredLogbook() {
