@@ -65,6 +65,13 @@ not, stop and tell Casey (the website session owns that page; 1.11.0 waited for 
 
 The workflow publishes this file verbatim as the GitHub release body, and the in-app What's
 New dialog shows it (fetched from GitHub, rendered by `lib/release-notes-format.js`).
+
+**Queued lines first.** Read `D:\Projects\potacat\docs\next-release-notes.md` (workspace file,
+readable from any folder). Every line queued there goes into these notes, in the operator's terms,
+in the right section (or a short section of its own near the end, before the `---` review line).
+Once the notes file is written, empty that file's list and keep the file and its heading. If the
+file is missing or its list is empty, carry on.
+
 Match the shape of the last few files (`release-notes/v1.12.0.md`, `v1.13.0.md`):
 
 - First line: `**Headline:** ` + two or three sentences on what matters most to a user.
