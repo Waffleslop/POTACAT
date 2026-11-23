@@ -101,7 +101,7 @@ test("ECHOCAT advertises 'log-contact' so a device can send one contact", () => 
 });
 
 test('log-ok records carry what the desktop saved, so a device copy has band, state and grid (NA4DQ)', () => {
-  assert.ok(/const LOG_OK_SAVED_FIELDS = \['frequency', 'band', 'mode', 'state', 'gridsquare', 'country', 'dxcc', 'name', 'county'\];/.test(main));
+  assert.ok(/const LOG_OK_SAVED_FIELDS = \['frequency', 'band', 'mode', 'state', 'gridsquare', 'country', 'dxcc', 'name', 'county', 'txPower'\];/.test(main));
   assert.ok(/operator: r\.bookOf \|\| '',[\s\S]{0,400}\.\.\.logOkSavedFields\(r\),/.test(main), 'the log-ok records[] map spreads the saved fields');
   const src = main.slice(main.indexOf('function logOkSavedFields'), main.indexOf('async function logContact'));
   const logOkSavedFields = new Function('LOG_OK_SAVED_FIELDS', src + '; return logOkSavedFields;')(['frequency', 'band', 'state', 'name']);

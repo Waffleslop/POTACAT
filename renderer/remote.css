@@ -581,6 +581,12 @@ html, body {
 }
 .so-toggles { display: flex; gap: 8px; flex-wrap: wrap; }
 .so-toggle-group { display: flex; gap: 4px; align-items: center; }
+/* Split up N (#689): the offset beside its button, the same size and border. */
+.rc-split-up-n {
+  height: 32px; padding: 0 6px; font-size: 13px; font-weight: 600;
+  background: var(--bg-card); color: var(--text);
+  border: 1px solid #444; border-radius: 6px; cursor: pointer;
+}
 .so-slider-wrap { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; }
 .so-slider { flex: 1; height: 32px; accent-color: var(--pota); }
 .so-slider-val { font-size: 13px; font-family: monospace; color: var(--text); min-width: 28px; text-align: right; }

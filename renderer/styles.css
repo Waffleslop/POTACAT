@@ -10847,8 +10847,8 @@ dialog[open] {
 .rig-bands-box { margin: 4px 0 10px; padding: 6px 8px; border: 1px solid var(--border-primary, #2a3a5e); border-radius: 4px; }
 .rig-bands-title { font-weight: 600; margin-bottom: 2px; }
 .rig-bands-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(72px, 1fr)); gap: 2px 8px; }
-#rig-bands-grid label { display: flex; flex-direction: row; justify-content: flex-start; align-items: center; gap: 4px; font-size: 12px; margin: 0; padding: 0; white-space: nowrap; width: auto; }
-#rig-bands-grid label input[type="checkbox"] { width: auto; margin: 0; flex: 0 0 auto; }
+#rig-bands-grid label, #rotor-bands-grid label { display: flex; flex-direction: row; justify-content: flex-start; align-items: center; gap: 4px; font-size: 12px; margin: 0; padding: 0; white-space: nowrap; width: auto; }
+#rig-bands-grid label input[type="checkbox"], #rotor-bands-grid label input[type="checkbox"] { width: auto; margin: 0; flex: 0 0 auto; }
 #rig-bands-grid label.rig-band-extra { opacity: 0.75; }
 .rig-setup-btn {
   font-size: 12px; font-weight: 600; padding: 5px 12px; border-radius: 4px; cursor: pointer;
