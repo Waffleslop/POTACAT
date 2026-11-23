@@ -5821,6 +5821,43 @@ if (setPskrUpload) {
   });
 }
 
+// "Turn the rotor only on these bands" (#356, lib/rotor-bands.js): tick
+// boxes for the bands the operator's rigs cover. Off = every band.
+const setRotorBandsOnly = document.getElementById('set-rotor-bands-only');
+const rotorBandsConfig = document.getElementById('rotor-bands-config');
+const rotorBandsGrid = document.getElementById('rotor-bands-grid');
+let rotorBandsSelected = new Set();
+function renderRotorBandsGrid(bands) {
+  if (!rotorBandsGrid) return;
+  rotorBandsGrid.textContent = '';
+  for (const b of bands) {
+    const lab = document.createElement('label');
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.checked = rotorBandsSelected.has(b);
+    cb.addEventListener('change', () => {
+      if (cb.checked) rotorBandsSelected.add(b); else rotorBandsSelected.delete(b);
+    });
+    lab.appendChild(cb);
+    lab.appendChild(document.createTextNode(b));
+    rotorBandsGrid.appendChild(lab);
+  }
+}
+async function loadRotorBandChoices() {
+  let bands = null;
+  try { const r = await window.api.rotorBandChoices(); bands = r && Array.isArray(r.bands) ? r.bands : null; } catch { /* older main */ }
+  renderRotorBandsGrid(bands || (window.RigBands ? window.RigBands.ALL_BANDS : []));
+}
+function applyRotorBandsVisibility() {
+  if (rotorBandsConfig && setRotorBandsOnly) rotorBandsConfig.classList.toggle('hidden', !setRotorBandsOnly.checked);
+}
+if (setRotorBandsOnly) setRotorBandsOnly.addEventListener('change', applyRotorBandsVisibility);
+/** rotorBands to save, low to high. */
+function rotorBandsToSave() {
+  const order = window.RigBands ? window.RigBands.ALL_BANDS : [...rotorBandsSelected];
+  return order.filter((b) => rotorBandsSelected.has(b));
+}
+
 // Rotor checkbox toggles rotor config visibility
 setEnableRotor.addEventListener('change', () => {
   rotorConfig.classList.toggle('hidden', !setEnableRotor.checked);
@@ -18490,6 +18527,10 @@ async function openSettingsDialog(tab) {
   if (s.enableRotor) rotorConfigured = true;
   if (setRotorType) setRotorType.value = s.rotorType || 'pstrotator';
   if (setRotorMode) setRotorMode.value = s.rotorMode || 'auto';
+  if (setRotorBandsOnly) setRotorBandsOnly.checked = s.rotorBandsOnly === true; // default off: every band
+  rotorBandsSelected = new Set(Array.isArray(s.rotorBands) ? s.rotorBands : []);
+  applyRotorBandsVisibility();
+  loadRotorBandChoices();
   setRotorHost.value = s.rotorHost || '127.0.0.1';
   setRotorPort.value = s.rotorPort || 12040;
   if (setRotorEzPort) setRotorEzPort.dataset.saved = s.rotorSerialPath || '';
@@ -19640,6 +19681,8 @@ settingsSave.addEventListener('click', async () => {
     enableRotor: rotorEnabledVal,
     rotorType: rotorTypeVal,
     rotorMode: rotorModeVal,
+    rotorBandsOnly: setRotorBandsOnly ? setRotorBandsOnly.checked : false,
+    rotorBands: rotorBandsToSave(),
     rotorHost: rotorHostVal,
     rotorPort: rotorPortVal,
     rotorSerialPath: rotorSerialPathVal,
