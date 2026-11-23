@@ -513,6 +513,7 @@ const IdleRadioUse = require('./lib/idle-radio-use');      // Idle Mode yields t
 const RadioTuneRoute = require('./lib/radio-tune-route'); // the path tuneRadio drives the radio on: TCI, Flex Direct, CAT, or none
 const IcomNetworkDataMod = require('./lib/icom-network-data-mod'); // #853: which DATA MOD item gets LAN over the network (DATA1/2/3 on an IC-7610)
 const IcomUsbDataMod = require('./lib/icom-usb-data-mod'); // sweep 1a: DATA MOD to USB for a data session over USB, put back after
+const Ft891TxAudioInput = require('./lib/ft891-tx-audio-input'); // #602: FT-891 MIC SELECT / DATA IN SELECT per rig, put back after
 const AprsRfFrequency = require('./lib/aprs-rf-frequency'); // APRS: the 2 m frequency by grid square (phase 2), 30 m worldwide (phase 3)
 const AprsRfFrames = require('./lib/aprs-rf-frames');       // APRS phase 2: Dire Wolf's AGW monitor frames -> APRS packets
 const AprsRadioReturn = require('./lib/aprs-radio-return'); // APRS phase 2: the radio goes back after listening
@@ -7251,8 +7252,47 @@ function restoreIcomUsbDataMod(reason) {
   try { h.guard.restore(reason); } catch (e) { sendCatLog('[Icom DATA MOD] ' + e.message); }
 }
 
+// #602: the FT-891's transmit audio input (rig.txAudioInput), set on its
+// MIC SELECT / DATA IN SELECT menus while POTACAT is connected over serial CAT,
+// and put back when it disconnects (lib/ft891-tx-audio-input.js).
+let _ft891TxAudioInput = null; // { guard, controller }
+function ft891TxAudioInputAttach(controller, transport, target) {
+  _ft891TxAudioInput = null;
+  const modelName = getActiveRigModelName();
+  if (!Ft891TxAudioInput.hasChoice(modelName) || !Ft891TxAudioInput.appliesToLink(target && target.type)) return;
+  const rigOf = () => (settings.rigs || []).find((r) => r && r.id === settings.activeRigId);
+  if (!Ft891TxAudioInput.choiceFor(rigOf())) return; // the default: the radio's menus are not touched
+  const guard = Ft891TxAudioInput.createGuard({
+    choice: () => Ft891TxAudioInput.choiceFor(rigOf()),
+    query: (cmd) => controller.queryRaw(cmd, { timeoutMs: 1500 }).catch(() => null),
+    send: (cmd) => controller.sendRaw(cmd),
+    log: (line) => sendCatLog('[FT-891 audio input] ' + line),
+    notice: (message) => { if (win && !win.isDestroyed()) win.webContents.send('app-notice', { message, duration: 15000 }); },
+  });
+  _ft891TxAudioInput = { guard, controller };
+  // Each time the link comes up (a dropped USB cable reconnects the same
+  // controller); menus already set stay set and keep the operator's values.
+  transport.on('connect', () => {
+    setTimeout(() => {
+      if (cat !== controller || !_ft891TxAudioInput || _ft891TxAudioInput.guard !== guard || !controller.connected) return;
+      guard.apply().catch((e) => sendCatLog('[FT-891 audio input] ' + e.message));
+    }, 1000);
+  });
+}
+function restoreFt891TxAudioInput(reason) {
+  const h = _ft891TxAudioInput;
+  _ft891TxAudioInput = null;
+  if (!h) return;
+  if (!h.controller || !h.controller.connected) {
+    if (Object.keys(h.guard.held).length) sendCatLog(`[FT-891 audio input] the link is already closed (${reason}): POTACAT could not put the radio's own transmit audio input menus back; set them on the radio if needed`);
+    return;
+  }
+  try { h.guard.restore(reason); } catch (e) { sendCatLog('[FT-891 audio input] ' + e.message); }
+}
+
 async function restoreIcomNetworkDataMod(reason = 'disconnect') {
   restoreIcomUsbDataMod(reason); // every disconnect path calls this one: the USB DATA MOD goes back first
+  restoreFt891TxAudioInput(reason); // and the FT-891's transmit audio input menus (#602)
   const state = _icomNetworkDataModRestore;
   if (!state) return false;
   _icomNetworkDataModRestore = null;
@@ -8457,6 +8497,7 @@ function ensureRemoteClient() {
   // already early-returns in remote mode, but an ALREADY-running `cat` was never
   // torn down. The user re-selects a local rig (→ connectCat) to come back.
   if (cat) {
+    restoreFt891TxAudioInput('remote shack'); // #602: the radio's own menus back before the port closes
     try { cat.removeAllListeners(); cat.disconnect(); _rememberCatClose(cat); } catch {}
     cat = null;
   }
@@ -10147,6 +10188,7 @@ async function connectCat() {
     if (hs.source !== 'rig' && SerialHsTrial.trialSkipReason(model, target) === 'ptt-rts') {
       if (_serialHsTrial.get(target.path) !== 'ptt-rts') { _serialHsTrial.set(target.path, 'ptt-rts'); sendCatLog(SerialHsTrial.pttRtsSkipLine(target.path)); }
     } else if (hs.source !== 'rig' && SerialHsTrial.trialApplies(model, target)) armSerialHandshakeNoAnswerTrial(cat, transport, target, hs);
+    if (model.protocol === 'kenwood') ft891TxAudioInputAttach(cat, transport, target); // #602: FT-891 transmit audio input, put back on disconnect
     // Lines low at open on every Yaesu (holdSerialLinesLow): Windows raises DTR/RTS on open.
     transport.connect({ path: target.path, baudRate: target.baudRate || 9600, dtrOff: holdSerialLinesLow(model, target), connectDelay: model.connectDelay, serialHandshake: hs.handshake, stopBits: model.serialStopBits });
   }
