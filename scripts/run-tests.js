@@ -139,6 +139,7 @@ const TESTS = [
   'test/sstv-audio-device-test.js',
   'test/sstv-live-path-test.js',
   'test/sstv-drive-test.js', // #279: the SSTV Drive slider keeps 0, shows its value, and is never squeezed
+  'test/sstv-tx-power-test.js', // #279: Transmit power for SSTV, set before a picture and put back after it, every way it ends
   'test/sstv-start-band-test.js', // #292: SSTV never tunes a radio to a band it is not set up for
   'test/sstv-echocat-send-test.js', // #357: a picture from ECHOCAT: its own copy for the encoder, a status line not a dialog, tuned before it keys
   'test/sstv-freq-box-test.js', // #359: the frequency box is not overwritten while typing; kHz or MHz; FM from 2 m up
