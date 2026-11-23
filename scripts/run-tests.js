@@ -80,6 +80,7 @@ const TESTS = [
   'test/vfo-monitor-tx-mute-test.js', // #713: VFO window radio monitor is silent while transmitting
   'test/vfo-log-spot-test.js',
   'test/vfo-wheel-direction-test.js', // #192 w0tlp: wheel up = frequency up in the VFO window
+  'test/vfo-step-keys-test.js', // #256 LZ3AW / K4DZC: Step down / Step up buttons and arrow keys tune by the step (hold repeats), never while typing, lock kept; main-window arrows stay on spots
   'test/vfo-tx-power-test.js', // #199 w0tlp: TX power slider in the VFO window, the Rig panel's caps and dispatcher
   'test/smartsdr-self-slice-test.js',
   'test/bundle-mac-deps-test.js',
