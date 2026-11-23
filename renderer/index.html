@@ -2829,6 +2829,11 @@
           </select>
         </label>
         <span class="help-text" style="font-size:12px;">In Manual mode, click the bearing value in the spot table to turn the antenna.</span>
+        <label class="checkbox-label"><input type="checkbox" id="set-rotor-bands-only"> Turn the rotor only on these bands</label>
+        <div id="rotor-bands-config" class="hidden">
+          <div id="rotor-bands-grid" class="rig-bands-grid"></div>
+          <span class="help-text" style="display:block;font-size:12px;">On the other bands, tuning leaves the antenna where it is (for a beam on the high bands and a dipole on the low ones). Clicking a bearing still turns it on any band.</span>
+        </div>
         <div id="rotor-pst-config">
           <span class="help-text" style="font-size:12px;">Sends beam heading to PstRotator via UDP.</span>
           <label>Host:

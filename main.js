@@ -383,6 +383,7 @@ const LogFreq = require('./lib/log-freq');
 const LogFreqField = require('./lib/log-freq-field'); // kHz to the hertz (#794)
 const LogTxPower = require('./lib/log-tx-power'); // the power a contact is logged at, never a guessed 100 W (#523)
 const RigBands = require('./lib/rig-bands');
+const RotorBands = require('./lib/rotor-bands'); // rotor only on chosen bands (#356)
 const SpotBandFilter = require('./lib/spot-band-filter');
 const SstvStartBand = require('./lib/sstv-start-band');
 const AwardTables = require('./lib/award-tables');
@@ -44682,7 +44683,16 @@ function tuneRadio(freqKhz, mode, brng, { clearXit, origin, purpose } = {}) {
   }
 
   if (settings.enableRotor && settings.rotorActive !== false && settings.rotorMode !== 'manual' && brng != null && !isNaN(brng)) {
-    sendRotorBearing(Math.round(brng));
+    // Rotor only on chosen bands (#356, lib/rotor-bands.js): off = every band.
+    const rotorBand = freqToBand(freqHz / 1e6) || '';
+    const rotorRule = RotorBands.decide(settings, rotorBand);
+    if (rotorRule.turn) {
+      tuneRadio._rotorBandSkipNoted = null;
+      sendRotorBearing(Math.round(brng));
+    } else if (tuneRadio._rotorBandSkipNoted !== rotorBand) {
+      tuneRadio._rotorBandSkipNoted = rotorBand;   // one line per band, not one per click
+      sendCatLog(rotorRule.line);
+    }
   } else if (settings.enableRotor && settings.rotorActive !== false && settings.rotorMode === 'manual'
       && brng != null && !isNaN(brng) && !tuneRadio._rotorManualNoted) {
     // Say once why a spot click did not turn the antenna (IK4IDF 2026-10-05).
@@ -57399,6 +57409,16 @@ function cloudShackNotice(text, kind) {
   // The active rig's bands (null = not restricted) for any window's first paint.
   ipcMain.handle('rig-bands-get', () => ({ bands: activeRigBands(), all: RigBands.ALL_BANDS }));
   // The rig editor's checkboxes: a model's native bands, before the rig is saved.
+  // Settings > Tuning > Antenna, "Turn the rotor only on these bands" (#356):
+  // the bands any configured rig covers, plus bands already ticked.
+  ipcMain.handle('rotor-band-choices', () => {
+    const lists = (settings.rigs || []).filter(Boolean).map((rig) => {
+      let name = rig.model || '';
+      if (!getModel(name, null) && rig.catTarget && rig.catTarget.civModel) name = rig.catTarget.civModel;
+      return RigBands.bandsForRig(rig, name, getModel(name, null));
+    });
+    return { bands: RotorBands.choices(lists, settings.rotorBands) };
+  });
   ipcMain.handle('rig-bands-native', (_e, modelName) => ({ bands: RigBands.nativeBands(String(modelName || ''), getModel(String(modelName || ''), null)), all: RigBands.ALL_BANDS }));
   // TX power from any window's slider — one writer, synced everywhere else
   // (applyJtcatTxGain); the origin is skipped so a dragging slider isn't
