@@ -381,6 +381,7 @@ const { gridToLatLon, latLonToGrid, haversineDistanceMiles, bearing } = require(
 const ActivationMapData = require('./lib/activation-map-data');
 const LogFreq = require('./lib/log-freq');
 const LogFreqField = require('./lib/log-freq-field'); // kHz to the hertz (#794)
+const LogGear = require('./lib/log-gear'); // the rig and antenna a device sends with a contact (#975)
 const LogTxPower = require('./lib/log-tx-power'); // the power a contact is logged at, never a guessed 100 W (#523)
 const RigBands = require('./lib/rig-bands');
 const SpotBandFilter = require('./lib/spot-band-filter');
@@ -20216,6 +20217,7 @@ function connectWsjtx() {
         rstRcvd: f.RST_RCVD || '',
         txPower: f.TX_PWR || '',
         myRig: f.MY_RIG || '',
+        myAntenna: f.MY_ANTENNA || '',
         band: f.BAND || '',
         sig: f.SIG || '',
         sigInfo: f.SIG_INFO || '',
@@ -32234,6 +32236,14 @@ function connectRemote() {
         const tp = LogTxPower.deviceTxPower(data.txPower);
         if (tp) entry.txPower = tp;
       }
+      // The activation's rig and antenna from the device (#975). The phone's
+      // rig wins over the desktop's station rig; none sent, logContact fills it.
+      {
+        const rig = LogGear.gearText(data.myRig);
+        if (rig) entry.myRig = rig;
+        const ant = LogGear.gearText(data.myAntenna);
+        if (ant) entry.myAntenna = ant;
+      }
       // One cloud record, shared with the device's own copy (dupe fix 2026-07-08).
       if (data.uuid && typeof data.uuid === 'string' && data.uuid.length <= 64) entry.uuid = data.uuid;
       for (const k of ['respot', 'wwffRespot', 'llotaRespot', 'wwbotaRespot', 'dxcRespot']) if (data[k]) entry[k] = true;
@@ -40455,6 +40465,7 @@ function rawQsoToQsoData(raw) {
     rstRcvd: raw.RST_RCVD || '',
     txPower: raw.TX_PWR || '',
     myRig: raw.MY_RIG || '',
+    myAntenna: raw.MY_ANTENNA || '',
     band: raw.BAND || '',
     sig: raw.SIG || '',
     sigInfo: raw.SIG_INFO || '',
@@ -58044,6 +58055,7 @@ function cloudShackNotice(text, kind) {
           sig: q.SIG || '',
           sigInfo: q.SIG_INFO || '',
           myRig: q.MY_RIG || '',
+          myAntenna: q.MY_ANTENNA || '',
           myGridsquare: q.MY_GRIDSQUARE || '',
         });
       }

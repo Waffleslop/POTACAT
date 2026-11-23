@@ -29732,6 +29732,7 @@ function buildActivationAdifQsos(act) {
     sig: c.sig || '',
     sigInfo: c.sigInfo || '',
     myRig: c.myRig || '',
+    myAntenna: c.myAntenna || '',
     myGridsquare: c.myGridsquare || '',
   })));
 }
