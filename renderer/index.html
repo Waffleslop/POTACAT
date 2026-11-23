@@ -2446,7 +2446,7 @@
               <option value="front">Front (microphone jack)</option>
             </select>
           </label>
-          <span class="help-text" style="display:block;margin:2px 0 0 0;">The socket your sound card interface is plugged into. POTACAT tells the radio which one to send each time it transmits; the wrong one puts a carrier on the air with no audio.</span>
+          <span id="tx-audio-input-help" class="help-text" style="display:block;margin:2px 0 0 0;">The socket your sound card interface is plugged into. POTACAT tells the radio which one to send each time it transmits; the wrong one puts a carrier on the air with no audio.</span>
         </div>
         <div id="rig-icom-usb-data-mod" class="hidden" style="margin-top:8px;">
           <label class="checkbox-label"><input type="checkbox" id="set-icom-usb-data-mod" checked> Set DATA MOD to USB while POTACAT sends data</label>
@@ -2829,6 +2829,11 @@
           </select>
         </label>
         <span class="help-text" style="font-size:12px;">In Manual mode, click the bearing value in the spot table to turn the antenna.</span>
+        <label class="checkbox-label"><input type="checkbox" id="set-rotor-bands-only"> Turn the rotor only on these bands</label>
+        <div id="rotor-bands-config" class="hidden">
+          <div id="rotor-bands-grid" class="rig-bands-grid"></div>
+          <span class="help-text" style="display:block;font-size:12px;">On the other bands, tuning leaves the antenna where it is (for a beam on the high bands and a dipole on the low ones). Clicking a bearing still turns it on any band.</span>
+        </div>
         <div id="rotor-pst-config">
           <span class="help-text" style="font-size:12px;">Sends beam heading to PstRotator via UDP.</span>
           <label>Host:
@@ -3538,6 +3543,7 @@
           <span class="vara-win-only help-text" style="display:block;margin:4px 0;">If you set VARA by hand instead: Settings &gt; SoundCard = the cable ends named below, Settings &gt; PTT = <b>VOX</b> (VARA has no "None"; VOX means VARA keys nothing and POTACAT keys the radio through Pat).</span>
           <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
             <label class="checkbox-label"><input type="checkbox" id="set-vara-hf-enable"> Use VARA HF</label>
+            <a class="vara-mac-only hidden" id="vara-mac-guide" href="https://potacat.com/guides/vara-on-mac/" data-external style="color:var(--accent-blue,#4fc3f7);font-size:12px;">Running VARA on a Mac?</a>
             <label class="vara-win-only">Program: <input type="text" id="set-vara-hf-path" placeholder="C:\VARA\VARA.exe (found for you)" style="width:210px;"> <button type="button" id="vara-hf-browse">Browse&hellip;</button> <button type="button" id="vara-hf-find">Find / test</button></label>
             <label title="Blank = this computer. Another computer: its name or address; VARA's audio then runs there.">Host: <input type="text" id="set-vara-hf-host" placeholder="this computer" spellcheck="false" style="width:120px;"></label>
             <label>Port: <input type="number" id="set-winlink-vara-port" min="1" max="65535" value="8300" style="width:70px;"></label>
@@ -5530,6 +5536,7 @@
   <script src="../lib/rig-family.js"></script>
   <script src="../lib/tci-target.js"></script>
   <script src="../lib/tx-audio-input.js"></script>
+  <script src="../lib/ft891-tx-audio-input.js"></script>
   <script src="../lib/rig-audio-jack.js"></script>
   <script src="../lib/icom-usb-data-mod.js"></script>
   <script src="../lib/tx-channel.js"></script>

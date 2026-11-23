@@ -3769,15 +3769,26 @@ if (rigModelSelect) rigModelSelect.addEventListener('change', syncYaesuLanMuteMo
 // Transmit audio input (#594): the Kenwoods whose key-down picks the socket
 // (lib/tx-audio-input.js). The TS-480 has no default: blank = ask on the
 // first transmit; the others are blank = Rear, as before.
+// The FT-891 (#602, lib/ft891-tx-audio-input.js): the same rig field sets the
+// radio's MIC SELECT menus while POTACAT is connected; blank = leave them alone.
 function syncTxAudioInputRow() {
   const row = document.getElementById('rig-tx-audio-input');
   const sel = document.getElementById('set-tx-audio-input');
   if (!row || !sel || !window.TxAudioInput) return;
   const model = rigModelSelect ? rigModelSelect.value : '';
-  const ok = window.TxAudioInput.hasChoice(model);
+  const ft891 = !!(window.Ft891TxAudioInput && window.Ft891TxAudioInput.hasChoice(model));
+  const ok = window.TxAudioInput.hasChoice(model) || ft891;
   row.classList.toggle('hidden', !ok);
   const blank = sel.querySelector('option[value=""]');
-  if (blank) blank.textContent = ok && window.TxAudioInput.MODELS[model] == null ? 'Ask on first transmit' : 'Rear (data / ACC2 socket), the default';
+  if (blank) blank.textContent = ft891 ? window.Ft891TxAudioInput.BLANK_LABEL
+    : ok && window.TxAudioInput.MODELS[model] == null ? 'Ask on first transmit' : 'Rear (data / ACC2 socket), the default';
+  const labels = ft891 ? window.Ft891TxAudioInput.LABELS : window.TxAudioInput.LABELS;
+  for (const v of ['rear', 'front']) { const o = sel.querySelector('option[value="' + v + '"]'); if (o) o.textContent = labels[v]; }
+  const help = document.getElementById('tx-audio-input-help');
+  if (help) {
+    if (help.dataset.kenwood == null) help.dataset.kenwood = help.textContent; // the page's own (Kenwood) text
+    help.textContent = ft891 ? window.Ft891TxAudioInput.HELP : help.dataset.kenwood;
+  }
 }
 if (rigModelSelect) rigModelSelect.addEventListener('change', syncTxAudioInputRow);
 // Where the sound card interface plugs in (#153, lib/rig-audio-jack.js).
@@ -4086,7 +4097,8 @@ async function saveRigEditor() {
   })();
   const txAudioInputEl = document.getElementById('set-tx-audio-input');
   const rigTxAudioInput = txAudioInputEl && (txAudioInputEl.value === 'front' || txAudioInputEl.value === 'rear')
-    && window.TxAudioInput && window.TxAudioInput.hasChoice(model) ? txAudioInputEl.value : ''; // #594
+    && ((window.TxAudioInput && window.TxAudioInput.hasChoice(model))
+      || (window.Ft891TxAudioInput && window.Ft891TxAudioInput.hasChoice(model))) ? txAudioInputEl.value : ''; // #594, FT-891 #602
   const icomUsbDataModEl = document.getElementById('set-icom-usb-data-mod');
   const rigIcomUsbDataModOff = !!(icomUsbDataModEl && !icomUsbDataModEl.checked); // sweep 1a: stored only when off
   const txChannelEl = document.getElementById('set-tx-channel');
@@ -5819,6 +5831,43 @@ if (setPskrUpload) {
   setPskrUpload.addEventListener('change', () => {
     pskrUploadConfig.classList.toggle('hidden', !setPskrUpload.checked);
   });
+}
+
+// "Turn the rotor only on these bands" (#356, lib/rotor-bands.js): tick
+// boxes for the bands the operator's rigs cover. Off = every band.
+const setRotorBandsOnly = document.getElementById('set-rotor-bands-only');
+const rotorBandsConfig = document.getElementById('rotor-bands-config');
+const rotorBandsGrid = document.getElementById('rotor-bands-grid');
+let rotorBandsSelected = new Set();
+function renderRotorBandsGrid(bands) {
+  if (!rotorBandsGrid) return;
+  rotorBandsGrid.textContent = '';
+  for (const b of bands) {
+    const lab = document.createElement('label');
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.checked = rotorBandsSelected.has(b);
+    cb.addEventListener('change', () => {
+      if (cb.checked) rotorBandsSelected.add(b); else rotorBandsSelected.delete(b);
+    });
+    lab.appendChild(cb);
+    lab.appendChild(document.createTextNode(b));
+    rotorBandsGrid.appendChild(lab);
+  }
+}
+async function loadRotorBandChoices() {
+  let bands = null;
+  try { const r = await window.api.rotorBandChoices(); bands = r && Array.isArray(r.bands) ? r.bands : null; } catch { /* older main */ }
+  renderRotorBandsGrid(bands || (window.RigBands ? window.RigBands.ALL_BANDS : []));
+}
+function applyRotorBandsVisibility() {
+  if (rotorBandsConfig && setRotorBandsOnly) rotorBandsConfig.classList.toggle('hidden', !setRotorBandsOnly.checked);
+}
+if (setRotorBandsOnly) setRotorBandsOnly.addEventListener('change', applyRotorBandsVisibility);
+/** rotorBands to save, low to high. */
+function rotorBandsToSave() {
+  const order = window.RigBands ? window.RigBands.ALL_BANDS : [...rotorBandsSelected];
+  return order.filter((b) => rotorBandsSelected.has(b));
 }
 
 // Rotor checkbox toggles rotor config visibility
@@ -18490,6 +18539,10 @@ async function openSettingsDialog(tab) {
   if (s.enableRotor) rotorConfigured = true;
   if (setRotorType) setRotorType.value = s.rotorType || 'pstrotator';
   if (setRotorMode) setRotorMode.value = s.rotorMode || 'auto';
+  if (setRotorBandsOnly) setRotorBandsOnly.checked = s.rotorBandsOnly === true; // default off: every band
+  rotorBandsSelected = new Set(Array.isArray(s.rotorBands) ? s.rotorBands : []);
+  applyRotorBandsVisibility();
+  loadRotorBandChoices();
   setRotorHost.value = s.rotorHost || '127.0.0.1';
   setRotorPort.value = s.rotorPort || 12040;
   if (setRotorEzPort) setRotorEzPort.dataset.saved = s.rotorSerialPath || '';
@@ -18821,6 +18874,8 @@ async function openSettingsDialog(tab) {
       winlinkVaraSection.classList.remove('hidden');
       winlinkVaraSection.querySelectorAll('.vara-win-only').forEach((el) => el.classList.toggle('hidden', !onWindows));
       winlinkVaraSection.querySelectorAll('.vara-other-only').forEach((el) => el.classList.toggle('hidden', onWindows));
+      // macOS: a link to the website's VARA-on-a-Mac guide beside Use VARA HF.
+      winlinkVaraSection.querySelectorAll('.vara-mac-only').forEach((el) => el.classList.toggle('hidden', window.api.platform !== 'darwin'));
       const varaDetails = document.getElementById('vara-details');
       if (varaDetails && !onWindows) varaDetails.open = true;
       if (setVaraHfHost) setVaraHfHost.value = s.winlinkVaraHost || '';
@@ -19640,6 +19695,8 @@ settingsSave.addEventListener('click', async () => {
     enableRotor: rotorEnabledVal,
     rotorType: rotorTypeVal,
     rotorMode: rotorModeVal,
+    rotorBandsOnly: setRotorBandsOnly ? setRotorBandsOnly.checked : false,
+    rotorBands: rotorBandsToSave(),
     rotorHost: rotorHostVal,
     rotorPort: rotorPortVal,
     rotorSerialPath: rotorSerialPathVal,
@@ -29732,6 +29789,7 @@ function buildActivationAdifQsos(act) {
     sig: c.sig || '',
     sigInfo: c.sigInfo || '',
     myRig: c.myRig || '',
+    myAntenna: c.myAntenna || '',
     myGridsquare: c.myGridsquare || '',
   })));
 }

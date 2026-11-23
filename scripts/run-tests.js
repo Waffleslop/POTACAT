@@ -163,6 +163,7 @@ const TESTS = [
   'test/worked-overlay-test.js',
   'test/remote-scope-freq-test.js',
   'test/protocol-registration-test.js',
+  'test/vara-mac-guide-link-test.js',
   'test/modem-rx-level-test.js',
   'test/watchlist-groups-test.js',
   'test/cert-san-policy-test.js',
@@ -201,6 +202,7 @@ const TESTS = [
   'test/elecraft-data-mode-test.js',
   'test/elecraft-atu-tune-test.js', // Elecraft tunes with SWT (K3 19, KX3 44, KX2 20 by OM;), never AC
   'test/ts590-atu-ac111-test.js', // TS-590S/SG starts a tune with AC111; per its PC command guide (VA2PSL #635); other Kenwoods keep AC011;
+  'test/ft2000-atu-cmd-test.js', // #990: FT-2000 tune is AC002; per its CAT reference p. 5, not the Kenwood AC011;
   'test/freedv-spot-merge-test.js', // #742: one row per FreeDV station across PSKReporter + FreeDV Reporter; departed stations leave; rows keyed by mode too
   'test/freedv-display-mode-test.js', // #716: RADE, not DIGU/PKTUSB, on every surface while FreeDV runs
   'test/vfo-ptt-row-test.js', // #190: ECHOCAT Web VFO-tab PTT row shows while the mode is unknown; hidden in CW/data
@@ -366,6 +368,7 @@ const TESTS = [
   'test/operating-entity-test.js', // W1AW/KL7 is Alaska; the log takes QRZ's DXCC entity, not its mailing country
   'test/hound-log-call-test.js', // a hound calls the fox's base call but logs the full call (level_death 6W/IK2HKT)
   'test/jtcat-hound-chip-test.js', // #160: HOUND chip is a two-way toggle on the main screen
+  'test/jtcat-waterfall-off-test.js', // #391: Show the audio waterfall (off hides the pane and stops drawing; decoding unaffected)
   'test/qrz-login-message-test.js', // Settings > Logging QRZ line: signed in vs no subscription vs bad password (K0DHW)
   'test/voice-tx-check-test.js', // 0 W / no ALC on a voice over: one hint naming the radio's audio-input menu
   'test/rig-test-saved-note-test.js', // a passing rig-editor Test says when its port is not saved yet
@@ -379,6 +382,7 @@ const TESTS = [
   'test/yaesu-audit-ftdx101-test.js', // Yaesu CAT audit: FTDX101 width SH00nn + its Table 3, AGC GT0 order, MD0 9/E/F, PC from 5 (2308-L)
   'test/yaesu-sd-break-in-delay-test.js', // Yaesu CAT audit: FT-710/FTDX10/FTDX101 SD is a two-digit index 00-33, sent and read
   'test/tx-audio-input-test.js', // TS-480/590/890/990 transmit audio input per rig; TS-480 asks on first transmit (#594)
+  'test/ft891-tx-audio-input-test.js', // FT-891 transmit audio input per rig: MIC SELECT / DATA IN SELECT set while connected, put back after (#602)
   'test/tx-channel-test.js', // transmit on left only or both channels, per rig: modem bridge, FT8, Tune (#654)
   'test/rig-list-a11y-test.js', // #603: every rig-list control names its rig for VoiceOver
   'test/split-first-tune-test.js', // #113 item 2: no split OFF unless POTACAT turned split on
@@ -678,6 +682,7 @@ const TESTS = [
   'test/log-tx-power-test.js',
   'test/station-clock-test.js', // ECHOCAT device sets the FT8 slot clock
   'test/rig-bands-test.js',
+  'test/rotor-bands-test.js', // #356 rotor only on chosen bands
   'test/band-last-freq-test.js',
   'test/spot-band-filter-test.js',
   'test/award-tables-test.js',
@@ -708,6 +713,7 @@ const TESTS = [
   'test/rig-power-off-guard-test.js', // #293: no Power Off for a radio POTACAT cannot switch back on, unless the rig allows it
   'test/rig-power-off-defaults-test.js', // #768: Power Off shown by default on a direct serial port or SCU-LAN10, hidden on Hamlib; a stored choice wins
   'test/amp-drive-limit-test.js', // B10 row 10: a per-rig amplifier drive limit, enforced in every radio client
+  'test/g90-power-scale-test.js', // the Xiegu G90 through rigctld sends RFPOWER on its own 20 W full scale (20 W = 1.000, not 0.200); other radios' bytes unchanged (#989)
   'test/remote-multi-client-test.js',
   'test/remote-bridge-test.js',
   'test/aprs-remote-shack-test.js', // #868: a desktop driving a remote shack starts APRS listening there (aprs-listen), shows the shack's aprs-state and the stations its radio heard
@@ -792,6 +798,8 @@ const TESTS = [
   'test/qrz-late-backfill-test.js', // a late QRZ answer fills the saved record's empty fields
   'test/qrz-request-timeout-test.js', // a stalled QRZ socket gives up at its timeout (activation review fix 1)
   'test/log-qso-fast-reply-test.js', // #732: ECHOCAT's log-ok at the disk write; uploads and respots after, respot outcome as a follow-up
+  'test/phone-tx-power-test.js', // ECHOCAT #85: log-qso keeps the phone's txPower (else the usual fill), log-ok records carry it, hello lists log-tx-power
+  'test/phone-activation-gear-test.js', // #975: log-qso keeps the phone's rig and antenna (64 chars), desktop rig otherwise; MY_ANTENNA written and read back
   'test/log-qso-idempotent-test.js', // #733: log-qso idempotent by uuid; the log's uuid index; no duplicate uuid reaches the Cloud
   'test/hunt-polish-test.js', // Hunt says who it is working; web Filters with Hunt off and for a guest; the list saved on every change; the review window closes on decline
   'test/tx-review-low-test.js', // drop detector paused in TX; Winlink re-key restarts the TX limit; full power on rigctld raw PC; multi-slice TX kind
@@ -820,6 +828,7 @@ const SERIAL = new Set([
   'test/atu-wizard-test.js', // runs the wizard on a 40x clock over real timers; under load a point times out (K3SBP run 1 case)
   'test/tci-audio-test.js', // 2 s budgets for a loopback TCI server to answer; missed in 2 of 9 parallel runs on a loaded machine, never alone
   'test/paddle-bounce-test.js', // web keyer element timing in real milliseconds; a dash was cut short once under load
+  'test/civ-pacing-test.js', // fixed 60/200 ms waits on a fake CI-V radio; failed four pushes under parallel load on 2026-11-22, passes alone
 ]);
 
 // SERIAL files that may be retried once after a failure (timing under load,

@@ -107,8 +107,14 @@ test('R2: a radio that answers CAT in TX keeps polling straight after an over', 
 test('Other Rig (Hamlib) 3088 with no Radio Model borrows the quirk', () => {
   const main = readSrc(path.join(__dirname, '..', 'main.js'));
   const fn = main.slice(main.indexOf('function getActiveRigModel()'), main.indexOf('function getActiveRigModel()') + 2500);
-  assert.ok(/m\.hamlib && m\.hamlib\.rigId === hamlibId/.test(fn), 'matched by Hamlib number');
-  assert.ok(/twin\.pollDuringTx === false\) return \{ \.\.\.generic, pollDuringTx: false \}/.test(fn), 'only the quirk is borrowed');
+  // The lookup moved to lib/rig-models.js hamlibTwinQuirks (#993); main.js calls it.
+  assert.ok(/return hamlibTwinQuirks\(generic, ct && ct\.rigId\)/.test(fn), 'main.js uses the twin lookup');
+  const { hamlibTwinQuirks, getModel } = require('../lib/rig-models');
+  const generic = getModel(null, 'rigctld');
+  const r = hamlibTwinQuirks(generic, 3088);
+  assert.strictEqual(r.pollDuringTx, false, 'the quirk is borrowed by Hamlib number');
+  assert.strictEqual(r.caps, generic.caps, 'panel caps stay generic');
+  assert.strictEqual(hamlibTwinQuirks(generic, 2029), generic, 'an unmatched number lends nothing');
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);
