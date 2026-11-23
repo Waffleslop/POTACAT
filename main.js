@@ -19319,7 +19319,7 @@ function logQsoReplyFromLog(uuid) {
 
 // The saved record's own fields for a log-ok `records[]` entry (additive;
 // older devices ignore them). Only fields the record actually holds.
-const LOG_OK_SAVED_FIELDS = ['frequency', 'band', 'mode', 'state', 'gridsquare', 'country', 'dxcc', 'name', 'county'];
+const LOG_OK_SAVED_FIELDS = ['frequency', 'band', 'mode', 'state', 'gridsquare', 'country', 'dxcc', 'name', 'county', 'txPower'];
 function logOkSavedFields(r) {
   const out = {};
   for (const k of LOG_OK_SAVED_FIELDS) {
@@ -32227,6 +32227,13 @@ function connectRemote() {
       // The state the activator was in, for a park spanning several
       // (lib/qso-expand.js parkStateFor: "NJ", "US-NJ" or "US-0001:NJ,...").
       if (typeof data.parkState === 'string' && data.parkState.length <= 200) entry.parkState = data.parkState;
+      // The power the operator typed on the device (ECHOCAT #85), in watts.
+      // Unset when absent or not a sane number: saveQsoRecord then fills it
+      // (radio, Default TX Power, empty). A guest's is the guest's own; kept.
+      {
+        const tp = LogTxPower.deviceTxPower(data.txPower);
+        if (tp) entry.txPower = tp;
+      }
       // One cloud record, shared with the device's own copy (dupe fix 2026-07-08).
       if (data.uuid && typeof data.uuid === 'string' && data.uuid.length <= 64) entry.uuid = data.uuid;
       for (const k of ['respot', 'wwffRespot', 'llotaRespot', 'wwbotaRespot', 'dxcRespot']) if (data[k]) entry[k] = true;
