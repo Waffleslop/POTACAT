@@ -168,6 +168,7 @@ function _applyPopoutTheme(payload) {
     fdMode = !!s.jtcatFdMode;
     if (fdExchInput) fdExchInput.value = s.jtcatFdExch || '';
     reflectFd();
+    setJpLayoutChoice(s.jtcatLayout, false); // #857: Automatic unless the operator chose Full or Compact
     skipTx1 = !!s.jtcatSkipTx1;
     reflectSkipTx1();
     huntCqFallback = !!s.jtcatHuntCqFallback;
@@ -1959,6 +1960,7 @@ function _applyPopoutTheme(payload) {
     if (qsoToastTimer) clearTimeout(qsoToastTimer);
     qsoToast.classList.remove('visible');
     qsoToast.classList.remove('error');
+    qsoToast.classList.remove('info');
     // Focus main POTACAT window — QSO log is there (only meaningful for
     // the success toast; clicking an error toast just dismisses it).
     if (!qsoToast.dataset.errorToast) window.api.focusMain();
@@ -1973,6 +1975,7 @@ function _applyPopoutTheme(payload) {
     if (qsoToastTimer) clearTimeout(qsoToastTimer);
     qsoToast.innerHTML = esc(message) +
       (sub ? '<div class="jp-toast-sub">' + esc(sub) + '</div>' : '');
+    qsoToast.classList.remove('info'); // #857's one-time note
     qsoToast.classList.add('visible');
     qsoToast.classList.add('error');
     qsoToast.dataset.errorToast = '1';
@@ -1989,6 +1992,7 @@ function _applyPopoutTheme(payload) {
     if (qsoToastTimer) clearTimeout(qsoToastTimer);
     qsoToast.innerHTML = esc(message) +
       (sub ? '<div class="jp-toast-sub">' + esc(sub) + '</div>' : '');
+    qsoToast.classList.remove('info'); // #857's one-time note
     qsoToast.classList.add('visible');
     qsoToast.classList.add('warn');
     qsoToast.dataset.errorToast = '1'; // suppress the click-focuses-main behavior
@@ -7112,6 +7116,58 @@ function _applyPopoutTheme(payload) {
       window.api.jtcatSetRxFreq(hz);
     }
   });
+
+  // #857 Layout: Full or Compact. lib/jtcat-layout.js picks Compact by
+  // itself when the window is short (a 1366x768 laptop), with hysteresis, and
+  // an explicit Full or Compact in Options always wins. Only the operator's
+  // choice is saved (the select); the automatic pick never is, so it never
+  // becomes a choice. This only toggles body.jp-compact: the window is never
+  // moved or resized, and the zoom keys below stay the operator's own.
+  var layoutSelect = document.getElementById('jp-layout');
+  var layoutChoice = 'auto'; // the operator's choice: auto | full | compact
+  var layoutNow = 'full';    // what the window shows
+  var layoutReady = false;   // settings loaded (no pick before the saved choice is known)
+  function applyJpLayout() {
+    if (layoutSelect) layoutSelect.value = layoutChoice;
+    var next = JtcatLayout.pick({ choice: layoutChoice, height: window.innerHeight, current: layoutNow });
+    if (next === layoutNow) return;
+    layoutNow = next;
+    document.body.classList.toggle('jp-compact', next === 'compact');
+    resizeWaterfall(); // the canvas follows its new CSS height
+    if (bandActivity && !stationsView) bandActivity.scrollTop = bandActivity.scrollHeight;
+    if (next === 'compact' && layoutChoice === 'auto') tellCompactOnce();
+  }
+  function setJpLayoutChoice(v, persist) {
+    layoutChoice = JtcatLayout.normalizeChoice(v);
+    layoutReady = true;
+    applyJpLayout();
+    if (persist) window.api.saveSettings({ jtcatLayout: layoutChoice });
+  }
+  // Said once per computer, the first time Automatic goes compact.
+  function tellCompactOnce() {
+    try {
+      if (localStorage.getItem('jtcat-compact-told')) return;
+      localStorage.setItem('jtcat-compact-told', '1');
+    } catch (e) { return; }
+    if (qsoToastTimer) clearTimeout(qsoToastTimer);
+    qsoToast.innerHTML = esc('Compact layout: this window is short, so Band Activity gets more lines.') +
+      '<div class="jp-toast-sub">' + esc('Options > Layout changes it. Ctrl and minus zooms out.') + '</div>';
+    qsoToast.classList.add('visible');
+    qsoToast.classList.add('info');
+    qsoToast.dataset.errorToast = '1'; // a click only dismisses it
+    qsoToastTimer = setTimeout(function() {
+      qsoToast.classList.remove('visible');
+      qsoToast.classList.remove('info');
+      delete qsoToast.dataset.errorToast;
+    }, 8000);
+  }
+  if (layoutSelect) layoutSelect.addEventListener('change', function() { setJpLayoutChoice(layoutSelect.value, true); });
+  var layoutRaf = 0;
+  window.addEventListener('resize', function() {
+    if (!layoutReady || layoutRaf) return;
+    layoutRaf = requestAnimationFrame(function() { layoutRaf = 0; applyJpLayout(); });
+  });
+  // end #857
 
   // --- Zoom (Ctrl+/Ctrl-) ---
   document.addEventListener('keydown', function(e) {

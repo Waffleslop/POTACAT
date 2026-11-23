@@ -91,6 +91,11 @@ Departures from WSJT-X (do not "fix"):
   responsibility; without it Hunt stops after 30 min idle (test/jtcat-hunt-off-test.js).
 - The pop-out captures no audio while driving a remote shack; the shack's engines run, the laptop displays.
 - Never copy GridTracker or WSJT-X copy or colours; parity with WSJT-X behaviour is fine and often the goal.
+- The window's layout (#857, lib/jtcat-layout.js): Options > The picture > Layout, Automatic (default),
+  Full or Compact, saved as jtcatLayout (GLOBAL_KEY, display). Automatic goes Compact below 800 px of
+  window height and back to Full from 840 px (hysteresis); an explicit Full or Compact always wins and
+  only that choice is saved. Compact is body.jp-compact: shorter chrome, same text sizes. The layout
+  never moves or resizes the window (test/jtcat-auto-compact-test.js).
 
 ## Tests
 lib/ft8-engine-test.js, lib/psk-engine-test.js, test/jtty-*.js, test/jtcat-*.js,
