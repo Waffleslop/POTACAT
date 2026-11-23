@@ -816,8 +816,6 @@ contextBridge.exposeInMainWorld('api', {
   cloudPromptNever: () => ipcRenderer.invoke('cloud-prompt-never'),
   cloudUploadCardGet: () => ipcRenderer.invoke('cloud-upload-card-get'),
   cloudUploadCardSnooze: () => ipcRenderer.invoke('cloud-upload-card-snooze'),
-  cloudGetSettings: () => ipcRenderer.invoke('cloud-get-settings'),
-  cloudPutSettings: (data) => ipcRenderer.invoke('cloud-put-settings', data),
   onCloudSyncStatus: (cb) => ipcRenderer.on('cloud-sync-status', (_e, data) => cb(data)),
   // Main -> JTCAT popout: push currently-visible spot calls for decode-row
   // highlighting (Tyler K0OTC feature request, 2026-04-22).

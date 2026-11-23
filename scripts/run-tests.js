@@ -63,6 +63,7 @@ const TESTS = [
   'test/cloud-tunnel-enable-remote-test.js', // ECHOCAT ask 2026-11-21: an owner device turns the Cloud Tunnel on with Cloud access; never a Guest Pass
   'test/cloud-tunnel-auto-test.js', // ECHOCAT ask 2026-11-21: the Cloud Tunnel turns on when the account gets access; never after the operator turned it off
   'test/cloud-state-test.js', // ECHOCAT ask 2026-11-21: auth-ok carries the shack's Cloud state and cloud-state follows it; never to a Guest Pass
+  'test/settings-sync-gone-test.js', // #379: the unused settings-sync wiring (cloud-get/put-settings, /v1/settings) stays removed
   'test/scan-run-test.js', // #37: a phone-started scan run on the desktop: the phone's 13 filter vectors, the desktop's exclusions, start/step/end rules, wire and glue
   'test/clock-platform-test.js', // NJ2DX 2026-11-21: each OS gets only the clock buttons it can honour; Time settings opens on a Mac
   'test/main-ismac-scope-test.js', // K3SBP 2026-11-21: isMac is not defined (opening APRS crashed); every isMac in main.js is declared in its own function
