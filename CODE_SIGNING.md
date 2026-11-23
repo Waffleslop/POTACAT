@@ -31,7 +31,8 @@ for SignPath.
 Releases are built from this repository by GitHub Actions with electron-builder
 (`.github/workflows/release.yml`) when a `vX.Y.Z` tag is pushed. The macOS jobs sign with the
 Developer ID certificate and notarize with Apple using repository secrets; the Windows and Linux
-jobs produce unsigned builds. SHA-256 checksums for every file are published with each release.
+jobs produce unsigned builds. The auto-update files published with each release (`latest*.yml`)
+carry a SHA-512 hash of each installer, which the in-app updater checks before installing.
 
 ## Privacy
 
