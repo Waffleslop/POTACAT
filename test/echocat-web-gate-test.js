@@ -108,7 +108,12 @@ function agree(over, expectedMode, cookieAuth) {
 t('LAN, no token required → serve/none (unchanged)', () => agree({ fromTunnel: false, requireToken: false }, 'none'));
 t('LAN, token required → serve/token (unchanged)', () => agree({ fromTunnel: false, requireToken: true }, 'token'));
 t('tunnel exposed but request from LAN → LAN rules', () => agree({ fromTunnel: false, requireToken: false }, 'none'));
-t('public IP but not tunnel-exposed → LAN rules (pre-existing behaviour)', () => agree({ tunnelExposed: false, requireToken: true }, 'token'));
+t('public IP but not tunnel-exposed, token set → serve/token', () => agree({ tunnelExposed: false, requireToken: true }, 'token'));
+t('public IP but not tunnel-exposed, no token → refused on both halves (2026-11-22)', () => {
+  const http = G.decideHttpGate({ tunnelExposed: false, fromTunnel: true, requireToken: false, method: 'GET', pathname: '/' });
+  assert.strictEqual(http.action, 'refuse-public');
+  assert.strictEqual(G.wsAuthModeFor({ tunnelExposed: false, fromTunnel: true, requireToken: false }), 'refuse');
+});
 t('anonymous tunnel GET / → connect page, nothing to clear', () => {
   assert.deepStrictEqual(gate({}), { action: 'connect-page', clearCookies: [] });
   assert.deepStrictEqual(gate({ pathname: '/remote.html', method: 'HEAD' }), { action: 'connect-page', clearCookies: [] });
