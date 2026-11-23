@@ -92,9 +92,14 @@ Departures from WSJT-X (do not "fix"):
 - The pop-out captures no audio while driving a remote shack; the shack's engines run, the laptop displays.
 - Never copy GridTracker or WSJT-X copy or colours; parity with WSJT-X behaviour is fine and often the goal.
 - The window's layout (#857, lib/jtcat-layout.js): Options > The picture > Layout, Automatic (default),
-  Full or Compact, saved as jtcatLayout (GLOBAL_KEY, display). Automatic goes Compact below 800 px of
-  window height and back to Full from 840 px (hysteresis); an explicit Full or Compact always wins and
-  only that choice is saved. Compact is body.jp-compact: shorter chrome, same text sizes. The layout
+  Full or Compact, saved as jtcatLayout (GLOBAL_KEY, display). Automatic decides by the screen, not the
+  window (2026-11-23): Full when the work area of the display the window is on is at least 840 CSS px,
+  Compact below that (one edge, no hysteresis). The 840 is measured: Full needs about 790 px of window
+  for four Band Activity lines, plus the title bar. So 1366x768 is Compact, 1920x1080 at 100% is Full
+  even in the default 700 px window, 1920x1080 at 125% (824 px) is Compact. CSS px = work area / zoom,
+  so Ctrl and minus can bring Full back. main.js sends the work area when the window moves to another
+  display or a display changes ('jtcat-work-area'); a resize alone never switches. An explicit Full or
+  Compact always wins and only that choice is saved. Compact is body.jp-compact: shorter chrome, same text sizes. The layout
   never moves or resizes the window (test/jtcat-auto-compact-test.js).
 
 ## Tests

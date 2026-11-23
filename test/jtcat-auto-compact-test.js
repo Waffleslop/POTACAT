@@ -1,6 +1,6 @@
 'use strict';
-// #857: the JTCAT window picks a compact layout by itself when it is short
-// (a 1366x768 laptop). lib/jtcat-layout.js decides; renderer/jtcat-popout.js
+// #857: the JTCAT window picks a compact layout by itself on a short screen
+// (a 1366x768 laptop): by the screen's work area, not the window height. lib/jtcat-layout.js decides; renderer/jtcat-popout.js
 // applies it as body.jp-compact and never moves or resizes the window.
 // Options > The picture > Layout: Automatic (default), Full, Compact.
 // An explicit Full or Compact always wins over the automatic pick.
@@ -38,63 +38,91 @@ function extract(src, name) {
 }
 
 // ---------------------------------------------------------------------------
-// The thresholds come from the layout (measured, see the lib's header).
+// Automatic decides by the SCREEN's usable height (its work area), not the
+// window's (Casey, 2026-11-23): Full when the work area fits the Full layout,
+// Compact only on a short screen. The threshold is measured (see the lib).
 // ---------------------------------------------------------------------------
-test('thresholds: compact below 800 px, full again from 840 px (40 px of hysteresis)', () => {
-  const { COMPACT_BELOW, FULL_FROM } = lib();
-  assert.strictEqual(COMPACT_BELOW, 800);
+test('threshold: the Full layout needs a work area of 840 px; one edge, no hysteresis band', () => {
+  const { FULL_FROM, COMPACT_BELOW } = lib();
   assert.strictEqual(FULL_FROM, 840);
-  assert.ok(FULL_FROM > COMPACT_BELOW, 'a band between the two edges');
+  assert.strictEqual(COMPACT_BELOW, FULL_FROM, 'compact below the same edge');
 });
 
-test('Automatic: below the threshold goes compact', () => {
+test('Automatic: a tall screen is Full whatever the window height (the default 700 px window too)', () => {
   const { pick } = lib();
-  for (const h of [480, 600, 700, 720, 799]) {
-    assert.strictEqual(pick({ choice: 'auto', height: h, current: 'full' }), 'compact', h + ' px');
-  }
-});
-
-test('Automatic: above the threshold stays (or goes) full', () => {
-  const { pick } = lib();
-  for (const h of [840, 900, 1080, 1400]) {
-    assert.strictEqual(pick({ choice: 'auto', height: h, current: 'full' }), 'full', h + ' px from full');
-    assert.strictEqual(pick({ choice: 'auto', height: h, current: 'compact' }), 'full', h + ' px from compact');
-  }
-  assert.strictEqual(pick({ choice: 'auto', height: 800, current: 'full' }), 'full', '800 is not below 800');
-});
-
-test('hysteresis: inside 800..839 the layout keeps what it shows, so it never flickers at the edge', () => {
-  const { pick } = lib();
-  for (const h of [800, 810, 825, 839]) {
-    assert.strictEqual(pick({ choice: 'auto', height: h, current: 'compact' }), 'compact', h + ' px stays compact');
-    assert.strictEqual(pick({ choice: 'auto', height: h, current: 'full' }), 'full', h + ' px stays full');
-  }
-  // A drag that wobbles across 800 switches once, not on every pixel.
-  let cur = 'full';
-  const seen = [];
-  for (const h of [805, 799, 801, 798, 802, 830, 839, 838, 841, 836, 845]) {
-    const next = pick({ choice: 'auto', height: h, current: cur });
-    if (next !== cur) seen.push(h + ':' + next);
-    cur = next;
-  }
-  assert.deepStrictEqual(seen, ['799:compact', '841:full']);
-});
-
-test('an explicit choice always wins over the automatic pick', () => {
-  const { pick } = lib();
-  for (const h of [480, 600, 799, 820, 900, 1400]) {
-    for (const cur of ['full', 'compact']) {
-      assert.strictEqual(pick({ choice: 'full', height: h, current: cur }), 'full', 'Full at ' + h);
-      assert.strictEqual(pick({ choice: 'compact', height: h, current: cur }), 'compact', 'Compact at ' + h);
+  for (const screenHeight of [840, 900, 1032, 1400, 2112]) {
+    for (const height of [480, 560, 700, 799, 1000]) {
+      for (const current of ['full', 'compact']) {
+        assert.strictEqual(pick({ choice: 'auto', screenHeight, height, current }), 'full', screenHeight + ' screen, ' + height + ' window, from ' + current);
+      }
     }
   }
 });
 
-test('no height yet (a window still opening): keep what is shown, full by default', () => {
+test('Automatic: a short screen (1366x768, 728..768 px work area) is Compact', () => {
   const { pick } = lib();
-  assert.strictEqual(pick({ choice: 'auto', height: 0 }), 'full');
-  assert.strictEqual(pick({ choice: 'auto', height: NaN, current: 'compact' }), 'compact');
+  for (const screenHeight of [600, 728, 768, 824, 839]) {
+    for (const current of ['full', 'compact']) {
+      assert.strictEqual(pick({ choice: 'auto', screenHeight, height: 700, current }), 'compact', screenHeight + ' from ' + current);
+    }
+  }
+});
+
+test('zoom: the rule is in CSS px, the work area divided by the zoom factor', () => {
+  const { pick, cssScreenHeight } = lib();
+  assert.strictEqual(cssScreenHeight(1032, 1), 1032);
+  assert.strictEqual(Math.round(cssScreenHeight(824, 0.9)), 916);
+  assert.strictEqual(Math.round(cssScreenHeight(1032, 1.3)), 794);
+  assert.strictEqual(cssScreenHeight(1032, 0), 1032, 'no zoom known: as 1');
+  assert.strictEqual(cssScreenHeight(1032, NaN), 1032);
+  // 1920x1080 at 125% (824 px work area) is Compact; one Ctrl and minus (0.9) brings Full.
+  assert.strictEqual(pick({ choice: 'auto', screenHeight: 824, zoom: 1 }), 'compact');
+  assert.strictEqual(pick({ choice: 'auto', screenHeight: 824, zoom: 0.9 }), 'full');
+  // Zooming in far enough on a 1080 screen makes it short in CSS px.
+  assert.strictEqual(pick({ choice: 'auto', screenHeight: 1032, zoom: 1.3 }), 'compact');
+  assert.strictEqual(pick({ choice: 'auto', screenHeight: 1032, zoom: 1.2 }), 'full');
+});
+
+test('moving to another display re-evaluates: tall to short goes Compact, short to tall goes Full', () => {
+  const { pick } = lib();
+  let cur = 'full';
+  const seen = [];
+  for (const screenHeight of [1032, 728, 728, 1400, 1032, 768]) {
+    const next = pick({ choice: 'auto', screenHeight, current: cur });
+    if (next !== cur) seen.push(screenHeight + ':' + next);
+    cur = next;
+  }
+  assert.deepStrictEqual(seen, ['728:compact', '1400:full', '768:compact']);
+});
+
+test('window resize alone never switches: same screen, any window height, same layout', () => {
+  const { pick } = lib();
+  for (const screenHeight of [728, 1032]) {
+    const want = screenHeight >= 840 ? 'full' : 'compact';
+    let cur = want;
+    for (const height of [700, 805, 799, 801, 798, 841, 480, 1000]) {
+      cur = pick({ choice: 'auto', screenHeight, height, current: cur });
+      assert.strictEqual(cur, want, screenHeight + ' screen, ' + height + ' window');
+    }
+  }
+});
+
+test('an explicit choice always wins over the automatic pick', () => {
+  const { pick } = lib();
+  for (const screenHeight of [600, 728, 839, 840, 1032, 1400]) {
+    for (const cur of ['full', 'compact']) {
+      assert.strictEqual(pick({ choice: 'full', screenHeight, current: cur }), 'full', 'Full at ' + screenHeight);
+      assert.strictEqual(pick({ choice: 'compact', screenHeight, current: cur }), 'compact', 'Compact at ' + screenHeight);
+    }
+  }
+});
+
+test('no screen height known: keep what is shown, full by default', () => {
+  const { pick } = lib();
+  assert.strictEqual(pick({ choice: 'auto', screenHeight: 0 }), 'full');
+  assert.strictEqual(pick({ choice: 'auto', screenHeight: NaN, current: 'compact' }), 'compact');
   assert.strictEqual(pick({ choice: 'auto' }), 'full');
+  assert.strictEqual(pick({ choice: 'auto', height: 500 }), 'full', 'the window height alone decides nothing');
 });
 
 // ---------------------------------------------------------------------------
@@ -116,8 +144,8 @@ test('migration: an operator who explicitly chose a layout keeps it', () => {
   assert.strictEqual(normalizeChoice('compact'), 'compact');
   assert.strictEqual(normalizeChoice('auto'), 'auto');
   // A saved Full on a short laptop stays full; a saved Compact on a tall screen stays compact.
-  assert.strictEqual(pick({ choice: normalizeChoice('full'), height: 700, current: 'full' }), 'full');
-  assert.strictEqual(pick({ choice: normalizeChoice('compact'), height: 1200, current: 'full' }), 'compact');
+  assert.strictEqual(pick({ choice: normalizeChoice('full'), screenHeight: 728, current: 'full' }), 'full');
+  assert.strictEqual(pick({ choice: normalizeChoice('compact'), screenHeight: 1400, current: 'full' }), 'compact');
 });
 
 test('migration: only the operator\'s own choice is saved, never the automatic pick', () => {
@@ -163,12 +191,38 @@ test('wiring: the compact layout is CSS on body.jp-compact and shrinks the chrom
   assert.ok(sizes.every((n) => n >= 13), 'no text under 13 px in compact: ' + sizes.join(','));
 });
 
-test('wiring: the window applies the pick on load and on resize, and sizes the waterfall after a switch', () => {
+test('wiring: the window picks from the screen work area and its zoom, and sizes the waterfall after a switch', () => {
   const apply = extract(js, 'applyJpLayout');
-  assert.ok(/JtcatLayout\.pick\(\{ choice: layoutChoice, height: window\.innerHeight, current: layoutNow \}\)/.test(apply), 'pick from the window height');
+  assert.ok(/JtcatLayout\.pick\(\{ choice: layoutChoice, screenHeight: layoutScreenHeight\(\), zoom: layoutZoom\(\), current: layoutNow \}\)/.test(apply), 'pick from the screen, in CSS px');
+  assert.ok(!/innerHeight/.test(apply), 'never the window height');
+  assert.ok(/screen\.availHeight/.test(extract(js, 'layoutScreenHeight')), 'the work area as the page sees it');
+  assert.ok(/window\.api\.getZoom\(\)/.test(extract(js, 'layoutZoom')), 'the zoom factor');
   assert.ok(/document\.body\.classList\.toggle\('jp-compact', next === 'compact'\)/.test(apply), 'body class');
   assert.ok(/resizeWaterfall\(\)/.test(apply), 'the canvas follows its new height');
-  assert.ok(/window\.addEventListener\('resize', function\(\) \{[^}]*applyJpLayout/.test(js.replace(/\n\s*/g, ' ')), 'resize listener');
+});
+
+test('wiring: moving to another display or a work-area change re-evaluates', () => {
+  // main.js tells the window the work area of the display it is on, when it
+  // moves and when any display's metrics change.
+  assert.ok(main.indexOf('function sendJtcatWorkArea(') !== -1, 'sendJtcatWorkArea in main.js');
+  const fn = extract(main, 'sendJtcatWorkArea');
+  assert.ok(/screen\.getDisplayMatching\(jtcatPopoutWin\.getBounds\(\)\)/.test(fn), 'the display the window is on');
+  assert.ok(/workArea\.height/.test(fn) && /'jtcat-work-area'/.test(fn), 'sends its work-area height');
+  assert.ok(/jtcatPopoutWin\.on\('moved', sendJtcatWorkArea\)/.test(main), 'on move');
+  assert.ok(/screen\.on\('display-metrics-changed', sendJtcatWorkArea\)/.test(main), 'on a work-area change');
+  const pre = readSrc(path.join(ROOT, 'preload-jtcat-popout.js'));
+  assert.ok(/onJtcatWorkArea: \(cb\) => ipcRenderer\.on\('jtcat-work-area'/.test(pre), 'preload');
+  const flat = js.replace(/\n\s*/g, ' ');
+  assert.ok(/window\.api\.onJtcatWorkArea\(function\(h\) \{[^}]*applyJpLayout\(\)/.test(flat), 'the window re-picks');
+  // A zoom change does not fire resize (measured in Electron 39), so the zoom
+  // keys re-pick themselves. The window height is not an input.
+  const zoom = js.slice(js.indexOf('// --- Zoom (Ctrl+/Ctrl-) ---'), js.indexOf('// --- VFO Lock'));
+  assert.ok(zoom.length > 100, 'the zoom block');
+  assert.strictEqual((zoom.match(/window\.api\.setZoom\(/g) || []).length, 3, 'three zoom keys');
+  assert.ok(/scheduleJpLayout\(\)/.test(zoom), 'the zoom keys re-pick the layout');
+  const sched = extract(js, 'scheduleJpLayout');
+  assert.ok(/applyJpLayout\(\)/.test(sched) && !/requestAnimationFrame/.test(sched), 'picks at once: a withheld frame must not swallow a pick');
+  assert.ok(/window\.addEventListener\('resize', scheduleJpLayout\)/.test(js), 'resize re-checks (a DPI change), harmless otherwise');
 });
 
 test('wiring: changing the layout never moves or resizes the window', () => {
@@ -183,6 +237,7 @@ test('wiring: the automatic switch says so once, and only for Automatic', () => 
   const tell = extract(js, 'tellCompactOnce');
   assert.ok(/localStorage\.getItem\('jtcat-compact-told'\)/.test(tell) && /localStorage\.setItem\('jtcat-compact-told', '1'\)/.test(tell), 'remembered once');
   assert.ok(/Options > Layout/.test(tell), 'names where to change it');
+  assert.ok(/this screen is short/.test(tell) && !/this window is short/.test(tell), 'the screen is short, not the window');
 });
 
 test('wiring: jtcatLayout is a machine-wide display setting, documented', () => {
