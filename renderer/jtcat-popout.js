@@ -7177,8 +7177,10 @@ function _applyPopoutTheme(payload) {
   });
 
   // #857 Layout: Full or Compact. lib/jtcat-layout.js picks Compact by
-  // itself when the window is short (a 1366x768 laptop), with hysteresis, and
-  // an explicit Full or Compact in Options always wins. Only the operator's
+  // itself on a short screen (a 1366x768 laptop): by the work area of the
+  // display the window is on, in CSS px (over the zoom), never by the window's
+  // own height, so a resize alone never switches it. An explicit Full or
+  // Compact in Options always wins. Only the operator's
   // choice is saved (the select); the automatic pick never is, so it never
   // becomes a choice. This only toggles body.jp-compact: the window is never
   // moved or resized, and the zoom keys below stay the operator's own.
@@ -7186,9 +7188,19 @@ function _applyPopoutTheme(payload) {
   var layoutChoice = 'auto'; // the operator's choice: auto | full | compact
   var layoutNow = 'full';    // what the window shows
   var layoutReady = false;   // settings loaded (no pick before the saved choice is known)
+  var layoutWorkArea = 0;    // the work-area height main.js last sent (0: none yet)
+  // The work area of the display the window is on (device-independent px).
+  // main.js sends it when the window moves or a display changes; until then
+  // the page's own screen.availHeight, which is the same number.
+  function layoutScreenHeight() {
+    return layoutWorkArea > 0 ? layoutWorkArea : (window.screen && window.screen.availHeight) || 0;
+  }
+  function layoutZoom() {
+    try { return window.api.getZoom(); } catch (e) { return 1; }
+  }
   function applyJpLayout() {
     if (layoutSelect) layoutSelect.value = layoutChoice;
-    var next = JtcatLayout.pick({ choice: layoutChoice, height: window.innerHeight, current: layoutNow });
+    var next = JtcatLayout.pick({ choice: layoutChoice, screenHeight: layoutScreenHeight(), zoom: layoutZoom(), current: layoutNow });
     if (next === layoutNow) return;
     layoutNow = next;
     document.body.classList.toggle('jp-compact', next === 'compact');
@@ -7209,7 +7221,7 @@ function _applyPopoutTheme(payload) {
       localStorage.setItem('jtcat-compact-told', '1');
     } catch (e) { return; }
     if (qsoToastTimer) clearTimeout(qsoToastTimer);
-    qsoToast.innerHTML = esc('Compact layout: this window is short, so Band Activity gets more lines.') +
+    qsoToast.innerHTML = esc('Compact layout: this screen is short, so Band Activity gets more lines.') +
       '<div class="jp-toast-sub">' + esc('Options > Layout changes it. Ctrl and minus zooms out.') + '</div>';
     qsoToast.classList.add('visible');
     qsoToast.classList.add('info');
@@ -7221,11 +7233,22 @@ function _applyPopoutTheme(payload) {
     }, 8000);
   }
   if (layoutSelect) layoutSelect.addEventListener('change', function() { setJpLayoutChoice(layoutSelect.value, true); });
-  var layoutRaf = 0;
-  window.addEventListener('resize', function() {
-    if (!layoutReady || layoutRaf) return;
-    layoutRaf = requestAnimationFrame(function() { layoutRaf = 0; applyJpLayout(); });
+  // Moved to another display, or a display's work area changed.
+  window.api.onJtcatWorkArea(function(h) {
+    var n = Number(h);
+    if (!(n > 0) || n === layoutWorkArea) return;
+    layoutWorkArea = n;
+    if (layoutReady) applyJpLayout();
   });
+  // Re-pick after a zoom key (a zoom change fires no resize, measured in
+  // Electron 39) and on resize, which only matters when the window lands on a
+  // display with another scale. A plain resize changes neither the screen nor
+  // the zoom, so it never switches the layout. applyJpLayout is cheap and
+  // returns at once when nothing changes, so no frame throttling is needed.
+  function scheduleJpLayout() {
+    if (layoutReady) applyJpLayout();
+  }
+  window.addEventListener('resize', scheduleJpLayout);
   // end #857
 
   // --- Zoom (Ctrl+/Ctrl-) ---
@@ -7241,7 +7264,8 @@ function _applyPopoutTheme(payload) {
     } else if (e.ctrlKey && e.key === '0') {
       e.preventDefault();
       window.api.setZoom(1.0);
-    }
+    } else return;
+    scheduleJpLayout(); // #857: the work area in CSS px changed with the zoom
   });
 
   // --- VFO Lock: tune-blocked toast ---

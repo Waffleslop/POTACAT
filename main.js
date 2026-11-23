@@ -1726,6 +1726,16 @@ let vfoPopoutWin = null;     // pop-out VFO window
 let _lastVfoTunedSpot = null; // the last activator card sent to the VFO window
 let conditionsPopoutWin = null; // pop-out Conditions (solar / propagation)
 let jtcatPopoutWin = null;   // pop-out JTCAT window
+let jtcatWorkAreaWatched = false; // #857: the screen listeners below are attached once
+// #857: the work-area height of the display the JTCAT window is on, for its
+// Automatic layout (lib/jtcat-layout.js). Sent on a move or a display change.
+function sendJtcatWorkArea() {
+  if (!jtcatPopoutWin || jtcatPopoutWin.isDestroyed()) return;
+  try {
+    const d = screen.getDisplayMatching(jtcatPopoutWin.getBounds());
+    if (d && d.workArea && d.workArea.height > 0) jtcatPopoutWin.webContents.send('jtcat-work-area', d.workArea.height);
+  } catch { /* a display going away mid-call */ }
+}
 let sstvPopoutWin = null;    // pop-out SSTV window
 let sstvPackStore = null;    // SSTV style packs (lib/sstv-packs.js)
 // Who opened the SSTV window: 'app' (ECHOCAT sstv-open) or 'desktop'. An
@@ -48761,6 +48771,14 @@ function cloudShackNotice(text, kind) {
     jtcatPopoutWin.show();
     jtcatPopoutWin.setMenuBarVisibility(false);
     jtcatPopoutWin.loadFile(path.join(__dirname, 'renderer', 'jtcat-popout.html'), { query: themeQuery() });
+    // #857: the layout's Automatic pick follows the work area of the display
+    // the window is on; tell it when the window moves or a display changes.
+    jtcatPopoutWin.on('moved', sendJtcatWorkArea);
+    if (!jtcatWorkAreaWatched) {
+      jtcatWorkAreaWatched = true;
+      screen.on('display-metrics-changed', sendJtcatWorkArea);
+      screen.on('display-removed', sendJtcatWorkArea);
+    }
     jtcatPopoutWin.on('close', () => {
       if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
         if (!jtcatPopoutWin.isMaximized() && !jtcatPopoutWin.isMinimized()) {
