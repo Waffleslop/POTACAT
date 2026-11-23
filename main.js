@@ -550,6 +550,7 @@ const { adifAppMode, adifModeSubmode } = require('./lib/adif-mode');
 const { PassQsoOutbox } = require('./lib/pass-qso-outbox');
 const { ClublogOutbox } = require('./lib/clublog-outbox');
 const QsoLog = require('./lib/qso-log');
+const LogbookEdit = require('./lib/logbook-edit'); // Logbook edit/delete act only on the record the operator chose (#988)
 const StationCounty = require('./lib/station-county');
 const JtcatSnrFloor = require('./lib/jtcat-snr-floor');
 const JtcatCallingTime = require('./lib/jtcat-calling-time');
@@ -32332,55 +32333,47 @@ function connectRemote() {
     }
   });
 
-  remoteServer.on('update-qso', ({ idx, fields: edit }) => {
+  remoteServer.on('update-qso', ({ idx, fields: edit, identity }) => {
     try {
-      let found = false;
-      let applied = null;
-      mutateQsoLog((qsos) => {
-        if (!qsos[idx]) return false;
-        found = true;
-        // My Park also sets MY_SIG and its mirror (lib/qso-edit.js, #509).
-        applied = applyQsoEdit(qsos[idx], edit);
-        if (applied.error) return false;
-      });
-      if (!found) {
-        remoteServer.sendQsoUpdated({ success: false, idx, error: 'Invalid index' });
+      // Only the record the device chose, by identity when it sent one
+      // (lib/logbook-edit.js, #988). My Park also sets MY_SIG and its
+      // mirror (lib/qso-edit.js, #509).
+      const r = LogbookEdit.updateOne(mutateQsoLog, idx, identity, edit, applyQsoEdit);
+      if (!r.success) {
+        // idx echoes the request (the phone matches its ack by it).
+        remoteServer.sendQsoUpdated({ success: false, idx, error: r.error, ...(r.reason ? { reason: r.reason } : {}) });
         return;
       }
-      if (applied.error) {
-        remoteServer.sendQsoUpdated({ success: false, idx, error: applied.error });
-        return;
-      }
-      const fields = applied.fields;
+      const fields = r.fields;
       loadWorkedQsos();
-      // Notify desktop QSO pop-out
+      // Notify desktop QSO pop-out (by position in the file)
       if (qsoPopoutWin && !qsoPopoutWin.isDestroyed()) {
-        qsoPopoutWin.webContents.send('qso-popout-updated', { idx, fields });
+        qsoPopoutWin.webContents.send('qso-popout-updated', { idx: r.index, fields });
       }
-      remoteServer.sendQsoUpdated({ success: true, idx, fields });
+      // idx echoes the request; logIdx is where the record really is.
+      remoteServer.sendQsoUpdated({ success: true, idx, logIdx: r.index, fields });
     } catch (err) {
       remoteServer.sendQsoUpdated({ success: false, idx, error: err.message });
     }
   });
 
-  remoteServer.on('delete-qso', ({ idx }) => {
+  remoteServer.on('delete-qso', ({ idx, identity }) => {
     try {
-      let found = false;
-      mutateQsoLog((qsos) => {
-        if (!qsos[idx]) return false;
-        found = true;
-        qsos.splice(idx, 1);
-      });
-      if (!found) {
-        remoteServer.sendQsoDeleted({ success: false, idx, error: 'Invalid index' });
+      // Only the record the device chose, and success only when it left the
+      // file (#988: a record with no uuid used to report success and stay).
+      const r = LogbookEdit.deleteOne(mutateQsoLog, idx, identity);
+      if (!r.success) {
+        remoteServer.sendQsoDeleted({ success: false, idx, error: r.error, ...(r.reason ? { reason: r.reason } : {}) });
         return;
       }
       loadWorkedQsos();
       // Notify desktop QSO pop-out
       if (qsoPopoutWin && !qsoPopoutWin.isDestroyed()) {
-        qsoPopoutWin.webContents.send('qso-popout-deleted', idx);
+        qsoPopoutWin.webContents.send('qso-popout-deleted', r.index);
       }
-      remoteServer.sendQsoDeleted({ success: true, idx });
+      // idx echoes the request (the phone matches its ack by it); logIdx is
+      // the position the record was removed from (later records shift down).
+      remoteServer.sendQsoDeleted({ success: true, idx, logIdx: r.index });
     } catch (err) {
       remoteServer.sendQsoDeleted({ success: false, idx, error: err.message });
     }
@@ -58655,13 +58648,13 @@ function cloudShackNotice(text, kind) {
     if (!refs.length) return { success: false, error: 'No park ref given' };
     try {
       if (!fs.existsSync(logPath)) return { success: false, error: 'Log file not found' };
-      const { changes } = mutateQsoLog((qsos) => qsos.filter(q => {
+      // removed counts what left the file; a record with no uuid is removed but not journaled (#988).
+      const { removed } = mutateQsoLog((qsos) => qsos.filter(q => {
         if ((q.QSO_DATE || '') !== date) return true;
         const mySig = (q.MY_SIG || '').toUpperCase();
         const myRef = (q.MY_SIG_INFO || '').toUpperCase();
         return !refs.some(r => r.sig === mySig && r.ref === myRef); // keep unless a ref matches
       }));
-      const removed = changes.length;
       if (removed === 0) return { success: true, removed: 0 };
       loadWorkedQsos();
       return { success: true, removed };
@@ -58724,28 +58717,21 @@ function cloudShackNotice(text, kind) {
     }
   });
 
-  ipcMain.handle('update-qso', async (event, { idx, fields: edit }) => {
+  ipcMain.handle('update-qso', async (event, { idx, fields: edit, identity }) => {
     try {
-      let found = false;
-      let applied = null;
-      mutateQsoLog((qsos) => {
-        if (!qsos[idx]) return false;
-        found = true;
-        // My Park also sets MY_SIG and its mirror, so Past Activations finds
-        // the QSO (lib/qso-edit.js, #509).
-        applied = applyQsoEdit(qsos[idx], edit);
-        if (applied.error) return false;
-      });
-      if (!found) return { success: false, error: 'Invalid index' };
-      if (applied.error) return { success: false, error: applied.error };
-      const fields = applied.fields;
+      // Only the record the operator chose: a stale idx never edits another
+      // QSO (lib/logbook-edit.js, #988). My Park also sets MY_SIG and its
+      // mirror, so Past Activations finds the QSO (lib/qso-edit.js, #509).
+      const r = LogbookEdit.updateOne(mutateQsoLog, idx, identity, edit, applyQsoEdit);
+      if (!r.success) return r;
+      const fields = r.fields;
       loadWorkedQsos();
       // Notify other windows about the change
       const sender = event.sender;
       if (qsoPopoutWin && !qsoPopoutWin.isDestroyed() && qsoPopoutWin.webContents !== sender) {
-        qsoPopoutWin.webContents.send('qso-popout-updated', { idx, fields });
+        qsoPopoutWin.webContents.send('qso-popout-updated', { idx: r.index, fields });
       }
-      return { success: true, fields };
+      return { success: true, fields, idx: r.index };
     } catch (err) {
       return { success: false, error: err.message };
     }
@@ -58808,20 +58794,19 @@ function cloudShackNotice(text, kind) {
     }
   });
 
-  ipcMain.handle('delete-qso', async (event, idx) => {
+  ipcMain.handle('delete-qso', async (event, idx, identity) => {
     try {
-      const { changes } = mutateQsoLog((qsos) => {
-        if (idx < 0 || idx >= qsos.length) return false;
-        qsos.splice(idx, 1);
-      });
-      if (!changes.length) return { success: false, error: 'Invalid index' };
+      // Only the record the operator chose: a stale idx never deletes
+      // another QSO, and a record with no uuid really goes (lib/logbook-edit.js, #988).
+      const r = LogbookEdit.deleteOne(mutateQsoLog, idx, identity);
+      if (!r.success) return r;
       loadWorkedQsos();
       // Notify QSO pop-out about the deletion
       const sender = event.sender;
       if (qsoPopoutWin && !qsoPopoutWin.isDestroyed() && qsoPopoutWin.webContents !== sender) {
-        qsoPopoutWin.webContents.send('qso-popout-deleted', idx);
+        qsoPopoutWin.webContents.send('qso-popout-deleted', r.index);
       }
-      return { success: true };
+      return { success: true, idx: r.index };
     } catch (err) {
       return { success: false, error: err.message };
     }
@@ -58849,7 +58834,7 @@ function cloudShackNotice(text, kind) {
       const targets = Array.isArray(remove) ? remove : [];
       if (!targets.length) return { success: true, removed: 0 };
       let stale = false;
-      const { changes } = mutateQsoLog((qsos) => {
+      const { removed } = mutateQsoLog((qsos) => {
         const drop = new Set();
         for (const { idx, fp } of targets) {
           if (!qsos[idx] || QsoLog.fingerprint(qsos[idx]) !== fp) { stale = true; return false; }
@@ -58863,7 +58848,7 @@ function cloudShackNotice(text, kind) {
       if (qsoPopoutWin && !qsoPopoutWin.isDestroyed() && qsoPopoutWin.webContents !== sender) {
         qsoPopoutWin.webContents.send('qso-popout-refresh');
       }
-      return { success: true, removed: changes.length };
+      return { success: true, removed };
     } catch (err) {
       return { success: false, error: err.message };
     }
@@ -58927,8 +58912,7 @@ function cloudShackNotice(text, kind) {
   ipcMain.handle('delete-qsos-by-match', async (_event, match) => {
     try {
       const matches = qsoMatcher(match);
-      const { changes } = mutateQsoLog((qsos) => qsos.filter((q) => !matches(q)));
-      const removed = changes.length;
+      const { removed } = mutateQsoLog((qsos) => qsos.filter((q) => !matches(q)));
       if (removed > 0) {
         loadWorkedQsos();
         refreshQsoPopoutFromDisk();

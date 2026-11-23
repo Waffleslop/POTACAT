@@ -807,6 +807,8 @@ const TESTS = [
   'test/phone-tx-power-test.js', // ECHOCAT #85: log-qso keeps the phone's txPower (else the usual fill), log-ok records carry it, hello lists log-tx-power
   'test/phone-activation-gear-test.js', // #975: log-qso keeps the phone's rig and antenna (64 chars), desktop rig otherwise; MY_ANTENNA written and read back
   'test/log-qso-idempotent-test.js', // #733: log-qso idempotent by uuid; the log's uuid index; no duplicate uuid reaches the Cloud
+  'test/qso-identity-test.js', // #988: which QSO a Logbook edit/delete means: uuid, else CALL+QSO_DATE+TIME_ON+BAND+MODE; refuse when no single match
+  'test/logbook-delete-988-test.js', // #988: Logbook deletes/edits hit the clicked QSO after a delete; a uuid-less delete is written; ECHOCAT reports the real result
   'test/hunt-polish-test.js', // Hunt says who it is working; web Filters with Hunt off and for a guest; the list saved on every change; the review window closes on decline
   'test/tx-review-low-test.js', // drop detector paused in TX; Winlink re-key restarts the TX limit; full power on rigctld raw PC; multi-slice TX kind
   'test/lan-review-test.js', // VFO speaker plays LAN audio; a reopened port clears POTACAT's old close; FT-710 named; LAN scope text; LAN transport window and strangers

@@ -82,11 +82,15 @@ test('Past files a ref-shaped MY_SIG_INFO without MY_SIG under its program, noth
 test('main.js: both update-qso paths and Past Activations use lib/qso-edit', () => {
   const src = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
   const ipc = src.slice(src.indexOf("ipcMain.handle('update-qso'"), src.indexOf("ipcMain.handle('expand-qso-multipark'"));
-  assert.match(ipc, /applyQsoEdit\(qsos\[idx\], edit\)/);
+  // #988: both go through lib/logbook-edit.js, which applies the edit with
+  // applyQsoEdit to the record the identity names.
+  assert.match(ipc, /LogbookEdit\.updateOne\(mutateQsoLog, idx, identity, edit, applyQsoEdit\)/);
   assert.doesNotMatch(ipc, /Object\.assign\(qsos\[idx\]/);
   const remote = src.slice(src.indexOf("remoteServer.on('update-qso'"), src.indexOf("remoteServer.on('delete-qso'"));
-  assert.match(remote, /applyQsoEdit\(qsos\[idx\], edit\)/);
+  assert.match(remote, /LogbookEdit\.updateOne\(mutateQsoLog, idx, identity, edit, applyQsoEdit\)/);
   assert.doesNotMatch(remote, /Object\.assign\(qsos\[idx\]/);
+  const lib = fs.readFileSync(path.join(__dirname, '..', 'lib', 'logbook-edit.js'), 'utf8');
+  assert.match(lib, /applied = applyEdit\(qsos\[at\.index\], edit\)/);
   const past = src.slice(src.indexOf('function getPastActivations()'), src.indexOf("ipcMain.handle('get-past-activations'"));
   assert.match(past, /activationSigOf\(q\)/);
 });
