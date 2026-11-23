@@ -251,6 +251,7 @@
   let rxDestConnected = false; // is rxAnalyser → audioCtx.destination wired?
   let txAnalyser = null; // AnalyserNode for TX metering
   let meterAnimFrame = null; // requestAnimationFrame ID for meter rendering
+  let meterPausedByCw = false; // the meter loop stopped for a paddle over (#244)
   let volBoostLevel = 0; // 0=1x, 1=2x, 2=3x
   const VOL_STEPS = [1, 2, 3];
   let sessionKeepAlive = null; // silent <audio> loop for Media Session anchor
@@ -457,8 +458,6 @@
   const dpStepUp = document.getElementById('dp-step-up');
   const dpStepDown = document.getElementById('dp-step-down');
   const dpStepSize = document.getElementById('dp-step-size');
-  const freqUpBtn = document.getElementById('freq-up-btn');
-  const freqDownBtn = document.getElementById('freq-down-btn');
   let spotSort = 'age';
   let spotMap = null;
   let spotMapLayer = null;
@@ -1231,6 +1230,9 @@
       V.smoothInto(scopeSmooth, rawBins, V.AVERAGING[scopeAvg] || V.AVERAGING.light);
       V.peakInto(scopePeak, rawBins, V.PEAK_DECAY[scopePeakDecay] != null ? V.PEAK_DECAY[scopePeakDecay] : V.PEAK_DECAY.slow);
     }
+    // A paddle over is running (#244): the data above is kept, this frame is
+    // not drawn (skipped, never queued); the over's end redraws the latest.
+    if (cwDrawPaused()) return;
     const bins = V ? V.applyRange(rawBins, scopeRange.lo, scopeRange.hi) : rawBins;
     let any = false;
     for (const sf of scopeSurfaces) {
@@ -1258,6 +1260,7 @@
         overlay: { passband: st.passband, txHz: st.txHz, bandPlan: st.bandPlan, privileges: scopePrivileges, labels: sf.full, flag: sf.full } });
   }
   function scopeDrawAll() {
+    if (cwDrawPaused()) return; // a paddle over is running (#244); its end redraws
     const A = window.ScopeAxis;
     if (!A || !window.ScopeView) return;
     const axis = scopeAxisNow();
@@ -4507,21 +4510,6 @@
     dpTune(newFreq);
   });
 
-  // Status bar up/down buttons — quick step without opening dial pad
-  if (freqUpBtn) freqUpBtn.addEventListener('click', (e) => {
-    e.stopPropagation();
-    const step = STEP_SIZES[dpStepIdx];
-    const newFreq = Math.round((currentFreqKhz + step) * 100) / 100;
-    dpTune(newFreq);
-  });
-
-  if (freqDownBtn) freqDownBtn.addEventListener('click', (e) => {
-    e.stopPropagation();
-    const step = STEP_SIZES[dpStepIdx];
-    const newFreq = Math.round((currentFreqKhz - step) * 100) / 100;
-    if (newFreq >= 100) dpTune(newFreq);
-  });
-
   // --- VFO Dial ---
   var vfoView = document.getElementById('dp-vfo-view');
   var keypadView = document.getElementById('dp-keypad-view');
@@ -6359,6 +6347,9 @@
   function startMeterRendering() {
     if (meterAnimFrame) return;
     function renderMeters() {
+      // A paddle over is running (#244): no frame is drawn or requested
+      // until it ends (cwDrawResume starts the loop again).
+      if (cwDrawPaused()) { meterAnimFrame = null; meterPausedByCw = true; return; }
       drawMeter(rxMeterCanvas, rxAnalyser);
       drawMeter(txMeterCanvas, txAnalyser);
       meterAnimFrame = requestAnimationFrame(renderMeters);
@@ -6367,6 +6358,7 @@
   }
 
   function stopMeterRendering() {
+    meterPausedByCw = false;
     if (meterAnimFrame) { cancelAnimationFrame(meterAnimFrame); meterAnimFrame = null; }
     // Clear meters
     if (rxMeterCanvas) rxMeterCanvas.getContext('2d').clearRect(0, 0, rxMeterCanvas.width, rxMeterCanvas.height);
@@ -9257,6 +9249,7 @@
   function ft8RenderWaterfall(bins) {
     if (!bins || !bins.length) return;
     if (!ft8WfVisible) return;
+    if (cwDrawPaused()) return; // a paddle over is running (#244): row skipped
     const canvas = ft8Waterfall;
     const ctx = canvas.getContext('2d');
     const w = canvas.width;
@@ -11983,11 +11976,64 @@ var _paddleHoldTimer = { dit: null, dah: null };
     // Stream mode: this page's keyer IS the radio's keyer, so stopping keying
     // means stopping it (its stop sends the cancelling key-up).
     if (cwKeyStreamOk) { try { localCwKeyer.stop(); } catch (e) {} }
+    cwDrawPause.end(); // the over is over: drawing resumes now
   }
 
   // Reachable from the message handler and the STOP button whatever scope
   // they sit in (a silent `typeof` miss would bring the stuck key back).
   window.__echocatReleasePaddles = releaseAllPaddles;
+
+  // --- Drawing pauses during a paddle over (#244 Part A) ---
+  // Scope, waterfall and meter drawing is the main-thread work that made
+  // paddle edges reach the keyer late. While an over runs, those frames are
+  // skipped (never queued); data keeps arriving and is kept. The over starts
+  // at the first paddle edge and ends quietMs after the last one with both
+  // contacts open (a stuck contact cannot hold it past maxHeldMs), or at
+  // once on a stop; then the latest picture is drawn. The hot path is one
+  // clock read: a single timer re-arms itself, never one per edge.
+  function createCwDrawPause(o) {
+    var quietMs = o.quietMs || 1200, maxHeldMs = o.maxHeldMs || 10000;
+    var paused = false, last = 0, h = null;
+    function arm(ms) { h = o.setTimer(onQuiet, Math.max(0, ms)); }
+    function onQuiet() {
+      h = null;
+      var idle = o.now() - last;
+      if (idle < quietMs) { arm(quietMs - idle); return; }
+      if (o.held() && idle < maxHeldMs) { arm(Math.min(quietMs, maxHeldMs - idle)); return; }
+      end();
+    }
+    function end() {
+      if (h != null) { o.clearTimer(h); h = null; }
+      if (!paused) return;
+      paused = false;
+      if (o.onResume) o.onResume();
+    }
+    return {
+      /** A paddle edge: the over runs (or goes on). */
+      activity: function () {
+        last = o.now();
+        paused = true;
+        if (h == null) arm(quietMs);
+      },
+      /** A stop: drawing resumes now. */
+      end: end,
+      get paused() { return paused; },
+    };
+  }
+  var cwDrawPause = createCwDrawPause({
+    now: function () { return performance.now(); },
+    held: function () { return ditDown || dahDown; },
+    setTimer: function (fn, ms) { return setTimeout(fn, ms); },
+    clearTimer: function (t) { clearTimeout(t); },
+    onResume: cwDrawResume,
+  });
+  // Read by every drawing path (scope, FT8 and SSTV waterfalls, meters).
+  function cwDrawPaused() { return !!(cwDrawPause && cwDrawPause.paused); }
+  // The over ended: draw the latest scope picture, restart the meter loop.
+  function cwDrawResume() {
+    try { scopeDrawAll(); } catch (e) {}
+    if (meterPausedByCw) { meterPausedByCw = false; startMeterRendering(); }
+  }
 
   function sendPaddle(contact, state) {
     // Drive the local iambic keyer first (zero-latency sidetone) then forward
@@ -11997,9 +12043,11 @@ var _paddleHoldTimer = { dit: null, dah: null };
     // produce RF was misleading users into thinking POTACAT was broken.
     // Presses only: a release always goes out (see releaseAllPaddles).
     if (!cwPaddleAvailable && state) return;
-    ensureCwAudioCtx();
+    // The keyer gets the edge first (#244); the bookkeeping below waits for it.
     if (contact === 'dit') localCwKeyer.paddleDit(!!state);
     else if (contact === 'dah') localCwKeyer.paddleDah(!!state);
+    ensureCwAudioCtx();
+    cwDrawPause.activity();
     if (ws && ws.readyState === WebSocket.OPEN && !cwKeyStreamOk) {
       if (state && !_paddleRttSentAt) _paddleRttSentAt = performance.now();
       ws.send(JSON.stringify({ type: 'paddle', contact: contact, state: state }));
@@ -12053,44 +12101,36 @@ var _paddleHoldTimer = { dit: null, dah: null };
     console.warn('[CW paddle] Ignoring key — ' + reason);
   }
 
-  document.addEventListener('keydown', function(e) {
-    if (e.repeat) return;
-    if (isInputFocused()) return;
+  // A paddle key goes to the keyer FIRST (#244 Part A). LZ3AW's cw-diag
+  // (1.14.6, 25 wpm): paddle input up to 59 ms late, because the page's main
+  // thread was busy when the edge arrived. The keyer withdraws a held
+  // element only before its sidetone starts (20 ms after it is chosen), so a
+  // release that late lands after the next element is committed. This
+  // handler runs in the capture phase on window, before any other key
+  // listener on the page, and does nothing before the keyer has the edge: no
+  // DOM work, no logging, no drawing. preventDefault and the input-lag note
+  // come after; a dropped key's log line is deferred. The other half of the
+  // fix is fewer busy frames: drawing pauses during the over (cwDrawPause).
+  function paddleKeyFirst(e) {
+    var down = e.type === 'keydown';
+    if (down && e.repeat) return;
     var contact = matchPaddleKey(e);
-    if (!contact) return;
-    if (!cwAvailable) {
-      logPaddleDrop('cwAvailable is false (desktop hasn\'t enabled CW for this session)');
+    if (!contact || isInputFocused()) return;
+    if (!cwAvailable || (down && !cwPaddleAvailable)) {
+      if (down) setTimeout(logPaddleDrop, 0, !cwAvailable
+        ? "cwAvailable is false (desktop hasn't enabled CW for this session)"
+        : "cwPaddleAvailable is false (desktop has determined paddle keying can't reach the radio — see verbose log for cause)");
       return;
     }
-    if (!cwPaddleAvailable) {
-      logPaddleDrop('cwPaddleAvailable is false (desktop has determined paddle keying can\'t reach the radio — see verbose log for cause)');
-      return;
-    }
+    var wasDown = contact === 'dit' ? ditDown : dahDown;
+    if (contact === 'dit') ditDown = down; else dahDown = down;
+    if (!down || !wasDown) sendPaddle(contact, down ? 1 : 0);
+    // After the keyer has the edge:
+    e.preventDefault();
     noteCwInputLag(e);
-    if (contact === 'dit') {
-      e.preventDefault();
-      if (!ditDown) { ditDown = true; sendPaddle('dit', 1); }
-    } else if (contact === 'dah') {
-      e.preventDefault();
-      if (!dahDown) { dahDown = true; sendPaddle('dah', 1); }
-    }
-  });
-
-  document.addEventListener('keyup', function(e) {
-    if (!cwAvailable) return;
-    if (isInputFocused()) return;
-    var contact = matchPaddleKey(e);
-    if (contact) noteCwInputLag(e);
-    if (contact === 'dit') {
-      e.preventDefault();
-      ditDown = false;
-      sendPaddle('dit', 0);
-    } else if (contact === 'dah') {
-      e.preventDefault();
-      dahDown = false;
-      sendPaddle('dah', 0);
-    }
-  });
+  }
+  window.addEventListener('keydown', paddleKeyFirst, { capture: true });
+  window.addEventListener('keyup', paddleKeyFirst, { capture: true });
 
   // --- Web MIDI paddle input ---
 
@@ -12133,8 +12173,10 @@ var _paddleHoldTimer = { dit: null, dah: null };
     }
   }
 
+  // A MIDI paddle note goes to the keyer first (#244 Part A), as the paddle
+  // keys do: the bytes are read, the edge is handed over, and only then the
+  // input-lag note. MIDIInput has no capture phase; this is its only listener.
   function ecHandleMidiMessage(msg) {
-    noteCwInputLag(msg);
     var data = msg.data;
     var status = data[0];
     var note = data[1];
@@ -12143,28 +12185,30 @@ var _paddleHoldTimer = { dit: null, dah: null };
     var isNoteOn = (cmd === 0x90 && velocity > 0);
     var isNoteOff = (cmd === 0x80 || (cmd === 0x90 && velocity === 0));
 
-    // Learn mode — capture note number
-    if (ecMidiLearning && isNoteOn) {
-      if (ecMidiLearning === 'dit') {
-        ecMidiDitNote = note;
-        localStorage.setItem('echocat-midi-dit-note', note);
-      } else if (ecMidiLearning === 'dah') {
-        ecMidiDahNote = note;
-        localStorage.setItem('echocat-midi-dah-note', note);
+    // Normal operation — map notes to paddle contacts
+    if (!(ecMidiLearning && isNoteOn)) {
+      if (note === ecMidiDitNote) {
+        if (isNoteOn) { if (!ditDown) { ditDown = true; sendPaddle('dit', 1); } }
+        else if (isNoteOff) { ditDown = false; sendPaddle('dit', 0); }
+      } else if (note === ecMidiDahNote) {
+        if (isNoteOn) { if (!dahDown) { dahDown = true; sendPaddle('dah', 1); } }
+        else if (isNoteOff) { dahDown = false; sendPaddle('dah', 0); }
       }
-      ecStopMidiLearn();
-      updateMidiNoteDisplays();
+      noteCwInputLag(msg);
       return;
     }
+    noteCwInputLag(msg);
 
-    // Normal operation — map notes to paddle contacts
-    if (note === ecMidiDitNote) {
-      if (isNoteOn) { if (!ditDown) { ditDown = true; sendPaddle('dit', 1); } }
-      else if (isNoteOff) { ditDown = false; sendPaddle('dit', 0); }
-    } else if (note === ecMidiDahNote) {
-      if (isNoteOn) { if (!dahDown) { dahDown = true; sendPaddle('dah', 1); } }
-      else if (isNoteOff) { dahDown = false; sendPaddle('dah', 0); }
+    // Learn mode — capture note number
+    if (ecMidiLearning === 'dit') {
+      ecMidiDitNote = note;
+      localStorage.setItem('echocat-midi-dit-note', note);
+    } else if (ecMidiLearning === 'dah') {
+      ecMidiDahNote = note;
+      localStorage.setItem('echocat-midi-dah-note', note);
     }
+    ecStopMidiLearn();
+    updateMidiNoteDisplays();
   }
 
   function ecConnectMidi(deviceId) {
@@ -14281,6 +14325,7 @@ var _paddleHoldTimer = { dit: null, dah: null };
 
   function sstvPhoneDrawWfLine(bins) {
     if (!sstvPhoneWfVisible || !sstvPhoneWfCtx || !bins) return;
+    if (cwDrawPaused()) return; // a paddle over is running (#244): row skipped
     var w = sstvPhoneWfCanvas.width, h = sstvPhoneWfCanvas.height;
     // Scroll down
     var imgData = sstvPhoneWfCtx.getImageData(0, 0, w, h);
@@ -15566,6 +15611,50 @@ var _paddleHoldTimer = { dit: null, dah: null };
     vfDial.addEventListener('mousedown', dialStart);
     document.addEventListener('mousemove', (e) => { if (isOpen) dialMove(e); });
     document.addEventListener('mouseup', dialEnd);
+
+    // #256 (LZ3AW): the mouse wheel over the dial or the frequency, and the
+    // arrow keys, tune by the step as the desktop VFO window does. Up / Down
+    // tune (hold to repeat), Left / Right make the step smaller / bigger.
+    // dpTune keeps the VFO lock and the range check.
+    function vfStepTune(dir) {
+      if (!currentFreqKhz) return false;
+      const hz = window.VfoStepKeys.stepFreqHz(Math.round(currentFreqKhz * 1000), Math.round(STEP_SIZES[dpStepIdx] * 1000), dir);
+      if (!hz || hz < 100000) return false;
+      dpTune(hz / 1000);
+      if (vfoLocked) return false; // dpTune said so; the hold ends
+      dialRotation += dir * Math.PI / 6;
+      renderAll();
+      drawDial();
+      return true;
+    }
+    function vfMoveStep(delta) {
+      const i = window.VfoStepKeys.stepIndexMove(dpStepIdx, delta, STEP_SIZES.length);
+      if (i === dpStepIdx) return;
+      dpStepIdx = i;
+      try { localStorage.setItem('echocat-step-idx', dpStepIdx); } catch {}
+      renderAll();
+      drawDial();
+    }
+    const vfStepHold = window.VfoStepKeys.createHoldRepeat(vfStepTune);
+    const vfWheel = (e) => {
+      e.preventDefault();
+      const dir = window.WheelTune.wheelDir(e.deltaY);
+      if (dir) vfStepTune(dir);
+    };
+    vfDial.addEventListener('wheel', vfWheel, { passive: false });
+    vfFreq.addEventListener('wheel', vfWheel, { passive: false });
+    document.addEventListener('keydown', (e) => {
+      if (!isOpen || !document.getElementById('dial-pad').classList.contains('hidden')) return;
+      const act = window.VfoStepKeys.keyAction(e, { typing: window.VfoStepKeys.isTypingTarget(document.activeElement) });
+      if (!act) return;
+      e.preventDefault();
+      if (act === 'up' || act === 'down') vfStepHold.start(act === 'up' ? 1 : -1);
+      else vfMoveStep(act === 'step-bigger' ? 1 : -1);
+    });
+    document.addEventListener('keyup', (e) => {
+      if (e.key === 'ArrowUp' || e.key === 'ArrowDown') vfStepHold.stop();
+    });
+    window.addEventListener('blur', () => vfStepHold.stop());
 
     // --- Pill interactions ---
     vfFreq.addEventListener('click', () => {
