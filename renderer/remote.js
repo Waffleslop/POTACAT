@@ -872,6 +872,9 @@
   let logbookQsos = [];
   let lastSolarData = null; // latest solar-data blob (tap the pills for detail)
   let lastFreqOtherHz = 0;  // split TX-side frequency, 0 = split off/hidden
+  let rcSplitOn = false;    // split, from rig-state (#689 Split up N)
+  let rcSplitUpKhz = 1;     // the chosen offset (lib/split-up.js OFFSETS_KHZ)
+  let rcSplitUpCaps = null; // the shack radio's capabilities
 
   // Both of these live in the status bar AND in the Full VFO View, which
   // COVERS the status bar — so each renders into both surfaces, and the
@@ -3444,6 +3447,8 @@
     if (s.split != null) {
       const sp = document.getElementById('rc-split');
       if (sp) sp.classList.toggle('active', !!s.split);
+      rcSplitOn = !!s.split;
+      paintRcSplitUp();
       // Split off means there is no TX side to show. rig-state arrives on
       // every change AND at connect, so gating the TX line on it here clears
       // the readout even if the freq-other push was missed or raced — the
@@ -3497,6 +3502,10 @@
       rcVfoGroup.classList.toggle('hidden', !s.capabilities.vfo && !s.capabilities.split);
       const rcSplitBtn = document.getElementById('rc-split');
       if (rcSplitBtn) rcSplitBtn.classList.toggle('hidden', !s.capabilities.split);
+      // Split up N (#689): only where the shack's radio can set its TX VFO.
+      rcSplitUpCaps = s.capabilities;
+      const rcSplitUpGroup = document.getElementById('rc-split-up-group');
+      if (rcSplitUpGroup && window.SplitUp) rcSplitUpGroup.classList.toggle('hidden', !SplitUp.available(s.capabilities));
       // Rig On/Off — show wherever the radio's CAT set supports PS0/PS1, 0x18, or equivalent.
       // Applies to both the Settings-overlay group and the VFO widget row.
       // #485: powerOn false = off over CAT but not on (FTX-1): no On.
@@ -5890,6 +5899,49 @@
         // the 2026-08-03 hardening).
         ws.send(JSON.stringify({ type: 'rig-control', data: { action: 'set-split', value: !rcSplit.classList.contains('active') } }));
       }
+    });
+  }
+
+  // Split up N (#689, DA2PK): one tap turns split on and puts the TX VFO at
+  // the receive frequency + N kHz (the shack's split-up action, the same as
+  // the desktop VFO window); tapped again, split off. Sets VFOs only, never
+  // keys. The shack checks the lock and the radio's range again.
+  function paintRcSplitUp() {
+    const b = document.getElementById('rc-split-up');
+    if (!b || !window.SplitUp) return;
+    const f = SplitUp.buttonFace(rcSplitOn, rcSplitUpKhz);
+    b.textContent = f.text;
+    b.title = f.title;
+    b.classList.toggle('active', f.on);
+  }
+  function rcSplitUpSend(p) {
+    if (!p.ok) { showToast(p.message, 2500, p.reason !== 'locked'); return; }
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    const off = p.steps.length === 1 && p.steps[0].action === 'set-split' && p.steps[0].value === false;
+    const data = off ? { action: 'set-split', value: false } : { action: 'split-up', offsetKhz: rcSplitUpKhz };
+    ws.send(JSON.stringify({ type: 'rig-control', data }));
+  }
+  const rcSplitUpBtn = document.getElementById('rc-split-up');
+  const rcSplitUpN = document.getElementById('rc-split-up-n');
+  if (rcSplitUpBtn && rcSplitUpN && window.SplitUp) {
+    try { rcSplitUpKhz = SplitUp.normalizeOffset(localStorage.getItem('echocat-split-up-khz') || SplitUp.DEFAULT_KHZ); } catch (e) {}
+    for (const n of SplitUp.OFFSETS_KHZ) {
+      const o = document.createElement('option');
+      o.value = String(n);
+      o.textContent = SplitUp.optionText(n);
+      rcSplitUpN.appendChild(o);
+    }
+    rcSplitUpN.value = String(rcSplitUpKhz);
+    paintRcSplitUp();
+    rcSplitUpBtn.addEventListener('click', () => {
+      if (txState) return;
+      rcSplitUpSend(SplitUp.press({ rxHz: currentFreqKhz * 1000, offsetKhz: rcSplitUpKhz, split: rcSplitOn, locked: vfoLocked, available: SplitUp.available(rcSplitUpCaps) }));
+    });
+    rcSplitUpN.addEventListener('change', () => {
+      rcSplitUpKhz = SplitUp.normalizeOffset(rcSplitUpN.value);
+      try { localStorage.setItem('echocat-split-up-khz', String(rcSplitUpKhz)); } catch (e) {}
+      paintRcSplitUp();
+      if (rcSplitOn && !txState) rcSplitUpSend(SplitUp.plan({ rxHz: currentFreqKhz * 1000, offsetKhz: rcSplitUpKhz, split: true, locked: vfoLocked, available: SplitUp.available(rcSplitUpCaps) }));
     });
   }
 
@@ -8686,33 +8738,12 @@
   const lbFilterClear = document.getElementById('lb-filter-clear');
 
   /**
-   * The mode a QSO is filed under in the Mode filter — the family, as the
-   * desktop Logbook shows it: USB/LSB are SSB, MFSK+SUBMODE FT4 is FT4,
-   * PSK31/63 are PSK.
+   * Pure: the QSOs a search + filter set shows. The rules are the desktop
+   * Logbook's own, in lib/logbook-filter.js (inlined), so this list, the
+   * desktop list and the desktop Logbook map agree (#702).
    */
-  function lbModeFamily(q) {
-    const v = AdifMode.recordMode(q);
-    if (v === 'USB' || v === 'LSB') return 'SSB';
-    if (/^PSK/.test(v)) return 'PSK';
-    return v;
-  }
-
-  /** Pure: the QSOs a search + filter set shows. test/lz3aw-round14-test.js. */
   function lbFilterQsos(qsos, f) {
-    const query = String(f.query || '').trim().toUpperCase();
-    const band = String(f.band || '').toUpperCase();
-    const mode = String(f.mode || '').toUpperCase();
-    const from = String(f.from || '').replace(/-/g, '');
-    const to = String(f.to || '').replace(/-/g, '');
-    return qsos.filter(q => {
-      if (band && String(q.BAND || '').toUpperCase() !== band) return false;
-      if (mode && lbModeFamily(q) !== mode) return false;
-      const d = String(q.QSO_DATE || '');
-      if (from && d < from) return false;
-      if (to && d > to) return false;
-      if (!query) return true;
-      return [q.CALL, q.SIG_INFO, q.COMMENT, AdifMode.recordMode(q), q.MODE, q.BAND].some(v => String(v || '').toUpperCase().includes(query));
-    });
+    return LogbookFilter.filterQsos(qsos, f);
   }
 
   function getFilteredLogbook() {

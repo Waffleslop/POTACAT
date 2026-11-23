@@ -2446,7 +2446,7 @@
               <option value="front">Front (microphone jack)</option>
             </select>
           </label>
-          <span class="help-text" style="display:block;margin:2px 0 0 0;">The socket your sound card interface is plugged into. POTACAT tells the radio which one to send each time it transmits; the wrong one puts a carrier on the air with no audio.</span>
+          <span id="tx-audio-input-help" class="help-text" style="display:block;margin:2px 0 0 0;">The socket your sound card interface is plugged into. POTACAT tells the radio which one to send each time it transmits; the wrong one puts a carrier on the air with no audio.</span>
         </div>
         <div id="rig-icom-usb-data-mod" class="hidden" style="margin-top:8px;">
           <label class="checkbox-label"><input type="checkbox" id="set-icom-usb-data-mod" checked> Set DATA MOD to USB while POTACAT sends data</label>
@@ -2462,6 +2462,16 @@
           </div>
           <label class="radio-label" style="margin-top:6px;"><input type="radio" name="rig-audio-jack" id="set-audio-jack-mic" value="mic"> Microphone jack</label>
           <span class="help-text" style="display:block;margin:2px 0 0 24px;">POTACAT never switches this radio to a DATA mode: FT8, WSPR, PSK, FreeDV, SSTV, Winlink and voice all go out in USB, LSB or FM. Warning for Icom owners: an Icom takes USB or rear-socket audio only in a DATA mode unless its menus are changed, so picking the microphone jack by mistake sends SSTV and Winlink as a silent carrier. Pick this only if the audio cable really goes into the microphone socket.</span>
+        </div>
+        <div id="rig-cw-sideband" class="hidden" style="margin-top:8px;">
+          <label>CW sideband:
+            <select id="set-cw-sideband" style="margin-top:2px;">
+              <option value="band">Automatic (default)</option>
+              <option value="upper">Always CW</option>
+              <option value="lower">Always CW-R (reverse)</option>
+            </select>
+          </label>
+          <span class="help-text" id="cw-sideband-help" style="display:block;margin:2px 0 0 0;">Automatic: a CW spot tunes the radio to CW on every band, and if you put the radio in CW-R yourself it stays there. Always: every CW tune, on every band, uses that one, also after a restart.</span>
         </div>
         <div id="rig-voice-as-data" style="margin-top:8px;">
           <label class="checkbox-label"><input type="checkbox" id="set-voice-as-data"> Voice in DATA mode (USB-D / LSB-D)</label>
@@ -2829,6 +2839,11 @@
           </select>
         </label>
         <span class="help-text" style="font-size:12px;">In Manual mode, click the bearing value in the spot table to turn the antenna.</span>
+        <label class="checkbox-label"><input type="checkbox" id="set-rotor-bands-only"> Turn the rotor only on these bands</label>
+        <div id="rotor-bands-config" class="hidden">
+          <div id="rotor-bands-grid" class="rig-bands-grid"></div>
+          <span class="help-text" style="display:block;font-size:12px;">On the other bands, tuning leaves the antenna where it is (for a beam on the high bands and a dipole on the low ones). Clicking a bearing still turns it on any band.</span>
+        </div>
         <div id="rotor-pst-config">
           <span class="help-text" style="font-size:12px;">Sends beam heading to PstRotator via UDP.</span>
           <label>Host:
@@ -2986,6 +3001,10 @@
           <input type="number" id="set-default-power" min="1" max="5000" placeholder="none">
         </label>
         <span class="help-text" style="margin-left:12px;margin-bottom:6px;display:block;">Logged only when the radio's power cannot be read and POTACAT has not set it. Blank: the contact is logged with no power.</span>
+        <label>Always log this power, for an amplifier (W):
+          <input type="number" id="set-log-fixed-power" min="1" max="10000" placeholder="off">
+        </label>
+        <span class="help-text" style="margin-left:12px;margin-bottom:6px;display:block;">Logged instead of the power the radio reports. A power you type for one contact still wins. Blank: off. New contacts only.</span>
         <label class="checkbox-label"><input type="checkbox" id="set-n1mm-rst"> N1MM-style RST logging</label>
         <span class="help-text" style="margin-left:12px;margin-bottom:6px;display:block;">On: one box per digit of each report. Off: one field per report; a full report moves the cursor to RST Rcvd by itself, and a Tab pressed straight after stays there.</span>
         <label class="checkbox-label"><input type="checkbox" id="set-log-comment-tags" checked> Auto park/club tags in comment</label>
@@ -3022,6 +3041,8 @@
           <div id="logbook-n3fjp-config" class="hidden" style="margin-top:6px;">
             <label class="checkbox-label"><input type="checkbox" id="set-n3fjp-pull"> Also bring in contacts I log in N3FJP on its own</label>
             <div class="help-text" style="margin-top:4px;line-height:1.5;">While N3FJP is open, POTACAT reads its log through the same API every 5 minutes and adds any contact it doesn't have, so it reaches your POTACAT log and POTACAT Cloud. The first time it reads the whole N3FJP log. Contacts already in your log are skipped, the same as Import Log.</div>
+            <label class="checkbox-label" style="margin-top:8px;"><input type="checkbox" id="set-n3fjp-call-in-progress"> Send the call in progress to N3FJP</label>
+            <div class="help-text" style="margin-top:4px;line-height:1.5;">When you click a spot, type a call in a log form, or JTCAT starts a QSO, the call goes into N3FJP's Call box so N3FJP shows its lookup, past contacts and dupe check. Nothing is logged until you log the contact. Once POTACAT logs it, N3FJP's entry boxes are cleared.</div>
           </div>
           <div id="logbook-log4om-config" class="hidden" style="margin-top:6px;">
             <label class="checkbox-label"><input type="checkbox" id="set-log4om-wsjtx-binary"> Use WSJT-X binary protocol (required for QRZ/Clublog propagation)</label>
@@ -3538,6 +3559,7 @@
           <span class="vara-win-only help-text" style="display:block;margin:4px 0;">If you set VARA by hand instead: Settings &gt; SoundCard = the cable ends named below, Settings &gt; PTT = <b>VOX</b> (VARA has no "None"; VOX means VARA keys nothing and POTACAT keys the radio through Pat).</span>
           <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
             <label class="checkbox-label"><input type="checkbox" id="set-vara-hf-enable"> Use VARA HF</label>
+            <a class="vara-mac-only hidden" id="vara-mac-guide" href="https://potacat.com/guides/vara-on-mac/" data-external style="color:var(--accent-blue,#4fc3f7);font-size:12px;">Running VARA on a Mac?</a>
             <label class="vara-win-only">Program: <input type="text" id="set-vara-hf-path" placeholder="C:\VARA\VARA.exe (found for you)" style="width:210px;"> <button type="button" id="vara-hf-browse">Browse&hellip;</button> <button type="button" id="vara-hf-find">Find / test</button></label>
             <label title="Blank = this computer. Another computer: its name or address; VARA's audio then runs there.">Host: <input type="text" id="set-vara-hf-host" placeholder="this computer" spellcheck="false" style="width:120px;"></label>
             <label>Port: <input type="number" id="set-winlink-vara-port" min="1" max="65535" value="8300" style="width:70px;"></label>
@@ -5530,7 +5552,9 @@
   <script src="../lib/rig-family.js"></script>
   <script src="../lib/tci-target.js"></script>
   <script src="../lib/tx-audio-input.js"></script>
+  <script src="../lib/ft891-tx-audio-input.js"></script>
   <script src="../lib/rig-audio-jack.js"></script>
+  <script src="../lib/cw-sideband.js"></script>
   <script src="../lib/icom-usb-data-mod.js"></script>
   <script src="../lib/tx-channel.js"></script>
   <script src="../lib/ptt-flow-conflict.js"></script>

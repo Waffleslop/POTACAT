@@ -61,7 +61,10 @@ test('a tapped spot moves the band dials and a running engine to its mode', () =
 // --- Item 6: Logbook filter bar ---
 // The page's AdifMode (inlined lib/adif-mode.js) for the extracted functions.
 globalThis.AdifMode = require('../lib/adif-mode');
-const { lbFilterQsos, lbModeFamily } = fnFrom(['lbModeFamily', 'lbFilterQsos']);
+// The rules are lib/logbook-filter.js since #702 (shared with the desktop Logbook and its map).
+globalThis.LogbookFilter = require('../lib/logbook-filter');
+const { lbFilterQsos } = fnFrom(['lbFilterQsos']);
+const lbModeFamily = globalThis.LogbookFilter.modeFamily;
 const qsos = [
   { CALL: 'K1ABC', BAND: '20m', MODE: 'USB', QSO_DATE: '20261001' },
   { CALL: 'LZ1XX', BAND: '40m', MODE: 'CW', QSO_DATE: '20261010', SIG_INFO: 'US-1234' },

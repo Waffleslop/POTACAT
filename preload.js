@@ -19,6 +19,7 @@ contextBridge.exposeInMainWorld('api', {
   // receive) — the Landmarks tab shows stations the SDR can hear (lib/listen-source.js).
   onKiwiStatus: (cb) => ipcRenderer.on('kiwi-status', (_e, s) => cb(s)),
   rigBandsNative: (model) => ipcRenderer.invoke('rig-bands-native', model),
+  rotorBandChoices: () => ipcRenderer.invoke('rotor-band-choices'),
   platform: process.platform,
   openExternal: (url) => ipcRenderer.send('open-external', url),
   pairRedeemUrl: (url) => ipcRenderer.invoke('pair-redeem-url', url),
@@ -533,6 +534,8 @@ contextBridge.exposeInMainWorld('api', {
   vfoPopoutOpen: () => ipcRenderer.send('vfo-popout-open'),
   vfoPopoutTheme: (theme) => ipcRenderer.send('vfo-popout-theme', theme),
   vfoTunedSpot: (spot) => ipcRenderer.send('vfo-tuned-spot', spot),
+  // A station the operator picked: its call to N3FJP's entry window (#712; main decides if and when).
+  n3fjpCallInProgress: (call) => ipcRenderer.send('n3fjp-call-in-progress', call),
   onVfoPopoutStatus: (cb) => ipcRenderer.on('vfo-popout-status', (_e, open) => cb(open)),
   // JTCAT pop-out
   // Optional mode ('PSK31' | 'JTTY' | ...): an already-open window switches to it.

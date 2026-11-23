@@ -64,7 +64,8 @@ const popHtml = R('renderer/log-popout.html');
 test('main: saveQsoRecord fills an empty power through the helper, never the raw setting', () => {
   const save = main.slice(main.indexOf('async function saveQsoRecord(qsoData, opts) {'));
   const body = save.slice(0, save.indexOf('\n}\n'));
-  assert.ok(/LogTxPower\.txPowerForLog\(\{ knownW: _currentTxPower, defaultW: LogTxPower\.operatorDefaultPower\(ops\) \}\)/.test(body));
+  // #837: one call, txPowerForContact (typed > fixed > radio > default).
+  assert.ok(/LogTxPower\.txPowerForContact\(\{[\s\S]*?knownW: tciRigTarget\(\) \? tciMeasuredWattsForLog\(\) : _currentTxPower,\s*defaultW: LogTxPower\.operatorDefaultPower\(ops\),?\s*\}\)/.test(body));
   assert.ok(!/ops\.defaultPower\)/.test(body), 'no raw ops.defaultPower fallback');
 });
 
