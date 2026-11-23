@@ -63,6 +63,7 @@ const TESTS = [
   'test/cloud-tunnel-enable-remote-test.js', // ECHOCAT ask 2026-11-21: an owner device turns the Cloud Tunnel on with Cloud access; never a Guest Pass
   'test/cloud-tunnel-auto-test.js', // ECHOCAT ask 2026-11-21: the Cloud Tunnel turns on when the account gets access; never after the operator turned it off
   'test/cloud-state-test.js', // ECHOCAT ask 2026-11-21: auth-ok carries the shack's Cloud state and cloud-state follows it; never to a Guest Pass
+  'test/settings-sync-gone-test.js', // #379: the unused settings-sync wiring (cloud-get/put-settings, /v1/settings) stays removed
   'test/scan-run-test.js', // #37: a phone-started scan run on the desktop: the phone's 13 filter vectors, the desktop's exclusions, start/step/end rules, wire and glue
   'test/clock-platform-test.js', // NJ2DX 2026-11-21: each OS gets only the clock buttons it can honour; Time settings opens on a Mac
   'test/main-ismac-scope-test.js', // K3SBP 2026-11-21: isMac is not defined (opening APRS crashed); every isMac in main.js is declared in its own function
@@ -203,6 +204,7 @@ const TESTS = [
   'test/vfo-ptt-row-test.js', // #190: ECHOCAT Web VFO-tab PTT row shows while the mode is unknown; hidden in CW/data
   'test/ws-liveness-test.js', // ECHOCAT Web: reconnect when no pong comes back or the screen wakes on a dead socket
   'test/ptt-release-test.js', // ECHOCAT Web: PTT lets go on blur/hidden/cancel, Space up with a box focused, and resends off after a reconnect (#935)
+  'test/remote-origin-security-test.js', // ECHOCAT: foreign page Origin refused on LAN sockets, /api/ptt cross-site refused with no ACAO, device-writable settings allowlist, public source needs the token, directory cards escaped
   'test/ptt-client-id-test.js', // #941: a reconnecting ECHOCAT Web page releases PTT its own dead socket holds; another id or none never does
   'test/error-banner-text-test.js', // #806: ECHOCAT Web error banner shows the message on iPhone Safari (stack has no message there)
   'test/freedv-diag-test.js', // #717: FreeDV audio in, sync on/off and capture failures in the session log, rate-limited
@@ -530,6 +532,7 @@ const TESTS = [
   'test/review-ask-test.js',
   'test/rigctld-gain-fallback-test.js',
   'test/release-notes-format-test.js',
+  'test/website-links-guard-test.js', // release.yml update-website pushes only version strings in the download block; anything else is a website handoff branch
   'test/contests-view-test.js',
   'test/remote-server-rewire-test.js',
   'test/sstv-tx-data-mode-test.js',

@@ -13057,10 +13057,8 @@ var _paddleHoldTimer = { dit: null, dah: null };
       var card = document.createElement('div');
       var isTunedNet = n.frequency && currentFreqKhz && Math.abs(parseFloat(n.frequency) - currentFreqKhz) < 0.5;
       card.className = 'dir-card' + (cd.status === 'live' ? ' dir-live' : cd.status === 'soon' ? ' dir-soon' : '') + (isTunedNet ? ' tuned' : '');
-      var statusHtml = cd.label ? '<span class="dir-card-status ' + cd.status + '">' + cd.label + '</span>' : '';
-      card.innerHTML = '<div class="dir-card-row"><span class="dir-card-name">' + (n.name || 'Unknown') + '</span>' + statusHtml + '</div>' +
-        '<div class="dir-card-detail"><span class="dir-card-freq">' + (FreqDots.khzMhz(n.frequency) || '?') + '</span> ' + (n.mode || '') + (e.band ? ' \u00b7 ' + e.band : '') +
-        (n.days && n.days !== 'Daily' ? ' \u00b7 ' + n.days : '') + '</div>';
+      // Sheet fields are text: escaped in lib/directory-cards.js.
+      card.innerHTML = window.DirectoryCards.netCardHtml(n, { cd: cd, band: e.band, freqText: FreqDots.khzMhz(n.frequency) });
       (function(net, band) {
         card.addEventListener('click', function() {
           if (!net.frequency) return;
@@ -13179,11 +13177,8 @@ var _paddleHoldTimer = { dit: null, dah: null };
       var card = document.createElement('div');
       var isTunedSwl = s.frequency && currentFreqKhz && Math.abs(parseFloat(s.frequency) - currentFreqKhz) < 0.5;
       card.className = 'dir-card' + (cd.status === 'live' ? ' dir-live' : cd.status === 'soon' ? ' dir-soon' : '') + (isTunedSwl ? ' tuned' : '');
-      var statusHtml = cd.label ? '<span class="dir-card-status ' + cd.status + '">' + cd.label + '</span>' : '';
-      card.innerHTML = '<div class="dir-card-row"><span class="dir-card-name">' + (s.station || 'Unknown') + '</span>' + statusHtml + '</div>' +
-        '<div class="dir-card-detail"><span class="dir-card-freq">' + (s.frequency || '?') + ' kHz</span>' +
-        (s.language ? ' \u00b7 ' + s.language : '') + (e.band ? ' \u00b7 ' + e.band : '') +
-        (s.powerKw ? ' \u00b7 ' + s.powerKw + 'kW' : '') + '</div>';
+      // Sheet fields are text: escaped in lib/directory-cards.js.
+      card.innerHTML = window.DirectoryCards.swlCardHtml(s, { cd: cd, band: e.band });
       (function(swl) {
         card.addEventListener('click', function() {
           if (!swl.frequency) return;

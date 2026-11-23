@@ -67,6 +67,34 @@ client                                 server
   |  ... feature messages flow ...      |
 ```
 
+### Who may connect (added 2026-11-22)
+
+Checked at the WebSocket upgrade, before the server `hello`
+(`RemoteServer._verifyUpgrade`, rules in `lib/echocat-web-gate.js`):
+
+- **Page Origin.** An upgrade that carries an `Origin` header must come from
+  this server's own page: the Origin's host must equal the `Host` header (a
+  default port on either side is ignored), or the Cloud host. Otherwise the
+  upgrade is refused with HTTP 403 and the body `Page origin is not this
+  ECHOCAT server`, whatever the auth mode. An upgrade with **no** `Origin`
+  (the ECHOCAT app, a POTACAT desktop over Node `ws`) is unaffected. A native
+  client that adds an Origin must make it the URL it dialled
+  (`https://<host>[:port]`), which is what React Native's own WebSocket does.
+  ECHOCAT Web connects to `location.host`, so its Origin always matches.
+  Before this, a page from any web site, open in a browser on the LAN, was
+  auto-authenticated as the owner.
+- **A public address with the Cloud Tunnel off** (a router port-forward of
+  7300): local trust stops at the LAN and the tailnet. With an ECHOCAT token
+  set and required, the socket gets `auth-mode: token`; with none, the
+  upgrade is refused with HTTP 403 (`Internet connection needs an ECHOCAT
+  token`) and `GET /` answers 403 with a plain-text explanation. Private
+  ranges (10/8, 172.16/12, 192.168/16), loopback, link-local and Tailscale
+  (100.64/10) are not public. Over the Cloud Tunnel nothing changes.
+
+LAN, Tailscale and loopback clients keep the local-trust behaviour of a fresh
+install: `auth-mode: none` and `auth-ok` with no token, unless the operator
+requires one.
+
 ## Message catalog
 
 Format: each row is `name — direction — purpose`. Directions:
@@ -77,7 +105,7 @@ Format: each row is `name — direction — purpose`. Directions:
 | Message | Dir | Purpose |
 |---|---|---|
 | `hello` | ↔ | Version + capability handshake (new in v1). Server-side `hello` also carries top-level `rigModel` (string, e.g. `"Flex 8600M"`, `"FTDX10"`) so POTACAT-desktop clients can label paired shacks in the Remote Radios panel — empty string when no rig is configured. |
-| `auth-mode` | S→C | Tell client which auth mode the server is configured for (`token`, `callsign`, `cloud`, `none`, `cookie`). `cookie` (2026-09-11, ECHOCAT Web over POTACAT Cloud): the WebSocket upgrade carried a valid `__Host-echocat_device` or `__Host-echocat_pass` cookie and the server has **already** authenticated the socket — `auth-ok` follows immediately with no `auth` message from the client. Sent only when the upgrade's `Origin` matches its `Host` (or the tunnel's `cloudHost`); a cross-site page that makes the browser attach the cookie gets `token` and no `auth-ok`. The page was served with `window.__authMode="cookie"` by the same decision (`lib/echocat-web-gate.js` `wsAuthModeFor` / `decideHttpGate`), so a page in cookie mode that receives `auth-mode: token` knows its cookie died (revoked, expired, pass ended) and must sign out and reload rather than show a token box. |
+| `auth-mode` | S→C | Tell client which auth mode the server is configured for (`token`, `callsign`, `cloud`, `none`, `cookie`). `cookie` (2026-09-11, ECHOCAT Web over POTACAT Cloud): the WebSocket upgrade carried a valid `__Host-echocat_device` or `__Host-echocat_pass` cookie and the server has **already** authenticated the socket — `auth-ok` follows immediately with no `auth` message from the client. Sent only when the upgrade's `Origin` matches its `Host` (or the tunnel's `cloudHost`); a cross-site page that makes the browser attach the cookie is refused at the upgrade (403, see "Who may connect"); an upgrade with the cookie but no `Origin` gets `token` and no `auth-ok`. The page was served with `window.__authMode="cookie"` by the same decision (`lib/echocat-web-gate.js` `wsAuthModeFor` / `decideHttpGate`), so a page in cookie mode that receives `auth-mode: token` knows its cookie died (revoked, expired, pass ended) and must sign out and reload rather than show a token box. |
 | `auth` | C→S | Submit credentials (token / callsign+password / cloud token). |
 | `auth-ok` | S→C | Auth succeeded. Bundles initial feature flags and settings. Per-device-token auths also include `expiresAt` (epoch ms or `null` for no-expiry — trusted / account-linked devices), `accountLinked` (bool — pair came in via Cloud-attested flow), and `trusted` (bool — operator marked the device "my own"). Absent for the legacy single-shared-token path and Guest Pass auth. Also carries the shack's CURRENT alternate dials + trust info on every connect: `tsHost`, `cloudHost`, `tsCertPublic` (true = served cert is a Tailscale-issued LE cert, validate normally, no pin; absent/false = self-signed, pin `fingerprint`), `spki` (SHA-256 lower-hex of the cert's SubjectPublicKeyInfo DER — stable across cert reissues since the keypair persists, cert-pin Phase 2a; a client that stores it verifies future certs by SPKI and survives rotation), and `fingerprint` (SHA-256 colon-hex of the cert being presented NOW — also the no-re-pair recovery for a rotated cert). A client paired cloud-only should ADOPT `tsHost` from here rather than treating the pairing as frozen. |
 | `alt-hosts` | S→C | Mid-session update of the same alternate-dial fields `auth-ok` carries (`tsHost`, `cloudHost`, `tsCertPublic`, `fingerprint`, `spki`) — pushed when the values actually change (operator signs into Tailscale, Cloud Tunnel comes up/down). Sent since v1.8.5; registered 2026-08-03. |
@@ -200,7 +228,7 @@ for the history.
 | `vfo-profiles-update` | C→S | Save/edit/delete a VFO profile. |
 | `apply-vfo-profile` | C→S | Apply a stored VFO profile to the rig. |
 | `settings-update` | S→C | One or more server-side settings changed; client refreshes UI. The settings blob (here, in `auth-ok` and in `pass-resumed`) carries `stationLocation` (object, 2026-11-22, #909): `{grid, state, county}`, the station's grid square, state and county exactly as the shack stamps them on a Guest Pass contact that is not an activation (`county` is `ST,County`, e.g. `PA,Bucks`; any of them `''` when the shack does not know it). A POTACAT desktop on a Guest Pass stamps them, and `APP_POTACAT_GUEST_PASS`, on a contact logged from its own log forms (lib/station-county.js `guestDeskStationFor`); with no `stationLocation` (an older shack) it changes nothing. Additive: ECHOCAT needs nothing, because the shack stamps the contacts a phone logs itself (`log-qso`). |
-| `save-settings` | C→S | Persist a settings delta. |
+| `save-settings` | C→S | Persist a settings delta. Since 2026-11-22 only the keys in `lib/device-settings.js` (`DEVICE_WRITABLE_KEYS`) are written: the station (`myCallsign`, `grid`, `licenseClass`), spot filters (`hideOutOfBand`, `potaAgeLimit`, `enableDxe`, `enableDxeSources`, `watchlistGroups`), logging (`respotDefault`, `logCommentTags`), JTCAT/JTTY/PSK (`jtcatUseDataMode`, `jtcatFdExch`, `jttySerial`, `jttyMacroStyle`, `jttyAudioFreq`, `jttyMacros`, `jttyFt8Macros`, `jttyTemplates`, `jttyProfile`, `pskMacros`), SSTV (`sstvTemplates`, `sstvCwId`, `sstvPostProcess`) and the WebSDR list (`kiwiSdrList`, `kiwiSdrLabel1-3`, `kiwiSdrHost1-3`). Any other key is dropped silently (the shack logs its name once); keys ending in `Path` or `Host`, keys starting with `remote` or `cloud`, tokens, passwords and the settings secrets are never written by a device, even if added to the list. A client that needs another setting asks for it to be added. The desktop's own window is not affected. |
 
 ### PTT / audio signaling (WebRTC)
 
@@ -944,6 +972,23 @@ diagnostics.
 | Message | Dir | Purpose |
 |---|---|---|
 | *(none yet — pairing happens via HTTP `POST /api/pair`, not WebSocket)* | | |
+
+#### HTTP PTT shortcut (`/api/ptt/on`, `/off`, `/toggle`)
+
+For Apple Shortcuts, Stream Deck HTTP actions and similar native callers, on
+the LAN and the tailnet only (over the Cloud Tunnel it is the 503 stub). Any
+method; `?token=` is required only when the operator requires a token; the
+reply is `{ptt: true|false}`. Since 2026-11-22:
+
+- The reply carries **no** `Access-Control-Allow-Origin`, so another web page
+  cannot read it.
+- A request with an `Origin` header that is not this server, or with a
+  `Sec-Fetch-Site` header other than `same-origin` or `none`, is refused with
+  403 and nothing keys. Native callers send neither header; a URL typed into
+  a browser or opened from a bookmark sends `Sec-Fetch-Site: none`. A request
+  started by another web page (an image, a form, a script) is refused.
+- From a public address with the Cloud Tunnel off it is refused unless a
+  token is set (see "Who may connect").
 
 #### ECHOCAT Web over POTACAT Cloud (HTTP, 2026-09-11)
 

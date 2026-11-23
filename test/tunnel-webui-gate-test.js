@@ -254,7 +254,9 @@ check(T(null, '192.168.1.1') === false, 'no headers object → falls through to 
   check(wsOk.authOk && wsOk.authOk.accountLinked === true, 'WS cookie auth-ok carries accountLinked=true');
   check(rs3.listPairedDevices().find(d => d.id === dev.id).lastSeen != null, 'cookie auth stamps the device lastSeen');
   const wsEvil = await wsProbe(Object.assign({ cookie: devCookie, origin: 'https://evil.example', host: STATION }, CF));
-  check(wsEvil.mode === 'token' && !wsEvil.authOk, 'WS + device cookie + foreign Origin → token mode, no auth-ok (cross-site WS refused)');
+  // Since 2026-11-22 a foreign Origin is refused at the upgrade itself
+  // (RemoteServer._verifyUpgrade), before any auth-mode frame.
+  check(!wsEvil.authOk && wsEvil.mode === null && wsEvil.seen.length === 0 && wsEvil.error === true, 'WS + device cookie + foreign Origin → refused at the upgrade, no auth-mode, no auth-ok (cross-site WS refused)');
   const wsNoOrigin = await wsProbe(Object.assign({ cookie: devCookie, host: STATION }, CF));
   check(wsNoOrigin.mode === 'token' && !wsNoOrigin.authOk, 'WS + device cookie + NO Origin → token mode, no auth-ok');
   const wsNoCookie = await wsProbe(Object.assign({ origin: `https://${STATION}`, host: STATION }, CF));
