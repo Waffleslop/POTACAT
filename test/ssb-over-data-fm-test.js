@@ -90,7 +90,7 @@ test('the log line is plain and names the mode it keys in', () => {
 // main.js glue: the key-down asks the module, logs the skip once, and keeps
 // the Yaesu voice gate and the forced paths ahead of it.
 const main = readSrc(path.join(__dirname, '..', 'main.js'));
-const at = main.indexOf('if (state && (settings.ssbOverData || forceData)');
+const at = main.indexOf('if (state && _dataPlanJack.want'); // the gate, decided by lib/rig-audio-jack.js (#153)
 const blk = main.slice(at, main.indexOf('if (isFlexRig) {', at));
 
 test('main: the swap gate still excludes Yaesu voice, Voice-in-DATA, noDataSwap and JTCAT', () => {

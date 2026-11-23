@@ -29,13 +29,25 @@ test('SSTV key-down declares audio and forces data mode on an Icom', () => {
 });
 
 test('handleRemotePtt honours forceDataMode even with SSB-over-DATA off or JTCAT loaded', () => {
-  assert.ok(/const forceData = !!opts\.forceDataMode;/.test(src));
+  // The rule lives in lib/rig-audio-jack.js pttDataPlan (#153): forced stands on a
+  // data-jack rig (every rig before #153); a microphone-jack rig never switches.
+  assert.ok(/forced: !!opts\.forceDataMode,/.test(src));
+  assert.ok(/const forceData = _dataPlanJack\.forceData;/.test(src));
+  const J = require('../lib/rig-audio-jack');
+  const p = J.pttDataPlan({ jack: 'data', voiceSwitch: null, ssbOverData: false, forced: true });
+  assert.ok(p.want && p.forceData, 'forced switches with SSB-over-DATA off');
   // `&& !opts.noDataSwap`: only Station Setup's voice test sets it (never SSTV).
-  assert.ok(/if \(state && \(settings\.ssbOverData \|\| forceData\) && !opts\.noDataSwap && !yaesuVoice && !voiceInData && audioActive && \(!ft8Engine \|\| forceData\)\) \{/.test(src));
+  assert.ok(/if \(state && _dataPlanJack\.want && !opts\.noDataSwap && !yaesuVoice && !voiceInData && audioActive && \(!ft8Engine \|\| forceData\)\) \{/.test(src));
 });
 
 test('voice on a Yaesu never goes to DATA-U (K3SBP FT-710 voice macros)', () => {
-  assert.ok(/const yaesuVoice = !forceData && !!\(_pttRig && _pttRig\.brand === 'Yaesu'\) &&\n\s*!\(typeof freedvEngine !== 'undefined' && freedvEngine\);/.test(src), 'yaesuVoice rule');
+  // The rule is lib/rig-audio-jack.js pttDataPlan (#153): unset, voice on a Yaesu
+  // stays in USB/LSB; only the rig's own tick box switches it.
+  assert.ok(/yaesu: !!\(_pttRig && _pttRig\.brand === 'Yaesu'\),/.test(src), 'yaesu fed to the rule');
+  assert.ok(/const yaesuVoice = _dataPlanJack\.yaesuVoice;/.test(src), 'yaesuVoice rule');
+  const J = require('../lib/rig-audio-jack');
+  assert.strictEqual(J.pttDataPlan({ jack: 'data', voiceSwitch: null, ssbOverData: true, yaesu: true }).yaesuVoice, true);
+  assert.strictEqual(J.pttDataPlan({ jack: 'data', voiceSwitch: null, ssbOverData: true, yaesu: true, freedvRunning: true }).yaesuVoice, false);
   const at = src.indexOf('const yaesuVoice');
   const sw = src.indexOf('&& !yaesuVoice && !voiceInData && audioActive');
   assert.ok(at > 0 && sw > at, 'the rule is decided before the mode switch');
