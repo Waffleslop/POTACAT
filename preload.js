@@ -434,7 +434,7 @@ contextBridge.exposeInMainWorld('api', {
   getRecentQsos: () => ipcRenderer.invoke('get-recent-qsos'),
   getAllQsos: () => ipcRenderer.invoke('get-all-qsos'),
   updateQso: (data) => ipcRenderer.invoke('update-qso', data),
-  deleteQso: (idx) => ipcRenderer.invoke('delete-qso', idx),
+  deleteQso: (idx, identity) => ipcRenderer.invoke('delete-qso', idx, identity), // identity: lib/qso-identity.js (#988)
   deleteQsosByMatch: (match) => ipcRenderer.invoke('delete-qsos-by-match', match),
   updateQsosByMatch: (data) => ipcRenderer.invoke('update-qsos-by-match', data),
   getDefaultLogPath: () => ipcRenderer.invoke('get-default-log-path'),

@@ -794,6 +794,8 @@ const TESTS = [
   'test/qrz-request-timeout-test.js', // a stalled QRZ socket gives up at its timeout (activation review fix 1)
   'test/log-qso-fast-reply-test.js', // #732: ECHOCAT's log-ok at the disk write; uploads and respots after, respot outcome as a follow-up
   'test/log-qso-idempotent-test.js', // #733: log-qso idempotent by uuid; the log's uuid index; no duplicate uuid reaches the Cloud
+  'test/qso-identity-test.js', // #988: which QSO a Logbook edit/delete means: uuid, else CALL+QSO_DATE+TIME_ON+BAND+MODE; refuse when no single match
+  'test/logbook-delete-988-test.js', // #988: Logbook deletes/edits hit the clicked QSO after a delete; a uuid-less delete is written; ECHOCAT reports the real result
   'test/hunt-polish-test.js', // Hunt says who it is working; web Filters with Hunt off and for a guest; the list saved on every change; the review window closes on decline
   'test/tx-review-low-test.js', // drop detector paused in TX; Winlink re-key restarts the TX limit; full power on rigctld raw PC; multi-slice TX kind
   'test/lan-review-test.js', // VFO speaker plays LAN audio; a reopened port clears POTACAT's old close; FT-710 named; LAN scope text; LAN transport window and strangers
