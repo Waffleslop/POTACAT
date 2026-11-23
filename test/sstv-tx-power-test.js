@@ -248,6 +248,11 @@ test('ECHOCAT: optional field in the settings blob, capability, doc', () => {
   assert.ok(RS.includes("'sstv-tx-power'"), 'capability');
   assert.ok(DOC.includes('sstvTxPowerW'), 'doc');
 });
+test('a device may save sstvTxPowerW, never the restore level (device-settings allowlist)', () => {
+  const DS = require('../lib/device-settings');
+  assert.strictEqual(DS.isDeviceWritable('sstvTxPowerW'), true);
+  assert.strictEqual(DS.isDeviceWritable('sstvTxPowerRestore'), false);
+});
 test('this test is in the runner', () => {
   assert.ok(RUN.includes("'test/sstv-tx-power-test.js'"));
 });
