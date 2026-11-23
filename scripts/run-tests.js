@@ -48,6 +48,7 @@ const TESTS = [
   'test/cw-tx-lockout-timer-test.js', // #583: the TX lockout ends when its timer fires a millisecond early
   'test/pass-radio-free-notify-test.js', // #541: the station tells Cloud the radio is free, once per idle offer
   'test/space-ptt-not-scan-test.js', // Space as Hold-a-key-to-talk never toggles scan (B9)
+  'test/cw-sideband-test.js', // #753: CW or CW-R (CW-U or CW-L) per rig; Automatic is the rule before #753 on every band; one rule in lib/cw-sideband.js
   'test/rig-audio-jack-test.js', // #153: sound card on the data or mic jack, per rig: the one DATA-mode rule for every transmission
   'test/plain-ssb-for-digital-test.js', // a Winlink session keeps the data mode with JTCAT's plain-USB setting off (FTDX10 on flrig)
   'test/lz3aw-web-parity-test.js',

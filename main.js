@@ -593,6 +593,7 @@ const PskrTx = require('./lib/pskreporter-tx');
 const { Ft8Engine, freqsForMode } = require('./lib/ft8-engine');
 const DialSnap = require('./lib/dial-snap');
 const RigAudioJack = require('./lib/rig-audio-jack'); // #153: sound card on the data jack or the mic jack, per rig; the one DATA-mode rule
+const CwSideband = require('./lib/cw-sideband'); // #753: CW or CW-R (CW-U or CW-L) per rig; the one CW sideband rule
 const FreedvPtt = require('./lib/freedv-ptt'); // FreeDV mode: voice PTT refused until FreeDV transmit exists
 const FreedvStatus = require('./lib/freedv-status'); // freedv-status to ECHOCAT: state, modes, sync, SNR, plain reason
 const FreedvDisplayMode = require('./lib/freedv-display-mode'); // #716: FREEDV-<codec> on every surface while the engine runs
@@ -10166,6 +10167,14 @@ async function connectCat() {
     cat.setVoiceAsData(vOn);
     if (vRig && vRig.voiceAsData && !vOn) sendCatLog("[CAT] Voice in DATA mode is ticked for this rig, but its sound card interface is on the microphone jack: voice stays in USB and LSB.");
     if (vOn) sendCatLog("[CAT] Voice in DATA mode is on for this rig: USB and LSB go to the radio as USB-D and LSB-D, and the radio's own microphone is off.");
+  }
+  // CW sideband (#753, lib/cw-sideband.js): every CW mode this rig is sent
+  // carries the rig's choice. Any edit of a rig reconnects CAT, as above.
+  if (cat && typeof cat.setCwSideband === 'function') {
+    const cwRig = (settings.rigs || []).find((r) => r && r.id === settings.activeRigId) || null;
+    const cwSb = CwSideband.settingOf(cwRig);
+    cat.setCwSideband(CwSideband.settingOf(cwRig));
+    if (cwSb !== CwSideband.AUTO) sendCatLog(`[CAT] CW sideband for this rig: always ${cwSb === CwSideband.UPPER ? 'CW / CW-U' : 'CW-R / CW-L'} on every band (Settings > Radio, Edit the rig).`);
   }
   // Linux cdc_acm radios reject TIOCMSET, so node-serialport's port.set()
   // call to flip DTR for paddle keying fails on the first try and every try
@@ -27970,7 +27979,7 @@ function stopTciScope(why) {
 /** Tune a TCI rig (tuneRadio). */
 function tciRigTune(freqHz, mode) {
   const why = !tciRig ? 'The TCI server is not connected'
-    : tciRig.tune(freqHz, mode, { dataMode: RigAudioJack.digitalUsesData({ jack: activeRigAudioJack().jack, useDataMode: settings.jtcatUseDataMode !== false }) });
+    : tciRig.tune(freqHz, CwSideband.requestFor(mode, CwSideband.settingOf(activeRigAudioJack().rig)), { dataMode: RigAudioJack.digitalUsesData({ jack: activeRigAudioJack().jack, useDataMode: settings.jtcatUseDataMode !== false }) });
   if (!why) return;
   sendCatLog(`[TCI] Tune refused: ${why}`);
   for (const w of [win, jtcatPopoutWin, vfoPopoutWin]) {
