@@ -34,6 +34,20 @@ Machine-wide (GLOBAL_KEY): ultracat, jtcatRxGain, jtcatTxGain (desktop-authorita
 `applyJtcatTxGain`), jtcatWaterfallSpeed, jtcatWaterfallFloor, jtcatShowBandScope, jtcatShowWaterfall, jtcatStationsExpiryMin.
 Rule: a setting that is operating policy is per profile; a setting about this machine or its display is GLOBAL.
 
+### Split "Fake It" (jtcatFakeIt, per profile)
+- lib/jtcat-fake-it.js: for each FT8/FT4/FT2 transmission the tone goes out at 1500-1999 Hz and the dial
+  moves by the difference (WSJT-X's rule), then comes back after the key-up. Glue: main.js fakeItSyncEngine,
+  fakeItShiftForTx, fakeItRestoreDial, fakeItIsEcho.
+- Default (Casey 2026-11-23, after N4RLW's IC-7300/IC-7100 report): ON for a new install. A settings file
+  that existed before 2026-11-23 and never had the key is written `jtcatFakeIt: false` once at startup
+  (seedSetting), so nobody's existing setup changes. A saved true or false is never touched. A new operator
+  profile on an existing station has no key and reads off. A missing key always reads off.
+- Where it shifts (engineCanShift): a CAT radio on this PC (serial CI-V, Kenwood, Yaesu, Hamlib, flrig,
+  DXLab Commander, Flex, RS-BA1, SCU-LAN10), one band, radio not in split, not driving a remote shack.
+  Anywhere else (no radio picked, CAT None, a no-CAT radio, TCI, the radio in split, multi-band, a remote
+  laptop) the tone goes out at the plain audio offset, exactly as with Fake It off. A CAT link that is down
+  at the moment of transmit still skips that one transmission (the audio was rendered for the shifted dial).
+
 ## When a QSO is logged (#807, Casey 2026-11-20)
 A QSO is logged when WE start transmitting a 73-family message (RR73, RRR or 73) to that station,
 or when THEIR RR73, RRR or 73 for the QSO is received, whichever comes first, once. Not a setting.
