@@ -587,7 +587,7 @@ const { PskrClient } = require('./lib/pskreporter');
 const PskrTx = require('./lib/pskreporter-tx');
 const { Ft8Engine, freqsForMode } = require('./lib/ft8-engine');
 const DialSnap = require('./lib/dial-snap');
-const PlainSsbForDigital = require('./lib/plain-ssb-for-digital');
+const RigAudioJack = require('./lib/rig-audio-jack'); // #153: sound card on the data jack or the mic jack, per rig; the one DATA-mode rule
 const FreedvPtt = require('./lib/freedv-ptt'); // FreeDV mode: voice PTT refused until FreeDV transmit exists
 const FreedvStatus = require('./lib/freedv-status'); // freedv-status to ECHOCAT: state, modes, sync, SNR, plain reason
 const FreedvDisplayMode = require('./lib/freedv-display-mode'); // #716: FREEDV-<codec> on every surface while the engine runs
@@ -3622,6 +3622,17 @@ AmpDrive.setLimitSource(() => {
   try { const m = getActiveRigModel(); fullW = m && Number(m.maxPower) > 0 ? Number(m.maxPower) : 0; } catch { fullW = 0; }
   return { watts, fullW };
 });
+
+/**
+ * The active rig's sound card jack and voice tick box (lib/rig-audio-jack.js,
+ * #153). Every decision to put the radio in a DATA mode reads this.
+ */
+function activeRigAudioJack() {
+  const rig = (settings.rigs || []).find((r) => r && r.id === settings.activeRigId) || null;
+  let family;
+  try { family = RigFamily.rigFamily(rig); } catch { family = undefined; }
+  return { rig, jack: RigAudioJack.jackOf(rig, family), voiceSwitch: RigAudioJack.voiceSwitchOf(rig) };
+}
 
 function getActiveRigModel() {
   const activeRig = (settings.rigs || []).find(r => r && r.id === settings.activeRigId);
@@ -10032,9 +10043,11 @@ async function connectCat() {
   // Voice in DATA mode (GitHub #24): this rig takes voice as USB-D/LSB-D.
   // Any edit of a rig reconnects CAT, so connecting is the one place to apply it.
   if (cat && typeof cat.setVoiceAsData === 'function') {
-    const vRig = (settings.rigs || []).find(r => r.id === settings.activeRigId);
-    cat.setVoiceAsData(!!(vRig && vRig.voiceAsData));
-    if (vRig && vRig.voiceAsData) sendCatLog("[CAT] Voice in DATA mode is on for this rig: USB and LSB go to the radio as USB-D and LSB-D, and the radio's own microphone is off.");
+    const { rig: vRig, jack: vJack } = activeRigAudioJack();
+    const vOn = RigAudioJack.voiceAsDataOn(vRig, vJack); // never on a microphone-jack rig (#153)
+    cat.setVoiceAsData(vOn);
+    if (vRig && vRig.voiceAsData && !vOn) sendCatLog("[CAT] Voice in DATA mode is ticked for this rig, but its sound card interface is on the microphone jack: voice stays in USB and LSB.");
+    if (vOn) sendCatLog("[CAT] Voice in DATA mode is on for this rig: USB and LSB go to the radio as USB-D and LSB-D, and the radio's own microphone is off.");
   }
   // Linux cdc_acm radios reject TIOCMSET, so node-serialport's port.set()
   // call to flip DTR for paddle keying fails on the first try and every try
@@ -15734,7 +15747,9 @@ function winlinkPacketRigMode(mode) {
   let family = 'none';
   try { family = rig ? RigFamily.rigFamily(rig) : (settings.catTarget ? RigFamily.familyFromCatTarget(settings.catTarget) : 'none'); } catch {}
   const model = getActiveRigModel();
-  return PacketRigMode.resolvePacketRigMode({ choice: rig && rig.packetMode, family, brand: model && model.brand, protocol: model && model.protocol });
+  // A microphone-jack rig runs packet in plain FM (lib/rig-audio-jack.js, #153).
+  const jack = RigAudioJack.jackOf(rig, family);
+  return PacketRigMode.resolvePacketRigMode({ choice: RigAudioJack.packetChoice(rig && rig.packetMode, jack), family, brand: model && model.brand, protocol: model && model.protocol });
 }
 let _winlinkUnreportedDataMode = ''; // a data mode sent to a radio that reads it back as FM (#128, the FT-857's PKT)
 /**
@@ -27750,7 +27765,7 @@ function stopTciScope(why) {
 /** Tune a TCI rig (tuneRadio). */
 function tciRigTune(freqHz, mode) {
   const why = !tciRig ? 'The TCI server is not connected'
-    : tciRig.tune(freqHz, mode, { dataMode: settings.jtcatUseDataMode !== false });
+    : tciRig.tune(freqHz, mode, { dataMode: RigAudioJack.digitalUsesData({ jack: activeRigAudioJack().jack, useDataMode: settings.jtcatUseDataMode !== false }) });
   if (!why) return;
   sendCatLog(`[TCI] Tune refused: ${why}`);
   for (const w of [win, jtcatPopoutWin, vfoPopoutWin]) {
@@ -28131,6 +28146,11 @@ function updateRemoteSettings() {
     // (AB9AI 2026-07-24). tuneRadio already honors it; this only closes the
     // display gap. Default-true idiom, like logCommentTags above.
     jtcatUseDataMode: settings.jtcatUseDataMode !== false,
+    // Where the active rig's sound card interface is plugged in (#153,
+    // lib/rig-audio-jack.js): 'mic' keeps every transmission out of DATA,
+    // whatever jtcatUseDataMode says, so a device shows "Plain USB" for it.
+    // Read-only and additive; set in the desktop rig editor.
+    rigAudioJack: activeRigAudioJack().jack,
     idleRxMode: IDLE_RX_MODES.includes(settings.idleRxMode) ? settings.idleRxMode : 'sstv',
     // The rest of Idle Mode, so a mobile device can show and set all of it
     // (capability 'idle-mode'), with the desktop window's own defaults.
@@ -33693,6 +33713,7 @@ function releasePhoneDrivenJtcat() {
 let _ssbModeBeforePtt = null; // original mode saved during DATA-mode PTT workaround
 let _ssbFreqBeforePtt = 0;    // dial freq saved at swap time — restore re-anchors here, never to a mid-TX polled freq
 let _ssbOverDataYaesuWarned = false; // log the rig-menu hint once per session
+const _micJackPttLogged = new Set(); // #153: the microphone-jack line, once per kind of transmission per session
 let _ssbOverDataFmAmWarned = false; // log 'SSB-over-DATA does not apply in FM or AM' once per session (#561)
 
 // --- Flex TX audio source (transmit set dax=) -------------------------------
@@ -34287,23 +34308,39 @@ function handleRemotePtt(state, opts = {}) {
   // reaches the rig in DATA mode (SSTV on an Icom, whose factory DATA OFF MOD
   // is MIC,ACC — plain USB keys with silence; WB8IMY IC-7300, 2026-09-26),
   // so the switch happens whether or not the SSB-over-DATA setting is on.
-  const forceData = !!opts.forceDataMode;
   // A Yaesu's DATA-U is not a mic-off USB: it takes the DATA filter and TX
   // processing, and with DATA MODE = PSK it shifts the carrier too, so a voice
   // macro or phone audio sent that way goes out narrow and wrong (K3SBP
   // FT-710, 2026-10-24: "kicks the 710 into Data-U, transmitting the voice all
   // wonky"). Voice stays in USB/LSB there; FreeDV and forced callers still switch.
-  const _pttRig = getActiveRigModel();
-  const yaesuVoice = !forceData && !!(_pttRig && _pttRig.brand === 'Yaesu') &&
-    !(typeof freedvEngine !== 'undefined' && freedvEngine);
-  if (state && settings.ssbOverData && !forceData && yaesuVoice && audioActive && !ft8Engine && !_ssbOverDataYaesuWarned) {
-    _ssbOverDataYaesuWarned = true;
-    sendCatLog('[PTT] SSB-over-DATA skipped for voice on a Yaesu: its DATA-U narrows and shifts voice. To keep the hand mic quiet during voice macros, set the SSB audio source to the rear/USB input in the radio menu.');
-  }
   // A rig with Voice in DATA mode is in USB-D/LSB-D already (GitHub #24).
-  const _voiceRig = (settings.rigs || []).find(r => r.id === settings.activeRigId);
-  const voiceInData = !forceData && !!(_voiceRig && _voiceRig.voiceAsData);
-  if (state && (settings.ssbOverData || forceData) && !opts.noDataSwap && !yaesuVoice && !voiceInData && audioActive && (!ft8Engine || forceData)) {
+  // The rig's sound card jack decides all of it (lib/rig-audio-jack.js, #153):
+  // on the microphone jack nothing switches to DATA, forced or not; on the
+  // data jack the rig's "voice switches to DATA" tick box, when set, replaces
+  // the global SSB-over-DATA setting and its Yaesu exception.
+  const _pttRig = getActiveRigModel();
+  const _jackNow = activeRigAudioJack();
+  const _dataPlanJack = RigAudioJack.pttDataPlan({
+    jack: _jackNow.jack, voiceSwitch: _jackNow.voiceSwitch, ssbOverData: !!settings.ssbOverData,
+    forced: !!opts.forceDataMode, yaesu: !!(_pttRig && _pttRig.brand === 'Yaesu'),
+    freedvRunning: !!(typeof freedvEngine !== 'undefined' && freedvEngine),
+    voiceAsData: !!(_jackNow.rig && _jackNow.rig.voiceAsData),
+  });
+  const forceData = _dataPlanJack.forceData;
+  const yaesuVoice = _dataPlanJack.yaesuVoice;
+  const voiceInData = _dataPlanJack.voiceInData;
+  if (state && _dataPlanJack.yaesuSkip && audioActive && !ft8Engine && !_ssbOverDataYaesuWarned) {
+    _ssbOverDataYaesuWarned = true;
+    sendCatLog('[PTT] SSB-over-DATA skipped for voice on a Yaesu: its DATA-U narrows and shifts voice. To keep the hand mic quiet during voice macros, set the SSB audio source to the rear/USB input in the radio menu, or tick "' + RigAudioJack.VOICE_SWITCH_LABEL + '" for this rig in Settings > Radio.');
+  }
+  if (state && _dataPlanJack.micSkip && !opts.noDataSwap && audioActive && (!ft8Engine || opts.forceDataMode)) {
+    const _micKey = opts.txKind || (opts.forceDataMode ? 'forced' : 'voice');
+    if (!_micJackPttLogged.has(_micKey)) {
+      _micJackPttLogged.add(_micKey);
+      sendCatLog(RigAudioJack.micJackPttLog({ txKind: opts.txKind, forced: !!opts.forceDataMode, mode: _currentMode }));
+    }
+  }
+  if (state && _dataPlanJack.want && !opts.noDataSwap && !yaesuVoice && !voiceInData && audioActive && (!ft8Engine || forceData)) {
     // Switch to DATA mode before TX to prevent local mic bleed
     // Skip when JTCAT is active — it manages its own DATA mode
     const curMode = (_currentMode || '').toUpperCase();
@@ -34351,7 +34388,7 @@ function handleRemotePtt(state, opts = {}) {
       _ssbFreqBeforePtt = _currentFreqHz;
       // Say WHY: a forced switch is not the SSB-over-DATA setting, and calling
       // it that sent EA1BZN to check two options that were already off.
-      sendCatLog(`[PTT] ${curMode} -> ${dataMode} (${forceData ? (opts.dataReason || 'this audio reaches the radio only in DATA mode') : 'SSB-over-DATA: mic disabled'})${_dataPlan === 'switch-hold' ? ' — held until the Winlink session ends' : ''}`);
+      sendCatLog(`[PTT] ${curMode} -> ${dataMode} (${forceData ? (opts.dataReason || 'this audio reaches the radio only in DATA mode') : _dataPlanJack.reason})${_dataPlan === 'switch-hold' ? ' — held until the Winlink session ends' : ''}`);
       // Yaesu rigs have a "DATA MODE" menu that controls whether DIGL/DIGU
       // behave as mic-disabled SSB (DATA MODE = Others/STD — carrier freq
       // unchanged) or as a subcarrier-offset PSK mode (DATA MODE = PSK —
@@ -44522,11 +44559,13 @@ function tuneRadio(freqKhz, mode, brng, { clearXit, origin, purpose } = {}) {
   // resolved to DIGU/USB per the independent freedvUseDataMode setting) isn't
   // re-rewritten here.
   // A Winlink radio session is not JTCAT and keeps the data mode (lib/plain-ssb-for-digital.js).
+  // A rig whose sound card interface is on the microphone jack never goes to a
+  // DATA mode, on any tune (lib/rig-audio-jack.js, #153).
   {
-    const plain = PlainSsbForDigital.plainSsbForDigital(mode, { useDataMode: settings.jtcatUseDataMode !== false, purpose, freedv: isFreedvMode });
-    if (plain !== mode) {
-      sendCatLog(`[tune] ${String(mode).toUpperCase()} -> ${plain}: "Switch radio to DATA mode (PKTUSB) for FT8 / FT4 (JTCAT)" is off`);
-      mode = plain;
+    const t = RigAudioJack.tuneMode(mode, { jack: activeRigAudioJack().jack, useDataMode: settings.jtcatUseDataMode !== false, purpose, freedv: isFreedvMode });
+    if (t.mode !== mode) {
+      sendCatLog(t.log);
+      mode = t.mode;
     }
   }
 

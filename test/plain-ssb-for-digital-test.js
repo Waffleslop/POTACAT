@@ -41,8 +41,9 @@ t('both Winlink tunes say purpose: winlink', () => {
   assert.ok(/origin: 'Winlink session', purpose: 'winlink'/.test(main));
   assert.ok(/origin: 'Winlink gateway pick', purpose: 'winlink'/.test(main));
 });
-t('tuneRadio applies the rule through the helper only', () => {
-  assert.ok(/PlainSsbForDigital\.plainSsbForDigital\(mode, \{ useDataMode: settings\.jtcatUseDataMode !== false, purpose/.test(main));
+t('tuneRadio applies the rule through the helper only (via lib/rig-audio-jack.js, #153)', () => {
+  assert.ok(/RigAudioJack\.tuneMode\(mode, \{ jack: activeRigAudioJack\(\)\.jack, useDataMode: settings\.jtcatUseDataMode !== false, purpose/.test(main));
+  assert.ok(/require\('\.\/plain-ssb-for-digital'\)/.test(fs.readFileSync(path.join(__dirname, '..', 'lib', 'rig-audio-jack.js'), 'utf8')), 'the jack rule uses this one');
   assert.ok(!/settings\.jtcatUseDataMode === false && mode && !isFreedvMode/.test(main), 'the old inline rewrite is gone');
 });
 
