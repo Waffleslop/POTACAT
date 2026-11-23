@@ -891,7 +891,8 @@ function _applyPopoutTheme(payload) {
       const settings = await window.api.getSettings();
       // The operator's own Default TX Power, never the old untouched 100;
       // none = the box stays empty and the contact carries no power (#523).
-      const dp = window.LogTxPower ? window.LogTxPower.operatorDefaultPower(settings) : 0;
+      // "Always log this power" (an amplifier, #837) comes first.
+      const dp = window.LogTxPower ? (window.LogTxPower.fixedLogPower(settings) || window.LogTxPower.operatorDefaultPower(settings)) : 0;
       if (dp && powerInput.value === '') powerInput.value = String(dp);
       // Re-spot prefs hydrated from the same settings keys the spot-row
       // Log dialog and Bottom Banner Logger use, so all three desktop

@@ -2986,6 +2986,10 @@
           <input type="number" id="set-default-power" min="1" max="5000" placeholder="none">
         </label>
         <span class="help-text" style="margin-left:12px;margin-bottom:6px;display:block;">Logged only when the radio's power cannot be read and POTACAT has not set it. Blank: the contact is logged with no power.</span>
+        <label>Always log this power, for an amplifier (W):
+          <input type="number" id="set-log-fixed-power" min="1" max="10000" placeholder="off">
+        </label>
+        <span class="help-text" style="margin-left:12px;margin-bottom:6px;display:block;">Logged instead of the power the radio reports. A power you type for one contact still wins. Blank: off. New contacts only.</span>
         <label class="checkbox-label"><input type="checkbox" id="set-n1mm-rst"> N1MM-style RST logging</label>
         <span class="help-text" style="margin-left:12px;margin-bottom:6px;display:block;">On: one box per digit of each report. Off: one field per report; a full report moves the cursor to RST Rcvd by itself, and a Tab pressed straight after stays there.</span>
         <label class="checkbox-label"><input type="checkbox" id="set-log-comment-tags" checked> Auto park/club tags in comment</label>
