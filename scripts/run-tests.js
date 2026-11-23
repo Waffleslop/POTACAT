@@ -708,6 +708,7 @@ const TESTS = [
   'test/rig-power-off-guard-test.js', // #293: no Power Off for a radio POTACAT cannot switch back on, unless the rig allows it
   'test/rig-power-off-defaults-test.js', // #768: Power Off shown by default on a direct serial port or SCU-LAN10, hidden on Hamlib; a stored choice wins
   'test/amp-drive-limit-test.js', // B10 row 10: a per-rig amplifier drive limit, enforced in every radio client
+  'test/g90-power-scale-test.js', // the Xiegu G90 through rigctld sends RFPOWER on its own 20 W full scale (20 W = 1.000, not 0.200); other radios' bytes unchanged (#989)
   'test/remote-multi-client-test.js',
   'test/remote-bridge-test.js',
   'test/aprs-remote-shack-test.js', // #868: a desktop driving a remote shack starts APRS listening there (aprs-listen), shows the shack's aprs-state and the stations its radio heard
