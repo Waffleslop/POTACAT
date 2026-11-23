@@ -1023,12 +1023,14 @@
     var g = pickedGateway();
     renderDial();
     renderFavBtn();
-    if (g && g.dialKhz) qsyTo(g.dialKhz);
+    if (g && g.dialKhz) qsyTo(g.dialKhz, g.call);
   });
   $('wl-gw-refresh').addEventListener('click', function () { loadGateways(true); });
 
-  function qsyTo(khz) {
-    window.api.qsy({ dialKhz: khz, mode: currentMode().id }).then(function (r) {
+  // The call goes with the dial: main looks a typed gateway (#585) up by it in
+  // the saved list, to apply the typed reach rule. Main never trusts a flag.
+  function qsyTo(khz, call) {
+    window.api.qsy({ dialKhz: khz, mode: currentMode().id, gateway: call || undefined }).then(function (r) {
       if (r && !r.ok && r.error) { $('wl-text').textContent = r.error; }
     });
   }
@@ -1062,6 +1064,13 @@
     var b = $('wl-fav');
     var g = pickedGateway();
     var m = currentMode().id;
+    // A gateway the operator typed in (#585): Edit and Remove where the star was.
+    var mine = !!(g && g.mine && m !== 'telnet');
+    b.hidden = mine;
+    $('wl-mine-edit').hidden = !mine;
+    $('wl-mine-remove').hidden = !mine;
+    if (!mine || !removeArmed || !sameGw(removeArmed, g)) disarmRemove();
+    if (mine) { $('wl-mine-edit').title = 'Change ' + g.call; $('wl-mine-remove').title = 'Remove ' + g.call + ' from your own gateways'; }
     var ok = !!(g && g.call && g.dialKhz && m !== 'telnet');
     var on = ok && isFav(g, m);
     b.disabled = !ok;
@@ -1081,12 +1090,124 @@
   // keeping the pick; Pat is not asked again.
   var favSig = '';
   function refreshFavMarks() {
-    var sig = JSON.stringify(favs().map(function (f) { return f.call + '|' + f.mode + '|' + f.khz; }));
+    var sig = JSON.stringify(favs().map(function (f) { return [f.call, f.mode, f.khz, f.mine ? 1 : 0, f.note || '', (f.via || []).join(' '), f.bw || 0]; }));
     if (sig === favSig) { renderFavBtn(); return; }
     favSig = sig;
     if (lastList) { var keep = pickedGateway(); buildGatewayOptions(lastList, keep ? { call: keep.call, khz: keep.dialKhz } : null); }
     else renderFavBtn();
   }
+
+  // ── Add a gateway (#585, plan docs/winlink-custom-gateways-plan.md 2.3) ──
+  // A gateway Pat does not list, typed in: saved in My gateways as the
+  // operator's own (Mine). The rules are lib/winlink-my-gateways.js.
+  var addEditing = null;   // the Mine entry being changed, or null for a new one
+  function addModes() {
+    return ((state && state.modes) || []).filter(function (m) { return m.id !== 'telnet' && m.available && WinlinkMine.MODES.indexOf(m.id) >= 0; });
+  }
+  function addFreqText(mode, khz) {
+    var c = WinlinkMine.centerKhz(mode, khz);
+    if (!c) return '';
+    return c >= 30000 ? String(+(c / 1000).toFixed(5)) : String(+c.toFixed(2));
+  }
+  function addSyncFields() {
+    var mode = $('wl-add-mode').value;
+    var hf = WinlinkMine.CENTER_MODES.indexOf(mode) >= 0;
+    $('wl-add-bw-row').hidden = mode !== 'ardop';
+    $('wl-add-via-row').hidden = mode !== 'packet';
+    $('wl-add-freq-label').textContent = hf ? 'Center frequency' : 'Channel frequency';
+    $('wl-add-freq').placeholder = hf ? 'for example 7101.4' : 'for example 145.05';
+    $('wl-add-dial').textContent = WinlinkMine.dialLine(mode, $('wl-add-freq').value);
+  }
+  function addShowErrors(errors) {
+    ['call', 'mode', 'freq', 'bw', 'via', 'note'].forEach(function (k) {
+      var el = $('wl-add-' + k + '-err');
+      if (el) el.textContent = (errors && errors[k]) || '';
+    });
+  }
+  function openAddForm(entry) {
+    var modes = addModes();
+    if (!modes.length) { $('wl-text').textContent = 'No radio mode is available on this station right now'; return; }
+    addEditing = entry || null;
+    var cur = currentMode().id;
+    var mode = entry ? entry.mode : (modes.some(function (m) { return m.id === cur; }) ? cur : modes[0].id);
+    $('wl-add-mode').innerHTML = modes.map(function (m) { return '<option value="' + esc(m.id) + '">' + esc(MODE_SHORT[m.id] || m.id) + '</option>'; }).join('')
+      + (entry && !modes.some(function (m) { return m.id === entry.mode; }) ? '<option value="' + esc(entry.mode) + '">' + esc(MODE_SHORT[entry.mode] || entry.mode) + '</option>' : '');
+    $('wl-add-mode').value = mode;
+    $('wl-add-title').textContent = entry ? 'Change ' + entry.call : 'Add a gateway';
+    $('wl-add-call').value = entry ? entry.call : '';
+    $('wl-add-freq').value = entry ? addFreqText(entry.mode, entry.khz) : '';
+    $('wl-add-bw').value = entry && entry.bw ? String(entry.bw) : '0';
+    $('wl-add-via').value = entry && entry.via ? entry.via.join(' ') : '';
+    $('wl-add-note').value = entry && entry.note ? entry.note : '';
+    $('wl-add-msg').textContent = '';
+    addShowErrors(null);
+    addSyncFields();
+    $('wl-add-card').classList.add('show');
+    $('wl-add-call').focus();
+  }
+  function closeAddForm() { $('wl-add-card').classList.remove('show'); addEditing = null; }
+  $('wl-gw-add').addEventListener('click', function () { if ($('wl-add-card').classList.contains('show') && !addEditing) closeAddForm(); else openAddForm(null); });
+  $('wl-add-cancel').addEventListener('click', closeAddForm);
+  $('wl-add-mode').addEventListener('change', addSyncFields);
+  $('wl-add-freq').addEventListener('input', function () { $('wl-add-dial').textContent = WinlinkMine.dialLine($('wl-add-mode').value, $('wl-add-freq').value); });
+  $('wl-add-call').addEventListener('input', function () {
+    var el = $('wl-add-call'), at = el.selectionStart, up = el.value.toUpperCase();
+    if (up !== el.value) { el.value = up; try { el.setSelectionRange(at, at); } catch (e) {} }
+  });
+  $('wl-add-card').addEventListener('keydown', function (e) {
+    if (e.key === 'Escape') { e.preventDefault(); closeAddForm(); }
+    else if (e.key === 'Enter' && e.target.tagName === 'INPUT') { e.preventDefault(); $('wl-add-save').click(); }
+  });
+  $('wl-add-save').addEventListener('click', function () {
+    var r = WinlinkMine.validate({
+      call: $('wl-add-call').value, mode: $('wl-add-mode').value, freq: $('wl-add-freq').value,
+      bw: $('wl-add-bw').value, via: $('wl-add-via').value, note: $('wl-add-note').value,
+    }, { modes: (state && state.modes) || null });
+    addShowErrors(r.errors);
+    if (!r.ok) return;
+    var e = r.entry;
+    var was = addEditing ? { call: addEditing.call, mode: addEditing.mode, dialKhz: addEditing.khz } : undefined;
+    var btn = $('wl-add-save');
+    btn.disabled = true;
+    window.api.favourite(was ? 'edit' : 'add', { call: e.call, mode: e.mode, dialKhz: e.dialKhz, mine: true, note: e.note, via: e.via, bw: e.bw, was: was }).then(function (x) {
+      btn.disabled = false;
+      if (!x || !x.ok) { $('wl-add-msg').textContent = (x && x.error) || 'Could not save that gateway'; return; }
+      closeAddForm();
+      // Picked at once, and the radio tuned there (the path a favourite uses).
+      useGateway({ call: e.call, mode: e.mode, khz: e.dialKhz });
+    });
+  });
+  $('wl-mine-edit').addEventListener('click', function () {
+    var g = pickedGateway();
+    if (g && g.mine) openAddForm(g.entry);
+  });
+  // Remove asks once: the first click turns the button into the question.
+  var removeArmed = null, removeTimer = null;
+  function disarmRemove() {
+    removeArmed = null;
+    clearTimeout(removeTimer);
+    var b = $('wl-mine-remove');
+    b.textContent = 'Remove';
+    b.classList.remove('danger');
+  }
+  $('wl-mine-remove').addEventListener('click', function () {
+    var g = pickedGateway();
+    if (!g || !g.mine) return;
+    if (!removeArmed || !sameGw(removeArmed, g)) {
+      removeArmed = { call: g.call, dialKhz: g.dialKhz };
+      var b = $('wl-mine-remove');
+      b.textContent = 'Remove ' + g.call + '? Click again';
+      b.classList.add('danger');
+      clearTimeout(removeTimer);
+      removeTimer = setTimeout(disarmRemove, 6000);
+      return;
+    }
+    disarmRemove();
+    if (addEditing && sameGw(addEditing, g)) closeAddForm();
+    window.api.favourite('remove', { call: g.call, mode: g.entry.mode, dialKhz: g.dialKhz }).then(function (x) {
+      if (x && !x.ok && x.error) $('wl-text').textContent = x.error;
+    });
+  });
 
   // One gateway (a favorite or a History row) → mode, band, gateway and dial
   // set together, and the radio tuned there.
@@ -1106,7 +1227,7 @@
     bandSel.value = bandOpt ? g.band : '';
     if (historyOpen) closeHistory();
     loadGateways(false);
-    qsyTo(khz);
+    qsyTo(khz, pendingPick.call);
   }
 
   // One line per gateway, the prediction as a word first: what the operator
@@ -1126,8 +1247,25 @@
   // Rows the gateway list holds besides Pat's: favorites Pat did not list
   // this time, and a History row picked from outside the list.
   var favRows = [];
+  // The operator's own gateways (#585), their own group at the top of the list.
+  var mineRows = [];
+  function mineRow(f) { return { call: f.call, dialKhz: f.khz, band: f.band, url: '', saved: true, mine: true, entry: f }; }
+  function mineOption(f, i, selected) {
+    return '<option value="m:' + i + '"' + (selected ? ' selected' : '') + '>' + esc(WinlinkMine.mineLabel(f)) + '</option>';
+  }
+  function mineGroupHtml(want) {
+    if (!mineRows.length) return { html: '', hit: false };
+    var hit = false;
+    var html = '<optgroup label="' + esc(WinlinkMine.MINE_GROUP) + '">' + mineRows.map(function (r, i) {
+      var on = !hit && !!want && sameGw(want, r);
+      if (on) hit = true;
+      return mineOption(r.entry, i, on);
+    }).join('') + '</optgroup>';
+    return { html: html, hit: hit };
+  }
   function pickedGateway() {
     var v = $('wl-gateway').value;
+    if (/^m:\d+$/.test(v)) return mineRows[parseInt(v.slice(2), 10)] || null;
     if (/^f:\d+$/.test(v)) return favRows[parseInt(v.slice(2), 10)] || null;
     return gateways[parseInt(v, 10)] || null;
   }
@@ -1165,24 +1303,32 @@
     var sel = $('wl-gateway');
     var m = currentMode().id;
     var band = $('wl-band').value;
-    favRows = favs().filter(function (f) { return f.mode === m && (!band || f.band === band) && !gateways.some(function (g) { return sameGw(g, f); }); })
-      .map(function (f) { return { call: f.call, dialKhz: f.khz, band: f.band, url: f.url || '', saved: true }; });
+    // lib/winlink-my-gateways.js: the operator's own first (a Mine entry Pat
+    // also lists shows once, as Mine), then Pat's ranking, then starred ones
+    // Pat did not list. No cap drops a Mine entry.
+    var groups = WinlinkMine.pickerGroups({ favourites: favs(), gateways: gateways, mode: m, band: band });
+    mineRows = groups.mine.map(mineRow);
+    favRows = groups.missing.map(function (f) { return { call: f.call, dialKhz: f.khz, band: f.band, url: f.url || '', saved: true }; });
     var last = state && state.lastGateway;
     var want = pendingPick || keep || (last && { call: last.call, khz: last.dialKhz });
-    var picked = false;
-    var rows = gateways.slice(0, 120).map(function (g, i) {
+    var mineHtml = mineGroupHtml(want);
+    var picked = mineHtml.hit;
+    var shown = 0;
+    var rows = gateways.map(function (g, i) {
+      if (shown >= 120 || groups.ranked.indexOf(g) < 0) return '';
+      shown++;
       var hit = !picked && want && sameGw(want, g);
       if (hit) picked = true;
       return '<option value="' + i + '"' + (hit ? ' selected' : '') + '>' + esc(gatewayLabel(g)) + '</option>';
     }).join('');
-    if (!gateways.length) rows = '<option value="" disabled>No gateways for that band</option>';
+    if (!groups.ranked.length) rows = '<option value="" disabled>No gateways for that band</option>';
     var extra = favRows.length ? '<optgroup label="Favorites not in this list">' + favRows.map(function (f, i) {
       var hit = !picked && want && sameGw(want, f);
       if (hit) picked = true;
       return favOption(f, i, hit);
     }).join('') + '</optgroup>' : '';
     var more = r.leftOut ? '<option value="" disabled>' + esc(r.leftOut + ' more this radio cannot call (outside the amateur bands, or not ticked under Check all bands in Settings > Radio, Edit the rig)') + '</option>' : '';
-    sel.innerHTML = '<optgroup label="' + (r.predicted ? 'Best path now' : 'Nearest first') + '">' + rows + '</optgroup>' + extra + more;
+    sel.innerHTML = mineHtml.html + '<optgroup label="' + (r.predicted ? 'Best path now' : 'Nearest first') + '">' + rows + '</optgroup>' + extra + more;
     if (pendingPick && !picked) {
       // A History row not in today's list is still callable: a row of its own at the top.
       favRows.push({ call: pendingPick.call, dialKhz: pendingPick.khz, band: '', url: pendingPick.url || '' });
@@ -1211,9 +1357,10 @@
     gwLoading = true;
     lastList = null;
     // Favorites are usable at once, while the list and its prediction load.
-    favRows = favs().filter(function (f) { return f.mode === m.id && (!band || f.band === band); })
-      .map(function (f) { return { call: f.call, dialKhz: f.khz, band: f.band, url: f.url || '', saved: true }; });
-    var favHtml = favRows.length ? '<optgroup label="Favorites">' + favRows.map(function (f, i) { return favOption(f, i, pendingPick && sameGw(pendingPick, f)); }).join('') + '</optgroup>' : '';
+    var early = WinlinkMine.pickerGroups({ favourites: favs(), gateways: [], mode: m.id, band: band });
+    mineRows = early.mine.map(mineRow);
+    favRows = early.missing.map(function (f) { return { call: f.call, dialKhz: f.khz, band: f.band, url: f.url || '', saved: true }; });
+    var favHtml = mineGroupHtml(pendingPick).html + (favRows.length ? '<optgroup label="Favorites">' + favRows.map(function (f, i) { return favOption(f, i, pendingPick && sameGw(pendingPick, f)); }).join('') + '</optgroup>' : '');
     sel.innerHTML = favHtml + '<option value=""' + (favHtml && pendingPick ? '' : ' selected') + '>Loading gateways…</option>';
     if (note) note.textContent = '';
     if (hf && state && state.predictionOn) predictStart(m.id); else predictStop();
@@ -1258,7 +1405,7 @@
     var busy = $('wl-mode').disabled;
     btn.hidden = on || busy || !(dialHz > 0);
   }
-  $('wl-retune').addEventListener('click', function () { var g = pickedGateway(); if (g && g.dialKhz) qsyTo(g.dialKhz); });
+  $('wl-retune').addEventListener('click', function () { var g = pickedGateway(); if (g && g.dialKhz) qsyTo(g.dialKhz, g.call); });
   if (window.api.onCatFrequency) window.api.onCatFrequency(function (hz) { dialHz = Number(hz) || 0; renderDial(); });
 
   // ── a good session ends with a card: save the gateway (#254) ──────────────

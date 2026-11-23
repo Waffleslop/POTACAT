@@ -421,6 +421,7 @@ const TESTS = [
   'test/winlink-busy-wait-test.js', // #296: Keep waiting stays chosen, Stop ends Pat's busy wait, the watchdog does not call the wait a stall
   'test/modem-audio-lane-test.js', // #187: the modem's audio off the main process; credit, drain, counted cuts
   'test/winlink-awake-test.js', // #187: a radio Winlink session holds off App Nap (the hidden bridge window starved on a Mac)
+  'test/winlink-my-gateways-test.js', // #585: Add a gateway: the form's checks, the dial from the centre, Mine entries (note, via, ARDOP bandwidth), Edit and Remove, their own group in the list
   'test/winlink-history-test.js', // #254: gateway history from Pat's event log, My gateways (saved gateways)
   'test/winlink-outcome-test.js', // #425: how a session ended is worded in one place; Pat's reply never reaches a status; one summary line per session
   'test/winlink-pat-recover-test.js', // #430: after an Abort, Connect restarts a Pat that is stuck on the last call; a session never starts on top of a dial (VARA)

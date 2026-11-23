@@ -13209,6 +13209,17 @@ function winlinkReachOpts() {
 }
 
 /**
+ * A gateway the operator typed in (#585, Add a gateway): the saved My gateways
+ * entry with `mine: true` for this call, mode and dial, or null. Read from
+ * settings, never from the request, so a window cannot ask for the typed reach
+ * rule (no band checks) on a listed gateway.
+ */
+function winlinkMineGateway({ gateway, mode, dialKhz } = {}) {
+  if (!gateway) return null;
+  return WinlinkFav.findMine(settings.winlinkFavourites, { call: String(gateway), mode: String(mode || ''), dialKhz: Number(dialKhz) });
+}
+
+/**
  * A gateway was picked (not yet connected): tune there now, so the waterfall
  * shows that frequency and the operator can see whether it is in use. The
  * dial/mode from before the FIRST pick is remembered across attempts and put
@@ -13217,13 +13228,15 @@ function winlinkReachOpts() {
  * regardless, so a dial moved in between is corrected before the first
  * transmission.
  */
-function winlinkPreviewQsy({ dialKhz, mode } = {}) {
+function winlinkPreviewQsy({ dialKhz, mode, gateway } = {}) {
   const khz = Number(dialKhz);
   if (!Number.isFinite(khz) || khz <= 0) return { ok: false, error: 'No frequency' };
   if (isRemoteMode()) return { ok: false, error: 'Radio sessions key the shack\'s radio — tune from the shack PC', reason: 'remote' };
   if (winlinkSessionActive()) return { ok: false, error: 'A session is running' };
   if (radioOwner !== 'none' && radioOwner !== 'winlink') return { ok: false, error: `The radio is in use by ${radioOwner}`, reason: 'radio-busy' };
-  const reach = WinlinkReach.gatewayReach(khz, winlinkReachOpts());
+  // A typed gateway (#585) skips the band checks and keeps the radio's range.
+  const mine = winlinkMineGateway({ gateway, mode, dialKhz: khz });
+  const reach = WinlinkReach.gatewayReach(khz, { ...winlinkReachOpts(), typed: !!mine });
   if (!reach.ok) { winlinkLog(`gateway pick refused: ${reach.why}`); return { ok: false, error: reach.why, reason: 'out-of-reach' }; }
   winlinkNoteHandTune();
   aprsListenYieldToWinlink('gateway pick'); // the modem and the radio are Winlink's now; APRS's saved place becomes the return point
@@ -15561,13 +15574,16 @@ async function winlinkStartSession({ mode, gateway, dialKhz, url: rowUrl, origin
     // A second Connect may have started a session while Pat was restarting.
     if (clear.restarted && winlinkSessionActive()) return { ok: false, error: 'A Winlink session is already running' };
   }
+  // A gateway the operator typed in (#585): its packet via path and its ARDOP
+  // bandwidth come from the saved entry, never from the request.
+  const mine = radio ? winlinkMineGateway({ gateway, mode, dialKhz }) : null;
   // The operator's ARDOP/VARA bandwidth caps the list row's bw for the dial (#663).
-  const url = WinlinkPat.sessionUrl({ mode, gateway, dialKhz, bw: mode === 'vara' ? settings.winlinkVaraBw : undefined, ardopBw: winlinkModemBw().ardop, rowUrl });
+  const url = WinlinkPat.sessionUrl({ mode, gateway, dialKhz, bw: mode === 'vara' ? settings.winlinkVaraBw : undefined, ardopBw: winlinkModemBw().ardop, rowUrl, via: mine ? mine.via : undefined, mineBw: mine ? mine.bw : undefined });
   if (!url) return { ok: false, error: 'Pick a gateway first' };
   if (radio) {
     // Never an attempt on a frequency this radio cannot transmit on: nothing
     // tunes, no modem starts, nothing keys (lib/winlink-reach.js).
-    const reach = WinlinkReach.gatewayReach(dialKhz, winlinkReachOpts());
+    const reach = WinlinkReach.gatewayReach(dialKhz, { ...winlinkReachOpts(), typed: !!mine });
     if (!reach.ok) { winlinkLog(`session refused: ${String(gateway || '').toUpperCase()} — ${reach.why}`); return { ok: false, error: reach.why, reason: 'out-of-reach' }; }
     if (!_winlinkShimPort) return { ok: false, error: WinlinkMailView.SHIM_DOWN };
     if (_swrTripped) return { ok: false, error: 'The SWR guard has tripped — fix the antenna match first' };
@@ -17234,12 +17250,31 @@ function winlinkTemplate(op, t) {
   return { ok: true, id: r.id || null };
 }
 
-/** Save ('add') or remove a gateway in My gateways; every surface gets the list on winlink-state. */
+/**
+ * The fields of a favourite request (the mail window's invoke, an ECHOCAT
+ * device's winlink-favourite), typed. #585: a gateway typed in on the Add a
+ * gateway form carries mine, note, via and bw; Edit also names the entry it
+ * replaces (was). lib/winlink-favourites.js clean() drops any that are not valid.
+ */
+function winlinkFavouriteFields(r = {}) {
+  const was = r.was && typeof r.was === 'object' ? { call: String(r.was.call || ''), mode: String(r.was.mode || ''), dialKhz: Number(r.was.dialKhz) } : undefined;
+  return {
+    call: String(r.call || ''), mode: String(r.mode || ''), khz: Number(r.dialKhz), url: String(r.url || ''),
+    mine: r.mine === true, note: typeof r.note === 'string' ? r.note : undefined,
+    via: Array.isArray(r.via) ? r.via.map(String) : undefined, bw: Number(r.bw) || undefined, was,
+  };
+}
+
+/** Save ('add'), change ('edit', #585) or remove a gateway in My gateways; every surface gets the list on winlink-state. */
 function winlinkFavourite(op, g) {
   const before = WinlinkFav.normalize(settings.winlinkFavourites);
   let list;
   if (op === 'add') {
     const r = WinlinkFav.add(before, g);
+    if (!r.ok) return { ok: false, error: r.error };
+    list = r.list;
+  } else if (op === 'edit') {
+    const r = WinlinkFav.edit(before, g.was, g);
     if (!r.ok) return { ok: false, error: r.error };
     list = r.list;
   } else if (op === 'remove') {
@@ -17249,7 +17284,7 @@ function winlinkFavourite(op, g) {
   }
   settings.winlinkFavourites = list;
   saveSettings(settings);
-  winlinkLog(`My gateways: ${op === 'add' ? 'saved' : 'removed'} ${String(g.call || '').toUpperCase()} (${g.mode}, ${Number(g.khz).toFixed(1)} kHz)`);
+  winlinkLog(`My gateways: ${op === 'add' ? 'saved' : op === 'edit' ? 'changed' : 'removed'} ${String(g.call || '').toUpperCase()} (${g.mode}, ${Number(g.khz).toFixed(1)} kHz)${g.mine ? ', typed in' : ''}`);
   // A finished session's card offers Save until it is saved.
   const res = winlinkState.session.result;
   if (res) winlinkState.setSession({ result: { ...res, saved: WinlinkFav.has(list, { call: res.call, mode: res.mode, khz: res.khz }) } });
@@ -17344,7 +17379,7 @@ async function winlinkHandleRemote({ type, req = {}, reply, clientId }) {
         return;
       case 'winlink-qsy':
         winlinkRetryCancel('gateway-pick');
-        result('qsy', winlinkPreviewQsy({ dialKhz: req.dialKhz, mode: req.mode }));
+        result('qsy', winlinkPreviewQsy({ dialKhz: req.dialKhz, mode: req.mode, gateway: req.gateway }));
         return;
       case 'winlink-qsy-restore':
         // This device left its Mail tab; the radio goes back only when no other Mail view is open.
@@ -17393,7 +17428,7 @@ async function winlinkHandleRemote({ type, req = {}, reply, clientId }) {
       }
       // My gateways (#254): save or remove one; the list rides winlink-state.
       case 'winlink-favourite':
-        result('favourite', winlinkFavourite(req.op, { call: req.call, mode: req.mode, khz: req.dialKhz, url: req.url }));
+        result('favourite', winlinkFavourite(req.op, winlinkFavouriteFields(req)));
         return;
       // Message templates: op 'save' (a new one, or the one with that id) | 'delete' {id}.
       // The address book: op 'save' (new, or the one with id) | 'delete' {id}.
@@ -49164,7 +49199,7 @@ function cloudShackNotice(text, kind) {
   ipcMain.handle('winlink-cmd-contact', (_e, { op, c } = {}) => winlinkContact(String(op || ''), c && typeof c === 'object' ? c : {}));
   ipcMain.handle('winlink-cmd-contact-group', (_e, { op, g } = {}) => winlinkContactGroup(String(op || ''), g && typeof g === 'object' ? g : {}));
   ipcMain.handle('winlink-cmd-template', (_e, { op, t } = {}) => winlinkTemplate(String(op || ''), t && typeof t === 'object' ? t : {}));
-  ipcMain.handle('winlink-cmd-favourite', (_e, { op, call, mode, dialKhz, url } = {}) => winlinkFavourite(String(op || ''), { call: String(call || ''), mode: String(mode || ''), khz: Number(dialKhz), url: String(url || '') }));
+  ipcMain.handle('winlink-cmd-favourite', (_e, { op, call, mode, dialKhz, url, mine, note, via, bw, was } = {}) => winlinkFavourite(String(op || ''), winlinkFavouriteFields({ call, mode, dialKhz, url, mine, note, via, bw, was })));
   ipcMain.on('winlink-cmd-set-mode', (_e, mode) => winlinkSetMode(mode));
   ipcMain.handle('winlink-cmd-accept-notice', () => winlinkAcceptNotice());
   ipcMain.on('winlink-open-settings', () => {

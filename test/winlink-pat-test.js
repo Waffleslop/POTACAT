@@ -372,5 +372,38 @@ test('#254: the gateway reply carries how many were left out', () => {
   assert.ok(!fn.slice(fn.indexOf('const note ='), fn.indexOf('const tell =')).includes('left out ('), 'the note is the ranking only');
 });
 
+// #585 Add a gateway (plan 3.3): packet goes through digipeaters typed in Via.
+test('#585: connectUrl puts the via calls before the target for packet', () => {
+  const { connectUrl } = require('../lib/winlink-pat');
+  assert.strictEqual(connectUrl({ mode: 'packet', gateway: 'w2xyz-10', dialKhz: 145050, via: ['W2ABC-1'] }), 'ax25:///W2ABC-1/W2XYZ-10?freq=145050');
+  assert.strictEqual(connectUrl({ mode: 'packet', gateway: 'W2XYZ-10', dialKhz: 145050, via: ['w2abc-1', 'K2DEF-3'] }), 'ax25:///W2ABC-1/K2DEF-3/W2XYZ-10?freq=145050');
+  assert.strictEqual(connectUrl({ mode: 'packet', gateway: 'W2XYZ-10', dialKhz: 145050, via: [] }), 'ax25:///W2XYZ-10?freq=145050');
+});
+test('#585: via is ignored for ARDOP, VARA HF, VARA FM and Mercury', () => {
+  const { connectUrl } = require('../lib/winlink-pat');
+  assert.strictEqual(connectUrl({ mode: 'ardop', gateway: 'K4SPB', dialKhz: 7099.9, via: ['W2ABC-1'] }), 'ardop:///K4SPB?freq=7099.9');
+  assert.strictEqual(connectUrl({ mode: 'vara', gateway: 'K4SPB', dialKhz: 7099.9, bw: 2300, via: ['W2ABC-1'] }), 'varahf:///K4SPB?bw=2300&freq=7099.9');
+  assert.strictEqual(connectUrl({ mode: 'varafm', gateway: 'W2XYZ-10', dialKhz: 145070, via: ['W2ABC-1'] }), 'varafm:///W2XYZ-10?freq=145070');
+  assert.strictEqual(connectUrl({ mode: 'mercury', gateway: 'K4SPB', dialKhz: 7099.9, via: ['W2ABC-1'] }), 'varahf:///K4SPB?freq=7099.9');
+});
+test('#585: a bad via call, or more than two, gives no URL', () => {
+  const { connectUrl } = require('../lib/winlink-pat');
+  assert.strictEqual(connectUrl({ mode: 'packet', gateway: 'W2XYZ-10', dialKhz: 145050, via: ['RELAY*'] }), null);
+  assert.strictEqual(connectUrl({ mode: 'packet', gateway: 'W2XYZ-10', dialKhz: 145050, via: ['W2ABC-1', 'K2DEF-3', 'N2GHI'] }), null);
+  assert.strictEqual(connectUrl({ mode: 'packet', gateway: 'W2XYZ-10', dialKhz: 145050, via: ['W2ABC-1/X'] }), null);
+});
+test('#585: sessionUrl for a typed gateway: the path for packet, its ARDOP bandwidth capped by the operator\'s', () => {
+  const { sessionUrl } = require('../lib/winlink-pat');
+  assert.strictEqual(sessionUrl({ mode: 'packet', gateway: 'W2XYZ-10', dialKhz: 145050, via: ['W2ABC-1'], rowUrl: 'ax25:///W2XYZ-10?freq=145050' }), 'ax25:///W2ABC-1/W2XYZ-10?freq=145050');
+  assert.strictEqual(sessionUrl({ mode: 'ardop', gateway: 'K4SPB', dialKhz: 7099.9, mineBw: 2000, ardopBw: 500 }), 'ardop:///K4SPB?bw=500MAX&freq=7099.9');
+  assert.strictEqual(sessionUrl({ mode: 'ardop', gateway: 'K4SPB', dialKhz: 7099.9, mineBw: 500, ardopBw: 2000 }), 'ardop:///K4SPB?bw=500MAX&freq=7099.9');
+  assert.strictEqual(sessionUrl({ mode: 'ardop', gateway: 'K4SPB', dialKhz: 7099.9, mineBw: 0, ardopBw: 500 }), 'ardop:///K4SPB?freq=7099.9', 'no bandwidth of its own: the modem keeps the operator\'s setting');
+});
+test('#585: a row URL with a digipeater path still names its gateway by the last segment', () => {
+  const { sessionUrl } = require('../lib/winlink-pat');
+  assert.strictEqual(sessionUrl({ mode: 'packet', gateway: 'W2XYZ-10', dialKhz: 145050, rowUrl: 'ax25:///N0PE-1/W2XYZ-10?freq=145050' }), 'ax25:///W2XYZ-10?freq=145050', 'the path never comes from a row URL, only from the saved entry');
+  assert.strictEqual(sessionUrl({ mode: 'packet', gateway: 'W2XYZ-10', dialKhz: 145050, rowUrl: 'ax25:///W2XYZ-10/OTHER-1?freq=1' }), 'ax25:///W2XYZ-10?freq=145050');
+});
+
 console.log(`\n${pass} passed, ${fail} failed`);
 if (fail) process.exit(1);
