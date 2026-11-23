@@ -1170,10 +1170,17 @@
     var last = state && state.lastGateway;
     var want = pendingPick || keep || (last && { call: last.call, khz: last.dialKhz });
     var picked = false;
-    var rows = gateways.slice(0, 120).map(function (g, i) {
-      var hit = !picked && want && sameGw(want, g);
+    var option = function (row) {
+      var hit = !picked && want && sameGw(want, row.g);
       if (hit) picked = true;
-      return '<option value="' + i + '"' + (hit ? ' selected' : '') + '>' + esc(gatewayLabel(g)) + '</option>';
+      return '<option value="' + row.i + '"' + (hit ? ' selected' : '') + '>' + esc(gatewayLabel(row.g)) + '</option>';
+    };
+    // Ordinary gateways first; then any the shack marked ownModem (a community
+    // modem listed under this mode), under their own heading. Still callable.
+    var sections = WinlinkMailView.gatewaySections(gateways, 120);
+    var rows = sections[0].rows.map(option).join('');
+    var ownModem = sections.slice(1).map(function (sec) {
+      return '<optgroup label="' + esc(sec.heading) + '">' + sec.rows.map(option).join('') + '</optgroup>';
     }).join('');
     if (!gateways.length) rows = '<option value="" disabled>No gateways for that band</option>';
     var extra = favRows.length ? '<optgroup label="Favorites not in this list">' + favRows.map(function (f, i) {
@@ -1182,7 +1189,8 @@
       return favOption(f, i, hit);
     }).join('') + '</optgroup>' : '';
     var more = r.leftOut ? '<option value="" disabled>' + esc(r.leftOut + ' more this radio cannot call (outside the amateur bands, or not ticked under Check all bands in Settings > Radio, Edit the rig)') + '</option>' : '';
-    sel.innerHTML = '<optgroup label="' + (r.predicted ? 'Best path now' : 'Nearest first') + '">' + rows + '</optgroup>' + extra + more;
+    var best = rows ? '<optgroup label="' + (r.predicted ? 'Best path now' : 'Nearest first') + '">' + rows + '</optgroup>' : '';
+    sel.innerHTML = best + ownModem + extra + more;
     if (pendingPick && !picked) {
       // A History row not in today's list is still callable: a row of its own at the top.
       favRows.push({ call: pendingPick.call, dialKhz: pendingPick.khz, band: '', url: pendingPick.url || '' });
