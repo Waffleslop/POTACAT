@@ -226,6 +226,12 @@ test('renderer/qso-popout.js: sorts a copy, sends the identity, reloads after a 
   const src = readSrc(path.join(ROOT, 'renderer', 'qso-popout.js'));
   const render = src.slice(src.indexOf('function render() {'), src.indexOf('// Sort', src.indexOf('function render() {')));
   assert.ok(!/filtered = allQsos;/.test(render), 'render never sorts allQsos itself');
+  // render sorts what lib/logbook-filter.js returns: always a new array, even
+  // with no filter set, so the sort never reorders allQsos (#983 + #988).
+  assert.ok(/filtered = LogbookFilter\.filterQsos\(allQsos,/.test(render));
+  const LogbookFilter = require('../lib/logbook-filter');
+  const list = [{ CALL: 'A' }, { CALL: 'B' }];
+  assert.notStrictEqual(LogbookFilter.filterQsos(list, {}, {}), list);
   const del = src.slice(src.indexOf('// --- Delete (two-click) ---'), src.indexOf('// --- New QSO form ---'));
   assert.ok(/window\.api\.deleteQso\(idx, QsoIdentity\.of\(qso\)\)/.test(del), 'delete sends the identity');
   assert.ok(!/q\.idx = i/.test(del), 'no renumbering in display order');
