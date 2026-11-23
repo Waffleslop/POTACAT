@@ -34930,6 +34930,13 @@ function sendVfoState() {
     // The radio states a custom CAT toggle can FOLLOW (lib/custom-cat-follow.js).
     preamp: _currentPreampState,
     att: _currentAttState,
+    // The ladder position and the ladder (#997): the window cycles IPO / AMP1 /
+    // AMP2 and 6 / 12 / 18 dB like the Rig panel; [] = plain on/off. The preamp
+    // ladder is cut to off/on on bands where the radio has only that.
+    preampStep: _currentPreampStep,
+    attStep: _currentAttStep,
+    preampSteps: vfoGainLadder('preampSteps', true),
+    attSteps: vfoGainLadder('attSteps', false),
     comp: _currentCompState,
     vox: _currentVoxState,
     nr: _currentNrState,
@@ -34977,6 +34984,13 @@ function vfoWfmAvailable() {
 }
 // The caps flags the VFO's CAT buttons check (VfoLayout.CAT_CHOICES), or null
 // when the radio is not known yet (the VFO then offers them all).
+/** Preamp / Att ladder for the VFO window (#997), [] when the radio has none. */
+function vfoGainLadder(key, perBand) {
+  try {
+    const caps = getRigCapabilities(detectRigType()) || {};
+    return _rigGainSteps.ladderForFreq(caps[key], perBand ? caps.preampTargets : undefined, displayFreqHz() || 0);
+  } catch { return []; }
+}
 function vfoCatCaps() {
   try {
     const caps = getRigCapabilities(detectRigType()) || {};

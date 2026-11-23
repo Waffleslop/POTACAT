@@ -349,6 +349,7 @@ const TESTS = [
   'test/look-picker-test.js', // #376: Light / Dark / System, the six swatches in order, contrast 4.5:1 per theme
   'test/vfo-compact-test.js', // VFO window: Audio on/off, the mini VFO strip, POTACAT colours for PTT, sliders and CW
   'test/vfo-layout-test.js', // VFO window: Large and Small VFO layouts, one-line Small VFO, CAT buttons, Scan
+  'test/vfo-gain-steps-test.js', // #997: VFO window Preamp/Att step through the radio's ladder (FTX-1 AMP2, Att 12/18 dB)
   'test/split-up-test.js', // #689: Split up N from the VFO window and ECHOCAT Web (TX = RX + N, lock, caps)
   'test/vfo-freq-entry-test.js', // #672: the Small VFO's frequency is typed in place, a click grows to the keypad; Enter never tunes a hidden buffer
   'test/main-window-layout-fixes-test.js', // #285 Log button "L", #284 HF Nets check mark, #298 HOLD TO TALK off screen
