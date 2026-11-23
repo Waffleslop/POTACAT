@@ -89,6 +89,15 @@ test('FTDX10: PC KEYING follows the CW keying line dropdown', () => {
   assert.ok(/PC KEYING → RTS/.test(rts.steps[0]), 'rts override: ' + rts.steps[0]);
   assert.strictEqual(auto.level, 'required');
 });
+test('FT-710: PC KEYING item and the Standard COM port line (#1001)', () => {
+  const n = note(resolve({ model: 'FT-710', radioType: 'serialcat' }), 'ft710-pc-keying');
+  assert.ok(n, 'FT-710 PC KEYING note missing');
+  assert.strictEqual(n.level, 'required');
+  assert.ok(/CW SETTING → MODE CW → PC KEYING → DTR/.test(n.steps[0]), n.steps[0]);
+  assert.ok(n.steps.some((x) => /Standard COM Port/.test(x) && /CW Key Port/.test(x)), 'Standard-port line missing');
+  const rts = note(resolve({ model: 'FT-710', radioType: 'serialcat', cwKeyLine: 'rts' }), 'ft710-pc-keying');
+  assert.ok(/PC KEYING → RTS/.test(rts.steps[0]), rts.steps[0]);
+});
 test('IC-7300: USB Keying (CW) uses the model main-port line, and the override', () => {
   const auto = note(resolve({ model: 'IC-7300', radioType: 'icom' }), 'icom-usb-keying-cw');
   assert.ok(/USB Keying \(CW\) → RTS/.test(auto.steps[0]), auto.steps[0]);
