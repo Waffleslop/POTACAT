@@ -177,5 +177,27 @@ test('the card opens in a page (#659: it threw "root is not defined")', () => {
   assert.strictEqual(body.children.length, 1);
 });
 
+test('#998: the card tables size to their content, not the global fixed-width table rules', () => {
+  // renderer/styles.css gives every table width:100% + table-layout:fixed and every tbody td
+  // overflow:hidden + text-overflow:ellipsis. Left alone, "Last 5 contacts" splits into four equal
+  // columns and clips the date. Both windows (main + JTCAT pop-out) load this one module.
+  const html = PC.cardHtml('N6OBW', { total: 1, recent: [{ date: '20261105', time: '143200', band: '20m', mode: 'SSB', ref: 'US-1613' }] });
+  const tag = /<table class="pc-recent"([^>]*)>/.exec(html);
+  assert.ok(tag, 'recent table present');
+  assert.ok(/table-layout:auto/.test(tag[1]), 'pc-recent sets table-layout:auto');
+  assert.ok(/width:auto/.test(tag[1]), 'pc-recent sets width:auto');
+  const tds = html.match(/<td style="[^"]*"/g) || [];
+  assert.ok(tds.length >= 4);
+  tds.forEach(t => assert.ok(/overflow:visible/.test(t) && /text-overflow:clip/.test(t), 'cell is not clipped: ' + t));
+});
+
+test('#998: the worked grid in the card is not stretched or clipped by the global table rules', () => {
+  const html = WM.workedMatrixHtml(WM.buildWorkedMatrix([{ band: '20m', mode: 'SSB' }, { band: '40m', mode: 'FT8' }]));
+  const tag = /<table class="wm-table"([^>]*)>/.exec(html);
+  assert.ok(tag && /table-layout:auto/.test(tag[1]) && /width:auto/.test(tag[1]), 'wm-table sets auto layout');
+  assert.ok(/<th style="[^"]*overflow:visible;text-overflow:clip/.test(html), 'row labels such as Digital are not ellipsised');
+});
+
+
 console.log(`\nPrior contacts: ${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);
