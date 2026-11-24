@@ -3045,7 +3045,7 @@
         // Desktop-authoritative synced RX gain — sent at connect and whenever
         // any surface moves it. Our own drags aren't echoed back (the desktop
         // skips the origin), so this can't fight the slider mid-drag.
-        var rgPct = Math.round(Number(msg.value) * 100);
+        var rgPct = Math.max(0, Math.min(100, Math.round(Number(msg.value) * 100)));
         if (isFinite(rgPct)) {
           var rgEl = document.getElementById('ft8-rx-gain');
           var rgVal = document.getElementById('ft8-rx-gain-val');
@@ -9758,6 +9758,7 @@
   var ft8TxGainVal = document.getElementById('ft8-tx-gain-val');
   // Restore saved gain levels
   var savedFt8Rx = parseInt(localStorage.getItem('echocat-ft8-rx-gain'), 10);
+  if (!isNaN(savedFt8Rx)) savedFt8Rx = Math.max(0, Math.min(100, savedFt8Rx)); // old builds allowed up to 300
   if (!isNaN(savedFt8Rx) && ft8RxGain) {
     ft8RxGain.value = savedFt8Rx;
     ft8RxGainVal.textContent = savedFt8Rx + '%';

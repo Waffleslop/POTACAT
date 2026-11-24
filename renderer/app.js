@@ -32926,10 +32926,11 @@ if (jtcatTxGainSlider) {
 }
 // Accept RX gain from popout or ECHOCAT
 window.api.onJtcatSetRxGain(function(level) {
-  if (jtcatRxGainNode) jtcatRxGainNode.gain.value = level;
+  if (jtcatRxGainNode) jtcatRxGainNode.gain.value = Math.max(0, Math.min(1, Number(level) || 0));
   if (jtcatRxGainSlider) {
-    jtcatRxGainSlider.value = Math.round(level * 100);
-    jtcatRxGainVal.textContent = Math.round(level * 100) + '%';
+    var lvlPct = Math.max(0, Math.min(100, Math.round(level * 100)));
+    jtcatRxGainSlider.value = lvlPct;
+    jtcatRxGainVal.textContent = lvlPct + '%';
   }
 });
 // Accept TX gain from popout or ECHOCAT (relayed by main; never echoed back)
@@ -33197,10 +33198,10 @@ window.api.getSettings().then(function(s) {
   // the slider's value when it builds (jtcatRxGainNode creation), so seeding
   // the DOM early is sufficient.
   if (typeof s.jtcatRxGain === 'number' && jtcatRxGainSlider) {
-    var rxPct = Math.round(s.jtcatRxGain * 100);
+    var rxPct = Math.max(0, Math.min(100, Math.round(s.jtcatRxGain * 100)));
     jtcatRxGainSlider.value = rxPct;
     jtcatRxGainVal.textContent = rxPct + '%';
-    if (jtcatRxGainNode) jtcatRxGainNode.gain.value = s.jtcatRxGain;
+    if (jtcatRxGainNode) jtcatRxGainNode.gain.value = rxPct / 100;
   }
   if (jtcatHoldTxFreqEl) jtcatHoldTxFreqEl.checked = !!s.jtcatHoldTxFreq;
   if (jtcatLateStartTxEl) jtcatLateStartTxEl.checked = s.jtcatLateStartTx !== false;

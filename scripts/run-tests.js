@@ -367,6 +367,7 @@ const TESTS = [
   'test/split-up-test.js', // #689: Split up N from the VFO window and ECHOCAT Web (TX = RX + N, lock, caps)
   'test/vfo-freq-entry-test.js', // #672: the Small VFO's frequency is typed in place, a click grows to the keypad; Enter never tunes a hidden buffer
   'test/main-window-layout-fixes-test.js', // #285 Log button "L", #284 HF Nets check mark, #298 HOLD TO TALK off screen
+  'test/status-bar-wrap-test.js', // spot count ran off a narrow window
   'test/wd3d-activator-test.js', // WD3D: toolbar wraps at full screen; a two-fer/n-fer spot fills every P2P park
   'test/wspr-run-time-test.js', // WSPR beacon runs as long as the operator sets (K2BDE); a PTT port keys on RTS by default (K5LEB)
   'test/remote-client-yield-test.js', // a desktop kicked by another of the owner's devices yields the rig (W0EGR)
@@ -736,6 +737,7 @@ const TESTS = [
   'test/adif-clean-test.js',
   'test/cloud-tab-ui-test.js',
   'test/jtcat-slider-wheel-test.js',
+  'test/jtcat-rx-slider-range-test.js',
   'test/cloud-phase2-ui-test.js',
   'test/onair-callsign-test.js',
   'test/activated-parks-test.js',

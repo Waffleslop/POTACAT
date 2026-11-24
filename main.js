@@ -1606,6 +1606,8 @@ function applyWaterfallPalette(id) {
 
 let _jtcatRxGainSaveTimer = null;
 let _jtcatRxGainBand = '';   // band whose level is currently loaded
+// The RX slider is 0 to 100%. Settings written by older builds may hold more.
+function clampJtcatRxGain(v) { v = Number(v); return Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : 1; }
 function applyJtcatRxGain(value, origin) {
   let v = Number(value);
   if (!Number.isFinite(v)) return;
@@ -1646,8 +1648,9 @@ function jtcatRxGainFollowBand(hz) {
   const band = freqToBand(hz / 1e6);
   if (!band || band === _jtcatRxGainBand) return;
   _jtcatRxGainBand = band;
-  const stored = settings.jtcatRxGainByBand && settings.jtcatRxGainByBand[band];
-  if (typeof stored !== 'number' || !Number.isFinite(stored)) return;
+  const storedRaw = settings.jtcatRxGainByBand && settings.jtcatRxGainByBand[band];
+  if (typeof storedRaw !== 'number' || !Number.isFinite(storedRaw)) return;
+  const stored = clampJtcatRxGain(storedRaw);
   const current = typeof settings.jtcatRxGain === 'number' ? settings.jtcatRxGain : 1;
   if (Math.abs(stored - current) < 0.005) return;   // already there — stay quiet
   sendCatLog(`[JTCAT] RX gain ${Math.round(stored * 100)}% restored for ${band}`);
@@ -31818,7 +31821,7 @@ function connectRemote() {
     // RX gain — desktop-authoritative synced slider: hydrate so the client
     // shows the shack's real value (a zeroed slider = blank waterfall) and
     // never pushes its own stale copy.
-    remoteServer.sendToClient({ type: 'jtcat-rx-gain-state', value: typeof settings.jtcatRxGain === 'number' ? settings.jtcatRxGain : 1 });
+    remoteServer.sendToClient({ type: 'jtcat-rx-gain-state', value: typeof settings.jtcatRxGain === 'number' ? clampJtcatRxGain(settings.jtcatRxGain) : 1 });
     remoteServer.sendToClient({ type: 'jtcat-tx-slot-state', lock: jtcatTxSlotLock() });
     remoteServer.sendToClient({ type: 'rig-bands', bands: activeRigBands(), all: RigBands.ALL_BANDS });
     // TX power — same arrangement since 2026-09-09. The web client used to
@@ -50022,7 +50025,7 @@ function cloudShackNotice(text, kind) {
       // clock banner (the monitor runs before this window opens), the shared
       // RX-gain level, and the waterfall spectrum loop.
       if (jtcatLastClock) js8PopoutWin.webContents.send('jtcat-clock', jtcatLastClock);
-      if (typeof settings.jtcatRxGain === 'number') js8PopoutWin.webContents.send('jtcat-set-rx-gain', settings.jtcatRxGain);
+      if (typeof settings.jtcatRxGain === 'number') js8PopoutWin.webContents.send('jtcat-set-rx-gain', clampJtcatRxGain(settings.jtcatRxGain));
       startJs8Spectrum();
       // Open = start, exactly like the JTCAT popout (Casey 2026-08-10: JS8's
       // manual Start didn't feel "easy"). Auto-start decoding when the window
