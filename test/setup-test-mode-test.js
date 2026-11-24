@@ -17,7 +17,9 @@ function test(name, fn) {
 }
 
 const BOTH = ['DIGU', 'DIGL'];
-const base = { mode: 'USB', family: 'hamlib', jack: 'data', useDataMode: true, dataModes: BOTH };
+const RigAudioJack = require('../lib/rig-audio-jack');
+const ft8 = (jack, useDataMode) => RigAudioJack.tuneMode('FT8', { jack, useDataMode }).mode;
+const base = { mode: 'USB', family: 'hamlib', ft8TuneMode: ft8('data', true), dataModes: BOTH };
 
 test('a sound-card radio in USB tests in DIGU, LSB in DIGL (the sideband kept)', () => {
   assert.deepStrictEqual(planTestMode(base), { dataMode: 'DIGU', why: 'switch' });
@@ -38,8 +40,9 @@ test('network-audio radios keep testing as before: Flex, TCI, Icom LAN, SCU-LAN1
 });
 
 test('never switches where FT8 itself would not: mic jack, plain-USB setting, no data mode', () => {
-  assert.strictEqual(planTestMode({ ...base, jack: 'mic' }).why, 'mic-jack');
-  assert.strictEqual(planTestMode({ ...base, useDataMode: false }).why, 'plain-usb');
+  assert.strictEqual(planTestMode({ ...base, ft8TuneMode: ft8('mic', true) }).why, 'ft8-voice', 'microphone jack');
+  assert.strictEqual(planTestMode({ ...base, ft8TuneMode: ft8('data', false) }).why, 'ft8-voice', 'JTCAT plain-USB setting');
+  assert.strictEqual(planTestMode({ ...base, ft8TuneMode: undefined }).dataMode, null, 'unknown: no switch');
   assert.strictEqual(planTestMode({ ...base, dataModes: [] }).why, 'no-data-mode');
   assert.strictEqual(planTestMode({ ...base, dataModes: undefined }).why, 'no-data-mode');
   assert.strictEqual(planTestMode({ ...base, mode: 'LSB', dataModes: ['DIGU'] }).why, 'no-data-mode', 'QMX: one DIGI mode, upper only');
@@ -91,7 +94,7 @@ test('main: the test plans its mode, plans the frequency with it, forces DATA on
   assert.strictEqual((f.match(/, modeNote \}\);/g) || []).length, 3, 'every keyed result carries the note');
   // startJtcatTune passes it to the key-down; nothing else asks for it.
   const tune = main.slice(main.indexOf('function startJtcatTune('), main.indexOf('function stopJtcatTune('));
-  assert.ok(/forceDataMode: !!opts\.forceDataMode, dataReason: opts\.dataReason, txKind: 'tune'/.test(tune));
+  assert.ok(/txKind: 'tune', forceDataMode: !!opts\.forceDataMode, dataReason: opts\.dataReason,/.test(tune));
   const callers = main.match(/startJtcatTune\(\{[^}]*\}\)/g) || [];
   for (const c of callers) {
     if (/forceDataMode|dataSwap/.test(c)) assert.ok(c.includes('STATION_SETUP_TEST_TONE_HZ'), 'only the setup test forces DATA on a tune: ' + c);

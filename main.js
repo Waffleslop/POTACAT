@@ -7021,9 +7021,10 @@ async function _runStationSetupTxTest(rigId, { keepPower = false, voice = false 
   // its release puts the mode back, however the test ends.
   let testFamily;
   try { testFamily = RigFamily.rigFamily(rig); } catch { testFamily = undefined; }
+  // The mode an FT8 tune sends on this radio: the one DATA-mode rule (jack + JTCAT setting).
+  const ft8TuneMode = RigAudioJack.tuneMode('FT8', { jack: activeRigAudioJack().jack, useDataMode: settings.jtcatUseDataMode !== false }).mode;
   const testModePlan = SetupTestMode.planTestMode({
-    voice, mode: modeNow, inData: !!(pttModeReport() || {}).data, family: testFamily,
-    jack: activeRigAudioJack().jack, useDataMode: settings.jtcatUseDataMode !== false,
+    voice, mode: modeNow, inData: !!(pttModeReport() || {}).data, family: testFamily, ft8TuneMode,
     dataModes: DataModePicker.dataModesFor(rigDataModeInput(detectRigType())),
   });
   const testMode = testModePlan.dataMode || modeNow;
@@ -25266,7 +25267,7 @@ function startJtcatTune(opts = {}) {
   // way a voice over does (the radio's SSB audio input, not its DATA one).
   // opts.forceDataMode: Station Setup's transmit test keys in the DATA mode
   // FT8 uses (lib/setup-test-mode.js, #755); the release puts the mode back.
-  const keyed = handleRemotePtt(true, { audio: true, emission: opts.emission || 'DATA', noDataSwap: !!opts.noDataSwap, forceDataMode: !!opts.forceDataMode, dataReason: opts.dataReason, txKind: 'tune', lanOwner: directYaesuReady ? 'tune' : undefined });
+  const keyed = handleRemotePtt(true, { audio: true, emission: opts.emission || 'DATA', noDataSwap: !!opts.noDataSwap, txKind: 'tune', forceDataMode: !!opts.forceDataMode, dataReason: opts.dataReason, lanOwner: directYaesuReady ? 'tune' : undefined });
   // Refused (SCU-LAN10 audio, SWR guard, licence...): no tone and no timers.
   // The refusal may already have stopped Tune; a tone started after that ran
   // until POTACAT closed (#214).
