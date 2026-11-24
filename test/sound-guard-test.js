@@ -108,6 +108,19 @@ test('the list for "Sound output" leaves out the radio\'s sound card and the rol
   assert.deepStrictEqual(list.map((d) => d.deviceId), ['spk1', 'hs1']);
 });
 
+test('what became of the chosen output: listed, the radio\'s now, or not connected (kept as the choice)', () => {
+  const devices = [defaultIs(SPEAKERS), SPEAKERS, HEADSET, CODEC];
+  assert.strictEqual(G.chosenState({ chosenId: '', devices, txDevices: ['cdc1'] }), '');
+  assert.strictEqual(G.chosenState({ chosenId: 'hs1', devices, txDevices: ['cdc1'] }), 'listed');
+  assert.strictEqual(G.chosenState({ chosenId: 'hs-old', chosenLabel: 'Headphones (Arctis 7)', devices, txDevices: ['cdc1'] }), 'listed');
+  assert.strictEqual(G.chosenState({ chosenId: 'cdc1', devices, txDevices: ['cdc1'] }), 'radio');
+  assert.strictEqual(G.chosenState({ chosenId: 'hs1', devices, txDevices: ['hs1'] }), 'radio');
+  assert.strictEqual(G.chosenState({ chosenId: 'gone', chosenLabel: 'Speakers (Dock)', devices, txDevices: ['cdc1'] }), 'missing');
+  // Not connected: Automatic plays meanwhile, and never on the radio.
+  const r = G.resolveOutput({ chosenId: 'gone', chosenLabel: 'Speakers (Dock)', devices: [defaultIs(CODEC), CODEC, SPEAKERS], txDevices: ['cdc1'] });
+  assert.strictEqual(r.sinkId, 'spk1');
+});
+
 console.log('Transmit guard: when');
 
 test('TX active: the sound is held, and dropped once it has waited 3 s', () => {

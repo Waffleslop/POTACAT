@@ -182,14 +182,15 @@
 
   /**
    * For the Sounds pane: the outputs to offer (the radio's sound card left
-   * out), where a sound would play now, and the line to show when it cannot.
+   * out), where a sound would play now, the line to show when it cannot, and
+   * what became of the output the operator chose (SoundGuard.chosenState).
    */
   async function describe(chosenId, chosenLabel) {
     const st = await txState();
     const devices = await outputs();
     const list = SoundGuard.listOutputs(devices, st.txDevices);
-    const where = SoundGuard.resolveOutput({ chosenId: chosenId || '', chosenLabel: chosenLabel || '', devices, txDevices: st.txDevices });
-    return { list, where };
+    const ask = { chosenId: chosenId || '', chosenLabel: chosenLabel || '', devices, txDevices: st.txDevices };
+    return { list, where: SoundGuard.resolveOutput(ask), chosen: SoundGuard.chosenState(ask) };
   }
 
   window.PotacatSounds = { configure, playFile, playChime, test, describe, cutAll, status: () => lastStatus };

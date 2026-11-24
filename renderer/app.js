@@ -17532,8 +17532,10 @@ const soundsPane = {
   output: document.getElementById('set-sound-output'),
   status: document.getElementById('set-sound-status'),
 };
+let soundOutputsListed = false; // the output list is filled (it is asked for; until then Save keeps the saved choice)
 function fillSoundsPane(s) {
   if (!soundsPane.on) return;
+  soundOutputsListed = false;
   const cfg = QsoSounds.readSettings(s);
   soundsPane.on.checked = cfg.on;
   soundsPane.contact.checked = cfg.contact;
@@ -17564,25 +17566,45 @@ async function refreshSoundOutputs(chosenId, chosenLabel) {
     sel.appendChild(o);
     if (chosenId && (d.deviceId === chosenId || (chosenLabel && d.label === chosenLabel))) picked = d.deviceId;
   }
+  // A chosen output that is unplugged stays the choice (Save must not lose it);
+  // Automatic plays until it is back.
+  if (info.chosen === 'missing') {
+    const o = document.createElement('option');
+    o.value = chosenId;
+    o.dataset.label = chosenLabel || '';
+    o.textContent = (chosenLabel || 'The output you chose') + ' (not connected)';
+    sel.appendChild(o);
+    picked = chosenId;
+  }
   sel.value = picked;
+  soundOutputsListed = true;
   const w = info.where;
   soundsPane.status.classList.toggle('sound-status-warn', !w.ok);
   if (!w.ok) soundsPane.status.textContent = w.text;
-  else if (w.why === 'moved') soundsPane.status.textContent = 'Playing on ' + w.label + ': your computer\'s default output is the radio\'s sound card, and POTACAT never plays a sound into the radio.';
+  else if (info.chosen === 'missing') soundsPane.status.textContent = 'Playing on ' + w.label + ' until the output you chose is connected again.';
+  else if (w.why === 'moved') soundsPane.status.textContent = 'Playing on ' + w.label + ': the output it would use is the radio\'s sound card, and POTACAT never plays a sound into the radio.';
   else soundsPane.status.textContent = 'Playing on ' + w.label + '.';
 }
 function readSoundsPane() {
   if (!soundsPane.on) return {};
-  const opt = soundsPane.output.selectedOptions[0];
-  return {
+  const out = {
     soundsOn: soundsPane.on.checked,
     soundContact: soundsPane.contact.checked,
     soundMilestones: soundsPane.milestones.checked,
     milestoneBanners: soundsPane.banners.checked,
     soundVolume: QsoSounds.readSettings({ soundVolume: soundsPane.volume.value }).volume,
-    soundOutput: soundsPane.output.value || '',
-    soundOutputLabel: soundsPane.output.value && opt ? opt.textContent : '',
   };
+  // The output only once its list is there: a Save before that keeps the saved choice.
+  if (soundOutputsListed) {
+    out.soundOutput = soundsPane.output.value || '';
+    out.soundOutputLabel = soundOutputLabelOf(soundsPane.output);
+  }
+  return out;
+}
+function soundOutputLabelOf(sel) {
+  const opt = sel.selectedOptions[0];
+  if (!sel.value || !opt) return '';
+  return opt.dataset.label != null ? opt.dataset.label : opt.textContent;
 }
 // Test: the contact sound as the pane is set now (saved or not), by the same
 // road as a real contact, so it obeys the transmit guard.
@@ -17599,8 +17621,7 @@ async function testSoundsPane() {
 }
 if (soundsPane.volume) soundsPane.volume.addEventListener('input', () => { soundsPane.volumeVal.textContent = soundsPane.volume.value + '%'; });
 if (soundsPane.output) soundsPane.output.addEventListener('change', () => {
-  const opt = soundsPane.output.selectedOptions[0];
-  refreshSoundOutputs(soundsPane.output.value, soundsPane.output.value && opt ? opt.textContent : '');
+  refreshSoundOutputs(soundsPane.output.value, soundOutputLabelOf(soundsPane.output));
 });
 
 // --- Events ---

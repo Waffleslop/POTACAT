@@ -369,7 +369,12 @@ test('the pane is loaded, saved and machine-wide', () => {
   assert.ok(/applySoundSettings\(settings\);/.test(app));
   assert.ok(/fillSoundsPane\(s\);/.test(app));
   assert.ok(/\.\.\.readSoundsPane\(\),/.test(app));
-  const keys = main.slice(main.indexOf('const GLOBAL_KEYS = new Set(['), main.indexOf(']);', main.indexOf('const GLOBAL_KEYS = new Set([')));
+  // Save never loses the chosen output: it is written only once its list is
+  // there, and an unplugged output stays in the list as the choice.
+  const read = app.slice(app.indexOf('function readSoundsPane()'), app.indexOf('function soundOutputLabelOf('));
+  assert.ok(/if \(soundOutputsListed\) \{\s+out\.soundOutput = soundsPane\.output\.value \|\| '';/.test(read));
+  assert.ok(/if \(info\.chosen === 'missing'\) \{/.test(app) && /\+ ' \(not connected\)';/.test(app));
+  const keys =main.slice(main.indexOf('const GLOBAL_KEYS = new Set(['), main.indexOf(']);', main.indexOf('const GLOBAL_KEYS = new Set([')));
   for (const k of ['soundsOn', 'soundContact', 'soundMilestones', 'milestoneBanners', 'soundVolume', 'soundOutput', 'soundOutputLabel', 'soundCoinOffered']) {
     assert.ok(keys.includes("'" + k + "'"), k);
   }
