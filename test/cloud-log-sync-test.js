@@ -571,7 +571,9 @@ check('wiring: sign-in schedules the catch-up (never on sign-out); boot runs it 
   // Never on a sign-out, whether chosen or forced by Cloud (device_revoked).
   assert.ok(/if \(!isSignOutReason\(reason\)\) \{[\s\S]{0,200}reconcileWithCloud\(reason\)/.test(ipc));
   assert.ok(/function isSignOutReason\(reason\) \{\n\s*return reason === 'signout' \|\| reason === 'revoked';/.test(ipc));
-  assert.ok(/sync\.startInterval\(interval, myJournal\(\), getSyncCallbacks\(\)\)/.test(ipc), 'background sync uses the owner view');
+  // The push view is the owner view less the deletes the #245 guard holds.
+  assert.ok(/sync\.startInterval\(interval, pushJournal\(\), getSyncCallbacks\(\)\)/.test(ipc), 'background sync uses the owner view');
+  assert.ok(/function pushJournal\(\) \{\s*const view = myJournal\(\);/.test(ipc), 'the push view is built on the owner view');
   const main = readSrc(path.join(__dirname, '..', 'main.js'));
   assert.ok(/cloudIpc\.reconcileWithCloud\('boot'\)/.test(main));
   assert.ok(/cloudIpc\.pendingStatus\(\)/.test(main) && !/cloudIpc\.journal\.length/.test(main), 'ECHOCAT status counts only this account');
