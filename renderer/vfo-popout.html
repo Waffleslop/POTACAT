@@ -938,6 +938,7 @@
 <!-- Shared TX EQ chain (Phase 1). Also loaded by remote-audio.html so
      both audio sources apply identical DSP. -->
 <script src="../lib/freq-dots.js"></script>
+<script src="../lib/cw-banks.js"></script>
 <script src="../lib/freedv-display-mode.js"></script>
 <script src="tx-eq-chain.js"></script>
 <script src="../lib/custom-cat-follow.js"></script>
@@ -4113,13 +4114,9 @@ window.api.onTxState((state) => {
 // --- CW Macros ---
 async function loadCwMacros() {
   const s = await window.api.getSettings();
-  const macros = s.cwMacros || [
-    { label: 'CQ', text: 'CQ CQ CQ DE {MYCALL} {MYCALL} K' },
-    { label: '599', text: '{call} UR 599 BK' },
-    { label: '73', text: '73 DE {MYCALL} E E' },
-    { label: 'AGN', text: 'AGN AGN PSE' },
-    { label: 'TU', text: 'TU DE {MYCALL} K' },
-  ];
+  // The Hunter (S&P) bank, the same set and defaults as the main window
+  // (lib/cw-banks.js, #741): one default set, not three.
+  const macros = CwBanks.banksFromSettings(s).sp;
   const row = document.getElementById('cw-macro-row');
   row.innerHTML = '';
   macros.forEach(m => {
@@ -4129,12 +4126,10 @@ async function loadCwMacros() {
     btn.textContent = m.label || '?';
     btn.title = m.text || '';
     btn.addEventListener('click', () => {
-      let text = m.text || '';
-      text = text.replace(/\{MYCALL\}/gi, s.myCallsign || '')
-        .replace(/\{call\}/gi, cwTypedCall || cwTunedCall)
-        .replace(/\{op_firstname\}/gi, cwTunedOpName)
-        .replace(/\{state\}/gi, '');
-      window.api.sendCwText(text);
+      // {MYCALL} is left for main (onAirCall: the on-air call, a Guest
+      // Pass's call included); an unknown {word} is dropped, never keyed.
+      const ex = CwBanks.expandVars(m.text || '', { call: cwTypedCall || cwTunedCall, opFirstname: cwTunedOpName });
+      if (ex.text) window.api.sendCwText(ex.text);
     });
     row.appendChild(btn);
   });

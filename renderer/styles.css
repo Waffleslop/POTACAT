@@ -11131,3 +11131,22 @@ dialog[open] {
   font-size: 12px; border-radius: 3px; cursor: pointer;
 }
 .filter-presets-tool:disabled { opacity: 0.35; cursor: default; }
+
+/* CW Enter Sends Message (#741): the switch and the badge beside Log, the
+   two bank tabs in Settings > Macros. Theme tokens only. */
+.esm-wrap { display: inline-flex; align-items: center; gap: 6px; }
+.esm-switch { display: inline-flex; align-items: center; gap: 4px; font-size: 13px; font-weight: 600; color: var(--text); cursor: pointer; white-space: nowrap; }
+.esm-badge {
+  display: inline-block; min-width: 64px; padding: 3px 8px; border-radius: 4px; text-align: center;
+  font-size: 14px; font-weight: 700; letter-spacing: 0.5px; font-family: monospace;
+  color: var(--accent); border: 1px solid var(--accent); background: var(--accent-subtle);
+}
+.esm-badge.sending { color: var(--bg-primary, #1a1a2e); background: var(--accent); }
+.cw-bank-tabs { display: flex; gap: 4px; align-items: center; flex-wrap: wrap; }
+.cw-bank-tab { font-size: 12px; padding: 3px 10px; cursor: pointer; border: 1px solid var(--border, #333); background: transparent; color: var(--text-dim); border-radius: 4px 4px 0 0; }
+.cw-bank-tab.active { color: var(--text); border-color: var(--accent); border-bottom-width: 2px; }
+.cw-bank-load { margin-left: auto; font-size: 11px; padding: 3px 10px; cursor: pointer; }
+.cw-bank-not-ready { color: var(--accent-red-text); }
+.cw-macro-row { display: flex; gap: 4px; align-items: center; }
+.cw-macro-key { width: 28px; flex: none; font-size: 11px; font-family: monospace; color: var(--text-dim); text-align: right; }
+.cw-macro-text.cw-macro-unknown { outline: 1px solid var(--accent-red); }

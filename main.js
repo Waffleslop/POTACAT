@@ -3452,6 +3452,7 @@ function pushCloudState() {
 }
 const typedCalls = new TypedCallTracker();
 const CwRemoteExpand = require('./lib/cw-remote-expand');
+const CwBanks = require('./lib/cw-banks'); // #741 the Run and S&P CW banks
 const CwGreeting = require('./lib/cw-greeting'); // {greeting} = GM/GA/GE by the other station's local time
 /**
  * Fill {call}/{op_firstname}/{state} left in CW text from a device (the
@@ -28512,6 +28513,11 @@ function updateRemoteSettings() {
     // settings.remoteCwMacros is only a fallback for old phone-only configs.
     // (The wire field name stays `remoteCwMacros` for app compatibility.)
     remoteCwMacros: settings.cwMacros || settings.remoteCwMacros || null,
+    // Both CW banks (#741): run = the Activator (Run) bank, sp = the Hunter
+    // (S&P) bank, which is the same set as remoteCwMacros (an older phone keeps
+    // reading that one). Keys are positional, F1 CQ ... F8 AGN (lib/cw-banks.js);
+    // esm = the Enter Sends Message switch, so a device can show it.
+    remoteCwBanks: (() => { const b = CwBanks.banksFromSettings(settings); return { run: b.run, sp: b.sp, esm: settings.cwEsmEnabled === true }; })(),
     // Phone-stored prefs that we persist server-side so they survive
     // localStorage wipes on the phone (Safari ITP, cache clears).
     // Currently: echocatWelcomeDismissed.

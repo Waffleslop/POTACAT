@@ -665,6 +665,9 @@ const TESTS = [
   'test/k9cyt-requests-test.js',
   'test/respot-templates-remote-test.js',
   'test/cw-remote-expand-test.js',
+  'test/cw-esm-test.js', // #741 Enter Sends Message: Run and S&P state machine, log first then TU, Esc
+  'test/cw-banks-test.js', // #741 the Run and S&P CW banks: N1MM positional keys, migration, variables
+  'test/cw-esm-wiring-test.js', // #741 the main window's ESM keys: only the call field, only CW, only with ESM on
   'test/cw-greeting-test.js',
   'test/tqsl-test.js', // TQSL found where it is installed, Flatpak included; the TQSL program field (#343)
   'test/lotw-flags-test.js',

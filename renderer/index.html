@@ -651,6 +651,14 @@
         <div id="activator-hunter-dropdown" class="activator-dropdown hidden"></div>
       </div>
       <button id="activator-log-btn" class="activator-log-btn" title="Log contact (Enter)">Log</button>
+      <!-- Enter Sends Message (#741): off by default; shown in CW only. The
+           badge says what Enter in the call field sends next. -->
+      <span id="activator-esm-wrap" class="esm-wrap hidden">
+        <label class="esm-switch" title="Enter Sends Message: in CW, Enter in the call field sends CQ, then their call and your exchange, then logs and sends TU. F1-F12 send the Activator macros. Esc stops sending. Off: Enter logs, as always.">
+          <input type="checkbox" id="activator-esm-toggle"> ESM
+        </label>
+        <span id="activator-esm-badge" class="esm-badge hidden" aria-live="polite"></span>
+      </span>
       <button id="activator-clear-btn" class="activator-clear-btn" title="Clear this entry (the contact was not made). Does not move the radio.">Clear</button>
       <button id="activator-atu-btn" class="activator-atu-btn" title="Run an antenna-tuner cycle on this frequency">ATU</button>
       <span id="activator-home-chip" class="activator-home-chip hidden">
@@ -827,6 +835,7 @@
           <div class="bl-rst-group"><label class="bl-rst-label">UTC</label><input type="text" id="bl-time" class="bl-field bl-time" placeholder="HH:MM" maxlength="5"></div>
           <input type="text" id="bl-notes" class="bl-field bl-notes" placeholder="Notes" maxlength="80" spellcheck="false">
           <label class="bl-respot-label" id="bl-respot-label"><input type="checkbox" id="bl-respot" checked> Spot</label>
+          <span id="bl-esm-badge" class="esm-badge hidden" aria-live="polite"></span>
           <button type="button" id="bl-log-btn" class="bl-log-btn">Log</button>
         </div>
       </div>
@@ -3731,7 +3740,15 @@
       <!-- CW Macros -->
       <div>
         <span style="font-size:12px;font-weight:bold;color:var(--text);">CW Macros</span>
-        <span class="help-text" style="display:block;margin-top:2px;">Variables: {MYCALL} {call} {op_firstname} {state} {greeting} (GM / GA / GE by their local time)</span>
+        <span class="help-text" style="display:block;margin-top:2px;">Two banks: Activator (Run) in Activator mode, Hunter (S&amp;P) everywhere else. The keys follow the contest-logger layout: F1 CQ, F2 exchange, F3 TU, F4 my call, F5 their call, F7 park-to-park exchange, F8 AGN?.</span>
+        <span class="help-text" style="display:block;margin-top:2px;">Variables: {MYCALL} {CALL} {MYSTATE} {PARK} {RST} {NR} {MYGRID} {op_firstname} {state} {greeting} (GM / GA / GE by their local time). Anything else in braces is not sent.</span>
+        <label class="checkbox-label" style="margin-top:6px;"><input type="checkbox" id="set-cw-esm"> Enter Sends Message (CW only): Enter in the call field sends the next message and logs. Esc stops sending.</label>
+        <div class="cw-bank-tabs" role="tablist" style="margin-top:6px;">
+          <button type="button" class="cw-bank-tab" data-bank="run" role="tab">Activator (Run)</button>
+          <button type="button" class="cw-bank-tab" data-bank="sp" role="tab">Hunter (S&amp;P)</button>
+          <button type="button" id="cw-bank-load-esm" class="cw-bank-load" title="Replace this bank with the Enter Sends Message layout">Load ESM layout</button>
+        </div>
+        <span id="cw-bank-esm-note" class="help-text" style="display:block;margin-top:4px;"></span>
         <div id="cw-macro-editor" style="margin-top:6px;display:flex;flex-direction:column;gap:4px;"></div>
       </div>
       <!-- Voice Macros -->
@@ -5616,6 +5633,8 @@
   <script src="was-view.js"></script>
   <script src="jtcat-parser.js"></script>
   <script src="remote-ptt.js"></script>
+  <script src="../lib/cw-banks.js"></script>
+  <script src="../lib/cw-esm.js"></script>
   <script src="app.js"></script>
   <script src="station-setup.js"></script>
   <script src="echocat-review.js"></script>
