@@ -213,6 +213,7 @@ const TESTS = [
   'test/ptt-release-test.js', // ECHOCAT Web: PTT lets go on blur/hidden/cancel, Space up with a box focused, and resends off after a reconnect (#935)
   'test/ws-limits-test.js', // ECHOCAT: 16 MiB maxPayload, a frame over 64 KiB before sign-in closes the socket unparsed (1009), sstv-photo over 4 MiB refused with sstv-tx-status error and never encoded
   'test/remote-origin-security-test.js', // ECHOCAT: foreign page Origin refused on LAN sockets, /api/ptt cross-site refused with no ACAO, device-writable settings allowlist, public source needs the token, directory cards escaped
+  'test/ptt-api-plain-http-test.js', // /api/ptt on the plain-HTTP fallback: keying needs the ECHOCAT password, release always works, HTTPS unchanged, local usage stamp (lib/ptt-api-gate.js, lib/ptt-api-usage.js)
   'test/ptt-client-id-test.js', // #941: a reconnecting ECHOCAT Web page releases PTT its own dead socket holds; another id or none never does
   'test/error-banner-text-test.js', // #806: ECHOCAT Web error banner shows the message on iPhone Safari (stack has no message there)
   'test/freedv-diag-test.js', // #717: FreeDV audio in, sync on/off and capture failures in the session log, rate-limited

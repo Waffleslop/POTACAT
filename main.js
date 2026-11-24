@@ -2362,6 +2362,13 @@ function onRemoteServer(fn) {
   _remoteServerHooks.push(fn);
   if (remoteServer) fn(remoteServer);
 }
+// /api/ptt usage stamp (lib/ptt-api-usage.js): when and over which route
+// (https/http) the HTTP PTT shortcut last worked, at most one write a minute.
+// Its own file, never settings: not exported, not sent to devices or Cloud.
+const pttApiUsage = require('./lib/ptt-api-usage').createPttApiUsage({
+  filePath: () => path.join(app.getPath('userData'), 'ptt-api-usage.json'),
+});
+onRemoteServer((rs) => { rs.on('ptt-api-used', ({ route } = {}) => pttApiUsage.record(route)); });
 // Guest Pass hand-back rule (#200 step 4): the owner used the radio at the
 // station. kind is one of lib/pass-owner-activity.js KINDS; remote-server
 // ignores it unless the owner holds a guest's radio. The idle-receive
