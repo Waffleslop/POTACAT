@@ -233,7 +233,7 @@ for the history.
 | `set-atu` | C→S | Toggle ATU. |
 | `set-enable-atu` | C→S | Enable/disable ATU subsystem. |
 | `set-enable-split` | C→S | Enable/disable split. |
-| `set-cw-xit` | C→S | Set CW XIT offset (Hz). |
+| `set-cw-xit` | C→S | `{value}`: set the CW XIT offset in Hz. |
 | `set-cw-filter` | C→S | Default CW filter width. |
 | `set-ssb-filter` | C→S | Default SSB filter width. |
 | `set-digital-filter` | C→S | Default digital-mode filter width. |
@@ -279,8 +279,27 @@ for the history.
 | Message | Dir | Purpose |
 |---|---|---|
 | `activator-state` | S→C | Active park, frequency, contacts so far, activation flags. |
-| `set-activator-park` | C→S | Set the park(s) the operator is activating. |
+| `set-activator-park` | C→S | Set the park(s) the operator is activating. Optional `tuneTo: {freqKhz: number, mode?: string}` (only to a shack listing `activation-ask-tune`): the frequency the device wants for this activation. The shack never tunes on it; it asks (below). |
+| `activation-tune-ask` | S→C | `{id, freqKhz, mode, current: {freqKhz, mode} \| null, rigs: [{id, name, active, connected}], activeRigId, guestOnAir, text, expiresInMs}`. Sent only to the device whose `set-activator-park` started the activation, only when its hello `capabilities` include `activation-ask-tune`. `text` is the question, ready to show ("Move the radio to 14.285.00 MHz SSB for this activation? It is on 14.074.00 MHz DIGU now."). `rigs` is empty for a one-radio shack (a yes/no question); with two or more it lists every configured radio and the device asks which (default: the `active` one). `guestOnAir` = a Guest Pass operator is connected (already said in `text`). No answer within `expiresInMs` (120000) = the radio is not moved; dismiss the question then. Added 2026-11-17, GitHub #146. Re-sent on reconnect (2026-11-17): the question belongs to the paired device, not its socket. If that device reconnects (a new socket, same pairing) while the question is still open, the shack sends the same `activation-tune-ask` again, with the same `id` and contents and `expiresInMs` set to the time that is left; an `activation-tune-answer` from the new socket is accepted. Treat a second ask with an `id` already on screen as the same question. |
+| `activation-tune-answer` | C→S | `{id, tune: boolean, rigId?}`. `tune: true` moves the radio to the asked frequency and mode; a `rigId` other than the active radio switches to that radio first (as `switch-rig`) and tunes once its link is up. `tune: false` (or no answer) leaves the radio alone. Accepted once, only from the asked device, within `expiresInMs`; a late answer gets `tune-blocked` "That question has expired...". A locked VFO gets the usual `tune-blocked`. Refused for a Guest Pass. |
 | `session-contacts` | S→C | List of contacts logged in the current session. |
+
+**An activation start never moves the radio (capability `activation-ask-tune`, 2026-11-17, GitHub #146).**
+Casey's rule (2026-11-07): POTACAT never retunes the radio silently for a phone activation; it
+asks first, and with more than one radio it asks which. A shack that lists `activation-ask-tune`
+in its hello `capabilities` takes the wanted frequency as `set-activator-park.tuneTo` and asks
+with `activation-tune-ask`. A device sends `activation-ask-tune` in its own hello `capabilities`
+when it can show the question. Older devices:
+- An ECHOCAT phone without the capability sent a bare `tune` just before `set-activator-park`.
+  The shack holds such a phone's plain tunes (no `channelId`, `bearing` or `pickSideband`) for
+  400 ms; a `set-activator-park` from the same device inside that time drops the tune, starts the
+  activation, and sends that phone a `tune-blocked` notice in words ("Your activation started.
+  POTACAT did not move the radio: it stays on ... To use ..., tune there from the VFO screen.").
+  Every other held tune goes through 400 ms late.
+- A new device on an older shack (no `activation-ask-tune` in the server hello) must ask on the
+  phone itself before it sends a bare `tune`.
+- ECHOCAT Web and the desktop-to-desktop client never sent a frequency with a start; unchanged.
+Brief: docs/activation-ask-before-tune.md.
 
 ### Logging (QSO / ADIF)
 

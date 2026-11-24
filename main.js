@@ -399,6 +399,7 @@ const BandLastFreq = require('./lib/band-last-freq'); // a band button returns t
 const { splitHostPort } = require('./lib/host-port');
 const activationProgram = require('./lib/activation-program');
 const { applyQsoEdit, modeEditFields, activationSigOf } = require('./lib/qso-edit'); // Logbook cell edits (#509)
+const ActivationTuneAsk = require('./lib/activation-tune-ask'); // #146: a device's activation start asks before the radio moves
 const ActivationClock = require('./lib/activation-clock'); // #147: a forgotten activation ends at the UTC day change or after 6 h idle
 const ActivationAnnounce = require('./lib/activation-announce'); // #508: which saved contacts join the live activation list
 const QsoExpand = require('./lib/qso-expand'); // one contact -> its ADIF records (logContact)
@@ -28390,6 +28391,28 @@ function pushRigListToRemote() {
   remoteServer.sendRigsToClient(rigs, settings.activeRigId || null);
 }
 
+// #146: can POTACAT move the active radio right now (the tune handler's test).
+function activationRigLinked() {
+  return !!((smartSdr && smartSdr.canTune) || (cat && cat.connected) || tciRigLinked());
+}
+
+// #146: an activation started from a device that wants a frequency. The radio
+// is never moved here: the device is asked (lib/activation-tune-ask.js), or an
+// older one is told in words that the radio stayed where it was.
+function activationTuneAskFollow(id, want, canAsk) {
+  const connected = activationRigLinked();
+  const d = ActivationTuneAsk.decide({
+    want, canAsk,
+    rig: { connected, freqKhz: _currentFreqHz / 1000, mode: _currentMode },
+    rigs: settings.rigs || [], activeRigId: settings.activeRigId || '',
+    guestOnAir: remoteServer.hasActivePassClient(),
+  });
+  sendCatLog(`[activation] start from a device wants ${want ? want.freqKhz + ' kHz ' + (want.mode || '') : 'nothing'}: ${d.log}`);
+  if (d.action === 'ask') remoteServer.sendActivationTuneAsk(id, d.ask);
+  else if (d.action === 'notice') remoteServer.sendActivationTuneNotice(id, d.text);
+  else remoteServer.dropActivationTuneAsk(id);
+}
+
 function pushActivatorStateToPhone() {
   if (!remoteServer || !remoteServer.hasClient()) return;
   const parkRefs = (settings.activatorParkRefs || []).filter(p => p && p.ref).map(p => ({ ref: p.ref, name: p.name || '' }));
@@ -32065,7 +32088,7 @@ function connectRemote() {
     sendCatLog(`[events] set-event-progress ${eventId}: ${itemId}=${!!worked}`);
   });
 
-  remoteServer.on('set-activator-park', async ({ parkRef, parkRefs, activationType, activationName: actName, sig, onAirCallsign, end, county }) => {
+  remoteServer.on('set-activator-park', async ({ parkRef, parkRefs, activationType, activationName: actName, sig, onAirCallsign, end, county, tuneWant, tuneAskId, clientCanAsk }) => {
     console.log('[Echo CAT] Set activator park:', parkRef || actName, 'type:', activationType, end ? '(ended)' : '');
     settings.appMode = end ? 'hunter' : 'activator';
     // The device's On-air call field: absent leaves the remembered value,
@@ -32107,6 +32130,27 @@ function connectRemote() {
     // Reset session contacts for new activation
     remoteServer.resetSessionContacts();
     activationClockFollow(false); // #147: a phone Start starts the activation clock (same parks keep it), End clears it
+    if (tuneAskId) activationTuneAskFollow(tuneAskId, tuneWant, clientCanAsk); // #146: ask, never tune here
+  });
+
+  // #146: the device said yes to "move the radio for this activation?",
+  // naming the radio when there are several. Another radio is switched to
+  // first (as a phone rig switch does) and tuned once its link is up.
+  remoteServer.on('activation-tune-answer', ({ freqKhz, mode, rigId }) => {
+    const tuneNow = () => remoteServer.emit('tune', { freqKhz, mode });
+    const rig = rigId && rigId !== settings.activeRigId ? (settings.rigs || []).find(r => r.id === rigId) : null;
+    if (!rig) { sendCatLog(`[activation] the device said yes: tuning to ${freqKhz} kHz ${mode || ''}`); tuneNow(); return; }
+    sendCatLog(`[activation] the device said yes on ${rig.name}: switching to it, then tuning to ${freqKhz} kHz ${mode || ''}`);
+    remoteServer.emit('switch-rig', { rigId: rig.id });
+    const until = Date.now() + 20000;
+    const t = setInterval(() => {
+      if (settings.activeRigId !== rig.id) { clearInterval(t); return; } // switched away meanwhile
+      if (activationRigLinked()) { clearInterval(t); tuneNow(); return; }
+      if (Date.now() > until) {
+        clearInterval(t);
+        remoteServer.sendToClient({ type: 'tune-blocked', reason: `${rig.name} did not connect, so POTACAT did not move it. Check its link on the desktop.` });
+      }
+    }, 500);
   });
 
   remoteServer.on('set-park-county', ({ ref, state, county }) => {

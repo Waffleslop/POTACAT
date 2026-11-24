@@ -75,7 +75,6 @@ const KNOWN_DRIFT = new Set([
   'set-scan-dwell:value',
   'set-max-age:value',
   'set-dist-unit:value',
-  'set-cw-xit:value',
   'set-cw-filter:value',
   'set-ssb-filter:value',
   'set-digital-filter:value',

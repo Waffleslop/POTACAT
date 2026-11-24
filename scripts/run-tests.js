@@ -69,6 +69,7 @@ const TESTS = [
   'test/clock-platform-test.js', // NJ2DX 2026-11-21: each OS gets only the clock buttons it can honour; Time settings opens on a Mac
   'test/main-ismac-scope-test.js', // K3SBP 2026-11-21: isMac is not defined (opening APRS crashed); every isMac in main.js is declared in its own function
   'test/aprs-rf-phone-test.js', // ECHOCAT ask 2026-11-21: one radio beacon per press from the owner's phone; the window's gate and caps; Listen off is set up and put back
+  'test/set-cw-xit-registry-test.js', // ECHOCAT 2026-11-22: the set-cw-xit registry row names value, the field the code reads
   'test/vfo-popout-70cm-test.js', // #891 NJ2DX: the VFO pop-out 70cm button sends 432 MHz, inside every 70 cm radio range (IC-9700 starts at 430)
   'test/smartsdr-meter-test.js',
   'test/smartsdr-udpport-reconnect-test.js', // K3SBP 2026-11-21: after a network drop the new Flex connection is told client udpport again (pan FFT, meters)
@@ -415,6 +416,7 @@ const TESTS = [
   'test/adif-mode-test.js', // #381: MFSK submodes (JS8, JTTY, FT4, FT2) read by name everywhere; FT4/FT2 still written bare
   'test/qso-edit-test.js', // #509: My Park edit sets MY_SIG so Past Activations finds the QSO
   'test/activation-auto-end-test.js', // #147: a forgotten activation ends at the UTC day change or after 6 h with no contacts
+  'test/activation-tune-ask-test.js', // #146: a device's activation start asks before the radio moves, never retunes silently
   'test/activation-relaunch-700-test.js', // #700: a saved activation clock that ran out while POTACAT was closed ends the activation at launch, not 33 s later
   'test/activation-device-ref-00z-test.js', // #734: the phone's own park is kept on a QSO that arrives after the desktop's activation ended (00Z)
   'test/activation-logging-388-test.js', // #388: a habit Tab after the RST jump is absorbed; a corrected park grid is kept per park
