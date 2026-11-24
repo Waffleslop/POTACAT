@@ -61,16 +61,65 @@ test('Desktop: only DXpeditions on the air, never contests or aliases', () => {
   assert.deepStrictEqual(list.map((d) => `${d.call} ${d.mode} ${d.khz} ${d.band}${d.hound ? ' FH' : ''}`),
     ['VP2V/GU4YOX FT4 14080 20m', 'VP2V/GU4YOX FT8 14090 20m FH', 'Z1Z FT8 21091 15m']);
 });
-test('Desktop: main sends the list to the JTCAT window; the window offers it in the band menu', () => {
+test('Desktop: main sends the list to the JTCAT window', () => {
   const main = read('main.js');
   assert.ok(/_jtcatDxpDials = jtcatDxpeditionDials\(potacatResult\.value\);\s*sendJtcatDxpeditions\(\);/.test(main));
   assert.ok(/ipcMain\.handle\('jtcat-dxpeditions-get', \(\) => _jtcatDxpDials\)/.test(main));
   assert.ok(read('lib/remote-bridge.js').includes("'jtcat-dxpeditions-get':"));
+});
+
+// #1033: the "Band and mode" picker (315e818f) replaced the band menu a day
+// after the DXpeditions group went in, and the group became unreachable. The
+// group now lives in the picker.
+const { pickerDxpeditionDials, dxpeditionNote, dxpeditionTag } = require('../lib/dxpedition-dials');
+const LIST = [
+  { call: 'VP2V/GU4YOX', entity: 'British Virgin Islands', mode: 'FT4', khz: 14080, band: '20m', hound: false, superFox: false, end: '2026-11-10' },
+  { call: 'VP2V/GU4YOX', entity: 'British Virgin Islands', mode: 'FT8', khz: 14090, band: '20m', hound: true, superFox: false, end: '2026-11-10' },
+  { call: 'Z1Z', entity: '', mode: 'FT8', khz: 50313, band: '6m', hound: false, superFox: true, end: '' },
+];
+test('#1033 picker rows: only bands this radio uses and modes the window has, each with a key', () => {
+  const rows = pickerDxpeditionDials(LIST, { bands: ['40m', '20m', '15m'], modes: ['FT8', 'FT4', 'WSPR'] });
+  assert.deepStrictEqual(rows.map((d) => d.key), ['VP2V/GU4YOX|FT4|14080', 'VP2V/GU4YOX|FT8|14090']);
+  assert.deepStrictEqual(pickerDxpeditionDials(LIST, { bands: ['20m', '6m'], modes: ['FT8'] }).map((d) => d.key),
+    ['VP2V/GU4YOX|FT8|14090', 'Z1Z|FT8|50313']);
+  assert.deepStrictEqual(pickerDxpeditionDials(LIST, { modes: ['FT8', 'FT4'] }).length, 3, 'no band list = every band');
+  assert.deepStrictEqual(pickerDxpeditionDials(null, {}), []);
+  assert.deepStrictEqual(pickerDxpeditionDials([{ call: 'X', mode: 'FT8', khz: 0, band: '20m' }], {}), []);
+  assert.strictEqual(LIST[0].key, undefined, 'the input list is not changed');
+});
+test('#1033 picker words: Fox/Hound and SuperFox, in real words', () => {
+  assert.strictEqual(dxpeditionTag(LIST[0]), '');
+  assert.strictEqual(dxpeditionTag(LIST[1]), 'Fox/Hound');
+  assert.strictEqual(dxpeditionTag(LIST[2]), 'SuperFox');
+  assert.strictEqual(dxpeditionNote(LIST[0], false), '');
+  assert.strictEqual(dxpeditionNote(LIST[1], false), 'They run Fox/Hound: turn on Hound before you call.');
+  assert.strictEqual(dxpeditionNote(LIST[1], true), 'Fox/Hound: Hound is on.');
+  assert.ok(/SuperFox/.test(dxpeditionNote(LIST[2], true)) && /WSJT-X/.test(dxpeditionNote(LIST[2], true)));
+});
+test('#1033 the picker has a DXpeditions group, hidden until one is on the air', () => {
+  const html = read('renderer/jtcat-popout.html');
+  assert.ok(/<script src="\.\.\/lib\/dxpedition-dials\.js"><\/script>[\s\S]*<script src="jtcat-popout\.js">/.test(html), 'the page loads the module before the window script');
+  const picker = html.slice(html.indexOf('id="jp-picker"'), html.indexOf('id="jp-pk-apply"'));
+  assert.ok(/id="jp-pk-dxp-sec"[^>]*hidden/.test(picker), 'section heading, hidden by default');
+  assert.ok(/DXPEDITIONS ON THE AIR/.test(picker));
+  assert.ok(/id="jp-pk-dxps"[^>]*role="radiogroup"[^>]*hidden/.test(picker), 'the buttons, hidden by default');
+  assert.ok(/\.jp-pk-band\.jp-pk-dxp \{/.test(html), 'the buttons have their own style');
+});
+test('#1033 the window: list feeds the picker, Switch tunes through one tune path', () => {
   const pop = read('renderer/jtcat-popout.js');
-  assert.ok(/function renderDxpeditionDials\(list\)/.test(pop) && /o\.className = 'jp-dxp-opt'/.test(pop));
-  assert.ok(/if \(!opt \|\| !opt\.classList\.contains\('jp-dxp-opt'\)\) return;\s*e\.stopImmediatePropagation\(\);/.test(pop));
-  assert.ok(/window\.api\.tune\(khz, mode \|\| modeSelect\.value\);/.test(pop));
-  assert.ok(/\}, true\);\s*if \(window\.api\.onJtcatDxpeditions\)/.test(pop), 'capture listener, before the band handler');
+  assert.ok(!/jp-dxp-opt|jp-dxp-group/.test(pop), 'the old hidden-menu group is gone, one path only');
+  assert.ok(/function renderDxpeditionDials\(list\)\s*\{\s*pkDxpList = Array\.isArray\(list\) \? list : \[\];\s*if \(pkIsOpen\(\)\) pkRender\(\);/.test(pop));
+  assert.ok(/DxpeditionDials\.pickerDxpeditionDials\(pkDxpList,/.test(pop), 'pkRender filters with the shared module');
+  assert.ok(/dxpSec\.hidden = dxpEl\.hidden = !rows\.length;/.test(pop), 'the group shows only when there is one to offer');
+  assert.ok(/function pkApply\(\) \{\s*if \(pk\.dxp\) \{ pkApplyDxpedition\(\); return; \}/.test(pop), 'Switch on a DXpedition tunes it');
+  assert.ok(/function pkApplyDxpedition\(\) \{[\s\S]{0,300}if \(d\) tuneDxpedition\(d\);/.test(pop));
+  const render = pop.slice(pop.indexOf('function pkRender('), pop.indexOf('function pkOpen('));
+  assert.ok(!/tuneDxpedition|window\.api\.tune/.test(render), 'a tap on a DXpedition only picks it');
+  const fn = pop.slice(pop.indexOf('function tuneDxpedition(d)'));
+  assert.ok(/window\.api\.tune\(d\.khz, d\.mode\);/.test(fn.slice(0, 2500)), 'the JTCAT tune: it moves the TX dial anchor');
+  assert.ok(/pkDxpOn = d;/.test(fn.slice(0, 2500)));
+  assert.ok(/var expectKhz = pkDxpOn \? pkDxpOn\.khz : parseFloat\(dial \? dial\.dataset\.freq : 0\);/.test(pop), 'the off-dial colour reads the DXpedition dial');
+  assert.ok(/function selectBand\(btn, save\) \{\s*pkDxpOn = null;/.test(pop), 'any band pick leaves the DXpedition dial');
 });
 
 chain.then(() => {
