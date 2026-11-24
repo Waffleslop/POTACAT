@@ -149,9 +149,11 @@ gh run list --workflow winlink-helpers.yml --limit 1     # green, and on a commi
 - **The ardopcf patch still applies** to the pinned tag whenever `third_party/ardopcf/` or
   the generator changed (the winlink-helpers run proves it; it applies with
   `--ignore-whitespace` after a `core.autocrlf=false` clone).
-- **Release notes** must say Winlink's platform truth as it ships: internet mail on Windows,
-  Linux and Mac; ARDOP and packet over the radio on Windows and Linux only. Never claim Mac
-  radio Winlink until ardopcf ships for macOS.
+- **Release notes** must say Winlink's platform truth with this sentence, word for word
+  (Casey, 2026-11-24: "Use the 1.14.7 Winlink platform sentence as the rule, word for word"):
+  "Winlink internet mail works on Windows, Linux and Mac. ARDOP and packet over the radio have
+  connected to gateways on Windows; on Linux and the Mac they have not yet been confirmed on the air."
+  Change it only on Casey's word (for example after a confirmed on-air connect on Linux or a Mac).
 - **winlink.org terms**: before the FIRST release that ships Winlink, Casey must have read
   `winlink.org/terms_conditions` in a browser (it answers 403 to scripted fetches). Ask once;
   record his answer in `project_winlink_mail.md`.
