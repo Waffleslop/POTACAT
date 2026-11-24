@@ -382,8 +382,20 @@ t('voice transmit: waits for the data test, then offers the voice tone; 0 W name
   assert.strictEqual(step(evalRig({ model: 'FLEX-6600', audioSource: 'smartsdr' }), 'voice-tx'), undefined, 'a Flex is not offered it');
   const main = readSrc(path.join(__dirname, '..', 'main.js')).replace(/\r\n/g, '\n');
   assert.ok(main.includes("case 'voice-test': await runStationSetupTxTest(rigId, { voice: true }); break;"));
-  assert.ok(main.includes("noDataSwap: voice });"), 'the voice tone never swaps to DATA');
+  assert.ok(main.includes("noDataSwap: voice, ...dataSwap });"), 'the voice tone never swaps to DATA');
   assert.ok(main.includes('&& !opts.noDataSwap && !yaesuVoice'), 'handleRemotePtt honours it');
+});
+
+// #755: the transmit test keys in the DATA mode FT8 uses and says so in one line.
+t('the transmit step shows what the test switched and put back', () => {
+  const note = 'For the test POTACAT switched the radio from USB to its DATA mode, the one FT8 uses, and put it back to USB.';
+  const ok = step(evalRig({ model: 'FT-710', live: { txTest: { result: 'ok', watts: 5, modeNote: note } } }), 'tx-test');
+  assert.strictEqual(ok.state, 'ok');
+  assert.ok(ok.detail.endsWith(note), ok.detail);
+  const none = step(evalRig({ model: 'FT-710', live: { txTest: { result: 'no-power', keyed: true, modeNote: note } } }), 'tx-test');
+  assert.ok(none.detail.endsWith(note));
+  const plain = step(evalRig({ model: 'FT-710', live: { txTest: { result: 'ok', watts: 5 } } }), 'tx-test');
+  assert.ok(!/DATA mode/.test(plain.detail), 'no note when nothing was switched');
 });
 
 console.log(`Station Setup: ${pass} passed, ${fail} failed`);

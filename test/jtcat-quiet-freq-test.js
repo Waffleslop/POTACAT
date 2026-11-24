@@ -41,22 +41,28 @@ function rendererRule(freqData, nyquist) {
 
 function lcg(seed) { let s = seed >>> 0; return () => (s = (s * 1664525 + 1013904223) >>> 0) / 4294967296; }
 
-test('pickQuietFreq is the renderer rule, bin for bin', () => {
+// #1032 narrowed the range to 500..2400 Hz (test/jtcat-auto-tone-passband-test.js).
+// Where the old rule's pick was already well inside that range, nothing moved.
+test('pickQuietFreq is the renderer rule wherever that rule picked inside 500..2400 Hz', () => {
   const rnd = lcg(671);
+  let compared = 0;
   // AnalyserNode fftSize 2048 -> 1024 bins at the context's rate.
   for (const rate of [12000, 44100, 48000, 96000]) {
-    for (let n = 0; n < 50; n++) {
+    for (let n = 0; n < 200; n++) {
       const bins = new Uint8Array(1024);
       for (let i = 0; i < bins.length; i++) bins[i] = Math.floor(rnd() * 256);
-      assert.strictEqual(Q.pickQuietFreq(bins, (rate / 2) / bins.length), rendererRule(bins, rate / 2), 'rate ' + rate + ' case ' + n);
+      const old = rendererRule(bins, rate / 2);
+      if (old < Q.AUTO_LOW_HZ + 20 || old > Q.AUTO_HIGH_HZ - 20) continue;
+      compared++;
+      assert.strictEqual(Q.pickQuietFreq(bins, (rate / 2) / bins.length), old, 'rate ' + rate + ' case ' + n);
     }
   }
+  assert.ok(compared > 300, 'compared ' + compared + ' cases');
 });
 
-test('flat spectrum keeps the first window; empty input is 1500', () => {
+test('flat spectrum keeps the first window inside the range; empty input is 1500', () => {
   const flat = new Uint8Array(512).fill(100);
-  assert.strictEqual(Q.pickQuietFreq(flat, 3000 / 512), rendererRule(flat, 3000));
-  assert.strictEqual(Q.pickQuietFreq(flat, 3000 / 512), 220, 'the first window, centred at about 220 Hz');
+  assert.strictEqual(Q.pickQuietFreq(flat, 3000 / 512), 500, 'the first window inside the range (was 220 Hz before #1032)');
   assert.strictEqual(Q.pickQuietFreq(null, 5), 1500);
   assert.strictEqual(Q.pickQuietFreq([], 5), 1500);
 });
