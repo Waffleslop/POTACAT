@@ -26125,8 +26125,9 @@ function connectSmartSdr() {
   // (every center-freq drag) and must not become a broadcast storm.
   // The Flex panadapter scope source: frames, and the pan's own axis.
   smartSdr.on('pan-frame', (f) => { if (flexScopeOn) { flexDigitalViewSync(); yaesuScopeOnFrame(f); } });
+  // centerAt: when a status last carried a centre, so a pre-ask centre is not taken for the answer (issue 1002)
   smartSdr.on('pan-geometry', (g) => {
-    flexPanGeometry[g.panId] = { ...(flexPanGeometry[g.panId] || {}), ...g };
+    flexPanGeometry[g.panId] = { ...(flexPanGeometry[g.panId] || {}), ...g, ...(g.centerHz > 0 ? { centerAt: Date.now() } : {}) };
     if (flexScopeOn && flexScopeApplyGeometry()) yaesuScopeBroadcastState();
   });
   smartSdr.on('pan-status', ({ panId, wnb, wnbLevel, rfgain }) => {
@@ -39476,7 +39477,7 @@ function flexScopeFollowPan() {
   const now = Date.now();
   let changed = false;
   // No ask yet (the scope is starting): a centre left from an earlier session says nothing; hold.
-  const off = ScopeDigitalView.panOffsetFromStatus({ reportedCentreHz: g.centerHz, ask: flexPanCenterAsk, nowMs: now });
+  const off = ScopeDigitalView.panOffsetFromStatus({ reportedCentreHz: g.centerHz, reportedAtMs: g.centerAt, ask: flexPanCenterAsk, nowMs: now });
   if (off != null && off !== (yaesuScopeState.centerOffsetHz || 0)) { yaesuScopeState.centerOffsetHz = off; changed = true; }
   const ask = flexDigitalSpanAsk;
   const spanSettled = ask && g.spanHz && (Math.abs(g.spanHz - ask.hz) <= ask.hz * 0.05 || now - ask.at >= ScopeDigitalView.SETTLE_MS);
