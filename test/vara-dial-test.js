@@ -208,6 +208,180 @@ test('another modem is never dialled twice', async () => {
   assert.deepStrictEqual(p.st.slept, []);
 });
 
+console.log('#1040: the first call after a start, both ways it can end at once');
+const TIMEOUT_LINE = '2026/11/23 10:02:11 Unable to establish connection to remote: connect timeout';
+test('Pat\'s word for a call VARA ended is "connect timeout", whenever it came', () => {
+  assert.deepStrictEqual(D.patVaraCallEnded(TIMEOUT_LINE), { ended: true, why: 'connect timeout' });
+  assert.strictEqual(D.patVaraCallEnded(CMD_REFUSED), null);
+  assert.strictEqual(D.patVaraCallEnded('Connected to N5TW (varahf)'), null);
+  assert.strictEqual(WinlinkPat.classifyPatLine(TIMEOUT_LINE), 'no-answer', 'and POTACAT read it as no answer');
+});
+test('the threshold: an ended call is placed again only within 5 s of the dial, never keyed, no link', () => {
+  const r = { ended: true, why: 'connect timeout' };
+  assert.strictEqual(D.QUICK_END_MS, 5000);
+  assert.deepStrictEqual(D.shouldRedial({ mode: 'vara', refusal: r, msSinceDial: 12, live: true }), { redial: true, waitMs: 500 });
+  assert.strictEqual(D.shouldRedial({ mode: 'vara', refusal: r, msSinceDial: 5000, live: true }).redial, true);
+  assert.strictEqual(D.shouldRedial({ mode: 'vara', refusal: r, msSinceDial: 5001, live: true }).redial, false);
+  assert.strictEqual(D.shouldRedial({ mode: 'vara', refusal: r, live: true }).redial, false, 'no time known: not placed again');
+  assert.strictEqual(D.shouldRedial({ mode: 'vara', refusal: r, msSinceDial: 12, live: true, keyed: true }).redial, false);
+  assert.strictEqual(D.shouldRedial({ mode: 'vara', refusal: r, msSinceDial: 12, live: true, connected: true }).redial, false);
+  assert.strictEqual(D.shouldRedial({ mode: 'vara', refusal: r, msSinceDial: 12, live: true, redials: 3 }).redial, false, 'the same cap as a refused port');
+  assert.strictEqual(D.shouldRedial({ mode: 'ardop', refusal: r, msSinceDial: 12, live: true }).redial, false);
+});
+/**
+ * A stand-in for VARA's command port as it behaves under Wine: one client at a
+ * time, and not listening again until `relistenMs` after a client leaves.
+ */
+function fakeVaraPort(relistenMs) {
+  const net = require('net');
+  const st = { port: 0, accepted: 0, closed: false };
+  let srv = null;
+  const listen = () => new Promise((resolve) => {
+    if (st.closed) return resolve();
+    srv = net.createServer((sock) => {
+      st.accepted++;
+      srv.close(); // one client at a time
+      sock.on('error', () => {});
+      sock.on('close', () => { setTimeout(listen, relistenMs); });
+    });
+    srv.on('error', () => {});
+    srv.listen(st.port, '127.0.0.1', () => { st.port = srv.address().port; resolve(); });
+  });
+  return { st, listen, close: () => { st.closed = true; try { srv.close(); } catch {} } };
+}
+/** Pat's first step on a first call: open VARA's command port; its line when that is refused. */
+function patOpensPort(port, notes) {
+  const net = require('net');
+  return () => new Promise((resolve, reject) => {
+    const sock = net.connect({ port, host: '127.0.0.1' });
+    sock.on('connect', () => { resolve({ sock }); });
+    sock.on('error', (e) => {
+      notes.note('log', D.patVaraPortRefusal(`vara initialization failed: couldn't connect to VARA command port: dial tcp 127.0.0.1:${port}: connect: connection ${e.code === 'ECONNREFUSED' ? 'refused' : e.code}`));
+      reject(Object.assign(new Error('connect: HTTP 500 — Session failure {"NumReceived":0}'), { status: 500 }));
+    });
+  });
+}
+test('real sockets: VARA is not listening again yet right after POTACAT\'s port check; the first dial is refused and the redial gets through', async () => {
+  const vara = fakeVaraPort(700);
+  await vara.listen();
+  // POTACAT's own check, with the settle 1.14.7 gave a port that answered at once (150 ms).
+  const accept = await V.waitForPortAccept(vara.st.port, { intervalMs: 50, settleMinMs: 150 });
+  assert.ok(accept.ok && accept.tries === 1);
+  const notes = new D.RefusalNotes();
+  const redials = [];
+  let calls = 0;
+  const open = patOpensPort(vara.st.port, notes);
+  const got = await D.dialWithRedial({
+    mode: 'vara', connect: () => { calls++; return open(); }, takeRefusal: () => notes.take(),
+    live: () => true, keyed: () => false, connected: () => false, onRedial: (i) => redials.push(i), graceMs: 20,
+  });
+  got.sock.destroy(); vara.close();
+  assert.ok(calls >= 2, 'the first dial was refused: ' + calls);
+  assert.strictEqual(redials[0].refusal.port, 'command');
+  assert.strictEqual(redials[0].waitMs, 500);
+  assert.ok(calls <= 4);
+});
+test('real sockets: with the one-second settle the same VARA takes the first dial', async () => {
+  const vara = fakeVaraPort(700);
+  await vara.listen();
+  const accept = await V.waitForPortAccept(vara.st.port, { intervalMs: 50 });
+  assert.ok(accept.ok && accept.settleMs >= 1000);
+  const notes = new D.RefusalNotes();
+  let calls = 0;
+  const open = patOpensPort(vara.st.port, notes);
+  const got = await D.dialWithRedial({
+    mode: 'vara', connect: () => { calls++; return open(); }, takeRefusal: () => notes.take(),
+    live: () => true, keyed: () => false, connected: () => false, graceMs: 20,
+  });
+  got.sock.destroy(); vara.close();
+  assert.strictEqual(calls, 1);
+});
+/** A stand-in for Pat whose first `ended` calls come back as "connect timeout" after `afterMs`. */
+function fakePatEnded({ ended = 1, afterMs = 12, keyedByCall = false } = {}) {
+  const st = { calls: 0, slept: [], redials: [], clock: 1000, keyed: false };
+  const notes = new D.RefusalNotes();
+  return {
+    st,
+    opts: (over = {}) => ({
+      mode: 'vara',
+      connect: async () => {
+        st.calls++;
+        if (st.calls <= ended) {
+          if (keyedByCall) st.keyed = true; // VARA called: the radio transmitted
+          st.clock += afterMs;
+          notes.note('log', D.patVaraCallEnded(TIMEOUT_LINE));
+          notes.note('output', D.patVaraCallEnded(TIMEOUT_LINE));
+          throw Object.assign(new Error('connect: HTTP 500 — Session failure {"NumReceived":0}'), { status: 500 });
+        }
+        return 3;
+      },
+      takeRefusal: () => notes.take(),
+      sleep: async (ms) => { st.slept.push(ms); st.clock += ms; },
+      now: () => st.clock,
+      live: () => true, keyed: () => st.keyed, connected: () => false,
+      onRedial: (i) => st.redials.push(i),
+      ...over,
+    }),
+  };
+}
+test('VARA answers the first CONNECT with DISCONNECTED at once ("connect timeout" in 12 ms, never keyed): placed again, and it goes through', async () => {
+  const p = fakePatEnded({ ended: 1, afterMs: 12 });
+  assert.strictEqual(await D.dialWithRedial(p.opts()), 3);
+  assert.strictEqual(p.st.calls, 2);
+  assert.deepStrictEqual(p.st.slept, [500]);
+  assert.strictEqual(p.st.redials[0].refusal.ended, true);
+  assert.strictEqual(p.st.redials[0].msSinceDial, 12);
+  const t = D.redialLogText({ mode: 'vara', where: '127.0.0.1:8300', ...p.st.redials[0], sinceCheckMs: 1010 });
+  assert.ok(/VARA HF at 127\.0\.0\.1:8300 ended Pat's call 12 ms after it was asked for, 1010 ms after POTACAT's own check of that port \(Pat: connect timeout\)\. The radio was never keyed, so nothing was transmitted\. Calling again in 500 ms \(try 2 of 4\)/.test(t), t);
+});
+test('ended at once every time: four dials, then VARA is named, not the gateway', async () => {
+  const p = fakePatEnded({ ended: 99 });
+  let err = null;
+  try { await D.dialWithRedial(p.opts()); } catch (e) { err = e; }
+  assert.strictEqual(p.st.calls, 4);
+  assert.deepStrictEqual(p.st.slept, [500, 1000, 2000]);
+  assert.strictEqual(err.varaEnded.ended, true);
+  assert.strictEqual(err.varaDials, 4);
+  assert.strictEqual(err.varaRefused, undefined);
+  const t = D.endedText({ mode: 'vara', where: '127.0.0.1:8300', dials: 4 });
+  assert.ok(/VARA HF at 127\.0\.0\.1:8300 ended the call at once 4 times, before the radio was keyed, so nothing was transmitted/.test(t), t);
+  assert.ok(!/did not answer/.test(t));
+});
+test('a real no-answer (the radio transmitted, "connect timeout" after 70 s) is never placed again', async () => {
+  const p = fakePatEnded({ ended: 99, afterMs: 70000, keyedByCall: true });
+  let err = null;
+  try { await D.dialWithRedial(p.opts()); } catch (e) { err = e; }
+  assert.ok(err);
+  assert.strictEqual(p.st.calls, 1);
+  assert.deepStrictEqual(p.st.slept, [], 'no wait, no redial');
+  assert.strictEqual(err.varaEnded, undefined, 'it stays a gateway that did not answer');
+  assert.strictEqual(err.varaDials, undefined);
+});
+test('keyed and over within a second is still a call: never placed again', async () => {
+  const p = fakePatEnded({ ended: 99, afterMs: 800, keyedByCall: true });
+  let err = null;
+  try { await D.dialWithRedial(p.opts()); } catch (e) { err = e; }
+  assert.strictEqual(p.st.calls, 1);
+  assert.strictEqual(err.varaEnded, undefined);
+});
+test('never keyed but 70 s long (a meter that missed the key-down must not matter): not placed again', async () => {
+  const p = fakePatEnded({ ended: 99, afterMs: 70000 });
+  let err = null;
+  try { await D.dialWithRedial(p.opts()); } catch (e) { err = e; }
+  assert.strictEqual(p.st.calls, 1);
+  assert.deepStrictEqual(p.st.slept, []);
+  assert.strictEqual(err.varaEnded, undefined);
+});
+test('VARA went on with the call during the wait (the radio keyed): no second CONNECT on top of it', async () => {
+  const p = fakePatEnded({ ended: 99, afterMs: 12 });
+  const o = p.opts();
+  const sleep = async (ms) => { p.st.slept.push(ms); if (ms === 500) p.st.keyed = true; };
+  let err = null;
+  try { await D.dialWithRedial({ ...o, sleep }); } catch (e) { err = e; }
+  assert.strictEqual(p.st.calls, 1);
+  assert.strictEqual(err.varaWentOn, true);
+});
+
 console.log('the words');
 test('the log line for a redial says nothing was transmitted and how long after POTACAT\'s check', () => {
   const t = D.redialLogText({ mode: 'vara', where: '127.0.0.1:8300', refusal: D.patVaraPortRefusal(CMD_REFUSED), dial: 2, of: 4, waitMs: 500, sinceCheckMs: 153.4 });
@@ -285,8 +459,17 @@ test('a key-down is counted where the radio is keyed, and the count starts at ze
 });
 test('Pat\'s refusal line is noted from both of its pipes and is never worded as no answer', () => {
   const ev = fnBody(main, 'winlinkOnPatEvent');
-  assert.ok(/const refused = VaraDial\.patVaraPortRefusal\(ev\.text\);\s*if \(refused\) \{\s*_winlinkVaraRefusals\.note\('log', refused\);[\s\S]{0,260}?_patHoldsVara\[_patVaraKind\] = null;\s*\}\s*else if \(ev\.class === 'login-failed'\)/.test(ev));
-  assert.ok(/_winlinkVaraRefusals\.note\('output', VaraDial\.patVaraPortRefusal\(line\)\)/.test(fnBody(main, 'spawnPat')));
+  assert.ok(/const refused = VaraDial\.patVaraPortRefusal\(ev\.text\);[\s\S]{0,420}?if \(refused\) \{\s*_winlinkVaraRefusals\.note\('log', refused\);[\s\S]{0,260}?_patHoldsVara\[_patVaraKind\] = null;\s*\}\s*else if \(ev\.class === 'login-failed'\)/.test(ev));
+  assert.ok(/_winlinkVaraRefusals\.note\('output', VaraDial\.patVaraPortRefusal\(line\) \|\| VaraDial\.patVaraCallEnded\(line\)\)/.test(fnBody(main, 'spawnPat')));
+});
+test('"connect timeout" is noted for the dial, and still reads as no answer when the dial does not take it', () => {
+  const ev = fnBody(main, 'winlinkOnPatEvent');
+  const note = ev.indexOf("_winlinkVaraRefusals.note('log', VaraDial.patVaraCallEnded(ev.text));");
+  assert.ok(note > 0);
+  assert.ok(note < ev.indexOf("else if (ev.class === 'no-answer')"), 'the no-answer wording is not skipped for it');
+  const s = fnBody(main, 'winlinkStartSession');
+  assert.ok(/if \(e && e\.varaEnded\) \{\s*_winlinkSessionError = VaraDial\.endedText\(/.test(s));
+  assert.ok(/if \(e && e\.varaWentOn\) \{[\s\S]{0,260}?patClient\.disconnect\(true\)/.test(s), 'a call that went on the air after all is ended, never repeated');
 });
 test('refused every time ends as a modem that is not answering, with POTACAT\'s own sentence', () => {
   const s = fnBody(main, 'winlinkStartSession');

@@ -84,7 +84,14 @@ are such clients. So the first call after a start can find the port closed. Pat 
 reached VARA: nothing was asked of it and nothing was transmitted. POTACAT places that call
 again after 500 ms, 1 s and 2 s (`lib/vara-dial.js` `dialWithRedial`), never once the radio has
 been keyed. If all four are refused it says that VARA refused the connection; it does not say
-the gateway did not answer. The `[Winlink]` log lines give the time between POTACAT's check and
+the gateway did not answer.
+
+Two more things guard that first call (#1040). After POTACAT's own last connection to the port
+closes, VARA is left alone for at least one second before Pat is asked to call. And on a first
+call Pat sends VARA its whole setup and CONNECT in one burst and takes the first DISCONNECTED it
+sees as the end of the call ("connect timeout" in Pat's log): when that comes within 5 seconds
+of the dial with the radio never keyed, no call was made, and it is placed again on the same
+schedule. A call that keyed the radio is never placed again by itself. The `[Winlink]` log lines give the time between POTACAT's check and
 the call, and each refusal.
 
 ## Checked, and what still needs the air

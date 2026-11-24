@@ -12428,7 +12428,7 @@ function spawnPat() {
         winlinkLog(`pat: ${line}`);
         if (DirewolfProcess.patLineSaysConnected(line)) _winlinkPatConnected = true;
         if (VaraProcess.patLineSaysVaraRefused(line) && _patVaraKind && _patHoldsVara[_patVaraKind] === proc) _patHoldsVara[_patVaraKind] = null;
-        if (winlinkSessionActive()) _winlinkVaraRefusals.note('output', VaraDial.patVaraPortRefusal(line));
+        if (winlinkSessionActive()) _winlinkVaraRefusals.note('output', VaraDial.patVaraPortRefusal(line) || VaraDial.patVaraCallEnded(line));
       }
     };
     proc.stdout.on('data', relay);
@@ -12516,6 +12516,9 @@ function winlinkOnPatEvent(ev) {
     // refused") are the no-answer rule's too; this is never a gateway that did not
     // answer. The dial decides what happens next (lib/vara-dial.js).
     const refused = VaraDial.patVaraPortRefusal(ev.text);
+    // VARA answered Pat's CONNECT with DISCONNECTED ("connect timeout"): the dial decides whether that
+    // was a call (it is then the no-answer below) or the first call's setup going wrong (lib/vara-dial.js).
+    _winlinkVaraRefusals.note('log', VaraDial.patVaraCallEnded(ev.text));
     if (refused) {
       _winlinkVaraRefusals.note('log', refused);
       // Pat does not hold a port it could not open, whatever was recorded before the dial.
@@ -16096,6 +16099,16 @@ async function winlinkStartSession({ mode, gateway, dialKhz, url: rowUrl, origin
       if (e && e.varaRefused) {
         _winlinkSessionError = VaraDial.refusedText({ mode, where: winlinkVaraWhere(mode), refusal: e.varaRefused, dials: e.varaDials });
         _winlinkSessionErrorKind = 'transport-down';
+      }
+      // VARA ended every call at once with the radio never keyed: not a gateway that did not answer either.
+      if (e && e.varaEnded) {
+        _winlinkSessionError = VaraDial.endedText({ mode, where: winlinkVaraWhere(mode), dials: e.varaDials });
+        _winlinkSessionErrorKind = 'transport-down';
+      }
+      // VARA went on with a call Pat had given up on: Pat is told to end it (the session's end unkeys).
+      if (e && e.varaWentOn) {
+        winlinkLog('vara: the call went on the air after Pat reported it ended; it is not placed again, and Pat is told to hang up');
+        if (patClient) patClient.disconnect(true).catch(() => {});
       }
       // One line for a bug report when a VARA call ends at once with nothing keyed.
       if (dialed) {
