@@ -589,6 +589,7 @@ const TESTS = [
   'test/commander-codec-test.js',
   'test/logger-cat-test.js',
   'test/cm108-ptt-test.js',
+  'test/window-security-test.js', // app windows: only the permissions POTACAT uses (mic, MIDI, CM108 WebHID, copy, audio output, full screen) for its own pages; no navigation away; no new windows, web links through the open-external allowlist
   'test/removed-features-test.js',
   'test/dxpedition-contests-test.js',
   'test/vfo-meters-test.js',
@@ -662,6 +663,8 @@ const TESTS = [
   'test/jtcat-split-panes-test.js',
   'test/qrz-base-call-test.js',
   'test/external-links-allowed-test.js',
+  'test/external-url-test.js', // open-external: host compared exactly (no lookalikes, userinfo, trailing dot); file:// only inside the app folders
+  'test/secret-file-test.js', // the ECHOCAT TLS key, the Tailscale key and settings.json are 0600; an older key is chmod'ed at start
   'test/fetch-policy-test.js',
   'test/icom-picker-models-test.js',
   'test/k9cyt-requests-test.js',

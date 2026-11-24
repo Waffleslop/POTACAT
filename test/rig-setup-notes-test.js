@@ -239,9 +239,10 @@ test('the editor persists ticks on both save paths and offers the button', () =>
 test('every setup offers Discord and email for a setup we do not list', () => {
   assert.ok(/const RIG_SETUP_DISCORD_URL = 'https:\/\/discord\.gg\//.test(APP), 'Discord link missing from the panel footer');
   assert.ok(/const RIG_SETUP_EMAIL = 'k3sbp@potacat\.com'/.test(APP), 'email address missing from the panel footer');
-  // open-external is a prefix allow-list that fails closed with no error.
-  assert.ok(MAIN.includes("'mailto:k3sbp@potacat.com'"), 'mailto:k3sbp@potacat.com is not allowed by open-external');
-  assert.ok(MAIN.includes("'https://discord.gg/'"), 'discord.gg is not allowed by open-external');
+  // open-external (lib/external-url.js) fails closed with no error.
+  const ExternalUrl = require('../lib/external-url');
+  assert.ok(ExternalUrl.allowed('mailto:k3sbp@potacat.com?subject=POTACAT%20setup&body=x'), 'mailto:k3sbp@potacat.com is not allowed by open-external');
+  assert.ok(ExternalUrl.allowed('https://discord.gg/cuNQpES38C'), 'discord.gg is not allowed by open-external');
 });
 test('main keys the CW Key Port with the same resolver the notes quote', () => {
   assert.ok(/const kpPins = resolveKeyPortPins\(/.test(MAIN), 'key-port keying no longer uses resolveKeyPortPins');
