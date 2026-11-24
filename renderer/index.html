@@ -906,7 +906,7 @@
       <div id="jtcat-audio-strip" style="display:flex;align-items:center;gap:8px;padding:2px 10px;font-size:11px;color:var(--text-dim);background:var(--bg-header);border-bottom:1px solid var(--border);">
         <span style="flex-shrink:0;">RX</span>
         <canvas id="jtcat-rx-meter" width="100" height="10" style="border-radius:2px;background:#111;flex-shrink:0;"></canvas>
-        <input type="range" id="jtcat-rx-gain" min="0" max="300" value="100" style="width:80px;" title="RX Gain % — remembered per band, so changing band restores the level you last used there">
+        <input type="range" id="jtcat-rx-gain" min="0" max="100" value="100" style="width:80px;" title="RX Gain % — remembered per band, so changing band restores the level you last used there">
         <span id="jtcat-rx-gain-val" style="min-width:32px;text-align:right;">100%</span>
         <!-- "RX gain low" hint badge — fires when pre-gain input is non-silent
              but post-gain level is too low for decode. Hidden by default;
@@ -1496,6 +1496,7 @@
         <button type="button" class="settings-tab" data-tab="logging">Logging</button>
         <button type="button" class="settings-tab" data-tab="network">ECHOCAT</button>
         <button type="button" class="settings-tab" data-tab="display">Display</button>
+        <button type="button" class="settings-tab" data-tab="sounds">Sounds</button>
         <button type="button" class="settings-tab" data-tab="cloud">Cloud</button>
         <!-- Appearance, one step from any tab (#376): Light, Dark or System.
              The themes for each mode are chosen in Settings > Display. -->
@@ -2430,7 +2431,13 @@
               <label style="margin-left:8px;">Carrier duration (s):
                 <input type="number" id="set-external-atu-seconds" min="1" max="15" step="0.5" value="4" style="width:60px;">
               </label>
-              <span class="help-text" style="margin-top:4px;display:block;">Tune button emits a low-power carrier (in AM, which needs no key or audio) so the RF-sensing tuner can match. Rig restores to its previous mode and power afterwards. 1 to 25 W; your radio may not go below its own minimum (5 W on many rigs).</span>
+              <!-- A radio POTACAT cannot set the power of (lib/tx-power-control.js): the field is greyed, with the reason. -->
+              <div class="help-text hidden" id="external-atu-own-power-note" style="margin-top:4px;font-weight:600;"></div>
+              <div class="help-text" id="external-atu-help" style="margin-top:4px;">Tune button emits a low-power carrier (in AM, which needs no key or audio) so the RF-sensing tuner can match, then puts the mode and the power back. 1 to 25 W; your radio may not go below its own minimum (5 W on many rigs). Where POTACAT cannot set a radio's power, the carrier goes out at the radio's own power, and POTACAT asks before the first tune.</div>
+              <div class="hidden" id="external-atu-own-power-reset" style="margin-top:6px;">
+                <span class="help-text" id="external-atu-own-power-reset-text"></span>
+                <button type="button" id="external-atu-own-power-reset-btn" style="margin-left:6px;">Ask me again</button>
+              </div>
             </div>
             <label class="checkbox-label" style="margin-top:8px;"><input type="checkbox" id="set-atu-keep-on"> Keep the tuner on after a tune cycle</label>
             <span class="help-text" style="margin-left:24px;display:block;">For a Yaesu with a tuner on its TUNER jack (FT-710 + mAT-30): the radio runs the tune, then switches the tuner off. With this on, POTACAT watches the cycle and sends AC001; the moment the radio reports the tuner off, so it stays online.</span>
@@ -2785,16 +2792,6 @@
       </div>
       <label class="checkbox-label"><input type="checkbox" id="set-notify-popup" checked> Pop-up notification</label>
       <label class="checkbox-label"><input type="checkbox" id="set-notify-sound" checked> Sound notification</label>
-      <label title="A short sound each time a QSO is logged — from any window, the mobile device, JTCAT or WSJT-X — so you know a contact went in the log even when POTACAT is in the background.">QSO logged chime:
-        <select id="set-qso-chime" style="margin-left:4px;">
-          <option value="off">Off</option>
-          <option value="soft">Soft ding</option>
-          <option value="twotone">Two-tone</option>
-          <option value="bell">Bell</option>
-          <option value="morse-r">Morse R (received)</option>
-        </select>
-        <button type="button" id="set-qso-chime-test" style="margin-left:6px;padding:2px 8px;font-size:12px;">Test</button>
-      </label>
       <label>Notification duration (seconds):
         <input type="number" id="set-notify-timeout" min="3" max="60" step="1" value="10">
       </label>
@@ -3093,6 +3090,10 @@
           </div>
         </div>
         <div style="margin-top:10px;border-top:1px solid var(--border);padding-top:8px;">
+          <label class="checkbox-label"><input type="checkbox" id="set-forward-synced-qsos" checked> Also send QSOs from my other devices when they arrive from POTACAT Cloud</label>
+          <span class="help-text" style="margin-left:12px;display:block;line-height:1.5;">A QSO you log on your phone off-grid, or on another device signed in to your POTACAT Cloud account, goes to the logbook, Extra UDP and QRZ Logbook set up here when this PC syncs it, the same as a QSO logged here. Only your own callsign's QSOs, logged after this is turned on. QSOs logged on another PC running POTACAT are left to that PC. If a logbook does not answer, POTACAT tries again for up to three days.</span>
+        </div>
+        <div style="margin-top:10px;border-top:1px solid var(--border);padding-top:8px;">
           <label class="checkbox-label"><input type="checkbox" id="set-lotw-enable"> Upload to ARRL Logbook of the World (via TQSL)</label>
           <span class="help-text" style="margin-left:12px;display:block;">Signs and uploads your POTACAT log with your own TrustedQSL install and callsign certificate. QSOs already at LoTW are skipped automatically.</span>
           <div id="lotw-config" class="hidden" style="margin-left:12px;margin-top:6px;">
@@ -3308,6 +3309,41 @@
         <div class="dir-suggest-link">Want a net or SWL station added? <a href="#" id="dir-suggest-sheet">Leave a comment on the Google Sheet</a> and we'll review it.</div>
       </div>
       <div id="dir-hover-popup" class="dir-hover-popup hidden"></div>
+    </fieldset>
+
+    <!-- Sounds (#1041): the contact sound, the milestone sounds and banners, the volume and the output.
+         What plays is lib/qso-sounds.js; when and on which output is lib/sound-guard.js (never the radio's sound card). -->
+    <fieldset class="source-toggles sounds-pane" data-settings-tab="sounds">
+      <legend>Sounds</legend>
+      <label class="checkbox-label"><input type="checkbox" id="set-sounds-on" checked> Sounds</label>
+      <span class="help-text sounds-help">Off is silent everywhere, except the low buzz that tells you a contact was not saved.</span>
+      <label class="checkbox-label"><input type="checkbox" id="set-sound-contact" checked> Contact logged sound</label>
+      <label class="sounds-row">Sound:
+        <select id="set-qso-chime">
+          <option value="coin">Coin</option>
+          <option value="soft">Soft ding</option>
+          <option value="twotone">Two-tone</option>
+          <option value="bell">Bell</option>
+          <option value="morse-r">Morse R (received)</option>
+        </select>
+      </label>
+      <span class="help-text sounds-help">A short sound each time a contact goes into the log, from any window, JTCAT or WSJT-X. A contact that is already in this activation's log plays two falling notes instead. A contact logged on your phone sounds on the phone, not here.</span>
+      <label class="checkbox-label"><input type="checkbox" id="set-sound-milestones" checked> Milestone sounds</label>
+      <label class="checkbox-label"><input type="checkbox" id="set-milestone-banners" checked> Milestone banners</label>
+      <span class="help-text sounds-help">At 1, 10, 25, 50, 100 and 250 contacts in a UTC day: one line at the top of the window for about 3 seconds, and from 10 contacts up a short tune after the contact sound.</span>
+      <label class="sounds-row">Volume:
+        <input type="range" id="set-sound-volume" min="10" max="100" step="5" value="80">
+        <span id="set-sound-volume-val">80%</span>
+        <button type="button" id="set-qso-chime-test">Test</button>
+      </label>
+      <label class="sounds-row">Sound output:
+        <select id="set-sound-output">
+          <option value="">Automatic</option>
+        </select>
+      </label>
+      <span class="help-text sounds-help">Automatic is your computer's default output, but never the radio's sound card. The radio's sound card is not in this list: a sound sent to it would go on the air.</span>
+      <div id="set-sound-status" class="sounds-status" role="status"></div>
+      <span class="help-text sounds-help">No sound plays while you transmit. One that comes due during a transmission waits for it to end, for up to 3 seconds.</span>
     </fieldset>
 
     <!-- 8. Display (trimmed — bearing moved to Antenna, SmartSDR absorbed) -->
@@ -5571,6 +5607,7 @@
   <script src="../lib/rig-family.js"></script>
   <script src="../lib/tci-target.js"></script>
   <script src="../lib/tx-audio-input.js"></script>
+  <script src="../lib/tx-power-control.js"></script>
   <script src="../lib/ft891-tx-audio-input.js"></script>
   <script src="../lib/rig-audio-jack.js"></script>
   <script src="../lib/cw-sideband.js"></script>
@@ -5633,10 +5670,14 @@
   <script src="../lib/jtcat-capture-gate.js"></script>
   <script src="../lib/diagnostic-snapshot.js"></script>
   <script src="was-view.js"></script>
+  <script src="../lib/chime-sounds.js"></script>
   <script src="jtcat-parser.js"></script>
   <script src="remote-ptt.js"></script>
   <script src="../lib/cw-banks.js"></script>
   <script src="../lib/cw-esm.js"></script>
+  <script src="../lib/qso-sounds.js"></script>
+  <script src="../lib/sound-guard.js"></script>
+  <script src="sounds.js"></script>
   <script src="app.js"></script>
   <script src="station-setup.js"></script>
   <script src="echocat-review.js"></script>

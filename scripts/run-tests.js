@@ -55,6 +55,9 @@ const TESTS = [
   'test/lz3aw-round5-test.js',
   'test/call-filter-test.js',
   'test/desktop-ux-test.js',
+  'test/qso-sounds-test.js', // #1041: which sound for which contact, the milestones (1/10/25/50/100/250; 500 retired for the phone), defaults, the qso-milestone message
+  'test/sound-guard-test.js', // #1041 the transmit guard: no sound on the radio's sound card, none while transmitting (held 3 s, then dropped)
+  'test/qso-sound-files-test.js', // #1041: renderer/sounds/*.wav are byte for byte what scripts/make-qso-sounds.js renders
   'test/host-port-test.js',
   'test/serial-callout-twin-test.js',
   'test/clock-offset-test.js',
@@ -200,6 +203,7 @@ const TESTS = [
   'test/jtcat-replace-log-test.js',
   'test/jtcat-second-caller-test.js',
   'test/jtcat-quiet-freq-test.js', // CQ quiet frequency: main measures the engine audio while no waterfall draws (one rule, lib/jtcat-quiet-freq.js)
+  'test/jtcat-auto-tone-passband-test.js', // #1032: the automatic CQ tone stays in 500..2400 Hz (inside every common DATA-mode TX filter); an operator's tone is never bounded
   'test/port-picker-test.js',
   'test/pota-parks-db-test.js',
   'test/elecraft-data-mode-test.js',
@@ -363,6 +367,7 @@ const TESTS = [
   'test/split-up-test.js', // #689: Split up N from the VFO window and ECHOCAT Web (TX = RX + N, lock, caps)
   'test/vfo-freq-entry-test.js', // #672: the Small VFO's frequency is typed in place, a click grows to the keypad; Enter never tunes a hidden buffer
   'test/main-window-layout-fixes-test.js', // #285 Log button "L", #284 HF Nets check mark, #298 HOLD TO TALK off screen
+  'test/status-bar-wrap-test.js', // spot count ran off a narrow window
   'test/wd3d-activator-test.js', // WD3D: toolbar wraps at full screen; a two-fer/n-fer spot fills every P2P park
   'test/wspr-run-time-test.js', // WSPR beacon runs as long as the operator sets (K2BDE); a PTT port keys on RTS by default (K5LEB)
   'test/remote-client-yield-test.js', // a desktop kicked by another of the owner's devices yields the rig (W0EGR)
@@ -435,6 +440,7 @@ const TESTS = [
   'test/winlink-wf-audio-test.js', // the Winlink waterfall says why it is black (no radio audio reaching POTACAT)
   'test/winlink-main-wiring-test.js',
   'test/winlink-vara-test.js',
+  'test/vara-dial-test.js', // the first VARA call after a start: a dial VARA refused is placed again while nothing was keyed, never read as 'did not answer'; a box set to the radio's own sound card is not a virtual cable
   'test/winlink-vara-anywhere-test.js', // #287: VARA HF and VARA FM on Linux, macOS and Windows, at a host and port; a fake VARA TNC (real Pat when its binary is present)
   'test/winlink-connect-test.js', // #128: /api/connect over http.request with no headers timeout; VARA and ARDOP send the same request
   'test/direwolf-skipped-path-log-test.js', // #1031: a configured winlinkDirewolfPath that is missing or not executable is named in the log
@@ -501,6 +507,7 @@ const TESTS = [
   'test/wspr-scheduler-test.js', // #268: a beacon never keys two slots in a row unless TX % is over 50
   'test/wspr-hop-atu-test.js', // #747: a receive-only WSPR hop runs no band-change ATU tune
   'test/wspr-beacon-power-test.js', // #268: the beacon keeps the operator's RF power; rigctld reports the radio's power
+  'test/wspr-beacon-power-scale-test.js', // #521: the beacon's level on each rig's scale (KX3, G90, Icom, Yaesu, Flex), never above the entry; none entered = power left alone
   'test/wspr-reported-dbm-test.js', // #268: the beacon reports the power it runs at (5 W = 37 dBm), or the operator's fixed pick, 0..60 dBm
   'test/js8-native-test.js',
   'test/check-required-natives-test.js', // release gate: ft8_native/js8_native exist, right arch (PE/ELF/Mach-O header), load
@@ -538,7 +545,7 @@ const TESTS = [
   'test/cloud-merge-dupe-test.js',
   'test/cloud-pull-per-profile-test.js', // #245: profiles sharing one account: each pulls only its own QSOs; the dupe guard and journal stay per profile
   'test/cloud-delete-guard-test.js', // #245: delete pushes held (another profile's QSOs, or over 25 an hour) until the operator confirms; dupe guard keeps station callsigns apart
-  'test/cloud-pull-forward-test.js', // #267: a phone's off-grid QSOs of this station reach MacLoggerDX etc. via the pull, once; never another PC's or the history
+  'test/cloud-pull-forward-test.js', // #267/#838: this station's QSOs from a phone or any other device reach MacLoggerDX etc. via the pull, once, retried when a logger refuses; never another PC's or the history
   'test/swr-guard-test.js',
   'test/atu-wizard-test.js',         // Flex ATU Calibration Wizard: plan vs privileges, classifier, run loop on a fake Flex, wiring
   'test/ft8-worker-respawn-test.js',
@@ -578,6 +585,7 @@ const TESTS = [
   'test/cw-playout-lateness-test.js', // #244 diagnostic: paddle playout edge lateness, one line per over
   'test/cw-sidetone-air-agree-test.js', // #244: ECHOCAT Web's sidetone and the air agree; an element is committed once it sounds
   'test/cw-keyer-setmode-same-mode-test.js', // ECHOCAT Web: a settings or config echo with the same keyer mode does not cut a CW over
+  'test/cw-keyer-timing-diag-test.js', // #244 diagnostic: the page keyer's timing record of one over; keying identical with and without it
   'test/web-paddle-input-first-test.js', // #244 Part A: paddle keys and MIDI reach the web keyer first (capture phase); drawing pauses during a paddle over
   'test/spot-hides-test.js',
   'test/mac-titlebar-test.js',
@@ -637,6 +645,8 @@ const TESTS = [
   'test/dx-rule-test.js',            // G4BFG: DX = another entity, or the operator's HF / 6 m-up distance
   'test/park-entity-test.js',        // #662: a home call signed in a park abroad takes the park's DXCC entity
   'test/external-atu-carrier-test.js', // N8JMS: RF-sense tuner carrier in AM (CW over CAT is key-up)
+  'test/tx-power-control-test.js', // N5XHI FT-857D 2026-11-24: the one rule "can POTACAT set this radio's TX power?", per radio and transport, the question's wording, the tune gate
+  'test/ext-atu-own-power-test.js', // ... the real gate + tune in a sandbox: no power commands or power claims on such a radio, Cancel keys nothing, a device is refused or asked, power-capable radios unchanged
   'test/jtcat-map-popout-arcs-test.js', // TacticalIndex: QSO arcs in the JTCAT map pop-out
   'test/jtcat-map-popout-rr73-test.js', // #1029: RR73 is not a grid in the map pop-out
   'test/ae5je-settings-audio-test.js', // AE5JE: audio devices follow their name; bug report says whether settings saves land
@@ -724,6 +734,7 @@ const TESTS = [
   'test/adif-clean-test.js',
   'test/cloud-tab-ui-test.js',
   'test/jtcat-slider-wheel-test.js',
+  'test/jtcat-rx-slider-range-test.js',
   'test/cloud-phase2-ui-test.js',
   'test/onair-callsign-test.js',
   'test/activated-parks-test.js',
@@ -761,6 +772,7 @@ const TESTS = [
   'test/jtcat-stations-needed-test.js', // #557 part 2: needed marks from the roster under the map's scope, the Park column, Wanted in Stations
   'test/jtcat-auto-compact-test.js', // #857: the JTCAT window picks a compact layout by itself when short (hysteresis; an explicit Full/Compact wins; never resizes the window)
   'test/jtcat-own-tx-offset-test.js', // #503: our own TX rows show the offset that slot went out on
+  'test/jtcat-chimes-test.js', // optional JTCAT chimes: a station calls me, TX stopped by itself (off by default, one sound engine, sound only)
   'test/net-reminder-row-test.js', // a Net Reminders row always names its net (#284)
   'test/freq-dots-test.js', // every frequency an operator reads is written the VFO way, 14.074.00 (Casey 2026-11-11)
   'test/settings-contrast-test.js', // Settings meets the contrast rule in every theme (VARA button in She's On Frequency); rendered: scripts/settings-contrast-audit.js
@@ -798,6 +810,7 @@ const TESTS = [
   'test/park-db-check-test.js', // activator: only POTA refs are checked against the parks list (og3e WWFF/SOTA flagged as typos), and the warning never overflows
   'test/rigctld-passthrough-test.js', // custom CAT over rigctld: a + or \ command goes to rigctld as typed (electricfalcon)
   'test/mono-upmix-test.js', // the VFO monitor plays radio audio in both ears (hoogskev, macOS left-channel only)
+  'test/setup-test-mode-test.js', // #755: the transmit test keys in the DATA mode FT8 uses (USB->DIGU on sound-card radios), says so, puts it back
   'test/setup-test-freq-test.js', // Station Setup test transmit: at the dial if the licence allows, else at the band's FT8 dial and back, else refused with why (w0tlp)
   'test/jtcat-spot-target-after-qso-test.js', // #518: a finished QSO (done, Skip, Cancel) with the spot target's call clears it, armed or engaged; the watcher never calls a worked station again
   'test/jtcat-hold-tx-resend-test.js', // #688: jtcat-start resends the Hold TX state so a phone FT8 screen opened after connect shows it; Hold TX Freq: ON reaches the CAT log

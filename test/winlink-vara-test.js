@@ -115,9 +115,14 @@ function fnBody(src, name) {
     assert.ok(a.settleMs >= a.waitedMs && took >= a.waitedMs + a.settleMs - 20, 'settled as long again after its own check');
     const quick = net.createServer((sock) => sock.on('error', () => {}));
     await new Promise((r) => quick.listen(0, '127.0.0.1', r));
-    const q = await V.waitForPortAccept(quick.address().port, { intervalMs: 50 });
-    quick.close();
+    const q = await V.waitForPortAccept(quick.address().port, { intervalMs: 50, settleMinMs: 50 });
     assert.ok(q.ok && q.tries === 1 && q.settleMs === 50, 'listening already: one try, the minimum settle');
+    // #1040: left alone for a second after our own connection closes, however quickly VARA took it.
+    assert.strictEqual(V.VARA_DEFAULTS.settleMinMs, 1000);
+    const tq = Date.now();
+    const q2 = await V.waitForPortAccept(quick.address().port, { intervalMs: 50 });
+    quick.close();
+    assert.ok(q2.ok && q2.tries === 1 && q2.settleMs === 1000 && Date.now() - tq >= 980, 'the default settle is one second: ' + q2.settleMs);
     const t1 = Date.now();
     const never = await V.waitForPortAccept(port, { intervalMs: 50, timeoutMs: 300 });
     assert.strictEqual(never.ok, false);

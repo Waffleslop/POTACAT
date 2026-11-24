@@ -31,7 +31,8 @@ Per profile: jtcatMaxQsoAttempts, jtcatCallingTimeMin, jtcatReworkDays, jtcatHun
 jtcatRelogCooldownMin, jtcatRunPauseAfter, jtcatModeHop*, jtcatFdMode/jtcatFdExch, jtcatHoundMode,
 jtcatSkipTx1, jtcatApDecode, jtcatLateStartTx, jttyMacroStyle, jttyMacros, pskMacros.
 Machine-wide (GLOBAL_KEY): ultracat, jtcatRxGain, jtcatTxGain (desktop-authoritative, one writer
-`applyJtcatTxGain`), jtcatWaterfallSpeed, jtcatWaterfallFloor, jtcatShowBandScope, jtcatShowWaterfall, jtcatStationsExpiryMin.
+`applyJtcatTxGain`), jtcatWaterfallSpeed, jtcatWaterfallFloor, jtcatShowBandScope, jtcatShowWaterfall, jtcatStationsExpiryMin,
+jtcatChimeCall, jtcatChimeStop.
 Rule: a setting that is operating policy is per profile; a setting about this machine or its display is GLOBAL.
 
 ### Split "Fake It" (jtcatFakeIt, per profile)
@@ -47,6 +48,27 @@ Rule: a setting that is operating policy is per profile; a setting about this ma
   Anywhere else (no radio picked, CAT None, a no-CAT radio, TCI, the radio in split, multi-band, a remote
   laptop) the tone goes out at the plain audio offset, exactly as with Fake It off. A CAT link that is down
   at the moment of transmit still skips that one transmission (the audio was rendered for the shifted dial).
+
+### Chimes (jtcatChimeCall, jtcatChimeStop; machine-wide; Casey 2026-11-24)
+- Options > Sounds: "Chime when a station calls me" and "Chime when transmitting stops by itself". Each is a
+  select of sounds with Off first and a Test button. Both are off by default; a missing key reads off.
+- lib/jtcat-chimes.js decides (pure); main.js is glue (jtcatChimeCallers once per decode event in both decode
+  paths, before the QSO machines; jtcatChimeTxStopped at the automatic stops); the main window plays through
+  lib/chime-sounds.js, the engine "QSO logged chime" uses. Sound only: no chime path stops, starts or changes TX.
+- A station calls me: a decode addressed to my call (JtcatParser.isAddressedTo, the red My Activity row) whose
+  transmitter (r.call) is not me and not the station of a QSO in progress. An answer to my CQ counts. At most one
+  chime per decode period; a caller who keeps calling does not chime again until 10 minutes pass without a call
+  from them; the station of a QSO in progress is remembered the same way, so their last 73 is not a new caller.
+- Transmitting stops by itself: the Tx watchdog (jtcatCallingTimeMin), the 30-minute attended limit ending Hunt
+  or Run, and Run pausing on a worked-out band (JtcatChimes.AUTO_STOP_REASONS). An operator stop (Halt, a Hunt,
+  Run or mode change, the phone) is silent: jtcatHaltTxNow, stopFullAutoCq and setJtcatHuntMode carry no chime.
+  Not included: the SWR guard, the per-QSO try cap, a tune link, APRS or SSTV taking the audio.
+- Where it sounds: the main window's default-output AudioContext, never given a sink, so never the transmit
+  audio device (jtcatTxAudioCtx is separate). A station whose radio codec is the Windows default output hears
+  every PC sound on that codec, so no chime starts while JTCAT is transmitting and the stop chime waits 800 ms
+  for the key-up. Each chime has its own list of sounds; no sound is in two lists.
+- Not built: the ECHOCAT app and ECHOCAT Web do not chime (handoff 2026-11-24), and a laptop driving a remote
+  shack does not either (its decodes arrive over the bridge, not through this PC's decode path).
 
 ## When a QSO is logged (#807, Casey 2026-11-20)
 A QSO is logged when WE start transmitting a 73-family message (RR73, RRR or 73) to that station,
@@ -101,6 +123,10 @@ Departures from WSJT-X (do not "fix"):
   JTCAT TX first (jtcatHaltTxNow) and says "Stopped FT8 so APRS can listen." (lib/aprs-listen.js
   startPlan). Automatic starts and Guest Pass guests never take it. Nothing restarts FT8 afterwards.
 - Wrong-band and out-of-privilege TX guards trust only a LIVE dial reading.
+- The automatic CQ tone (quiet-frequency pick, lib/jtcat-quiet-freq.js) is 500-2400 Hz (#1032): the
+  signal stays inside 500-2500 Hz, within every common radio's DATA-mode TX filter (sources in the
+  module header). Every path (window open, minimised, phone, Run) reads the one tracker, which bounds
+  each report. A tone the operator chose (waterfall, TX box, phone) is never bounded; Fake It is unchanged.
 - ULTRACAT (hidden, `settings.ultracat`): Run mode and unattended Hunt are the operator's
   responsibility; without it Hunt stops after 30 min idle (test/jtcat-hunt-off-test.js).
 - The pop-out captures no audio while driving a remote shack; the shack's engines run, the laptop displays.
@@ -118,6 +144,7 @@ Departures from WSJT-X (do not "fix"):
 
 ## Tests
 lib/ft8-engine-test.js, lib/psk-engine-test.js, test/jtty-*.js, test/jtcat-*.js,
+test/jtcat-chimes-test.js (the chimes: triggers, non-triggers, rate limit, wiring),
 test/decode-contract-test.js (real worker, native and WASM), test/layout-alignment-test.js (rows at
 phone and desktop widths, CI only), test/remote-bridge-test.js, test/k9cyt-requests-test.js.
 
