@@ -501,6 +501,10 @@ header {
   border-bottom: 1px solid var(--border-primary);
   position: relative;
   flex-shrink: 0;
+  /* A narrow window wraps the status bar under the filters instead of pushing
+     the spot count off the right edge (Discord report 2026-11-24). */
+  flex-wrap: wrap;
+  row-gap: 6px;
 }
 
 .filters {
@@ -982,6 +986,7 @@ button:hover {
    pushed HOLD TO TALK off the right edge (#298). The bar may now shrink, and
    only the shack chip gives way, ending in "..." (its title has the whole
    line); PTT and every other item keep their size. */
+.status-bar { margin-left: auto; }
 .status-bar { min-width: 0; flex-shrink: 1; }
 .status-bar > * { flex: none; }
 .status-bar > #remote-shack-status { flex: 0 1 auto; min-width: 64px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
