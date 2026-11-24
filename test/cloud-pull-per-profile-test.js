@@ -248,8 +248,7 @@ check('B. the guard still absorbs a true cross-device duplicate within one profi
   assert.strictEqual(q.length, 1);
   assert.strictEqual(q[0].APP_POTACAT_MERGED_UUIDS, mine.uuid);
   const dels = port.cloud.journal.getAll().filter((e) => e.action === 'delete');
-  assert.strictEqual(dels.length, 1);
-  assert.strictEqual(dels[0].profile, 'LZ3AW/P', 'the tombstone is the active profile\'s');
+  assert.strictEqual(dels.length, 0, 'absorbed locally; the live Cloud row is never deleted');
 });
 
 check('the reporter\'s sequence no longer empties the LZ3AW log', () => {

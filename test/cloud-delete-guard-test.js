@@ -241,10 +241,53 @@ check('C: the pull\'s duplicate guard never tombstones a QSO of another station 
   await onPulled([{ uuid: uuid(500), version: 1, adifFields: other }]);
   assert.strictEqual(d.journal.getAll().filter((e) => e.action === 'delete').length, 0, 'no tombstone queued');
   assert.strictEqual(parseAllRawQsos(d.logPath).length, 2, 'both QSOs in the log');
-  // Same station callsign, same contact: still absorbed as before.
+  // Same station callsign, same contact: absorbed locally as before, never
+  // deleted in the Cloud.
   const twin = { ...mine }; delete twin.APP_POTACAT_UUID; delete twin.APP_POTACAT_VERSION;
   await onPulled([{ uuid: uuid(501), version: 1, adifFields: twin }]);
-  assert.strictEqual(d.journal.getAll().filter((e) => e.action === 'delete').length, 1, 'a real double report is still absorbed');
+  assert.strictEqual(parseAllRawQsos(d.logPath).length, 2, 'not appended twice');
+  assert.strictEqual(d.journal.getAll().filter((e) => e.action === 'delete').length, 0, 'aliased, not tombstoned');
+});
+
+check('root cause: two logs holding one contact under two uuids no longer delete each other\'s copy', async () => {
+  // The chain the Cloud saw: a catch-up or re-upload gives the server a second
+  // copy under a new uuid, then a whole-history pull on each side found the
+  // other's copy and tombstoned it. Both copies died.
+  const a = rec(7, 'K0ABC');
+  const b = { ...a, APP_POTACAT_UUID: uuid(70007) };
+  const strip = (r) => { const f = { ...r }; delete f.APP_POTACAT_UUID; delete f.APP_POTACAT_VERSION; return f; };
+  const left = desktop({ dir: freshDir(), active: 'K0ABC', profiles: [], records: [a], answer: false });
+  const right = desktop({ dir: freshDir(), active: 'K0ABC', profiles: [], records: [b], answer: false });
+  await left.cloud.getSyncCallbacks().onPulled([{ uuid: b.APP_POTACAT_UUID, version: 1, adifFields: strip(b) }]);
+  await right.cloud.getSyncCallbacks().onPulled([{ uuid: a.APP_POTACAT_UUID, version: 1, adifFields: strip(a) }]);
+  for (const d of [left, right]) {
+    assert.strictEqual(d.journal.getAll().filter((e) => e.action === 'delete').length, 0, 'no delete pushed by either side');
+    assert.strictEqual(parseAllRawQsos(d.logPath).length, 1, 'each log keeps its one record');
+  }
+});
+
+check('a uuid in another case is the same QSO (no look-alike match against itself)', async () => {
+  const mine = { ...rec(9, 'K0ABC'), APP_POTACAT_UUID: uuid(9).toUpperCase() };
+  const d = desktop({ dir: freshDir(), active: 'K0ABC', profiles: [], records: [mine], answer: false });
+  const fields = { ...mine }; delete fields.APP_POTACAT_UUID; delete fields.APP_POTACAT_VERSION;
+  await d.cloud.getSyncCallbacks().onPulled([{ uuid: uuid(9), version: 2, adifFields: { ...fields, COMMENT: 'edited' } }]);
+  const q = parseAllRawQsos(d.logPath);
+  assert.strictEqual(q.length, 1);
+  assert.strictEqual(q[0].COMMENT, 'edited', 'applied as an update of the same QSO');
+  assert.ok(!q[0].APP_POTACAT_MERGED_UUIDS, 'not absorbed as a look-alike');
+});
+
+check('a profile sharing its account with another profile does not re-pull the whole history on Sync Now', async () => {
+  const both = [{ call: 'K0ABC', owner: ACCOUNT }, { call: 'K0ABC/P', owner: ACCOUNT }];
+  const d = desktop({ dir: freshDir(), active: 'K0ABC', profiles: both, records: [rec(1, 'K0ABC')], answer: false });
+  const client = d.cloud.getCloudSync();
+  client._lastSyncTimestamp = '2026-11-01T00:00:00.000Z';
+  const base = client._authedRequest;
+  client._authedRequest = async (m, url, body) => (url.startsWith('/v1/sync/status') ? { totalQsos: 5000 } : base(m, url, body));
+  await d.cloud.syncNow();
+  const pulls = client.calls.filter((c) => c.url.startsWith('/v1/sync/pull'));
+  assert.ok(pulls.length >= 1 && pulls.every((c) => /since=/.test(c.url)), 'the pull keeps its cursor');
+  assert.ok(!d.lines.some((l) => /pulling the account's whole history again/.test(l)));
 });
 
 check('main.js gives cloud-ipc the window the dialog belongs to', () => {
