@@ -101,6 +101,10 @@ Departures from WSJT-X (do not "fix"):
   JTCAT TX first (jtcatHaltTxNow) and says "Stopped FT8 so APRS can listen." (lib/aprs-listen.js
   startPlan). Automatic starts and Guest Pass guests never take it. Nothing restarts FT8 afterwards.
 - Wrong-band and out-of-privilege TX guards trust only a LIVE dial reading.
+- The automatic CQ tone (quiet-frequency pick, lib/jtcat-quiet-freq.js) is 500-2400 Hz (#1032): the
+  signal stays inside 500-2500 Hz, within every common radio's DATA-mode TX filter (sources in the
+  module header). Every path (window open, minimised, phone, Run) reads the one tracker, which bounds
+  each report. A tone the operator chose (waterfall, TX box, phone) is never bounded; Fake It is unchanged.
 - ULTRACAT (hidden, `settings.ultracat`): Run mode and unattended Hunt are the operator's
   responsibility; without it Hunt stops after 30 min idle (test/jtcat-hunt-off-test.js).
 - The pop-out captures no audio while driving a remote shack; the shack's engines run, the laptop displays.

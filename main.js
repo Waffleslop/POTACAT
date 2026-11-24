@@ -399,6 +399,7 @@ const BandLastFreq = require('./lib/band-last-freq'); // a band button returns t
 const { splitHostPort } = require('./lib/host-port');
 const activationProgram = require('./lib/activation-program');
 const { applyQsoEdit, modeEditFields, activationSigOf } = require('./lib/qso-edit'); // Logbook cell edits (#509)
+const ActivationTuneAsk = require('./lib/activation-tune-ask'); // #146: a device's activation start asks before the radio moves
 const ActivationClock = require('./lib/activation-clock'); // #147: a forgotten activation ends at the UTC day change or after 6 h idle
 const ActivationAnnounce = require('./lib/activation-announce'); // #508: which saved contacts join the live activation list
 const QsoExpand = require('./lib/qso-expand'); // one contact -> its ADIF records (logContact)
@@ -2511,6 +2512,7 @@ const SerialHsTrial = require('./lib/serial-hs-trial');
 const PttFlowConflict = require('./lib/ptt-flow-conflict'); // #544: PTT on RTS + RTS/CTS on one port
 const IdleWsprBand = require('./lib/idle-wspr-band');
 const SetupTestFreq = require('./lib/setup-test-freq');
+const SetupTestMode = require('./lib/setup-test-mode'); // #755: the transmit test keys in the mode FT8 uses
 const HuntFilters = require('./lib/jtcat-hunt-filters');
 const N3fjpDeleted = require('./lib/n3fjp-deleted');
 // The radio's last mode report ({ mode, at }), set in sendCatMode: what the
@@ -2713,7 +2715,8 @@ function voiceTxCheckEnd() {
   if (!c) return;
   const model = getActiveRigModel() || {};
   const d = decideVoiceTxHint({ keyedMs: Date.now() - c.startedAt, fwdEvents: c.fwdEvents, peakW: c.peakW,
-    alcEvents: c.alcEvents, peakAlc: c.peakAlc, mode: c.mode || _currentMode, brand: model.brand, model: getActiveRigModelName() });
+    alcEvents: c.alcEvents, peakAlc: c.peakAlc, mode: c.mode || _currentMode, brand: model.brand, model: getActiveRigModelName(),
+    network: !!(settings.catTarget && settings.catTarget.type === 'icom-network') });
   if (!d) return;
   const k = (settings.activeRigId || '') + '|' + d.key;
   if (_voiceTxHinted.has(k)) return;
@@ -7002,8 +7005,9 @@ async function _runStationSetupTxTest(rigId, { keepPower = false, voice = false 
   }
   // The test sends an AUDIO tone. In CW the radio keys but ignores audio, so
   // it transmits nothing — 0.0 W, SWR 1.0 — and the result blamed the audio
-  // (K3SBP's 8600, 2026-09-25). Say so instead of keying. Never switch the
-  // radio's mode behind the operator's back.
+  // (K3SBP's 8600, 2026-09-25). Say so instead of keying. The only mode the
+  // test ever changes is USB/LSB to the DATA mode FT8 uses (below, #755), and
+  // it says so and puts it back.
   const modeNow = String(_currentMode || '').toUpperCase();
   if (/^CW/.test(modeNow)) {
     return done({ result: 'error', message: 'The radio is in CW mode. The test sends an audio tone, which needs USB, LSB or a DATA mode (DIGU on a Flex). Switch the radio to USB, then test again.' });
@@ -7013,11 +7017,26 @@ async function _runStationSetupTxTest(rigId, { keepPower = false, voice = false 
   }
   sendCatLog(`[Setup] test transmit${voice ? ' (voice)' : ''}: radio mode ${modeNow || 'unknown'}`);
 
+  // The mode FT8 uses (lib/setup-test-mode.js, #755): a test in USB reached the
+  // radio's SSB menus (PTT and audio source), not the DATA ones FT8 uses, so an
+  // FTdx-101D keyed for FT8 and never for the test. The key-down switches and
+  // its release puts the mode back, however the test ends.
+  let testFamily;
+  try { testFamily = RigFamily.rigFamily(rig); } catch { testFamily = undefined; }
+  // The mode an FT8 tune sends on this radio: the one DATA-mode rule (jack + JTCAT setting).
+  const ft8TuneMode = RigAudioJack.tuneMode('FT8', { jack: activeRigAudioJack().jack, useDataMode: settings.jtcatUseDataMode !== false }).mode;
+  const testModePlan = SetupTestMode.planTestMode({
+    voice, mode: modeNow, inData: !!(pttModeReport() || {}).data, family: testFamily, ft8TuneMode,
+    dataModes: DataModePicker.dataModesFor(rigDataModeInput(detectRigType())),
+  });
+  const testMode = testModePlan.dataMode || modeNow;
+  if (testModePlan.dataMode) sendCatLog(`[Setup] test transmit: keying in ${testModePlan.dataMode}, the mode FT8 uses on this radio; ${modeNow} goes back when the test ends`);
+
   // Where the tone may go (lib/setup-test-freq.js, w0tlp: refused in LSB).
   // Outside the operator's privileges at the dial: move to the band's FT8
   // dial for the test and come back; no such frequency: say why, key nothing.
   const testBand = freqToBand(_currentFreqHz / 1e6);
-  const plan = SetupTestFreq.planTestFrequency({ freqHz: _currentFreqHz, mode: modeNow, licenseClass: settings.licenseClass,
+  const plan = SetupTestFreq.planTestFrequency({ freqHz: _currentFreqHz, mode: testMode, licenseClass: settings.licenseClass,
     extraDialsKhz: testBand && JS8_DIAL_KHZ[testBand] ? [JS8_DIAL_KHZ[testBand]] : [] });
   if (plan.action === 'refuse') {
     sendCatLog(`[Setup] test transmit: not keyed — ${plan.why}`);
@@ -7077,10 +7096,15 @@ async function _runStationSetupTxTest(rigId, { keepPower = false, voice = false 
   // Judged by the mode the radio is in: a tone in LSB on a phone segment is
   // inside a phone privilege, where a data emission would not be (W0TLP
   // 2026-11-02). Still refused where the class has no phone there.
-  startJtcatTune({ toneHz: STATION_SETUP_TEST_TONE_HZ, emission: plan.emission, noDataSwap: voice });
+  const dataSwap = testModePlan.dataMode ? { forceDataMode: true, dataReason: SetupTestMode.DATA_REASON } : {};
+  startJtcatTune({ toneHz: STATION_SETUP_TEST_TONE_HZ, emission: plan.emission, noDataSwap: voice, ...dataSwap });
   const keyed = jtcatTuneState.active;
+  // Set by the key-down when it switched the radio to DATA; its release restores it.
+  const swappedFrom = keyed && testModePlan.dataMode ? _ssbModeBeforePtt : null;
+  let releasedAt = 0;
   if (keyed) {
     await sleepMs(3000);
+    releasedAt = Date.now();
     stopJtcatTune();
     await sleepMs(900); // meters report a beat late
   }
@@ -7088,6 +7112,19 @@ async function _runStationSetupTxTest(rigId, { keepPower = false, voice = false 
   clearInterval(swrPoll);
   const meas = _stationSetupTxTest;
   _stationSetupTxTest = null;
+
+  // The release put the voice mode back (handleRemotePtt). Wait for the radio
+  // to report it before any move back, so a second restore cannot re-anchor
+  // the dial to the test frequency; then tell the operator in one line.
+  let modeNote = '';
+  if (swappedFrom) {
+    const modeBack = await waitForCondition(() => {
+      const r = pttModeReport();
+      return !!r && r.at >= releasedAt && !r.data;
+    }, 2 * PTT_RESTORE_CONFIRM_MS + 1000);
+    modeNote = SetupTestMode.modeNote({ from: swappedFrom, restored: modeBack });
+    sendCatLog(modeBack ? `[Setup] test transmit: radio back in ${swappedFrom}` : `[Setup] test transmit: sent the radio back to ${swappedFrom}, but it has not reported it — check the mode`);
+  }
 
   // Back to where the operator was, if the test moved (believed only from the radio).
   if (movedFromHz) {
@@ -7121,23 +7158,23 @@ async function _runStationSetupTxTest(rigId, { keepPower = false, voice = false 
   const judged = StationSetup.judgeTxTest({ pttAccepted: keyed, lineError, ...meas });
   if (judged.result === 'not-keyed') {
     sendCatLog(`[Setup] ${voice ? 'voice' : 'test'} transmit result: not keyed — ${lineError ? `${lineError.line} on ${lineError.port} failed: ${lineError.message}` : 'transmit was refused'}`);
-    return done({ ...judged, message: lineError ? undefined : 'The radio was not keyed: POTACAT refused to transmit. The log panel says why.', restored, restoreNote });
+    return done({ ...judged, message: lineError ? undefined : 'The radio was not keyed: POTACAT refused to transmit. The log panel says why.', restored, restoreNote, modeNote });
   }
   if (audioFault) {
     // POTACAT refused to send the tone (the radio's audio output would not
     // open) and unkeyed at once — not a "no power" radio problem.
     sendCatLog(`[Setup] test transmit: stopped, the radio's audio output could not be opened (${audioFault.reason})`);
-    return done({ result: 'error', message: "POTACAT stopped the test because the radio's audio output could not be opened. Choose the output again under Audio in the radio settings (the step above checks it), then test again.", restored, restoreNote });
+    return done({ result: 'error', message: "POTACAT stopped the test because the radio's audio output could not be opened. Choose the output again under Audio in the radio settings (the step above checks it), then test again.", restored, restoreNote, modeNote });
   }
   const { result, watts, swr, keyed: keyedProven, evidence } = judged;
   sendCatLog(`[Setup] ${voice ? 'voice' : 'test'} transmit result: ${result}${watts ? `, ${watts} W` : ''}${swr ? `, SWR ${swr}` : ''}${evidence ? ` (keyed: ${evidence})` : ' (the radio did not confirm it keyed)'}`);
   // A silent voice path names the radio's input menu (lib/voice-tx-check.js).
   let hint = null;
   if (voice && result === 'no-power') {
-    const d = decideVoiceTxHint({ keyedMs: 3000, fwdEvents: meas.fwdEvents, peakW: 0, alcEvents: 0, peakAlc: 0, mode: modeNow, brand: info.brand, model: rig.model });
+    const d = decideVoiceTxHint({ keyedMs: 3000, fwdEvents: meas.fwdEvents, peakW: 0, alcEvents: 0, peakAlc: 0, mode: modeNow, brand: info.brand, model: rig.model, network: !!(rig.catTarget && rig.catTarget.type === 'icom-network') });
     hint = d ? d.hint : null;
   }
-  return done({ result, watts, swr, keyed: keyedProven, evidence, restored, restoreNote, hint });
+  return done({ result, watts, swr, keyed: keyedProven, evidence, restored, restoreNote, hint, modeNote });
 }
 
 function getIcomNetworkDataModSpec(target, rigModel, liveCivAddr = null) {
@@ -11662,7 +11699,14 @@ function findPat() {
   }), WinlinkPat.patBinaryName(process.platform));
 }
 
+let _direwolfSkipLogged = '';
 function findDirewolf() {
+  // #1031: say so once when a configured path is ignored (this also runs on status polls).
+  const skipMsg = DirewolfProcess.skippedConfiguredPathMessage(settings, fs.statSync, (p) => fs.accessSync(p, fs.constants.X_OK));
+  if (skipMsg !== _direwolfSkipLogged) {
+    _direwolfSkipLogged = skipMsg;
+    if (skipMsg) console.log('[Winlink] ' + skipMsg);
+  }
   return _findBinary(DirewolfProcess.direwolfPathCandidates({
     settings, isPackaged: app.isPackaged, resourcesPath: process.resourcesPath, appDir: __dirname, platform: process.platform,
   }), DirewolfProcess.direwolfBinaryName(process.platform));
@@ -25230,7 +25274,9 @@ function startJtcatTune(opts = {}) {
   // the tone). The 90s timer auto-releases.
   // opts.noDataSwap: Station Setup's voice test keys in plain USB/LSB, the
   // way a voice over does (the radio's SSB audio input, not its DATA one).
-  const keyed = handleRemotePtt(true, { audio: true, emission: opts.emission || 'DATA', noDataSwap: !!opts.noDataSwap, txKind: 'tune', lanOwner: directYaesuReady ? 'tune' : undefined });
+  // opts.forceDataMode: Station Setup's transmit test keys in the DATA mode
+  // FT8 uses (lib/setup-test-mode.js, #755); the release puts the mode back.
+  const keyed = handleRemotePtt(true, { audio: true, emission: opts.emission || 'DATA', noDataSwap: !!opts.noDataSwap, txKind: 'tune', forceDataMode: !!opts.forceDataMode, dataReason: opts.dataReason, lanOwner: directYaesuReady ? 'tune' : undefined });
   // Refused (SCU-LAN10 audio, SWR guard, licence...): no tone and no timers.
   // The refusal may already have stopped Tune; a tone started after that ran
   // until POTACAT closed (#214).
@@ -28388,6 +28434,28 @@ function pushRigListToRemote() {
   if (!remoteServer || !remoteServer.hasClient || !remoteServer.hasClient()) return;
   const rigs = (settings.rigs || []).map(r => ({ id: r.id, name: r.name, family: RigFamily.rigFamily(r) }));
   remoteServer.sendRigsToClient(rigs, settings.activeRigId || null);
+}
+
+// #146: can POTACAT move the active radio right now (the tune handler's test).
+function activationRigLinked() {
+  return !!((smartSdr && smartSdr.canTune) || (cat && cat.connected) || tciRigLinked());
+}
+
+// #146: an activation started from a device that wants a frequency. The radio
+// is never moved here: the device is asked (lib/activation-tune-ask.js), or an
+// older one is told in words that the radio stayed where it was.
+function activationTuneAskFollow(id, want, canAsk) {
+  const connected = activationRigLinked();
+  const d = ActivationTuneAsk.decide({
+    want, canAsk,
+    rig: { connected, freqKhz: _currentFreqHz / 1000, mode: _currentMode },
+    rigs: settings.rigs || [], activeRigId: settings.activeRigId || '',
+    guestOnAir: remoteServer.hasActivePassClient(),
+  });
+  sendCatLog(`[activation] start from a device wants ${want ? want.freqKhz + ' kHz ' + (want.mode || '') : 'nothing'}: ${d.log}`);
+  if (d.action === 'ask') remoteServer.sendActivationTuneAsk(id, d.ask);
+  else if (d.action === 'notice') remoteServer.sendActivationTuneNotice(id, d.text);
+  else remoteServer.dropActivationTuneAsk(id);
 }
 
 function pushActivatorStateToPhone() {
@@ -32065,7 +32133,7 @@ function connectRemote() {
     sendCatLog(`[events] set-event-progress ${eventId}: ${itemId}=${!!worked}`);
   });
 
-  remoteServer.on('set-activator-park', async ({ parkRef, parkRefs, activationType, activationName: actName, sig, onAirCallsign, end, county }) => {
+  remoteServer.on('set-activator-park', async ({ parkRef, parkRefs, activationType, activationName: actName, sig, onAirCallsign, end, county, tuneWant, tuneAskId, clientCanAsk }) => {
     console.log('[Echo CAT] Set activator park:', parkRef || actName, 'type:', activationType, end ? '(ended)' : '');
     settings.appMode = end ? 'hunter' : 'activator';
     // The device's On-air call field: absent leaves the remembered value,
@@ -32107,6 +32175,27 @@ function connectRemote() {
     // Reset session contacts for new activation
     remoteServer.resetSessionContacts();
     activationClockFollow(false); // #147: a phone Start starts the activation clock (same parks keep it), End clears it
+    if (tuneAskId) activationTuneAskFollow(tuneAskId, tuneWant, clientCanAsk); // #146: ask, never tune here
+  });
+
+  // #146: the device said yes to "move the radio for this activation?",
+  // naming the radio when there are several. Another radio is switched to
+  // first (as a phone rig switch does) and tuned once its link is up.
+  remoteServer.on('activation-tune-answer', ({ freqKhz, mode, rigId }) => {
+    const tuneNow = () => remoteServer.emit('tune', { freqKhz, mode });
+    const rig = rigId && rigId !== settings.activeRigId ? (settings.rigs || []).find(r => r.id === rigId) : null;
+    if (!rig) { sendCatLog(`[activation] the device said yes: tuning to ${freqKhz} kHz ${mode || ''}`); tuneNow(); return; }
+    sendCatLog(`[activation] the device said yes on ${rig.name}: switching to it, then tuning to ${freqKhz} kHz ${mode || ''}`);
+    remoteServer.emit('switch-rig', { rigId: rig.id });
+    const until = Date.now() + 20000;
+    const t = setInterval(() => {
+      if (settings.activeRigId !== rig.id) { clearInterval(t); return; } // switched away meanwhile
+      if (activationRigLinked()) { clearInterval(t); tuneNow(); return; }
+      if (Date.now() > until) {
+        clearInterval(t);
+        remoteServer.sendToClient({ type: 'tune-blocked', reason: `${rig.name} did not connect, so POTACAT did not move it. Check its link on the desktop.` });
+      }
+    }, 500);
   });
 
   remoteServer.on('set-park-county', ({ ref, state, county }) => {
@@ -42861,6 +42950,7 @@ function setEventOptIn(eventId, optedIn, dismissed) {
   if (dismissed !== undefined) settings.events[eventId].dismissed = dismissed;
   saveSettings(settings);
   pushEventsToRenderer();
+  updateRemoteSettings(); // the phone alerts from eventSubscriptions; send it the change (#1030)
 }
 
 // The banner at the top of the main window, per event. A year-long event
@@ -43010,6 +43100,7 @@ function markEventRegion(eventId, region, qsoData) {
   };
   saveSettings(settings);
   pushEventsToRenderer();
+  updateRemoteSettings(); // progress rides eventSubscriptions to the phone (#1030)
 }
 
 // Union of log-derived progress (state.progress, rebuilt from the ADIF log by
