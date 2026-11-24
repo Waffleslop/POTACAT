@@ -952,7 +952,7 @@ const setHideWorked = document.getElementById('set-hide-worked');
 const setTuneClick = document.getElementById('set-tune-click');
 const setQsoChime = document.getElementById('set-qso-chime');
 const setQsoChimeTest = document.getElementById('set-qso-chime-test');
-if (setQsoChimeTest) setQsoChimeTest.addEventListener('click', () => { try { playQsoChime(setQsoChime ? setQsoChime.value : 'soft'); } catch {} });
+if (setQsoChimeTest) setQsoChimeTest.addEventListener('click', () => { try { testSoundsPane(); } catch {} });
 const setEnableSplit = document.getElementById('set-enable-split');
 const setEnableAtu = document.getElementById('set-enable-atu');
 const setEnableRotor = document.getElementById('set-enable-rotor');
@@ -2366,6 +2366,7 @@ async function loadPrefs() {
   myCallsign = settings.myCallsign || '';
   tuneClick = settings.tuneClick === true;
   qsoChime = settings.qsoChime || 'off';
+  applySoundSettings(settings); // #1041 Settings > Sounds
   enableSplit = settings.enableSplit === true;
   updateSplitIndicator();
   catLogToggleBtn.classList.toggle('hidden', settings.verboseLog !== true);
@@ -5198,24 +5199,56 @@ blMode.addEventListener('keydown', (e) => {
 
 // --- QSO logged chime (N2FSM 2026-09-12: "a subtle indicator to know I just
 // completed a contact" when POTACAT is in the background or the next room).
-// Synthesized, so there is nothing to ship or find; four flavours, off by
-// default. Fired by main's 'qso-logged', the one event every log path
-// (dialog, pop-out, quick log, JTCAT auto-log, phone, WSJT-X) passes through.
-// The tones themselves are lib/chime-sounds.js, shared with the JTCAT chimes.
-function playQsoChime(kind) {
+// Synthesized, so there is nothing to ship or find; four flavours. Fired by
+// main's 'qso-logged', the one event every log path (dialog, pop-out, quick
+// log, JTCAT auto-log, phone, WSJT-X) passes through.
+// #1041: the flavours are the contact sound of an operator who picked one; for
+// everyone else it is the coin (lib/qso-sounds.js). Every sound here goes
+// through PotacatSounds (renderer/sounds.js), which asks the transmit guard
+// (lib/sound-guard.js) when and on which output: never the radio's sound card,
+// never while transmitting. `using` is the Sounds pane's unsaved choices (Test).
+function playQsoChime(kind, using) {
   if (!kind || kind === 'off') return;
-  if (!audioCtx) audioCtx = new AudioContext();
+  // The tones are lib/chime-sounds.js, shared with the JTCAT chimes (#1043).
   // A value this build does not know plays the soft ding, as it always has.
-  ChimeSounds.play(audioCtx, ChimeSounds.notesOf(kind).length ? kind : 'soft');
+  const id = ChimeSounds.notesOf(kind).length ? kind : 'soft';
+  return PotacatSounds.playChime((ctx, out) => {
+    ChimeSounds.play(ctx, id, out);
+    return ChimeSounds.lengthOf(id);
+  }, using);
 }
-if (window.api.onQsoLogged) window.api.onQsoLogged(() => { try { playQsoChime(qsoChime); } catch {} });
+const qsoSoundState = QsoSounds.createState();
+let soundSettings = {}; // the settings object, as last loaded or saved (Settings > Sounds)
+function applySoundSettings(s) {
+  soundSettings = s || {};
+  PotacatSounds.configure(soundSettings);
+}
+// A contact went into the log: the coin (or the operator's own chime), the
+// short coin in a pileup, the two falling notes for a dupe; nothing when a
+// phone logged it (the phone plays it). lib/qso-sounds.js decides.
+function onContactLogged(q) {
+  const r = QsoSounds.contactLogged(qsoSoundState, q || {}, Date.now(), soundSettings);
+  if (!r.sound) return;
+  if (r.sound.chime) playQsoChime(r.sound.chime); else PotacatSounds.playFile(r.sound.file);
+  if (QsoSounds.coinOfferDue(soundSettings)) showCoinOffer();
+}
+if (window.api.onQsoLogged) window.api.onQsoLogged((q) => { try { onContactLogged(q); } catch {} });
+// A contact was NOT saved (main's qso-log-failed, logContact's own result):
+// the low buzz, with Sounds switched off too.
+if (window.api.onQsoLogFailed) window.api.onQsoLogFailed((q) => {
+  try { const r = QsoSounds.saveFailed(q || {}); if (r.sound) PotacatSounds.playFile(r.sound.file); } catch {}
+});
 // JTCAT chimes (the JTCAT window's Options > Sounds): a station calls me, or
 // transmitting stopped by itself. main decides (lib/jtcat-chimes.js) and names
-// the sound; it plays here, on the same default-output context as the QSO
-// chime. That context is never given a sink, so it is never the device the
-// transmit audio goes to (jtcatTxAudioCtx has its own).
+// the sound; it plays through PotacatSounds like every other sound, so the
+// transmit guard (lib/sound-guard.js) keeps it off the radio's sound card and
+// out of any transmission.
 if (window.api.onJtcatChime) window.api.onJtcatChime((d) => {
-  try { if (!audioCtx) audioCtx = new AudioContext(); ChimeSounds.play(audioCtx, d && d.sound); } catch {}
+  try {
+    const id = d && d.sound;
+    if (!ChimeSounds.notesOf(id).length) return;
+    PotacatSounds.playChime((ctx, out) => { ChimeSounds.play(ctx, id, out); return ChimeSounds.lengthOf(id); });
+  } catch {}
 });
 
 // --- Tune confirmation click ---
@@ -17303,8 +17336,8 @@ window.api.onTuneBlocked((msg) => {
 });
 
 // --- Cat Celebration ---
-const QSO_MILESTONES = [10, 25, 50, 100, 150, 200, 250, 500];
-const celebratedMilestones = new Set();
+// #1041: the rungs and their state are lib/qso-sounds.js (qsoSoundState): a
+// banner and a sound at 1, 10, 25, 50, 100 and 250; the cat at 150, 200 and 500.
 let lastKnownDailyQsoCount = 0;
 
 // --- Spot history popover -------------------------------------------------
@@ -17445,21 +17478,200 @@ function getTodayUtcQsoCount() {
 
 function checkQsoMilestone() {
   const count = getTodayUtcQsoCount();
-  // Reset celebrated milestones if day rolled over (count dropped)
-  if (count < lastKnownDailyQsoCount) celebratedMilestones.clear();
   lastKnownDailyQsoCount = count;
-  for (const m of QSO_MILESTONES) {
-    if (count >= m && !celebratedMilestones.has(m)) {
-      celebratedMilestones.add(m);
-      if (m === 500) {
-        showMegaCelebration(`500 QSOs today! You are UNSTOPPABLE!`);
-      } else {
-        showCatCelebration(`${m} QSOs today! Keep going!`);
-      }
-      break; // one celebration at a time
+  // The first call marks the rungs already passed (no celebration for contacts
+  // made before launch); a count that drops starts the day's rungs again.
+  const hit = QsoSounds.countChanged(qsoSoundState, count, Date.now(), { settings: soundSettings, needsContact: true });
+  if (!hit) return;
+  if (hit.kind === 'cat') {
+    // 150, 200 and 500: the cat, as before, without sound.
+    if (hit.rung === 500) {
+      showMegaCelebration(`500 QSOs today! You are UNSTOPPABLE!`);
+    } else {
+      showCatCelebration(`${hit.rung} QSOs today! Keep going!`);
     }
+    return;
+  }
+  if (hit.banner) showMilestoneBanner(hit.text);
+  // After the coin: PotacatSounds plays one sound at a time, in order.
+  if (hit.sound) PotacatSounds.playFile(hit.sound);
+}
+
+// --- Milestone banner (#1041) ---
+// One line at the top centre for about 3 s, then it fades. It never takes
+// focus (no control in it, pointer-events off) and it is placed clear of the
+// log entry strip and the TX controls.
+const TOP_BANNER_AVOID = ['#banner-logger', '#remote-ptt-btn', '#jtcat-tx-indicator', '#jtcat-halt-tx', '.milestone-banner'];
+function placeTopBanner(el) {
+  const header = document.querySelector('header');
+  let top = (header ? header.getBoundingClientRect().bottom : 0) + 8;
+  for (let pass = 0; pass < 6; pass++) {
+    el.style.top = top + 'px';
+    const me = el.getBoundingClientRect();
+    let moved = false;
+    for (const sel of TOP_BANNER_AVOID) {
+      for (const other of document.querySelectorAll(sel)) {
+        if (other === el) continue;
+        const r = other.getBoundingClientRect();
+        if (!r.width || !r.height) continue; // hidden
+        const overlap = me.left < r.right && me.right > r.left && me.top < r.bottom && me.bottom > r.top;
+        if (overlap) { top = r.bottom + 8; moved = true; }
+      }
+    }
+    if (!moved) break;
   }
 }
+function showMilestoneBanner(text) {
+  const old = document.querySelector('.milestone-banner:not(.milestone-offer)');
+  if (old) old.remove();
+  const el = document.createElement('div');
+  el.className = 'milestone-banner';
+  el.setAttribute('role', 'status');
+  el.textContent = text;
+  document.body.appendChild(el);
+  placeTopBanner(el);
+  setTimeout(() => el.classList.add('leaving'), QsoSounds.BANNER_MS);
+  setTimeout(() => el.remove(), QsoSounds.BANNER_MS + 600);
+}
+// The one-time "Keep it, or turn it off" banner, after the first coin an
+// operator who never picked a chime hears. Shown once per computer; it leaves
+// by itself (the sound stays on) and never takes the keyboard.
+function showCoinOffer() {
+  if (document.querySelector('.milestone-offer')) return;
+  soundSettings = { ...soundSettings, soundCoinOffered: true };
+  PotacatSounds.configure(soundSettings);
+  window.api.saveSettings({ soundCoinOffered: true });
+  const el = document.createElement('div');
+  el.className = 'milestone-banner milestone-offer';
+  el.setAttribute('role', 'status');
+  const text = document.createElement('span');
+  text.textContent = QsoSounds.COIN_OFFER.text;
+  const keep = document.createElement('button');
+  keep.type = 'button';
+  keep.tabIndex = -1;
+  keep.textContent = QsoSounds.COIN_OFFER.keep;
+  const off = document.createElement('button');
+  off.type = 'button';
+  off.tabIndex = -1;
+  off.textContent = QsoSounds.COIN_OFFER.off;
+  keep.addEventListener('click', () => el.remove());
+  off.addEventListener('click', () => {
+    soundSettings = { ...soundSettings, soundContact: false };
+    PotacatSounds.configure(soundSettings);
+    window.api.saveSettings({ soundContact: false });
+    const box = document.getElementById('set-sound-contact');
+    if (box) box.checked = false;
+    el.remove();
+    showLogToast('Contact logged sound is off. Turn it back on in Settings > Sounds.', { duration: 6000, long: true });
+  });
+  el.append(text, keep, off);
+  document.body.appendChild(el);
+  placeTopBanner(el);
+  setTimeout(() => { if (el.parentNode) el.remove(); }, 20000);
+}
+
+// --- Settings > Sounds (#1041) ---
+const soundsPane = {
+  on: document.getElementById('set-sounds-on'),
+  contact: document.getElementById('set-sound-contact'),
+  milestones: document.getElementById('set-sound-milestones'),
+  banners: document.getElementById('set-milestone-banners'),
+  volume: document.getElementById('set-sound-volume'),
+  volumeVal: document.getElementById('set-sound-volume-val'),
+  output: document.getElementById('set-sound-output'),
+  status: document.getElementById('set-sound-status'),
+};
+let soundOutputsListed = false; // the output list is filled (it is asked for; until then Save keeps the saved choice)
+function fillSoundsPane(s) {
+  if (!soundsPane.on) return;
+  soundOutputsListed = false;
+  const cfg = QsoSounds.readSettings(s);
+  soundsPane.on.checked = cfg.on;
+  soundsPane.contact.checked = cfg.contact;
+  soundsPane.milestones.checked = cfg.milestones;
+  soundsPane.banners.checked = cfg.banners;
+  soundsPane.volume.value = cfg.volume;
+  soundsPane.volumeVal.textContent = cfg.volume + '%';
+  refreshSoundOutputs(cfg.output, cfg.outputLabel);
+}
+// "Sound output": Automatic, then every output that is not the radio's sound
+// card (lib/sound-guard.js listOutputs). The line under it says where a sound
+// plays now, or why none can.
+async function refreshSoundOutputs(chosenId, chosenLabel) {
+  if (!soundsPane.output) return;
+  let info;
+  try { info = await PotacatSounds.describe(chosenId, chosenLabel); } catch { return; }
+  const sel = soundsPane.output;
+  sel.textContent = '';
+  const auto = document.createElement('option');
+  auto.value = '';
+  auto.textContent = 'Automatic';
+  sel.appendChild(auto);
+  let picked = '';
+  for (const d of info.list) {
+    const o = document.createElement('option');
+    o.value = d.deviceId;
+    o.textContent = d.label;
+    sel.appendChild(o);
+    if (chosenId && (d.deviceId === chosenId || (chosenLabel && d.label === chosenLabel))) picked = d.deviceId;
+  }
+  // A chosen output that is unplugged stays the choice (Save must not lose it);
+  // Automatic plays until it is back.
+  if (info.chosen === 'missing') {
+    const o = document.createElement('option');
+    o.value = chosenId;
+    o.dataset.label = chosenLabel || '';
+    o.textContent = (chosenLabel || 'The output you chose') + ' (not connected)';
+    sel.appendChild(o);
+    picked = chosenId;
+  }
+  sel.value = picked;
+  soundOutputsListed = true;
+  const w = info.where;
+  soundsPane.status.classList.toggle('sound-status-warn', !w.ok);
+  if (!w.ok) soundsPane.status.textContent = w.text;
+  else if (info.chosen === 'missing') soundsPane.status.textContent = 'Playing on ' + w.label + ' until the output you chose is connected again.';
+  else if (w.why === 'moved') soundsPane.status.textContent = 'Playing on ' + w.label + ': the output it would use is the radio\'s sound card, and POTACAT never plays a sound into the radio.';
+  else soundsPane.status.textContent = 'Playing on ' + w.label + '.';
+}
+function readSoundsPane() {
+  if (!soundsPane.on) return {};
+  const out = {
+    soundsOn: soundsPane.on.checked,
+    soundContact: soundsPane.contact.checked,
+    soundMilestones: soundsPane.milestones.checked,
+    milestoneBanners: soundsPane.banners.checked,
+    soundVolume: QsoSounds.readSettings({ soundVolume: soundsPane.volume.value }).volume,
+  };
+  // The output only once its list is there: a Save before that keeps the saved choice.
+  if (soundOutputsListed) {
+    out.soundOutput = soundsPane.output.value || '';
+    out.soundOutputLabel = soundOutputLabelOf(soundsPane.output);
+  }
+  return out;
+}
+function soundOutputLabelOf(sel) {
+  const opt = sel.selectedOptions[0];
+  if (!sel.value || !opt) return '';
+  return opt.dataset.label != null ? opt.dataset.label : opt.textContent;
+}
+// Test: the contact sound as the pane is set now (saved or not), by the same
+// road as a real contact, so it obeys the transmit guard.
+async function testSoundsPane() {
+  const using = { ...soundSettings, ...readSoundsPane(), soundsOn: true, soundContact: true };
+  const kind = setQsoChime ? setQsoChime.value : 'coin';
+  const r = await (QsoSounds.contactSound(kind) === 'coin' ? PotacatSounds.test(using) : playQsoChime(kind, using));
+  if (!soundsPane.status) return;
+  if (r && r.played) { refreshSoundOutputs(using.soundOutput, using.soundOutputLabel); return; }
+  soundsPane.status.classList.add('sound-status-warn');
+  if (r && r.reason === 'transmitting') soundsPane.status.textContent = 'Not played: the radio is transmitting. Sounds wait for the transmission to end.';
+  else if (r && r.reason === 'no-other-output') soundsPane.status.textContent = SoundGuard.NO_OUTPUT_TEXT;
+  else soundsPane.status.textContent = 'Not played: that sound output could not be opened.';
+}
+if (soundsPane.volume) soundsPane.volume.addEventListener('input', () => { soundsPane.volumeVal.textContent = soundsPane.volume.value + '%'; });
+if (soundsPane.output) soundsPane.output.addEventListener('change', () => {
+  refreshSoundOutputs(soundsPane.output.value, soundOutputLabelOf(soundsPane.output));
+});
 
 // --- Events ---
 // Band/mode dropdowns already wired via initMultiDropdown()
@@ -18713,7 +18925,8 @@ async function openSettingsDialog(tab) {
   setHideOutOfBand.checked = s.hideOutOfBand === true;
   setHideWorked.checked = s.hideWorked === true;
   setTuneClick.checked = s.tuneClick === true;
-  if (setQsoChime) setQsoChime.value = s.qsoChime || 'off';
+  if (setQsoChime) setQsoChime.value = QsoSounds.contactSound(s.qsoChime); // the coin unless a chime was picked (#1041)
+  fillSoundsPane(s);
   setEnableRotor.checked = s.enableRotor === true;
   if (s.enableRotor) rotorConfigured = true;
   if (setRotorType) setRotorType.value = s.rotorType || 'pstrotator';
@@ -19879,6 +20092,7 @@ settingsSave.addEventListener('click', async () => {
     hideWorked: hideWorkedEnabled,
     tuneClick: tuneClickEnabled,
     qsoChime: setQsoChime ? setQsoChime.value : 'off',
+    ...readSoundsPane(), // #1041 Settings > Sounds
     enableRotor: rotorEnabledVal,
     rotorType: rotorTypeVal,
     rotorMode: rotorModeVal,
@@ -20392,16 +20606,8 @@ window.api.onUpdateDownloaded(() => {
 let workedQsosInitialized = false;
 window.api.onWorkedQsos((entries) => {
   workedQsos = new Map(entries);
-  if (!workedQsosInitialized) {
-    // Seed count and pre-mark passed milestones on first load
-    workedQsosInitialized = true;
-    lastKnownDailyQsoCount = getTodayUtcQsoCount();
-    for (const m of QSO_MILESTONES) {
-      if (lastKnownDailyQsoCount >= m) celebratedMilestones.add(m);
-    }
-  } else {
-    checkQsoMilestone();
-  }
+  workedQsosInitialized = true;
+  checkQsoMilestone(); // its first call marks the rungs already passed, silently
   render();
 });
 

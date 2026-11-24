@@ -318,12 +318,14 @@ test('main: both settings belong to this computer', () => {
 test('main window: one sound engine, on the default output, never the transmit device', () => {
   assert.ok(/<script src="\.\.\/lib\/chime-sounds\.js"><\/script>/.test(indexHtml), 'index.html loads the shared sounds');
   const fn = extract(app, 'playQsoChime');
-  assert.ok(/ChimeSounds\.play\(audioCtx, /.test(fn), 'the QSO chime plays through the shared engine');
+  // #1041: every operator sound goes through PotacatSounds (renderer/sounds.js), whose transmit
+  // guard picks the output (never the radio's sound card) and holds it while transmitting.
+  assert.ok(/PotacatSounds\.playChime\(/.test(fn) && /ChimeSounds\.play\(ctx, id, out\)/.test(fn), 'the QSO chime plays through the shared engine, into the guarded output');
   assert.ok(!/createOscillator/.test(fn), 'and no longer builds its own tones');
   assert.ok(!/setSinkId|remoteAudioOutput|jtcatTxAudioCtx/.test(fn), 'no chosen device: the system default output');
   assert.ok(/window\.api\.onJtcatChime\(/.test(app));
   const i = app.indexOf('window.api.onJtcatChime(');
-  assert.ok(/ChimeSounds\.play\(audioCtx, /.test(app.slice(i, i + 400)), 'the JTCAT chimes use the same context');
+  assert.ok(/PotacatSounds\.playChime\(\(ctx, out\) => \{ ChimeSounds\.play\(ctx, id, out\)/.test(app.slice(i, i + 700)), 'the JTCAT chimes use the same guarded engine');
   assert.ok(/onJtcatChime: \(cb\) => ipcRenderer\.on\('jtcat-chime'/.test(pre), 'preload');
   // The chime context is created with no options and never given a sink.
   assert.ok(!/\baudioCtx\.setSinkId/.test(app), 'the chime context is never routed to a device');
