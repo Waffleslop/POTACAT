@@ -16136,10 +16136,10 @@ function render() {
       for (const cell of cells) {
         const td = document.createElement('td');
         // Only a reference cell that can overflow wraps (#999): several program
-        // refs or pills. A single plain ref keeps the old nowrap cell, so row
+        // refs only. A single ref (pills or not) keeps the old nowrap cell, so row
         // height is unchanged (like source-multi-program on the Source cell).
         const multiRef = cell.col === 'reference' && String(cell.val || '').indexOf(' / ') !== -1;
-        const refWraps = multiRef || (cell.col === 'reference' && !!(cell.newPark || cell.wwff || (cell.wantedStates && cell.wantedStates.length)));
+        const refWraps = multiRef;
         // Make park ref and name clickable links to park/summit pages
         if ((cell.col === 'reference' || cell.col === 'parkName') && s.reference && s.source !== 'net') {
           let url;

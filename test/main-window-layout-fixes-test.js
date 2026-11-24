@@ -45,7 +45,7 @@ test('#999: the Park cell wraps like Source: refs and pills are nowrap units, li
   assert.ok(/\.ref-wrap \.ref-part, \.ref-wrap \.ref-new-pill, \.ref-wrap \.ref-state-pill, \.ref-wrap \.ref-wwff-pill \{ white-space: nowrap; \}/.test(css), 'nowrap units');
   assert.ok(/if \(refWraps\) td\.classList\.add\('ref-wrap'\);/.test(app), 'the class is conditional');
   assert.ok(/const multiRef = cell\.col === 'reference' && String\(cell\.val \|\| ''\)\.indexOf\(' \/ '\) !== -1;/.test(app), 'multi-ref means " / " in the value');
-  assert.ok(/const refWraps = multiRef \|\| \(cell\.col === 'reference' && !!\(cell\.newPark \|\| cell\.wwff \|\| \(cell\.wantedStates && cell\.wantedStates\.length\)\)\);/.test(app), 'a single plain ref (no pills) gets no ref-wrap');
+  assert.ok(/const refWraps = multiRef;/.test(app), 'only a multi-ref wraps: a single ref with a NEW/WWFF/state pill gets no ref-wrap');
   assert.ok(!/ref-dx-pill/.test(css.slice(css.indexOf('td.ref-wrap'), css.indexOf('td.ref-wrap') + 400)), 'no dead DX selector (the DX pill is in the location cell)');
   assert.ok(/String\(cell\.val \|\| ''\)\.split\(' \/ '\)/.test(app) && /className = 'ref-part'/.test(app), 'each ref in its own span');
 });
