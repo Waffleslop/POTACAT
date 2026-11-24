@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 'use strict';
-// ADIF MODE/SUBMODE both ways (lib/adif-mode.js, #381 step 1).
+// ADIF MODE/SUBMODE both ways (lib/adif-mode.js, #381).
 //
-// Writing: FT4, FT8 and FT2 are written exactly as before (MODE=FT4 etc.);
-// JS8 and JTTY stay MFSK + SUBMODE. Reading: every reader that shows, counts,
-// filters or matches a mode sees JS8 / JTTY by name, an old MODE=FT4 record
-// reads FT4, and an MFSK/FT4 or MFSK/FT2 record (what WSJT-X writes, and
-// what POTACAT will write after the later flip) already reads FT4 / FT2.
+// Writing: FT4 and FT2 are MFSK + SUBMODE (ADIF 3.1.8, what WSJT-X writes),
+// as JS8 and JTTY are; FT8 stays MODE=FT8. Reading: every reader that shows,
+// counts, filters or matches a mode sees FT4 / FT2 / JS8 / JTTY by name, and
+// an old MODE=FT4 record still reads FT4. The rest of the FT4/FT2 change is
+// pinned in test/adif-ft4-mfsk-test.js.
 //
 // Run: node test/adif-mode-test.js
 
@@ -39,11 +39,11 @@ const write = (mode, submode) => {
   const f = writer.buildAdifFields({ callsign: 'K1ABC', frequency: '14080', mode, submode, qsoDate: '20261114', timeOn: '1200' });
   return [f.MODE, f.SUBMODE || ''];
 };
-test('FT4 is still written as MODE=FT4 with no SUBMODE (the flip waits for phone + Cloud)', () => {
-  assert.deepStrictEqual(write('FT4'), ['FT4', '']);
+test('FT4 is written as MODE=MFSK SUBMODE=FT4', () => {
+  assert.deepStrictEqual(write('FT4'), ['MFSK', 'FT4']);
 });
 test('FT8 is unchanged', () => { assert.deepStrictEqual(write('FT8'), ['FT8', '']); });
-test('FT2 is unchanged', () => { assert.deepStrictEqual(write('FT2'), ['FT2', '']); });
+test('FT2 is written as MODE=MFSK SUBMODE=FT2', () => { assert.deepStrictEqual(write('FT2'), ['MFSK', 'FT2']); });
 test('JS8 and JTTY are still MFSK + SUBMODE; PSK31 is PSK/PSK31', () => {
   assert.deepStrictEqual(write('JS8', 'NORMAL'), ['MFSK', 'JS8']);
   assert.deepStrictEqual(write('JTTY'), ['MFSK', 'JTTY']);
@@ -60,7 +60,7 @@ test('a QSO read back from a record writes the record\'s own pair (adifMode)', (
   assert.deepStrictEqual(pair('MFSK', 'JS8', 'JS8'), ['MFSK', 'JS8']);
   assert.deepStrictEqual(pair('MFSK', 'FT4', 'FT4'), ['MFSK', 'FT4'], 'a WSJT-X MFSK/FT4 record stays MFSK/FT4');
   assert.deepStrictEqual(pair('MFSK', 'FT2', 'FT2'), ['MFSK', 'FT2']);
-  assert.deepStrictEqual(pair('FT4', '', 'FT4'), ['FT4', ''], 'an old MODE=FT4 record stays as it is');
+  assert.deepStrictEqual(pair('FT4', '', 'FT4'), ['MFSK', 'FT4'], 'an old MODE=FT4 record goes out (resend, Cloud-pull forward) as MFSK/FT4');
   assert.deepStrictEqual(pair('DIGITALVOICE', 'FREEDV', 'FREEDV'), ['DIGITALVOICE', 'FREEDV']);
   assert.deepStrictEqual(pair('JS8', '', 'JS8'), ['MFSK', 'JS8'], 'a bare MODE=JS8 is repaired');
 });
@@ -150,7 +150,7 @@ test('a Mode edit writes MODE + SUBMODE by the writer\'s rule', () => {
   assert.deepStrictEqual(modeEditFields({ MODE: 'FT8' }, 'JS8').fields, { MODE: 'MFSK', SUBMODE: 'JS8' });
   assert.deepStrictEqual(modeEditFields({ MODE: 'MFSK', SUBMODE: 'JS8' }, 'FT8').fields, { MODE: 'FT8', SUBMODE: null });
   assert.deepStrictEqual(modeEditFields({ MODE: 'CW' }, 'PSK31').fields, { MODE: 'PSK', SUBMODE: 'PSK31' });
-  assert.deepStrictEqual(modeEditFields({ MODE: 'FT8' }, 'FT4').fields, { MODE: 'FT4', SUBMODE: null });
+  assert.deepStrictEqual(modeEditFields({ MODE: 'FT8' }, 'FT4').fields, { MODE: 'MFSK', SUBMODE: 'FT4' });
 });
 test('applyQsoEdit: an edited MFSK/JS8 record keeps MFSK + SUBMODE', () => {
   const r = { CALL: 'K1ABC', MODE: 'MFSK', SUBMODE: 'JS8' };
