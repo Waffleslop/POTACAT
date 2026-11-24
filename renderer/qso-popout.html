@@ -83,6 +83,10 @@
        its "Sure?" confirmation is never clipped (GitHub #94). */
     .qso-table th.col-actions, .qso-table tbody td:last-child { position: sticky; right: 0; background: var(--bg-primary); overflow: visible; z-index: 1; }
     .qso-table .log-delete-btn.confirming { white-space: nowrap; }
+    /* Details: the Contact details window for the row's station. */
+    .qso-table .log-details-btn { background: none; border: 1px solid var(--border-primary); border-radius: 3px; color: var(--accent-blue, #4fc3f7);
+      cursor: pointer; font-size: 12px; padding: 1px 6px; margin-right: 4px; line-height: 1.3; }
+    .qso-table .log-details-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
     .qso-table th { position: relative; overflow: hidden; }
     .qso-table th.col-dragging { opacity: 0.5; }
     .qso-table th.col-drop { box-shadow: inset 2px 0 0 var(--accent-blue); }

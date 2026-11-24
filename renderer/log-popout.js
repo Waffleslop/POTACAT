@@ -40,6 +40,13 @@ function _applyPopoutTheme(payload) {
   if (callInput) callInput.addEventListener('input', reportCall);
   const nameInput = document.getElementById('lp-name');
   const qrzBtn = document.getElementById('lp-qrz-link');
+  // Details: the Contact details window for the call being typed (lib/contact-card.js).
+  const contactBtn = document.getElementById('lp-contact-details');
+  if (contactBtn) contactBtn.addEventListener('click', () => {
+    const raw = callInput.value.trim().toUpperCase();
+    if (!raw || raw.length < 3 || !window.api.openContactCard) return;
+    window.api.openContactCard({ call: raw });
+  });
   const identityEl = document.getElementById('lp-identity');
   const chipsEl = document.querySelectorAll('.lp-chip');
   const refSection = document.getElementById('lp-ref-section');
@@ -320,6 +327,7 @@ function _applyPopoutTheme(payload) {
     } else {
       qrzBtn.classList.remove('active');
     }
+    if (contactBtn) contactBtn.classList.toggle('active', !!call && call.length >= 3);
     if (info) {
       const { name, loc } = qrzNameAndLocation(info);
       nameInput.value = name || '';
@@ -351,6 +359,7 @@ function _applyPopoutTheme(payload) {
     // Cheap input update: enable/disable QRZ button based on length only.
     if (raw && raw.length >= 3) qrzBtn.classList.add('active');
     else qrzBtn.classList.remove('active');
+    if (contactBtn) contactBtn.classList.toggle('active', !!raw && raw.length >= 3);
 
     if (lookupTimer) clearTimeout(lookupTimer);
     if (!raw || raw.length < 3) {
@@ -447,6 +456,7 @@ function _applyPopoutTheme(payload) {
     selectChip('dx');
     identityEl.innerHTML = '';
     qrzBtn.classList.remove('active');
+    if (contactBtn) contactBtn.classList.remove('active');
     renderPastQsos([], 0, '');
     timeUserEdited = false;
     // Don't reset freqUserEdited / modeUserEdited — if the user is QSY-ing

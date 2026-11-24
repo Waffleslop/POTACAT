@@ -39,6 +39,8 @@ contextBridge.exposeInMainWorld('api', {
   // One contact as logged (comma lists welcome); main builds its records.
   logContact: (entry) => ipcRenderer.invoke('log-contact', entry),
   openExternal: (url) => ipcRenderer.send('open-external', url),
+  // Contact details window for a row's station: { call, idx, identity } (lib/contact-card.js).
+  openContactCard: (req) => ipcRenderer.send('contact-card-open', req),
   minimize: () => ipcRenderer.send('qso-popout-minimize'),
   maximize: () => ipcRenderer.send('qso-popout-maximize'),
   close: () => ipcRenderer.send('qso-popout-close'),

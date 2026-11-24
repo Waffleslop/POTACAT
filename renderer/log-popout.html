@@ -73,6 +73,10 @@
     #lp-qrz-link { padding: 5px 10px; font-size: 12px; font-weight: 600; background: var(--accent-blue, #4fc3f7); color: #000; border: none; border-radius: 3px; cursor: pointer; opacity: 0.5; pointer-events: none; transition: opacity 0.15s; }
     #lp-qrz-link.active { opacity: 1; pointer-events: auto; }
     #lp-qrz-link:hover.active { filter: brightness(1.1); }
+    /* Details: the Contact details window for the call in the field. */
+    #lp-contact-details { padding: 4px 10px; font-size: 12px; font-weight: 600; background: var(--bg-input, #0f1419); color: var(--text-primary); border: 1px solid var(--accent-blue, #4fc3f7); border-radius: 3px; cursor: pointer; opacity: 0.5; pointer-events: none; }
+    #lp-contact-details.active { opacity: 1; pointer-events: auto; }
+    #lp-contact-details:hover.active { background: var(--bg-hover); }
 
     /* Identity row (Name · Country/State · Beam 087°) */
     #lp-identity { font-size: 12px; color: var(--accent-green, #4ecca3); min-height: 16px; margin-top: 4px; padding-left: 2px; }
@@ -159,6 +163,7 @@
         <input type="text" id="lp-name" readonly tabindex="-1">
       </label>
       <button id="lp-qrz-link" type="button" title="Open QRZ.com page">QRZ&#8599;</button>
+      <button id="lp-contact-details" type="button" title="Contact details: photo, address, beam heading, local time">Details</button>
     </div>
     <div id="lp-identity"></div>
     <div id="lp-worked-matrix"></div><!-- bands/modes already worked with this call (lib/worked-matrix.js, #108) -->

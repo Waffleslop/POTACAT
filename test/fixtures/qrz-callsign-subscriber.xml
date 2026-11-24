@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<QRZDatabase version="1.36" xmlns="http://xmldata.qrz.com">
+<Callsign>
+<call>W1XYZ</call>
+<aliases>W1XYZ/P,KA1XYZ</aliases>
+<dxcc>291</dxcc>
+<attn>c/o Club Station</attn>
+<fname>JANE Q</fname>
+<name>SAMPLE</name>
+<nickname>Jan</nickname>
+<addr1>12 Example Road</addr1>
+<addr2>Springfield</addr2>
+<state>MA</state>
+<zip>01101</zip>
+<country>United States</country>
+<land>United States</land>
+<lat>42.101400</lat>
+<lon>-72.589800</lon>
+<grid>FN32rc</grid>
+<county>Hampden</county>
+<class>E</class>
+<email>jane@example.invalid</email>
+<url>https://example.invalid/w1xyz</url>
+<qslmgr>Direct or bureau</qslmgr>
+<image>https://cdn-xml.qrz.com/z/w1xyz/photo.jpg</image>
+<TimeZone>Eastern</TimeZone>
+<GMTOffset>-5</GMTOffset>
+<DST>Y</DST>
+<eqsl>0</eqsl>
+<mqsl>1</mqsl>
+<cqzone>5</cqzone>
+<ituzone>8</ituzone>
+<lotw>1</lotw>
+<iota>NA-046</iota>
+<geoloc>user</geoloc>
+</Callsign>
+<Session>
+<Key>abc123</Key>
+<Count>42</Count>
+<SubExp>Wed Jan 1 00:00:00 2031</SubExp>
+<GMTime>Mon Nov 23 12:00:00 2026</GMTime>
+</Session>
+</QRZDatabase>

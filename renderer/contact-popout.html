@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <script src="popout-theme-boot.js"></script>
+  <!-- The photo is the only thing loaded from outside, and only from QRZ. Main fetches everything else. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' https://*.qrz.com https://qrz.com; style-src 'self' 'unsafe-inline'; script-src 'self';">
+  <title>Contact details</title>
+  <script src="popout-theme-bootstrap.js"></script>
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    html, body { margin: 0; padding: 0; height: 100%; }
+    body { display: flex; flex-direction: column; overflow: hidden; background: var(--bg-primary); color: var(--text-primary);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 14px; line-height: 1.4; }
+    .cd-main { flex: 1; overflow-y: auto; padding: 14px 16px 18px; }
+    .cd-loading { color: var(--text-secondary); font-size: 15px; padding: 18px 0; }
+
+    /* Who: photo beside the call, name and the worked line */
+    .cd-who { display: flex; gap: 14px; align-items: flex-start; }
+    .cd-photo { width: 112px; height: 140px; flex-shrink: 0; border-radius: 6px; object-fit: cover; background: var(--bg-secondary); border: 1px solid var(--border-primary); }
+    .cd-who-text { min-width: 0; flex: 1; }
+    .cd-call { font-size: 26px; font-weight: 800; letter-spacing: .5px; font-family: ui-monospace, Menlo, Consolas, monospace; color: var(--text-primary); overflow-wrap: anywhere; }
+    .cd-name { font-size: 17px; font-weight: 600; margin-top: 2px; }
+    .cd-sub { color: var(--text-secondary); font-size: 14px; }
+    .cd-worked { margin-top: 8px; font-size: 14px; font-weight: 600; color: var(--accent-blue, #4fc3f7); }
+    .cd-worked.confirmed { color: var(--accent-green, #4ecca3); }
+    .cd-worked.never { color: var(--text-secondary); font-weight: 500; }
+
+    /* At a glance: local time, weather, beam and distance */
+    .cd-glance { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; margin-top: 14px; }
+    .cd-tile { background: var(--bg-secondary); border: 1px solid var(--border-primary); border-radius: 6px; padding: 7px 10px; }
+    .cd-tile .l { font-size: 12px; color: var(--text-secondary); font-weight: 600; }
+    .cd-tile .v { font-size: 18px; font-weight: 700; font-variant-numeric: tabular-nums; }
+    .cd-tile .s { font-size: 12px; color: var(--text-secondary); }
+
+    .cd-section { margin-top: 16px; }
+    .cd-section h2 { font-size: 13px; font-weight: 700; color: var(--text-secondary); margin: 0 0 6px; text-transform: none; }
+    .cd-section-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    .cd-address { font-size: 15px; line-height: 1.45; user-select: text; }
+    dl.cd-facts { display: grid; grid-template-columns: max-content 1fr; gap: 5px 14px; margin: 0; }
+    dl.cd-facts dt { color: var(--text-secondary); font-size: 13px; padding-top: 1px; }
+    dl.cd-facts dd { margin: 0; font-size: 15px; user-select: text; overflow-wrap: anywhere; }
+    .cd-btn { background: var(--bg-input); color: var(--text-primary); border: 1px solid var(--border-primary); border-radius: 4px; padding: 4px 11px; font-size: 13px; cursor: pointer; }
+    .cd-btn:hover { background: var(--bg-hover); }
+    .cd-btn.done { color: var(--accent-green, #4ecca3); border-color: var(--accent-green, #4ecca3); }
+    .cd-links { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+    .cd-link { color: var(--accent-blue, #4fc3f7); background: none; border: 0; padding: 0; font-size: 15px; cursor: pointer; text-decoration: underline; }
+    .cd-note { margin-top: 18px; padding-top: 10px; border-top: 1px solid var(--border-primary); color: var(--text-secondary); font-size: 13px; }
+    .cd-weather-off { margin-top: 12px; color: var(--text-secondary); font-size: 13px; }
+    .cd-weather-off .cd-link { font-size: 13px; }
+    .cd-weather-stop { margin-left: 4px; font-size: 12px; }
+    [hidden] { display: none !important; }
+  </style>
+</head>
+<body>
+  <div class="titlebar">
+    <div class="titlebar-title">Contact details</div>
+    <div class="titlebar-controls">
+      <button class="titlebar-btn" id="tb-min" title="Minimize">&#x2014;</button>
+      <button class="titlebar-btn titlebar-close" id="tb-close" title="Close">&#x2715;</button>
+    </div>
+  </div>
+
+  <div class="cd-main" id="cd-main">
+    <div class="cd-loading" id="cd-loading">Looking up the station...</div>
+    <div id="cd-card" hidden>
+      <div class="cd-who">
+        <img class="cd-photo" id="cd-photo" alt="" hidden>
+        <div class="cd-who-text">
+          <div class="cd-call" id="cd-call"></div>
+          <div class="cd-name" id="cd-name"></div>
+          <div class="cd-sub" id="cd-sub"></div>
+          <div class="cd-worked" id="cd-worked"></div>
+        </div>
+      </div>
+
+      <div class="cd-glance" id="cd-glance"></div>
+
+      <div class="cd-section" id="cd-address-section" hidden>
+        <div class="cd-section-head">
+          <h2>Mailing address</h2>
+          <button type="button" class="cd-btn" id="cd-copy-address" title="Copy the address for a QSL card">Copy address</button>
+        </div>
+        <div class="cd-address" id="cd-address"></div>
+      </div>
+
+      <div class="cd-section" id="cd-facts-section" hidden>
+        <dl class="cd-facts" id="cd-facts"></dl>
+        <div class="cd-links" id="cd-links"></div>
+      </div>
+
+      <div class="cd-section" id="cd-this-section" hidden>
+        <h2>This contact</h2>
+        <dl class="cd-facts" id="cd-this"></dl>
+      </div>
+
+      <div class="cd-weather-off" id="cd-weather-off" hidden>
+        <button type="button" class="cd-link" id="cd-weather-on">Show the local weather</button>:
+        POTACAT asks Open-Meteo (open-meteo.com) for the weather in this station's grid square. No callsign is sent.
+      </div>
+
+      <div class="cd-note" id="cd-note" hidden></div>
+    </div>
+  </div>
+
+  <script src="contact-popout.js"></script>
+</body>
+</html>

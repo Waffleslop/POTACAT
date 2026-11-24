@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<QRZDatabase version="1.36" xmlns="http://xmldata.qrz.com">
+<Callsign>
+<call>G4ABC</call>
+<fname>Peter</fname>
+<name>O'BRIEN</name>
+<addr2>Bristol</addr2>
+<country>England</country>
+</Callsign>
+<Session>
+<Key>abc123</Key>
+<Count>3</Count>
+<SubExp>non-subscriber</SubExp>
+<Message>A subscription is required to access the complete record.</Message>
+</Session>
+</QRZDatabase>
