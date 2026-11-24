@@ -184,9 +184,12 @@ test('every data-external link in the windows passes', () => {
 
 test('main routes open-external through the lib and opens the checked form', () => {
   const main = readSrc(path.join(__dirname, '..', 'main.js'));
-  const at = main.indexOf("ipcMain.on('open-external'");
-  const block = main.slice(at, main.indexOf('\n  });\n', at));
-  assert.ok(/const known = ExternalUrl\.checked\(url\);\s*if \(known\) \{ shell\.openExternal\(known\); return; \}/.test(block));
+  // The IPC and the window guards (lib/window-security.js) share one gate.
+  assert.ok(/ipcMain\.on\('open-external', \(_e, url\) => \{ openExternalIfAllowed\(url\); \}\);/.test(main));
+  const at = main.indexOf('function openExternalIfAllowed(url) {');
+  assert.ok(at > 0, 'openExternalIfAllowed exists');
+  const block = main.slice(at, main.indexOf('\n  }\n', at));
+  assert.ok(/const known = ExternalUrl\.checked\(url\);\s*if \(known\) \{ shell\.openExternal\(known\); return true; \}/.test(block));
   assert.ok(!/startsWith\(/.test(block), 'no prefix test left in the handler');
   assert.ok(/ExternalUrl\.fileRevealPath\(url, externalRevealRoots\(\)\)/.test(block), 'file links go through the folder rule');
   assert.ok(!/showItemInFolder\(url|replace\('file:\/\/'/.test(block), 'no raw path reveal');
