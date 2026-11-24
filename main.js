@@ -496,6 +496,7 @@ const WinlinkSummaryStore = require('./lib/winlink-summary-store'); // the sessi
 const WinlinkFav = require('./lib/winlink-favourites');
 const WinlinkMine = require('./lib/winlink-my-gateways'); // #585: the shack's check of a typed gateway
 const WinlinkTemplates = require('./lib/winlink-templates');
+const WinlinkCatalog = require('./lib/winlink-catalog');
 const WinlinkContacts = require('./lib/winlink-contacts');
 const WinlinkReach = require('./lib/winlink-reach');
 const PotaEmailSpot = require('./lib/pota-email-spot');
@@ -12190,6 +12191,8 @@ function winlinkPayload() {
     // The operator's own message templates (the built-in Position report and
     // POTA spot are not stored: every surface offers them itself).
     templates: WinlinkTemplates.normalize(settings.winlinkTemplates),
+    // The Winlink catalog (docs/winlink-catalog.md): a few numbers; a surface asks for the list again when they change.
+    catalog: winlinkCatalogStamp(),
     // The Position report form's starting point: the center of the grid, and
     // how far off that can be (half the square's diagonal, rounded).
     position: (() => {
@@ -12278,6 +12281,8 @@ async function winlinkRefreshMailboxes(boxes = WinlinkStateLib.FOLDERS) {
     }
   }
   winlinkPush();
+  // A catalog reply in the Inbox is recognised by itself (docs/winlink-catalog.md); the message is left as it is.
+  if (boxes.includes('in')) winlinkCatalogScan();
 }
 
 /**
@@ -17552,6 +17557,156 @@ function winlinkTemplate(op, t) {
   return { ok: true, id: r.id || null };
 }
 
+// ── Winlink catalog requests (docs/winlink-catalog.md) ──────────────────────
+// The rules are lib/winlink-catalog.js. Here: the stored catalog (one file for
+// every profile: the catalog is the same for everyone), the operator's picks
+// and the pending LIST request (settings, per profile), and reading a catalog
+// reply out of the Inbox. Nothing here starts a session, and a request is
+// queued only by the operator's click (the window's handlers, an ECHOCAT
+// device's winlink-catalog-* messages).
+
+let _winlinkCatalog; // the stored catalog, or null; undefined until first asked for
+const _winlinkCatalogSeen = new Set(); // Inbox messages already looked at, this run
+let _winlinkCatalogSeenFor = ''; // the mailbox they belong to (another profile starts again)
+let _winlinkCatalogUnreadable = false;
+let _winlinkCatalogScanning = false;
+let _winlinkCatalogScanAgain = false;
+let _winlinkCatalogBusy = false;
+
+function winlinkCatalogPath() { return path.join(app.getPath('userData'), 'winlink-catalog.json'); }
+
+function winlinkCatalogStored() {
+  if (_winlinkCatalog === undefined) {
+    try { _winlinkCatalog = WinlinkCatalog.cleanStored(JSON.parse(fs.readFileSync(winlinkCatalogPath(), 'utf8'))); } catch { _winlinkCatalog = null; }
+  }
+  return _winlinkCatalog;
+}
+
+function winlinkCatalogStamp() {
+  return WinlinkCatalog.stamp(winlinkCatalogStored(), { requestedAt: settings.winlinkCatalogRequestedAt, now: Date.now(), unreadable: _winlinkCatalogUnreadable });
+}
+
+/** The panel's data: the full catalog's items (none yet = the starter list), the picks, the pending request. */
+function winlinkCatalogGet() {
+  // The pending stamp ends after 7 days (lib/winlink-catalog.js pendingActive).
+  if (settings.winlinkCatalogRequestedAt && !WinlinkCatalog.pendingActive(settings.winlinkCatalogRequestedAt, Date.now())) {
+    delete settings.winlinkCatalogRequestedAt;
+    try { saveSettings(settings); } catch {}
+  }
+  return WinlinkCatalog.payload(winlinkCatalogStored(), { picks: settings.winlinkCatalogPicks, requestedAt: settings.winlinkCatalogRequestedAt, now: Date.now(), unreadable: _winlinkCatalogUnreadable });
+}
+
+/** Put request messages in the Outbox, one after another, through winlinkSend. One request at a time. */
+async function winlinkCatalogQueue(messages) {
+  if (_winlinkCatalogBusy) return { ok: false, busy: true, error: 'The last request is still going into the Outbox.', queued: [], messages: 0 };
+  _winlinkCatalogBusy = true;
+  const queued = [];
+  let sent = 0;
+  try {
+    for (const m of messages) {
+      const r = await winlinkSend({ to: m.to, subject: m.subject, body: m.body });
+      if (!r || !r.ok) return { ok: false, error: (r && r.error) || WinlinkCatalog.TEXT.sendFailed, queued, messages: sent };
+      sent++;
+      if (m.ids) queued.push(...m.ids);
+    }
+    return { ok: true, queued, messages: sent };
+  } catch (e) {
+    return { ok: false, error: e.message, queued, messages: sent };
+  } finally {
+    _winlinkCatalogBusy = false;
+  }
+}
+
+/** Put in Outbox: the ticked items as request messages (at most 10 IDs each). What was queued joins the picks. */
+async function winlinkCatalogRequest(ids) {
+  if (!String(settings.myCallsign || '').trim()) return { ok: false, error: WinlinkCatalog.TEXT.noCallsign, queued: [], messages: 0 };
+  const messages = WinlinkCatalog.buildRequests(ids);
+  if (!messages.length) return { ok: false, error: 'Tick at least one item.', queued: [], messages: 0 };
+  const r = await winlinkCatalogQueue(messages);
+  if (r.queued.length) {
+    settings.winlinkCatalogPicks = WinlinkCatalog.addRecent(settings.winlinkCatalogPicks, r.queued);
+    try { saveSettings(settings); } catch {}
+    winlinkLog(`catalog: request for ${r.queued.length} item${r.queued.length === 1 ? '' : 's'} in the Outbox (${r.messages} message${r.messages === 1 ? '' : 's'}): ${r.queued.join(' ')}`);
+  }
+  return { ...r, picks: WinlinkCatalog.normalizePicks(settings.winlinkCatalogPicks) };
+}
+
+/** Get / Update the full catalog: one LIST request in the Outbox. Never a second while one is pending. */
+async function winlinkCatalogRequestList() {
+  if (WinlinkCatalog.pendingActive(settings.winlinkCatalogRequestedAt, Date.now())) return { ok: true, already: true, queued: [], messages: 0 };
+  if (!String(settings.myCallsign || '').trim()) return { ok: false, error: WinlinkCatalog.TEXT.noCallsign, queued: [], messages: 0 };
+  const r = await winlinkCatalogQueue([WinlinkCatalog.listRequest()]);
+  if (!r.ok) return r;
+  settings.winlinkCatalogRequestedAt = Date.now();
+  try { saveSettings(settings); } catch {}
+  winlinkLog('catalog: the request for the full catalog (LIST) is in the Outbox');
+  winlinkPush();
+  return r;
+}
+
+/** Star or unstar an item in Your picks. */
+function winlinkCatalogStar(id, on) {
+  if (!WinlinkCatalog.isId(id)) return { ok: false, error: 'Unknown item' };
+  settings.winlinkCatalogPicks = WinlinkCatalog.setStar(settings.winlinkCatalogPicks, id, !!on);
+  saveSettings(settings);
+  return { ok: true };
+}
+
+/** One Inbox message: is it the catalog? Read only: never marked read, moved or changed. true = a catalog was stored. */
+async function winlinkCatalogExamine(mid, date) {
+  const msg = await patClient.message('in', mid);
+  if (!WinlinkCatalog.looksLikeCatalog(msg)) return false;
+  const p = WinlinkCatalog.parseCatalogList(msg.body);
+  if (!p.ok) {
+    if (p.reason === 'not-a-table') {
+      _winlinkCatalogUnreadable = true;
+      winlinkLog(`catalog: a message looks like the Winlink catalog but its table could not be read; first line: ${JSON.stringify(p.firstLine)}`);
+    }
+    return false;
+  }
+  const stored = WinlinkCatalog.storedFrom(p, { mid, date }, Date.now());
+  if (!stored) return false;
+  _writeJsonAtomic(winlinkCatalogPath(), stored);
+  _winlinkCatalog = stored;
+  _winlinkCatalogUnreadable = false;
+  if (settings.winlinkCatalogRequestedAt) { delete settings.winlinkCatalogRequestedAt; try { saveSettings(settings); } catch {} }
+  const asOf = stored.modified ? `, as of ${stored.modified}` : '';
+  winlinkLog(`catalog: read the Winlink catalog from the Inbox (${stored.items.length} items${asOf})`);
+  return true;
+}
+
+/** After the Inbox list is refreshed: look at mail not yet examined, newest first; the first catalog found is the newest. */
+async function winlinkCatalogScan() {
+  if (!patClient) return;
+  if (_winlinkCatalogScanning) { _winlinkCatalogScanAgain = true; return; }
+  _winlinkCatalogScanning = true;
+  try {
+    const box = String(winlinkMailboxDir() || '');
+    if (box !== _winlinkCatalogSeenFor) { _winlinkCatalogSeen.clear(); _winlinkCatalogSeenFor = box; _winlinkCatalogUnreadable = false; }
+    const list = winlinkState.list('in');
+    const byMid = new Map(list.map((m) => [m.mid, m]));
+    let changed = false;
+    const wasUnreadable = _winlinkCatalogUnreadable;
+    for (const mid of WinlinkCatalog.toExamine(list, { seen: _winlinkCatalogSeen, stored: winlinkCatalogStored() })) {
+      if (!patClient || String(winlinkMailboxDir() || '') !== box) break; // Pat stopped or the operator changed
+      try {
+        const found = await winlinkCatalogExamine(mid, (byMid.get(mid) || {}).date || '');
+        _winlinkCatalogSeen.add(mid);
+        if (found) { changed = true; break; } // newest first: anything older is an older catalog
+      } catch (e) {
+        _winlinkCatalogSeen.add(mid); // a message Pat cannot open is not asked for again this run
+      }
+    }
+    if (changed || wasUnreadable !== _winlinkCatalogUnreadable) {
+      winlinkPopoutSend('winlink-catalog-updated');
+      winlinkPush();
+    }
+  } finally {
+    _winlinkCatalogScanning = false;
+    if (_winlinkCatalogScanAgain) { _winlinkCatalogScanAgain = false; winlinkCatalogScan(); }
+  }
+}
+
 /**
  * The fields of a favourite request (the mail window's invoke, an ECHOCAT
  * device's winlink-favourite), typed. #585: a gateway typed in on the Add a
@@ -17756,6 +17911,19 @@ async function winlinkHandleRemote({ type, req = {}, reply, clientId }) {
         return;
       case 'winlink-posreport':
         result('posreport', await winlinkPosReport({ lat: req.lat, lon: req.lon, comment: req.comment }));
+        return;
+      // The Winlink catalog (capability 'winlink-catalog', docs/winlink-catalog.md): the same four requests as the mail window's.
+      case 'winlink-catalog-get':
+        reply({ type: 'winlink-catalog', ...winlinkCatalogGet() });
+        return;
+      case 'winlink-catalog-request':
+        reply({ type: 'winlink-catalog-queued', ...(await winlinkCatalogRequest(req.ids)) });
+        return;
+      case 'winlink-catalog-request-list':
+        reply({ type: 'winlink-catalog-queued', ...(await winlinkCatalogRequestList()) });
+        return;
+      case 'winlink-catalog-star':
+        result('catalog-star', winlinkCatalogStar(String(req.id || ''), req.on === true));
         return;
       case 'winlink-accept-notice':
         result('accept-notice', winlinkAcceptNotice());
@@ -49892,6 +50060,11 @@ function cloudShackNotice(text, kind) {
   ipcMain.handle('winlink-forms-update', () => winlinkFormsUpdate());
   ipcMain.handle('winlink-form-open', (_e, o = {}) => winlinkFormOpen({ kind: String(o.kind || ''), path: String(o.path || ''), box: String(o.box || ''), mid: String(o.mid || ''), file: String(o.file || '') }));
   ipcMain.handle('winlink-form-info', (_e, o = {}) => winlinkFormInfo({ box: String(o.box || ''), mid: String(o.mid || ''), file: String(o.file || '') }));
+  // Winlink catalog requests (docs/winlink-catalog.md). Driving a remote shack, the bridge sends these to the shack.
+  ipcMain.handle('winlink-catalog-get', () => winlinkCatalogGet());
+  ipcMain.handle('winlink-catalog-request', (_e, ids) => winlinkCatalogRequest(ids));
+  ipcMain.handle('winlink-catalog-request-list', () => winlinkCatalogRequestList());
+  ipcMain.handle('winlink-catalog-star', (_e, o = {}) => winlinkCatalogStar(o.id, o.on));
   // Driving a remote shack, the bridge sends this to the shack (#299) and this handler never runs.
   ipcMain.handle('winlink-cmd-connect', (_e, o = {}) => {
     winlinkRetryCancel('connect');
