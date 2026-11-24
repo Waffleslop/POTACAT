@@ -838,6 +838,7 @@ const SERIAL = new Set([
   'test/tci-audio-test.js', // 2 s budgets for a loopback TCI server to answer; missed in 2 of 9 parallel runs on a loaded machine, never alone
   'test/paddle-bounce-test.js', // web keyer element timing in real milliseconds; a dash was cut short once under load
   'test/civ-pacing-test.js', // fixed 60/200 ms waits on a fake CI-V radio; failed four pushes under parallel load on 2026-11-22, passes alone
+  'test/ptt-client-id-test.js', // fixed port 17461; "Port 17461 busy" blocked two pushes under parallel load on 2026-11-23, passes alone
 ]);
 
 // SERIAL files that may be retried once after a failure (timing under load,
