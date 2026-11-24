@@ -551,6 +551,7 @@ const WinlinkTxLevel = require('./lib/winlink-tx-level'); // #300: Winlink's own
 const ModemAudioServerMod = require('./lib/modem-audio-server');
 const { ModemAudioLane } = require('./lib/modem-audio-lane-client'); // the modem's audio, off the main process (#187)
 const { buildAdifFields, buildAdifRecord, sqliteQsoToAdifFields, ADIF_HEADER, adifField } = require('./lib/adif-writer');
+const LogExportChoice = require('./lib/log-export-choice');
 const { adifAppMode, adifModeSubmode } = require('./lib/adif-mode');
 const { PassQsoOutbox } = require('./lib/pass-qso-outbox');
 const { ClublogOutbox } = require('./lib/clublog-outbox');
@@ -56913,12 +56914,14 @@ function cloudShackNotice(text, kind) {
     }
   }
 
-  ipcMain.handle('export-adif', async (event, qsos) => {
+  // opts.fileName: the Logbook's suggested name (a time range, the selected
+  // rows: #698). Only a name lib/log-export-choice.js could have made is used.
+  ipcMain.handle('export-adif', async (event, qsos, opts) => {
     try {
       const parentWin = BrowserWindow.fromWebContents(event.sender) || win;
       const result = await dialog.showSaveDialog(parentWin, {
         title: 'Export ADIF',
-        defaultPath: path.join(adifExportDefaultDir(), 'potacat_export.adi'),
+        defaultPath: path.join(adifExportDefaultDir(), LogExportChoice.safeFileName(opts && opts.fileName)),
         filters: [
           { name: 'ADIF Files', extensions: ['adi', 'adif'] },
           { name: 'All Files', extensions: ['*'] },
