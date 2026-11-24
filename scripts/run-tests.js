@@ -461,6 +461,8 @@ const TESTS = [
   'test/winlink-forms-test.js', // #346 phase 1: Pat's form catalog, a filled form to compose and the Outbox with Pat's forminstance cookie, View form; the form window locked down (requests, navigation, permissions, geolocation from the grid); a real offline Pat when present
   'test/winlink-gpsd-test.js', // #346: forms' position is the Settings grid's centre, from a GPSd stand-in on 127.0.0.1 (Pat reads GPSd only); no grid, no fix; a real offline Pat when present
   'test/winlink-forms-reply-test.js', // #346 phase 2: Reply with form: the reply form named in the received form's XML, opened pre-linked (Pat's in-reply-to, path-checked in 1.0.1), its own XML on the reply; a real offline Pat when present
+  'test/winlink-catalog-test.js', // Winlink catalog requests: the starter list, reading Winlink's LIST reply (hand-written fixture and hostile variants), search, grouping, the request messages (at most 10 IDs each), size advice, picks, every sentence
+  'test/winlink-catalog-wiring-test.js', // Winlink catalog: the panel, preload and main.js glue; one send path, no connect, the Inbox message never changed, no innerHTML with catalog text; the remote link's wire messages
   'test/winlink-contacts-test.js', // the Winlink address book, and the Position report and POTA spot forms
   'test/winlink-sent-routes-test.js', // #442: how each sent message went out (gateway, dial, mode or internet, time), kept by message id
   'test/winlink-summary-store-test.js', // #425: the session summary lines survive a restart, so Report a Bug still holds the session that dropped
