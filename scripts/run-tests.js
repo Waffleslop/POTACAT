@@ -792,6 +792,7 @@ const TESTS = [
   'test/park-db-check-test.js', // activator: only POTA refs are checked against the parks list (og3e WWFF/SOTA flagged as typos), and the warning never overflows
   'test/rigctld-passthrough-test.js', // custom CAT over rigctld: a + or \ command goes to rigctld as typed (electricfalcon)
   'test/mono-upmix-test.js', // the VFO monitor plays radio audio in both ears (hoogskev, macOS left-channel only)
+  'test/setup-test-mode-test.js', // #755: the transmit test keys in the DATA mode FT8 uses (USB->DIGU on sound-card radios), says so, puts it back
   'test/setup-test-freq-test.js', // Station Setup test transmit: at the dial if the licence allows, else at the band's FT8 dial and back, else refused with why (w0tlp)
   'test/jtcat-spot-target-after-qso-test.js', // #518: a finished QSO (done, Skip, Cancel) with the spot target's call clears it, armed or engaged; the watcher never calls a worked station again
   'test/jtcat-hold-tx-resend-test.js', // #688: jtcat-start resends the Hold TX state so a phone FT8 screen opened after connect shows it; Hold TX Freq: ON reaches the CAT log
