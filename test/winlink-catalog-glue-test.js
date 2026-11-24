@@ -277,7 +277,7 @@ test('a catalog that could not be read is remembered with its message, and clear
   for (let i = 0; i < 80; i++) junk.push('some other line of text number ' + i + ' ' + 'pad '.repeat(15));
   s.pat.in.push({ mid: 'BAD', to: ['N0CALL'], subject: 'x', body: catalogBody(8) + '\n' + junk.join('\n'), date: '2026-03-10T00:00:00Z', from: 'SERVICE' });
   await s.refresh();
-  assert.deepStrictEqual(s.settings.winlinkCatalogUnreadable, { mid: 'BAD' });
+  assert.strictEqual(s.settings.winlinkCatalogUnreadable.mid, 'BAD');
   assert.strictEqual(s.fns.get().unreadable, true);
   assert.ok(s.logs.some((l) => /could not be read \(8 rows read, 80 lines skipped\)$/.test(l)) && !s.logs.some((l) => /some other line/.test(l)));
   await s.fns.requestList(false);

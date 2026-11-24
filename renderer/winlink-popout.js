@@ -1061,6 +1061,7 @@
     var done = function (r) {
       catBusy = false;
       if (!r || !r.ok) { if (!(r && r.busy)) catErr((r && r.error) || WCAT.TEXT.sendFailed); if (catPanelOpen()) renderCatalog(); return; }
+      if (r.text) catErr(r.text);   // nothing was queued, and why: a request is already in the Outbox
       loadCatalog();
     };
     window.api.catalogRequestList(catAgain).then(done, function () { done(null); });

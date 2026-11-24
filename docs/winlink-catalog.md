@@ -281,7 +281,10 @@ When the Inbox is looked at (`shouldScan`):
 - when Get, Update or Request again is pressed.
 
 Which messages are read (`toExamine`): every Inbox message not examined before, whatever its date.
-What was examined is remembered by message ID, the last 1,000, per operator profile. It is not
+What was examined is remembered by message ID, per operator profile (a profile switch restarts
+POTACAT, so a pass never spans two profiles). The set is pruned to the Inbox as it is now and is
+never cut below it (5,000 at most), so a pass can only add to it: a look reads each message once,
+always ends, and writes the settings only when the set changed. It is not
 remembered by date: a message's date is the sender's, and a future-dated or out-of-order message
 must never hide the reply. Reads are one at a time, newest-dated first, at most 200 in a pass; when
 more wait, another pass follows.
@@ -315,7 +318,7 @@ nothing is set in memory, no success is logged, and the next pass asks again.
 | Pending request | setting `winlinkCatalogRequest` | Per operator profile: `{ at, mid }`, when the `LIST` request was queued and which Outbox message it is (`mid` is empty when that could not be told). Removed only by `settleRequest`. |
 | An offer | setting `winlinkCatalogOffer` | Per operator profile: `{ mid, from, date, count, have }` of a catalog message waiting for **Use it**. The items are read from the message again on the click. |
 | Answered offers | setting `winlinkCatalogDeclined` | Per operator profile: the last 50 message IDs not to offer again. |
-| Examined mail | setting `winlinkCatalogExamined` | Per operator profile: the last 1,000 Inbox message IDs already examined. (An earlier date mark, `winlinkCatalogScannedTo`, is ignored and removed.) |
+| Examined mail | setting `winlinkCatalogExamined` | Per operator profile: the Inbox message IDs already examined (pruned to the Inbox, 5,000 at most). (An earlier date mark, `winlinkCatalogScannedTo`, is ignored and removed.) |
 | Could not read | setting `winlinkCatalogUnreadable` | Per operator profile: `{ mid }` of the catalog message that could not be read. Cleared when a good catalog is read or used. |
 
 None of these is a secret.
@@ -324,8 +327,8 @@ Where a request stands (`settleRequest`):
 
 | Kind | When | Shown as |
 |---|---|---|
-| queued | Its message is in the Outbox. When the message could not be identified: while any catalog request is in the Outbox. | "requested", no button |
-| sent | Its message is in Sent. When it could not be identified: no catalog request is in the Outbox. | "requested", with **Request again** |
+| queued | Its message is known to be in the Outbox. | "requested", no button |
+| sent | Its message is in Sent, or it could not be identified. | "requested", with **Request again** |
 | unknown | Its message is in neither folder as far as is known: the folders are not listed yet, the Sent list is older than the Outbox's, or Sent failed to list. | "requested", no button; settled by the next full refresh |
 | none | Nothing is waited for. | Get / Update |
 
@@ -336,8 +339,12 @@ to an hour ahead of the clock (the clock was set back) counts as just made.
 
 Queuing the request (`listRule`, `newRequest`): Pat's Outbox is listed afresh and each catalog
 request in it is read, never the cached list. While a `LIST` request is in the Outbox no second one
-is queued, whatever the state says. After the send the Outbox is listed again; the `LIST` message
-that is new is the one the request is tied to.
+is queued, whatever the state says; the panel then says "A request for the full catalog is already
+in the Outbox. It goes out with your next Send / Receive.", and a `LIST` found there that nobody
+recorded is adopted as the request. After the send the Outbox is listed again; the `LIST` message
+that is new (of several, the one dated nearest the send) is the one the request is tied to. The
+lock that allows one catalog request at a time is taken before the first listing. A newly queued
+request clears the "could not read" note, and a request newer than that note outranks it.
 
 Window calls (the Winlink window's preload): `catalogGet`, `catalogRequest(ids)`,
 `catalogRequestList(again)`, `catalogStar(id, on)`, `catalogOffer(use)`, `onCatalogUpdated`. Channels:

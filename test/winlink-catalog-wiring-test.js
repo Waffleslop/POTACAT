@@ -194,7 +194,7 @@ test('no decision lives in the glue: it asks the rules and applies the answer', 
   }
 });
 test('a request goes through winlinkSend, the path every message takes; nothing connects; no timer asks', () => {
-  assert.ok(/await winlinkSend\(\{ to: m\.to, subject: m\.subject, body: m\.body \}\)/.test(fnBody(main, 'winlinkCatalogQueue')));
+  assert.ok(/await winlinkSend\(\{ to: m\.to, subject: m\.subject, body: m\.body \}\)/.test(fnBody(main, 'winlinkCatalogSendAll')));
   assert.ok(!/patClient\.send\(|winlinkSendOne\(|winlinkStartSession\(|\.connect\(|setInterval|setTimeout/.test(GLUE));
   const callers = main.split('\n').filter((l) => /winlinkCatalogRequestList\(/.test(l) && !/function winlinkCatalogRequestList/.test(l));
   assert.strictEqual(callers.length, 2, 'the window\'s handler and the ECHOCAT request: ' + callers.join(' | '));
@@ -209,7 +209,7 @@ test('the Outbox is asked of Pat afresh around a LIST send; the cache is not use
   const f = fnBody(main, 'winlinkCatalogListsInOutbox');
   assert.ok(/await patClient\.mailbox\('out'\)/.test(f) && /patClient\.message\('out', mid\)/.test(f) && !/winlinkState/.test(f));
   const r = fnBody(main, 'winlinkCatalogRequestList');
-  assert.ok(r.indexOf('const before = await winlinkCatalogListsInOutbox();') < r.indexOf('winlinkCatalogQueue(') && r.indexOf('winlinkCatalogQueue(') < r.indexOf('after = await winlinkCatalogListsInOutbox();'));
+  assert.ok(r.indexOf('const before = await winlinkCatalogListsInOutbox();') < r.indexOf('winlinkCatalogSendAll(') && r.indexOf('_winlinkCatalogBusy = true;') < r.indexOf('const before = await') && r.indexOf('winlinkCatalogSendAll(') < r.indexOf('after = await winlinkCatalogListsInOutbox();'));
 });
 test('the refresh says which folders it listed without an error, then lets the catalog look', () => {
   const refresh = fnBody(main, 'winlinkRefreshMailboxes');
