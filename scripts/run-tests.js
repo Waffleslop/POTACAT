@@ -704,6 +704,7 @@ const TESTS = [
   'test/landmarks-test.js', // Directory > Landmarks: the catalog gate, hours, rig coverage, the NCDXF clock, the feed, wiring
   'test/directory-key-nav-test.js', // #501: Directory arrow keys move from the row you clicked; ends clamp; a tab switch resets
   'test/lz3aw-round14-test.js',
+  'test/log-export-choice-test.js', // #698: Export ADIF for everything shown, a UTC time range, or the selected rows
   'test/logbook-map-filter-test.js', // #702: the Logbook map plots exactly the filtered rows; one filter for list, map and ECHOCAT Web
   'test/lz3aw-batch-b-test.js',
   'test/lotw-report-test.js',
