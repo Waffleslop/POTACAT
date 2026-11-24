@@ -207,11 +207,13 @@ const TESTS = [
   'test/ft2000-atu-cmd-test.js', // #990: FT-2000 tune is AC002; per its CAT reference p. 5, not the Kenwood AC011;
   'test/freedv-spot-merge-test.js', // #742: one row per FreeDV station across PSKReporter + FreeDV Reporter; departed stations leave; rows keyed by mode too
   'test/freedv-display-mode-test.js', // #716: RADE, not DIGU/PKTUSB, on every surface while FreeDV runs
+  'test/echocat-web-data-mode-test.js', // DIGU / DIGL in ECHOCAT Web's mode picker for radios that have them (lib/data-mode-picker.js)
   'test/vfo-ptt-row-test.js', // #190: ECHOCAT Web VFO-tab PTT row shows while the mode is unknown; hidden in CW/data
   'test/ws-liveness-test.js', // ECHOCAT Web: reconnect when no pong comes back or the screen wakes on a dead socket
   'test/ptt-release-test.js', // ECHOCAT Web: PTT lets go on blur/hidden/cancel, Space up with a box focused, and resends off after a reconnect (#935)
   'test/ws-limits-test.js', // ECHOCAT: 16 MiB maxPayload, a frame over 64 KiB before sign-in closes the socket unparsed (1009), sstv-photo over 4 MiB refused with sstv-tx-status error and never encoded
   'test/remote-origin-security-test.js', // ECHOCAT: foreign page Origin refused on LAN sockets, /api/ptt cross-site refused with no ACAO, device-writable settings allowlist, public source needs the token, directory cards escaped
+  'test/ptt-api-plain-http-test.js', // /api/ptt on the plain-HTTP fallback: keying needs the ECHOCAT password, release always works, HTTPS unchanged, local usage stamp (lib/ptt-api-gate.js, lib/ptt-api-usage.js)
   'test/ptt-client-id-test.js', // #941: a reconnecting ECHOCAT Web page releases PTT its own dead socket holds; another id or none never does
   'test/error-banner-text-test.js', // #806: ECHOCAT Web error banner shows the message on iPhone Safari (stack has no message there)
   'test/freedv-diag-test.js', // #717: FreeDV audio in, sync on/off and capture failures in the session log, rate-limited
@@ -888,6 +890,7 @@ const SERIAL = new Set([
   'test/tci-audio-test.js', // 2 s budgets for a loopback TCI server to answer; missed in 2 of 9 parallel runs on a loaded machine, never alone
   'test/paddle-bounce-test.js', // web keyer element timing in real milliseconds; a dash was cut short once under load
   'test/civ-pacing-test.js', // fixed 60/200 ms waits on a fake CI-V radio; failed four pushes under parallel load on 2026-11-22, passes alone
+  'test/ptt-client-id-test.js', // fixed port 17461; "Port 17461 busy" blocked two pushes under parallel load on 2026-11-23, passes alone
   // Added 2026-11-23 when they joined TESTS; not yet seen to fail, placed here up front:
   'test/revoke-kick.test.js', // fixed port 17310, a real ECHOCAT server and 300-1500 ms waits for the kick to land
   'test/remote-client-dial-test.js', // fixed port 17320 and a 2.5 s window of dial rounds with backoff

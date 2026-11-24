@@ -475,6 +475,9 @@
   let _mapHomeGrid = null;
   let currentFreqKhz = 0;
   let currentMode = '';
+  // The radio's DATA flag where it reports it apart from the mode (an Icom in
+  // USB with 1A 06 on): status.modeData. Read with currentMode for the badge.
+  let currentModeData = false;
   let currentNoCat = false; // status.noCat: a "No CAT control (VOX)" rig, keyed by its sound card
   let tunedFreqKhz = '';
 
@@ -3393,12 +3396,14 @@
       }
     }
     if (typeof s.noCat === 'boolean' && s.noCat !== currentNoCat) { currentNoCat = s.noCat; updateSsbPanelVisibility(); }
+    if (typeof s.modeData === 'boolean') currentModeData = s.modeData;
     if (s.mode) {
       currentMode = s.mode;
       quickLogFollowRadio();
-      // Display friendly name for FreeDV modes
+      // Display friendly name for FreeDV modes; data sub-modes read DIGU / DIGL
+      // whatever the radio calls them (PKTUSB, USB-D, DATA-U, USB + DATA flag).
       const mUp = s.mode.toUpperCase();
-      modeBadge.textContent = FreedvDisplayMode.freedvBadge(s.mode); // lib/freedv-display-mode.js
+      modeBadge.textContent = DataModePicker.badge(FreedvDisplayMode.freedvBadge(s.mode), currentModeData); // lib/freedv-display-mode.js, lib/data-mode-picker.js
       // PKTUSB / PKTLSB / DIGU / DIGL are SSB sub-band positions used for
       // FT8/FT4/FreeDV — they're voice-capable carriers, not CW. Without
       // these, FreeDV (which lands the rig on PKTLSB on lower bands and
@@ -3486,6 +3491,12 @@
     if (s.capabilities) {
       setMicGainVisible(!!s.capabilities.micGain);
       rigCapabilities = s.capabilities;
+      // DIGU / DIGL in the mode picker only for a radio that has them
+      // (capabilities.dataModes, lib/data-mode-picker.js); hidden on older shacks.
+      const dataModes = DataModePicker.pickerModes(s.capabilities);
+      modePicker.querySelectorAll('.mp-btn[data-data-mode]').forEach((b) => {
+        b.classList.toggle('hidden', dataModes.indexOf(b.dataset.mode) < 0);
+      });
       soFilterRow.classList.toggle('hidden', !s.capabilities.filter);
       rcNbGroup.classList.toggle('hidden', !s.capabilities.nb);
       rcAtuGroup.classList.toggle('hidden', !s.capabilities.atu);
@@ -3974,7 +3985,7 @@
       currentFreqKhz = parseFloat(freqKhz);
     }
     if (mode) {
-      modeBadge.textContent = FreedvDisplayMode.freedvBadge(mode); // lib/freedv-display-mode.js
+      modeBadge.textContent = DataModePicker.badge(FreedvDisplayMode.freedvBadge(mode)); // lib/freedv-display-mode.js, lib/data-mode-picker.js
     }
     tunedFreqKhz = freqKhz;
     tunedCallsign = callsign;
@@ -5134,9 +5145,11 @@
   modeBadge.classList.add('tappable');
   modeBadge.addEventListener('click', () => {
     if (modePicker.classList.contains('hidden')) {
-      // Highlight current mode
+      // Highlight current mode (a data sub-mode lights DIGU / DIGL whatever
+      // name the radio reports for it)
+      const shownMode = DataModePicker.dataModeOf(currentMode, currentModeData) || currentMode;
       modePicker.querySelectorAll('.mp-btn').forEach(btn => {
-        btn.classList.toggle('active', btn.dataset.mode === currentMode);
+        btn.classList.toggle('active', btn.dataset.mode === shownMode);
       });
       modePicker.classList.remove('hidden');
     } else {
@@ -5148,7 +5161,7 @@
     const btn = e.target.closest('.mp-btn');
     if (!btn) return;
     const newMode = btn.dataset.mode;
-    if (newMode === currentMode) {
+    if (newMode === currentMode || newMode === DataModePicker.dataModeOf(currentMode, currentModeData)) {
       modePicker.classList.add('hidden');
       return;
     }
