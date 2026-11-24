@@ -1402,6 +1402,7 @@ const setWavelogUrl = document.getElementById('set-wavelog-url');
 const setWavelogApiKey = document.getElementById('set-wavelog-api-key');
 const setWavelogStationId = document.getElementById('set-wavelog-station-id');
 const setExtraUdp = document.getElementById('set-extra-udp');
+const setForwardSyncedQsos = document.getElementById('set-forward-synced-qsos'); // #838
 const extraUdpConfig = document.getElementById('extra-udp-config');
 const setExtraUdpHost = document.getElementById('set-extra-udp-host');
 const setExtraUdpPort = document.getElementById('set-extra-udp-port');
@@ -18862,6 +18863,7 @@ async function openSettingsDialog(tab) {
   setWavelogApiKey.value = s.wavelogApiKey || '';
   setWavelogStationId.value = s.wavelogStationId || '';
   setExtraUdp.checked = s.extraUdpEnabled === true;
+  if (setForwardSyncedQsos) setForwardSyncedQsos.checked = s.forwardSyncedQsos !== false;
   if (setExtraUdpDecodes) setExtraUdpDecodes.checked = s.extraUdpDecodes !== false;
   setExtraUdpHost.value = s.extraUdpHost || '127.0.0.1';
   setExtraUdpPort.value = s.extraUdpPort || 2237;
@@ -19888,6 +19890,7 @@ settingsSave.addEventListener('click', async () => {
     wavelogApiKey: setWavelogApiKey.value.trim(),
     wavelogStationId: setWavelogStationId.value.trim(),
     extraUdpEnabled: setExtraUdp.checked,
+    forwardSyncedQsos: setForwardSyncedQsos ? setForwardSyncedQsos.checked : true,
     extraUdpDecodes: setExtraUdpDecodes ? setExtraUdpDecodes.checked : true,
     extraUdpHost: setExtraUdpHost.value.trim() || '127.0.0.1',
     extraUdpPort: parseInt(setExtraUdpPort.value, 10) || 2237,
@@ -33915,7 +33918,7 @@ function jtcatWaterfallLoop() {
   // Auto-detect quietest TX frequency — analyze every ~30 frames (~0.5s)
   jtcatQuietFreqFrame++;
   if (jtcatQuietFreqFrame % 30 === 0) {
-    // The quietest 50 Hz window in 200-2800 Hz (lib/jtcat-quiet-freq.js; main
+    // The quietest 50 Hz window, auto range 500-2400 Hz (lib/jtcat-quiet-freq.js; main
     // runs the same rule on the engine audio while this loop is paused).
     jtcatQuietFreq = window.JtcatQuietFreq.pickQuietFreq(freqData, nyquist / freqData.length);
     window.api.jtcatQuietFreq(jtcatQuietFreq);
