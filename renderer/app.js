@@ -4640,7 +4640,7 @@ function updateBlModeFromRadio() {
   const prev = blMode.value;
   blMode.value = mapped;
   // Only reset RST defaults when mode actually changes (not every poll cycle)
-  if (mapped !== prev) updateBlRstDefaults(mapped);
+  if (mapped !== prev) { updateBlRstDefaults(mapped); if (typeof updateEsmBadges === 'function') updateEsmBadges(); }
 }
 
 /** Set RST defaults: 59 for phone, 599 for CW/digital. Skips any field the
@@ -4928,6 +4928,9 @@ function parseBannerFreq(s) {
   return null;
 }
 
+// Resolves true only when the contact is in the log: Enter Sends Message
+// sends the exchange after a saved contact, never after a failed one (#741).
+// (ESM's own session ignores an Enter while this save runs: never twice.)
 async function saveBannerQso() {
   const rawCallsign = blCallsign.value.trim().toUpperCase();
   if (!rawCallsign) { blCallsign.focus(); return; }
@@ -5014,6 +5017,7 @@ async function saveBannerQso() {
   blLogBtn.disabled = true;
   blLogBtn.textContent = 'Saving…';
   let lastResult = null;
+  let saved = false;
   // The records each callsign became, for the activation contact push below.
   const bannerLogRecords = new Map();
   try {
@@ -5044,6 +5048,7 @@ async function saveBannerQso() {
 
     const result = lastResult;
     if (result && result.success) {
+      saved = true;
       // Keep type and ref sticky across QSOs (user is likely logging same park)
       blCallsign.value = ''; try { window.api.reportLogCallsign('', 'main:banner'); } catch {}
       blNotes.value = '';
@@ -5116,12 +5121,15 @@ async function saveBannerQso() {
     blLogBtn.disabled = false;
     blLogBtn.textContent = 'Log';
   }
+  return saved;
 }
 
 blLogBtn.addEventListener('click', saveBannerQso);
 
-// Enter key flow: callsign -> RST Sent -> RST Rcvd -> save
+// Enter key flow: callsign -> RST Sent -> RST Rcvd -> save. With Enter
+// Sends Message on in CW, the call field's Enter is S&P ESM (#741).
 blCallsign.addEventListener('keydown', (e) => {
+  if (esmHandleCallKey(e, 'sp')) return;
   if (e.key === 'Enter') { e.preventDefault(); blRstSent.focus(); blRstSent.select(); }
 });
 blRstSent.addEventListener('keydown', (e) => {
@@ -10840,32 +10848,34 @@ async function populateWinKeyerPorts() {
   });
 }
 
-// CW Macro editor
-const DEFAULT_CW_MACROS = [
-  { label: 'CQ', text: 'CQ CQ CQ DE {MYCALL} {MYCALL} K' },
-  { label: '599', text: '{call} UR 599 {state} BK' },
-  { label: '73', text: '{call} TNX {op_firstname} 73 DE {MYCALL} E E' },
-  { label: 'AGN', text: 'AGN AGN PSE' },
-  { label: 'TU', text: 'TU DE {MYCALL} K' },
-];
+// CW Macro editor: two banks (#741). cwMacros is the Hunter (S&P) bank, as it
+// always was; cwMacrosRun is the Activator (Run) bank. Keys are positional, as
+// in N1MM Logger+: F1 CQ, F2 exchange, F3 TU, F4 my call, F5 their call,
+// F7 park-to-park exchange, F8 again (lib/cw-banks.js).
+const DEFAULT_CW_MACROS = CwBanks.LEGACY_DEFAULTS.map((m) => ({ label: m.label, text: m.text }));
 // User-addable CW macros — mirrors the voice-macro slot model (+/- buttons,
-// capped at 25). The visible row count is stored in localStorage; the macro
-// content is saved to settings.cwMacros on Settings Save.
+// capped at 25). The visible row count is stored in localStorage per bank;
+// the macro content is saved to settings on Settings Save.
 const CW_MACRO_MAX = 25;
 const CW_MACRO_DEFAULT_SLOTS = 5; // matches the historical fixed set
 const CW_MACRO_SLOTS_KEY = 'pota-cat-cw-macro-slots';
-function loadCwMacroSlots() {
-  let n = parseInt(localStorage.getItem(CW_MACRO_SLOTS_KEY), 10);
+const CW_BANK_NAMES = { run: 'Activator (Run)', sp: 'Hunter (S&P)' };
+const CW_ESM_ROLE_HINT = { 0: 'CQ', 1: 'EXCH', 2: 'TU', 3: 'MYCALL', 4: 'CALL', 6: 'P2P', 7: 'AGN' };
+let _cwEditorBanks = { run: [], sp: [] };
+let _cwEditorTab = 'sp';
+function cwSlotsKey(bank) { return bank === 'run' ? CW_MACRO_SLOTS_KEY + '-run' : CW_MACRO_SLOTS_KEY; }
+function loadCwMacroSlots(bank) {
+  let n = parseInt(localStorage.getItem(cwSlotsKey(bank || _cwEditorTab)), 10);
   if (!Number.isFinite(n)) n = CW_MACRO_DEFAULT_SLOTS;
   return Math.min(CW_MACRO_MAX, Math.max(1, n));
 }
-function saveCwMacroSlots(n) {
+function saveCwMacroSlots(n, bank) {
   n = Math.min(CW_MACRO_MAX, Math.max(1, n));
-  try { localStorage.setItem(CW_MACRO_SLOTS_KEY, String(n)); } catch {}
+  try { localStorage.setItem(cwSlotsKey(bank || _cwEditorTab), String(n)); } catch {}
   return n;
 }
 // Raw read of the current editor rows (untrimmed) — used to preserve unsaved
-// edits when the +/- buttons re-render.
+// edits when the +/- buttons or the bank tabs re-render.
 function readCwMacroRows() {
   const labels = cwMacroEditorEl.querySelectorAll('.cw-macro-label');
   const texts = cwMacroEditorEl.querySelectorAll('.cw-macro-text');
@@ -10873,8 +10883,56 @@ function readCwMacroRows() {
   labels.forEach((el, i) => rows.push({ label: el.value, text: texts[i] ? texts[i].value : '' }));
   return rows;
 }
+// An unknown {word} is never keyed: outline it so the operator sees it here.
+function markCwMacroUnknown(input) {
+  const bad = CwBanks.unknownVars(input.value);
+  input.classList.toggle('cw-macro-unknown', bad.length > 0);
+  input.title = bad.length ? 'Not a variable POTACAT knows, so it is not sent: ' + bad.join(' ') : '';
+}
+function reflectCwBankTabs() {
+  document.querySelectorAll('.cw-bank-tab').forEach((b) => {
+    const on = b.dataset.bank === _cwEditorTab;
+    b.classList.toggle('active', on);
+    b.setAttribute('aria-selected', on ? 'true' : 'false');
+  });
+  const note = document.getElementById('cw-bank-esm-note');
+  if (note) {
+    const ready = CwBanks.esmReady(readCwMacroRows());
+    note.textContent = ready
+      ? 'Laid out for Enter Sends Message.'
+      : 'Not laid out for Enter Sends Message yet: F4 must send {MYCALL} and F5 {CALL}.';
+    note.classList.toggle('cw-bank-not-ready', !ready);
+  }
+}
+// Settings opened: both banks from settings (first load copies the Hunter
+// macros into the Run bank unchanged, lib/cw-banks.js banksFromSettings).
+function loadCwMacroEditor(s) {
+  const b = CwBanks.banksFromSettings(s);
+  _cwEditorBanks = { run: b.run, sp: b.sp };
+  _cwEditorTab = appMode === 'activator' ? 'run' : 'sp';
+  renderCwMacroEditor(_cwEditorBanks[_cwEditorTab]);
+  const esm = document.getElementById('set-cw-esm');
+  if (esm) esm.checked = s.cwEsmEnabled === true;
+}
+function switchCwBankTab(bank) {
+  if (bank === _cwEditorTab) return;
+  _cwEditorBanks[_cwEditorTab] = readCwMacroRows();
+  _cwEditorTab = bank;
+  renderCwMacroEditor(_cwEditorBanks[bank]);
+}
+document.querySelectorAll('.cw-bank-tab').forEach((b) => b.addEventListener('click', () => switchCwBankTab(b.dataset.bank)));
+{
+  const loadBtn = document.getElementById('cw-bank-load-esm');
+  if (loadBtn) loadBtn.addEventListener('click', () => {
+    const name = CW_BANK_NAMES[_cwEditorTab];
+    if (!window.confirm('Replace the ' + name + ' macros with the Enter Sends Message layout?\n\nF1 CQ, F2 exchange, F3 TU, F4 my call, F5 their call, F7 park-to-park exchange, F8 AGN?. The other bank is not touched. Nothing is saved until you save Settings.')) return;
+    saveCwMacroSlots(CwBanks.BANK_KEYS);
+    _cwEditorBanks[_cwEditorTab] = CwBanks.defaultsFor(_cwEditorTab);
+    renderCwMacroEditor(_cwEditorBanks[_cwEditorTab]);
+  });
+}
 function renderCwMacroEditor(macros) {
-  const list = macros && macros.length ? macros : DEFAULT_CW_MACROS;
+  const list = Array.isArray(macros) ? macros : DEFAULT_CW_MACROS;
   // Show the saved slot count, but never fewer rows than there are populated
   // macros (so an imported/larger set isn't hidden).
   let slots = loadCwMacroSlots();
@@ -10890,10 +10948,16 @@ function renderCwMacroEditor(macros) {
   for (let i = 0; i < slots; i++) {
     const m = list[i] || {};
     const row = document.createElement('div');
-    row.style.cssText = 'display:flex;gap:4px;align-items:center;';
-    row.innerHTML = `<input type="text" class="cw-macro-label" data-idx="${i}" value="${(m.label || '').replace(/"/g, '&quot;')}" style="width:50px;font-size:11px;padding:2px 4px;" maxlength="6" placeholder="F${i + 1}">` +
+    row.className = 'cw-macro-row';
+    const key = i < 12 ? 'F' + (i + 1) : '';
+    const role = CW_ESM_ROLE_HINT[i] || '';
+    row.innerHTML = `<span class="cw-macro-key" title="${role ? 'Enter Sends Message uses this key for ' + role : ''}">${key}</span>` +
+      `<input type="text" class="cw-macro-label" data-idx="${i}" value="${(m.label || '').replace(/"/g, '&quot;')}" style="width:58px;font-size:11px;padding:2px 4px;" maxlength="6" placeholder="${role || 'Label'}">` +
       `<input type="text" class="cw-macro-text" data-idx="${i}" value="${(m.text || '').replace(/"/g, '&quot;')}" style="flex:1;font-size:11px;padding:2px 4px;font-family:monospace;" placeholder="CW text...">`;
     cwMacroEditorEl.appendChild(row);
+    const t = row.querySelector('.cw-macro-text');
+    markCwMacroUnknown(t);
+    t.addEventListener('input', () => { markCwMacroUnknown(t); reflectCwBankTabs(); });
   }
   // Footer: + Add / − Remove last + counter (mirrors the voice-macro editor).
   const footer = document.createElement('div');
@@ -10932,15 +10996,13 @@ function renderCwMacroEditor(macros) {
   counter.textContent = slots + ' / ' + CW_MACRO_MAX;
   footer.appendChild(counter);
   cwMacroEditorEl.appendChild(footer);
+  reflectCwBankTabs();
 }
+// Both banks, trimmed labels, for Settings Save.
 function readCwMacroEditor() {
-  const labels = cwMacroEditorEl.querySelectorAll('.cw-macro-label');
-  const texts = cwMacroEditorEl.querySelectorAll('.cw-macro-text');
-  const macros = [];
-  labels.forEach((el, i) => {
-    macros.push({ label: el.value.trim(), text: texts[i] ? texts[i].value : '' });
-  });
-  return macros.length ? macros : null;
+  _cwEditorBanks[_cwEditorTab] = readCwMacroRows();
+  const clean = (rows) => rows.map((m) => ({ label: String(m.label || '').trim(), text: String(m.text || '') }));
+  return { sp: clean(_cwEditorBanks.sp || []), run: clean(_cwEditorBanks.run || []) };
 }
 
 
@@ -19007,7 +19069,7 @@ async function openSettingsDialog(tab) {
   cwSidetoneVolumeLabel.textContent = setCwSidetoneVolume.value + '%';
   cwKeyerConfig.classList.toggle('hidden', !s.enableCwKeyer);
   updateCwKeyerTypeVisibility();
-  renderCwMacroEditor(s.cwMacros);
+  loadCwMacroEditor(s);
   renderVoiceMacroEditor();
   if (s.hotkeys && s.hotkeys.length) hotkeyBindings = s.hotkeys;
   renderHotkeyEditor();
@@ -19618,7 +19680,8 @@ settingsSave.addEventListener('click', async () => {
   const cwSidetoneVal = setCwSidetone.checked;
   const cwSidetonePitchVal = parseInt(setCwSidetonePitch.value, 10) || 600;
   const cwSidetoneVolumeVal = parseInt(setCwSidetoneVolume.value, 10);
-  const cwMacrosVal = readCwMacroEditor();
+  const cwBanksVal = readCwMacroEditor();
+  const cwEsmEl = document.getElementById('set-cw-esm');
   const potaParksPath = setPotaParksPath.value.trim() || '';
   const hideWorkedParksEnabled = setHideWorkedParks.checked;
   const loggingEnabled = true; // always on; cloud sync is the choice
@@ -19906,7 +19969,9 @@ settingsSave.addEventListener('click', async () => {
     cwSidetone: cwSidetoneVal,
     cwSidetonePitch: cwSidetonePitchVal,
     cwSidetoneVolume: cwSidetoneVolumeVal,
-    cwMacros: cwMacrosVal,
+    cwMacros: cwBanksVal.sp,      // the Hunter (S&P) bank; phones read it as remoteCwMacros
+    cwMacrosRun: cwBanksVal.run,  // the Activator (Run) bank (#741)
+    cwEsmEnabled: !!(cwEsmEl && cwEsmEl.checked), // Enter Sends Message: off unless the operator turns it on
     hotkeys: hotkeyBindings,
     enableRemote: remoteEnabled,
     remoteAccess: remoteAccessVal,
@@ -24734,7 +24799,21 @@ let cwMacroBoxVisible = localStorage.getItem('cwMacroBoxVisible') === 'true';
   });
 })();
 
-let _cwMacroCache = null; // cached macros from settings (avoids depending on Settings dialog DOM)
+let _cwMacroCache = null; // the bank the macro bar shows: Activator (Run) in Activator mode, else Hunter (S&P)
+// Both banks and the ESM switch, as saved (#741). Read from settings, never
+// from the Settings dialog DOM.
+let _cwBanks = null;
+let _cwEsmEnabled = false;
+let _cwHomeState = '';
+async function reloadCwEsmSettings(s) {
+  s = s || await window.api.getSettings();
+  _cwBanks = CwBanks.banksFromSettings(s);
+  _cwEsmEnabled = s.cwEsmEnabled === true;
+  _cwHomeState = s.homeState || '';
+  _cwMacroCache = null;
+  if (typeof updateEsmBadges === 'function') updateEsmBadges();
+  return _cwBanks;
+}
 
 async function updateCwMacroBar() {
   if (!cwMacroBar) return;
@@ -24743,8 +24822,8 @@ async function updateCwMacroBar() {
   if (!cwMacroBoxVisible) return;
   // Use cached macros, or load from settings (not from the editor DOM which may be empty)
   if (!_cwMacroCache) {
-    const s = await window.api.getSettings();
-    _cwMacroCache = s.cwMacros && s.cwMacros.length ? s.cwMacros : DEFAULT_CW_MACROS;
+    const banks = _cwBanks || await reloadCwEsmSettings();
+    _cwMacroCache = appMode === 'activator' ? banks.run : banks.sp;
   }
   cwMacroBtns.innerHTML = '';
   _cwMacroCache.forEach((m, i) => {
@@ -24761,7 +24840,7 @@ async function updateCwMacroBar() {
   });
 }
 // Invalidate cache when settings are saved so macro bar picks up edits
-function invalidateCwMacroCache() { _cwMacroCache = null; }
+function invalidateCwMacroCache() { _cwMacroCache = null; _cwBanks = null; reloadCwEsmSettings().catch(() => {}); }
 // Send CW macro i (0-based) exactly as its button would. False when there is
 // no such macro, so a bare F key with nothing behind it keeps its default.
 function sendCwMacroByIndex(i) {
@@ -24791,16 +24870,12 @@ function expandDesktopCwMacros(text) {
     .find(Boolean) || '';
   const call = _logPopoutCallsign || live
     || (lastTunedSpot ? lastTunedSpot.callsign : '');
-  // {op_firstname} — nickname (preferred) or first name from QRZ
-  const bareCall = JtcatParser.baseCall(call);
-  const qrzOp = bareCall ? qrzData.get(bareCall) : null;
-  const opName = (qrzOp && (cleanQrzName(qrzOp.nickname) || cleanQrzName(qrzOp.fname))) || '';
-  // {state} — state from QRZ
-  const opState = (qrzOp && qrzOp.state) || '';
-  return text
-    .replace(/\{call\}/gi, call)
-    .replace(/\{op_firstname\}/gi, opName)
-    .replace(/\{state\}/gi, opState);
+  // {op_firstname} and {state} from QRZ for that call; {PARK} {MYSTATE}
+  // {RST} {NR} {MYGRID} from this activation (#741). An unknown {word} is
+  // dropped and named, never keyed as braces (lib/cw-banks.js).
+  const ex = CwBanks.expandVars(text, cwVarContext(appMode === 'activator' ? 'run' : 'sp', call));
+  if (ex.unknown.length) cwReportUnknown(ex.unknown);
+  return ex.text;
 }
 // CW WPM control in macro bar
 const cwWpmDisplay = document.getElementById('cw-wpm-display');
@@ -24869,13 +24944,16 @@ if (quickShowCwMacros) {
     updateCwMacroBar();
   });
 }
+// Both banks and the Enter Sends Message switch (#741), then the bar.
+reloadCwEsmSettings().catch(() => {});
 // Render on startup if saved as visible
 updateCwMacroBar();
 if (cwMacroSendBtn) {
   cwMacroSendBtn.addEventListener('click', () => {
     const text = cwMacroInput.value.trim();
     if (text) {
-      window.api.sendCwText(expandDesktopCwMacros(text));
+      const out = expandDesktopCwMacros(text);
+      if (out) window.api.sendCwText(out);
       cwMacroInput.value = '';
     }
   });
@@ -25748,10 +25826,11 @@ function executeHotkeyAction(binding) {
   const cwMatch = a.match(/^cw-macro-(\d)$/);
   if (cwMatch) {
     const idx = parseInt(cwMatch[1], 10) - 1;
-    const macros = _cwMacroCache || [];
+    const macros = (_cwBanks && (appMode === 'activator' ? _cwBanks.run : _cwBanks.sp)) || _cwMacroCache || [];
     const list = macros.length ? macros : DEFAULT_CW_MACROS;
     if (idx >= 0 && idx < list.length && list[idx].text) {
-      window.api.sendCwText(expandDesktopCwMacros(list[idx].text));
+      const out = expandDesktopCwMacros(list[idx].text);
+      if (out) window.api.sendCwText(out);
     }
     return;
   }
@@ -28962,6 +29041,7 @@ function updateTitleBar() {
 function setAppMode(mode) {
   appMode = mode;
   updateTitleBar();
+  _cwMacroCache = null; updateCwMacroBar(); // the macro bar follows the mode's bank (#741)
   if (mode === 'activator') {
     // Hide hunter UI — unless activator spots are visible
     if (!activatorSpotsVisible) {
@@ -30525,25 +30605,34 @@ if (crossRefWwbota) crossRefWwbota.addEventListener('blur', rebuildCrossRefs);
 let _activatorLogBusy = false;
 const _activatorLogQueue = [];
 let _activatorLogInFlight = null;
-async function activatorLogContact() {
+// With { result: true } (Enter Sends Message, #741) it resolves true only when
+// this press's contact is saved; false when the form was not ready, the same
+// contact was already waiting, or the save failed. TU is sent on true only.
+// A plain press (button, Enter) returns as soon as it is queued, as before.
+async function activatorLogContact(opts) {
+  const wantResult = !!(opts && opts.result === true);
   const snap = activatorReadEntry();
-  if (!snap) return;
-  if ((_activatorLogInFlight && _activatorLogInFlight.key === snap.key) || _activatorLogQueue.some((q) => q.key === snap.key)) return;
+  if (!snap) return false;
+  if ((_activatorLogInFlight && _activatorLogInFlight.key === snap.key) || _activatorLogQueue.some((q) => q.key === snap.key)) return false;
+  snap.done = new Promise((resolve) => { snap.resolve = resolve; });
   _activatorLogQueue.push(snap);
   if (_activatorLogBusy) {
     showLogToast(`${snap.callsigns.join(', ')} will be logged right after the contact being saved now`, { duration: 3000 });
-    return;
+    return wantResult ? snap.done : undefined;
   }
   _activatorLogBusy = true;
   try {
     while (_activatorLogQueue.length) {
       _activatorLogInFlight = _activatorLogQueue.shift();
-      try { await activatorLogContactNow(_activatorLogInFlight); } catch (e) { console.error('[Activator] save:', e); }
+      let ok = false;
+      try { ok = (await activatorLogContactNow(_activatorLogInFlight)) === true; } catch (e) { console.error('[Activator] save:', e); }
+      _activatorLogInFlight.resolve(ok);
     }
   } finally {
     _activatorLogInFlight = null;
     _activatorLogBusy = false;
   }
+  return wantResult ? snap.done : undefined;
 }
 
 /**
@@ -30653,7 +30742,7 @@ async function activatorLogContactNow(s) {
   if (!res || !res.success) {
     // Never list a contact that is not in the log.
     showLogToast(`Not logged: ${(res && res.error) || 'save failed'}`, { warn: true, duration: 6000 });
-    return;
+    return false;
   }
   // Fire cross-program self-spots (WWFF/LLOTA) via quick-respot
   for (const xr of activatorCrossRefs) {
@@ -30725,6 +30814,7 @@ async function activatorLogContactNow(s) {
 
   // Only this contact's own entry is cleared: a call typed meanwhile stays.
   if (activatorCallsignInput.value.trim().toUpperCase() === rawCallsign) clearActivatorEntry();
+  return true;
 }
 
 /**
@@ -30784,9 +30874,194 @@ if (activatorHomeDismiss) {
   activatorHomeDismiss.addEventListener('click', clearActivatorHome);
 }
 
-// Enter key in callsign or RST fields triggers log
+// --- CW Enter Sends Message (#741) ---------------------------------------
+// In CW, with ESM switched on, Enter in the call field sends the next message
+// of the contact (lib/cw-esm.js decides which), and F1-F12 from that field
+// send the bank's keys. Activator quick log = Run with the Activator bank;
+// the Hunter banner logger = S&P with the Hunter bank. Off by default; Enter
+// in every other field, and in every mode but CW, logs exactly as before.
+// Keying goes through window.api.sendCwText (main's sendCwTextToRadio: the
+// licence gate, the Guest Pass, every keyer); Esc through window.api.cwCancel
+// (cancelAllCwSends). Never a new keying route.
+const esmSessions = { run: CwEsm.createSession('run'), sp: CwEsm.createSession('sp') };
+let _esmSendingUntil = 0;
+let _esmSendingTimer = null;
+function cwEsmOn() { return _cwEsmEnabled === true; }
+function esmBank(side) {
+  const b = _cwBanks || CwBanks.banksFromSettings({});
+  return side === 'run' ? b.run : b.sp;
+}
+function esmMode(side) { return side === 'run' ? (activatorModeSelect ? activatorModeSelect.value : '') : (blMode ? blMode.value : ''); }
+function esmCallField(side) { return side === 'run' ? activatorCallsignInput : blCallsign; }
+function esmIsP2p(side) {
+  if (side === 'run') {
+    const el = document.getElementById('activator-hunter-park');
+    return !!(el && el.value.trim());
+  }
+  // Hunting from a park of my own: their park and mine, park to park.
+  return activationActive && activatorParkRefs.length > 0 && !!blRef.value.trim() && blType.value === 'pota';
+}
+// What the variables mean for this contact (lib/cw-banks.js expandVars).
+function cwVarContext(side, call) {
+  const bare = JtcatParser.baseCall(call || '');
+  const qrzOp = bare ? qrzData.get(bare) : null;
+  const countyState = document.getElementById('activator-county-state');
+  const parkState = activatorParkRefs.length && countyState ? countyState.value : '';
+  const atPark = side === 'run' || (activationActive && activatorParkRefs.length > 0);
+  return {
+    call,
+    myState: (atPark && parkState) || _cwHomeState || '',
+    park: activatorParkRefs.map((p) => p.ref).join(' '),
+    rst: side === 'sp' ? (blRstSent.value.trim() || '599') : getRstDigits('activator-rst-sent', '599'),
+    nr: activatorContacts.length + 1,
+    myGrid: activatorParkGrid || grid || '',
+    opFirstname: (qrzOp && (cleanQrzName(qrzOp.nickname) || cleanQrzName(qrzOp.fname))) || '',
+    state: (qrzOp && qrzOp.state) || '',
+  };
+}
+function cwReportUnknown(vars) {
+  showLogToast('Not sent: ' + vars.join(' ') + ' is not a macro variable POTACAT knows. Fix it in Settings > Station > Macros.', { warn: true, duration: 5000 });
+}
+// The text goes out on the existing CW path, and the badge says SENDING for
+// about as long as the radio needs (the envelope main's duplicate guard uses).
+function esmSend(text) {
+  window.api.sendCwText(text);
+  _esmSendingUntil = Date.now() + Math.ceil((text.length * 12000) / Math.max(5, cwMacroWpm || 20));
+  clearTimeout(_esmSendingTimer);
+  _esmSendingTimer = setTimeout(updateEsmBadges, Math.max(0, _esmSendingUntil - Date.now()) + 50);
+  updateEsmBadges();
+}
+function esmAbort(side) {
+  esmSessions[side].abort({ cancel: () => window.api.cwCancel() });
+  _esmSendingUntil = 0;
+  updateEsmBadges();
+}
+function esmLog(side) {
+  return side === 'run' ? activatorLogContact({ result: true }).then((ok) => ok === true) : saveBannerQso().then((ok) => ok === true);
+}
+async function esmEnter(side) {
+  const bank = esmBank(side);
+  if (!CwBanks.esmReady(bank)) {
+    showLogToast(`The ${CW_BANK_NAMES[side]} macros are not laid out for Enter Sends Message: Settings > Station > Macros, the ${CW_BANK_NAMES[side]} tab, Load ESM layout. Nothing was sent.`, { warn: true, duration: 7000 });
+    return;
+  }
+  const field = esmCallField(side);
+  const r = await esmSessions[side].enter({ call: field.value, p2p: esmIsP2p(side) }, {
+    bank: () => bank,
+    expand: (text, c) => CwBanks.expandVars(text, cwVarContext(side, c.call)),
+    log: () => esmLog(side),
+    send: esmSend,
+    cancel: () => window.api.cwCancel(),
+    onMissing: (roles) => showLogToast(`Nothing sent: the ${roles.join(' and ')} key is empty in the ${CW_BANK_NAMES[side]} macros.`, { warn: true, duration: 5000 }),
+    onUnknown: cwReportUnknown,
+  });
+  if (r && r.focus === 'call') field.focus();
+  updateEsmBadges();
+}
+// F1-F12 from the call field: that key of this side's bank; Shift+F the
+// other side's bank, as N1MM does for the opposite mode.
+function esmSendKey(side, n, otherBank) {
+  const useSide = otherBank ? (side === 'run' ? 'sp' : 'run') : side;
+  const m = esmBank(useSide)[n - 1];
+  if (!m || !String(m.text || '').trim()) return false;
+  const ex = CwBanks.expandVars(m.text, cwVarContext(side, esmCallField(side).value));
+  if (ex.unknown.length) cwReportUnknown(ex.unknown);
+  if (ex.text) esmSend(ex.text);
+  return true;
+}
+/**
+ * Keydown in a call field. True when ESM took the key (the field's own
+ * Enter-logs behaviour must not run). Only the call field ever calls this.
+ */
+function esmHandleCallKey(e, side) {
+  if (!CwEsm.active({ enabled: _cwEsmEnabled, mode: esmMode(side), field: 'call' })) return false;
+  if (e.ctrlKey || e.altKey || e.metaKey) return false;
+  if (e.key === 'Escape') { e.preventDefault(); esmAbort(side); return true; }
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); esmEnter(side); return true; }
+  const fk = /^F([1-9]|1[0-2])$/.exec(e.key);
+  if (fk) {
+    if (esmSendKey(side, parseInt(fk[1], 10), e.shiftKey)) { e.preventDefault(); e.stopPropagation(); }
+    return true;
+  }
+  return false;
+}
+// Esc in the rest of the row stops the send too; it never keys anything.
+function esmHandleRowKey(e, side) {
+  if (e.key !== 'Escape' || !cwEsmOn() || !CwEsm.isCwMode(esmMode(side))) return false;
+  esmAbort(side);
+  return true;
+}
+function updateEsmBadge(side, badge) {
+  if (!badge) return;
+  const show = cwEsmOn() && CwEsm.isCwMode(esmMode(side));
+  badge.classList.toggle('hidden', !show);
+  if (!show) return;
+  const sending = Date.now() < _esmSendingUntil;
+  const field = esmCallField(side);
+  const cue = sending ? 'SENDING' : esmSessions[side].cue(field ? field.value : '', esmIsP2p(side));
+  badge.textContent = cue;
+  badge.classList.toggle('sending', sending);
+  badge.title = sending
+    ? 'Sending CW. Esc stops it.'
+    : `Enter Sends Message is on. Enter in the call field sends ${cue === 'TU+LOG' || cue === 'EXCH+LOG' ? 'nothing until the contact is logged, then ' + (cue === 'TU+LOG' ? 'TU' : 'your exchange') : cue}. F1-F12 send the ${CW_BANK_NAMES[side]} macros. Esc stops.`;
+}
+function updateEsmBadges() {
+  updateEsmBadge('run', document.getElementById('activator-esm-badge'));
+  updateEsmBadge('sp', document.getElementById('bl-esm-badge'));
+  const t = document.getElementById('activator-esm-toggle');
+  if (t) t.checked = cwEsmOn();
+  const tw = document.getElementById('activator-esm-wrap');
+  if (tw) tw.classList.toggle('hidden', !CwEsm.isCwMode(esmMode('run')));
+}
+// The switch in Activator mode. Turning it on with a Run bank that is not
+// laid out for ESM offers the layout; declined, ESM stays off.
+async function setCwEsmEnabled(on) {
+  const patch = { cwEsmEnabled: !!on };
+  if (on) {
+    const b = _cwBanks || CwBanks.banksFromSettings(await window.api.getSettings());
+    if (!CwBanks.esmReady(b.run)) {
+      if (!window.confirm('Enter Sends Message needs the Activator (Run) macros in the contest layout: F1 CQ, F2 exchange, F3 TU, F4 my call, F5 their call, F7 park-to-park exchange, F8 AGN?.\n\nLoad that layout into the Activator macros now? Your Hunter macros are not touched.')) {
+        updateEsmBadges();
+        return;
+      }
+      patch.cwMacrosRun = CwBanks.defaultsFor('run');
+      saveCwMacroSlots(CwBanks.BANK_KEYS, 'run');
+    }
+  }
+  await window.api.saveSettings(patch);
+  await reloadCwEsmSettings();
+  esmSessions.run.reset(); esmSessions.sp.reset();
+  const set = document.getElementById('set-cw-esm');
+  if (set) set.checked = cwEsmOn();
+  if (patch.cwMacrosRun) showLogToast('Enter Sends Message is on. The Activator macros now use the contest layout (Settings > Station > Macros).', { duration: 5000 });
+}
+{
+  const t = document.getElementById('activator-esm-toggle');
+  if (t) t.addEventListener('change', () => { setCwEsmEnabled(t.checked); });
+  if (activatorModeSelect) activatorModeSelect.addEventListener('change', updateEsmBadges);
+  if (blMode) blMode.addEventListener('change', updateEsmBadges);
+  if (activatorCallsignInput) activatorCallsignInput.addEventListener('input', () => {
+    if (!activatorCallsignInput.value.trim()) esmSessions.run.reset();
+    updateEsmBadges();
+  });
+  if (blCallsign) blCallsign.addEventListener('input', () => {
+    if (!blCallsign.value.trim()) esmSessions.sp.reset();
+    updateEsmBadges();
+  });
+  const hp = document.getElementById('activator-hunter-park');
+  if (hp) hp.addEventListener('input', updateEsmBadges);
+  document.querySelectorAll('#activator-rst-sent, #activator-rst-rcvd, #activator-state, #activator-rst-sent-digits .rst-digit, #activator-rst-rcvd-digits .rst-digit')
+    .forEach((el) => el.addEventListener('keydown', (e) => { esmHandleRowKey(e, 'run'); }));
+  [blRstSent, document.getElementById('bl-rst-rcvd')].forEach((el) => {
+    if (el) el.addEventListener('keydown', (e) => { esmHandleRowKey(e, 'sp'); });
+  });
+}
+
+// Enter key in callsign or RST fields triggers log (with ESM on in CW, the
+// call field's Enter, Esc and F keys are ESM's: esmHandleCallKey).
 if (activatorCallsignInput) {
   activatorCallsignInput.addEventListener('keydown', (e) => {
+    if (esmHandleCallKey(e, 'run')) return;
     if (e.key === 'Enter') {
       e.preventDefault();
       activatorLogContact();
@@ -31387,6 +31662,7 @@ function updateActivatorModeFromCat(mode) {
   else if (m === 'FT4') activatorModeSelect.value = 'FT4';
   else if (m === 'FT2') activatorModeSelect.value = 'FT2';
   else if (m === 'RTTY') activatorModeSelect.value = 'RTTY';
+  updateEsmBadges(); // the ESM switch and badge show in CW only (#741)
 }
 
 // Frequency input: Enter or blur -> tune radio
