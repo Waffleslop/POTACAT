@@ -521,12 +521,29 @@ test('which request is ours: the LIST message that a fresh Outbox listing shows 
   assert.deepStrictEqual(C.requestEntries([{ mid: 'A', to: ['INQUIRY'], subject: 'REQUEST' }, { mid: 'B', to: ['W1AW'], subject: 'REQUEST' }, { mid: 'C', to: ['inquiry@winlink.org'], subject: ' request ' }]), ['A', 'C']);
   assert.deepStrictEqual([C.isListBody(' list\r\n'), C.isListBody('PROP_3DAY'), C.isListBody('LIST\nPROP_3DAY')], [true, false, false]);
 });
-test('never a second LIST while one is in the Outbox, whatever the state says; Request again only when none is', () => {
-  for (const kind of ['none', 'queued', 'sent', 'unknown']) for (const again of [false, true]) assert.strictEqual(C.listRule({ inOutbox: ['L1'], kind, again }), 'already', kind + ' ' + again);
-  assert.strictEqual(C.listRule({ inOutbox: [], kind: 'none', again: false }), 'queue');
-  assert.strictEqual(C.listRule({ inOutbox: [], kind: 'sent', again: false }), 'already');
-  assert.strictEqual(C.listRule({ inOutbox: [], kind: 'sent', again: true }), 'queue');
-  assert.strictEqual(C.listRule({ inOutbox: [], kind: 'unknown', again: false }), 'already');
+test('never a second LIST while one is in the Outbox, whatever the state says, and it is said in words; Request again only when none is', () => {
+  const said = 'A request for the full catalog is already in the Outbox. It goes out with your next Send / Receive.';
+  for (const kind of ['none', 'queued', 'sent', 'unknown']) for (const again of [false, true]) assert.deepStrictEqual(C.listRule({ inOutbox: [{ mid: 'L1' }], kind, again }), { queue: false, text: said }, kind + ' ' + again);
+  assert.deepStrictEqual(C.listRule({ inOutbox: [], kind: 'none', again: false }), { queue: true, text: '' });
+  assert.deepStrictEqual(C.listRule({ inOutbox: [], kind: 'sent', again: false }), { queue: false, text: '' });
+  assert.strictEqual(C.listRule({ inOutbox: [], kind: 'sent', again: true }).queue, true);
+  assert.strictEqual(C.listRule({ inOutbox: [], kind: 'unknown', again: false }).queue, false);
+  assert.strictEqual(C.TEXT.alreadyQueued, said);
+});
+test('a LIST found in the Outbox that nobody recorded is adopted as the request; a recorded one that is there is kept', () => {
+  assert.deepStrictEqual(C.adoptRequest(null, [{ mid: 'L0', date: 'x' }], T0), { at: T0, mid: 'L0' });
+  assert.deepStrictEqual(C.adoptRequest({ at: 5, mid: 'GONE' }, ['L0'], T0), { at: T0, mid: 'L0' });
+  assert.deepStrictEqual(C.adoptRequest({ at: 5, mid: 'L0' }, [{ mid: 'L9' }, { mid: 'L0' }], T0), { at: 5, mid: 'L0' });
+  assert.deepStrictEqual(C.adoptRequest({ at: 5, mid: 'L1' }, [], T0), { at: 5, mid: 'L1' });
+  assert.strictEqual(C.adoptRequest(null, [], T0), null);
+});
+test('more than one new LIST after the send: the one dated nearest our send is ours', () => {
+  const at = Date.parse('2026-03-10T12:00:00Z');
+  const after = [{ mid: 'OTHER', date: '2026-03-10T11:20:00Z' }, { mid: 'OURS', date: '2026-03-10T12:00:01Z' }, { mid: 'OLD', date: '2026-03-01T00:00:00Z' }];
+  assert.deepStrictEqual(C.newRequest(at, [{ mid: 'OLD' }], after), { at, mid: 'OURS' });
+  assert.deepStrictEqual(C.newRequest(at, [], [{ mid: 'A' }, { mid: 'B' }]), { at, mid: 'A' }, 'no dates: the first listed');
+  assert.deepStrictEqual(C.noteAfterRequest({ mid: 'U', at: 5 }, true), null, 'a new request clears the could-not-read note');
+  assert.deepStrictEqual(C.noteAfterRequest({ mid: 'U', at: 5 }, false), { mid: 'U', at: 5 });
 });
 test('in the Outbox: queued, however long it sits there, and never forgotten', () => {
   const o = { outbox: [LISTMSG] };
@@ -554,7 +571,8 @@ test('sent: pending with Request again, until a catalog is read or 7 days pass',
 });
 test('a request whose message could not be identified: queued while any catalog request is in the Outbox, else sent', () => {
   const r = { at: T0, mid: '' };
-  assert.strictEqual(settle({ request: r, outbox: [{ mid: 'X', to: ['INQUIRY'], subject: 'REQUEST' }] }).kind, 'queued', 'no Request again while a request sits in the Outbox');
+  assert.strictEqual(settle({ request: r, outbox: [{ mid: 'X', to: ['INQUIRY'], subject: 'REQUEST' }] }).kind, 'sent', 'another catalog request in the Outbox proves nothing: queued is only for a message known to be there');
+  assert.strictEqual(settle({ request: r, outbox: [{ mid: 'X', to: ['INQUIRY'], subject: 'REQUEST' }], now: T0 + 7 * 86400000 }).kind, 'none', 'and the 7 days apply');
   assert.strictEqual(settle({ request: r }).kind, 'sent');
   assert.strictEqual(settle({ request: r, lists: null }).kind, 'unknown');
   assert.strictEqual(settle({ request: null }).kind, 'none');
@@ -692,6 +710,31 @@ test('the one-time look is finished only when nothing failed, there was mail, an
   assert.strictEqual(C.applyScan({}, passOf({}), [], 0).lookDone, false, 'the Inbox was not listed yet');
   assert.deepStrictEqual([C.applyScan({}, passOf({ failed: true, left: 1 }), [], 5).lookDone, C.applyScan({}, passOf({ failed: true, left: 1 }), [], 5).again], [false, false]);
   assert.deepStrictEqual([C.applyScan({}, passOf({ left: 300 }), [], 500).lookDone, C.applyScan({}, passOf({ left: 300 }), [], 500).again], [false, true]);
+});
+test('the examined set never shrinks under a pass: pruned to the Inbox as it is, capped no lower than the Inbox', () => {
+  const inbox = Array.from({ length: 1300 }, (_, i) => ({ mid: 'M' + i }));
+  const all = inbox.map((m) => m.mid);
+  const r = C.applyScan({ examined: all.slice(0, 1100) }, passOf({ examined: 200, left: 0 }), ['GONE1', 'GONE2'].concat(all), 1300, inbox);
+  assert.strictEqual(r.state.examined.length, 1300, 'every Inbox message stays examined: none is read again');
+  assert.ok(!r.state.examined.includes('GONE1'), 'IDs no longer in the Inbox are dropped');
+  assert.deepStrictEqual([r.save, r.lookDone, r.again], [true, true, false]);
+  const same = C.applyScan({ examined: all }, passOf({ examined: 0 }), all, 1300, inbox);
+  assert.strictEqual(same.save, false, 'nothing new examined: the settings are not written');
+  assert.strictEqual(C.toSettings({ examined: all }).winlinkCatalogExamined.length, 1300);
+  assert.strictEqual(C.cleanExamined(Array.from({ length: 6000 }, (_, i) => 'X' + i), C.EXAMINED_LIMIT).length, 5000);
+});
+test('another pass is asked for only when this one made progress, so a scan always ends', () => {
+  assert.strictEqual(C.applyScan({}, passOf({ left: 300, examined: 200 }), [], 500).again, true);
+  assert.strictEqual(C.applyScan({}, passOf({ left: 300, examined: 0 }), [], 500).again, false);
+});
+test('a pending request that is newer than the could-not-read note outranks it; an older one does not', () => {
+  const note = { mid: 'U', at: 100 };
+  assert.strictEqual(C.payload(null, { pendingKind: 'queued', requestedAt: 200, unreadable: note }).unreadable, false);
+  assert.strictEqual(C.sourceRow(C.payload(null, { pendingKind: 'queued', requestedAt: 200, unreadable: note })).kind, 'pending');
+  assert.strictEqual(C.payload(null, { pendingKind: 'queued', requestedAt: 50, unreadable: note }).unreadable, true);
+  assert.strictEqual(C.payload(null, { unreadable: note }).unreadable, true);
+  assert.strictEqual(C.stamp(null, { pendingKind: 'sent', requestedAt: 200, unreadable: note }).unreadable, false);
+  assert.deepStrictEqual(C.applyScan({ now: 77 }, passOf({ unreadableMid: 'U1' }), [], 5).state.unreadable, { mid: 'U1', at: 77 });
 });
 test('what is kept in settings; an empty value removes its key; the old date mark is removed', () => {
   const s = C.toSettings({ request: { at: T0, mid: 'L1' }, offer: null, declined: [], examined: ['A'], unreadable: { mid: 'U' } });

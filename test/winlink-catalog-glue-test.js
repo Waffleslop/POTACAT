@@ -88,7 +88,7 @@ function station(o = {}) {
     for (const b of boxes) { if (failing.includes(b)) continue; cache[b] = pat[b].map(entry); listed.push(b); }
     fns.listed(listed);
     if (listed.includes('in')) await fns.scan('mail');
-    for (let i = 0; i < 50 && fns.scanning(); i++) await new Promise((r) => setTimeout(r, 5));
+    for (let i = 0; i < 20000 && fns.scanning(); i++) await new Promise((r) => setTimeout(r, 2));
   };
   return { pat, cache, settings, logs, flags, files, fns, refresh, client };
 }
@@ -115,9 +115,54 @@ test('never a second LIST while one is in the Outbox, even when nothing says a r
   for (const again of [false, true]) {
     const r = await s.fns.requestList(again);
     assert.deepStrictEqual([r.ok, r.already], [true, true]);
+    assert.strictEqual(r.text, 'A request for the full catalog is already in the Outbox. It goes out with your next Send / Receive.', 'and the panel is told why');
   }
   assert.strictEqual(s.pat.out.length, 1);
-  assert.strictEqual(s.settings.winlinkCatalogRequest, undefined);
+  assert.strictEqual(s.settings.winlinkCatalogRequest.mid, 'L0', 'the LIST that was found is adopted as the request');
+  assert.strictEqual(s.fns.get().pendingKind, 'queued', 'so the panel shows it as requested');
+});
+for (const n of [1300, 5000]) {
+  test('an Inbox of ' + n + ' messages: the look ends, every message is read once, and the settings are not rewritten for nothing', async () => {
+    const s = station();
+    for (let i = 0; i < n; i++) s.pat.in.push({ mid: 'M' + i, to: ['N0CALL'], subject: 's', body: 'hello ' + i, date: new Date(1770000000000 + i * 60000).toISOString(), from: 'X' });
+    let reads = 0;
+    s.flags.onMessage = (box) => { if (box === 'in') reads++; };
+    s.fns.get();
+    await s.refresh();
+    assert.strictEqual(s.fns.scanning(), false, 'it terminates');
+    assert.strictEqual(reads, n, 'each message once');
+    assert.ok(s.flags.saves <= Math.ceil(n / 200) + 2, 'saves: ' + s.flags.saves);
+    assert.strictEqual(s.settings.winlinkCatalogExamined.length, n);
+    const saves = s.flags.saves;
+    await s.refresh();
+    await s.refresh();
+    assert.deepStrictEqual([reads, s.flags.saves], [n, saves], 'later refreshes read nothing and write nothing');
+    await s.fns.requestList(false); // now pending: every refresh looks, and still nothing is read twice
+    await s.refresh();
+    await s.refresh();
+    assert.strictEqual(reads, n);
+  });
+}
+test('Get while a could-not-read note is shown: the LIST is queued, the note goes, and the panel shows the request', async () => {
+  const s = station({ settings: { winlinkCatalogUnreadable: { mid: 'BAD', at: 5 } } });
+  assert.strictEqual(s.fns.get().unreadable, true);
+  assert.strictEqual((await s.fns.requestList(false)).ok, true);
+  const g = s.fns.get();
+  assert.deepStrictEqual([g.unreadable, g.pendingKind, s.settings.winlinkCatalogUnreadable], [false, 'queued', undefined]);
+  const second = await s.fns.requestList(false);
+  assert.deepStrictEqual([second.already, /already in the Outbox/.test(second.text), s.pat.out.length], [true, true, 1]);
+});
+test('two Get presses at once: one LIST', async () => {
+  const s = station();
+  const [a, b] = await Promise.all([s.fns.requestList(false), s.fns.requestList(false)]);
+  assert.strictEqual(s.pat.out.filter((m) => m.body === 'LIST').length, 1);
+  assert.deepStrictEqual([a.ok, b.busy], [true, true]);
+});
+test('a request whose message could not be identified is not held as queued by another catalog request in the Outbox', async () => {
+  const s = station({ settings: { winlinkCatalogRequest: { at: Date.now(), mid: '' } } });
+  s.pat.out.push(itemMsg('ITEMREQ'));
+  await s.refresh();
+  assert.strictEqual(s.fns.get().pendingKind, 'sent');
 });
 test('Pat cannot list the Outbox: nothing is queued and the reason is said', async () => {
   const s = station();
