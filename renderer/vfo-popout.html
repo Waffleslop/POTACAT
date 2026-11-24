@@ -944,6 +944,7 @@
 <script src="../lib/custom-cat-slider.js"></script>
 <script src="../lib/rig-power-view.js"></script>
 <script src="../lib/rig-bands.js"></script>
+<script src="../lib/rig-gain-steps.js"></script>
 <script src="../lib/vfo-layout.js"></script>
 <script src="../lib/split-up.js"></script>
 <script src="../lib/freq-paste.js"></script>
@@ -1223,6 +1224,15 @@ window.api.onRadioState((s) => {
   let catChanged = false;
   for (const c of VfoLayout.CAT_CHOICES) {
     if (s[c.state] != null && catState[c.state] !== !!s[c.state]) { catState[c.state] = !!s[c.state]; catChanged = true; }
+  }
+  // Preamp / Att ladder and position (#997): the buttons step through it.
+  for (const g of ['preamp', 'att']) {
+    const steps = RigGainSteps.normalizeSteps(s[g + 'Steps'] !== undefined ? s[g + 'Steps'] : catGain[g].steps);
+    const step = s[g + 'Step'] != null ? Number(s[g + 'Step']) : catGain[g].step;
+    if (JSON.stringify(steps) !== JSON.stringify(catGain[g].steps) || step !== catGain[g].step) {
+      catGain[g] = { steps, step };
+      catChanged = true;
+    }
   }
   if (catChanged) paintCatButtons();
   if (s.catCaps !== undefined && JSON.stringify(s.catCaps) !== JSON.stringify(vfoCatCaps)) {
@@ -1647,10 +1657,24 @@ let vfoCatLarge = VfoLayout.CAT_DEFAULT_LARGE.slice();
 let vfoSmall = VfoLayout.normalizeSmall(null);   // settings.vfoSmall: { order, on, cat }
 let vfoCatCaps = null;       // null until the radio is known: offer them all
 const catState = {};         // vfo-radio-state field -> on, e.g. { nb: true }
+// Preamp / Att: the radio's ladder and where it is on it (#997). steps [] = a
+// plain on/off radio, which keeps sending true / false.
+const catGain = { preamp: { steps: [], step: 0 }, att: { steps: [], step: 0 } };
+const CAT_GAIN_NAME = { 'set-preamp': 'preamp', 'set-att': 'att' };
+function catGainLabel(c) {
+  const g = catGain[CAT_GAIN_NAME[c.action]];
+  return g && g.steps.length ? RigGainSteps.buttonLabel(c.label, g.step, g.steps) : c.label;
+}
 function catPicksFor(row) { return row.id === 'mini-cat' ? vfoSmall.cat : vfoCatLarge; }
 function paintCatButtons() {
   document.querySelectorAll('.cat-builtin').forEach(b => {
     if (b.dataset.state) b.classList.toggle('on', !!catState[b.dataset.state]);
+    const g = catGain[b.dataset.gain];
+    if (g) {
+      const base = b.dataset.base;
+      b.textContent = g.steps.length ? RigGainSteps.buttonLabel(base, g.step, g.steps) : base;
+      if (g.steps.length) b.title = base + ': ' + (RigGainSteps.stepLabel(g.step, g.steps) || 'Off') + ', click to cycle';
+    }
   });
 }
 function buildRigToggles() {
@@ -1660,8 +1684,9 @@ function buildRigToggles() {
     for (const c of VfoLayout.catButtons(catPicksFor(row), vfoCatCaps, null)) {
       const btn = document.createElement('button');
       btn.className = 'tog toggle-btn cat-builtin' + (catState[c.state] ? ' on' : '');
-      btn.textContent = c.label;
+      btn.textContent = catGainLabel(c);
       btn.dataset.state = c.state || '';
+      if (CAT_GAIN_NAME[c.action]) { btn.dataset.gain = CAT_GAIN_NAME[c.action]; btn.dataset.base = c.label; }
       const ch = VfoLayout.CAT_CHOICES.find(x => x.key === c.action);
       btn.title = c.momentary ? 'Start an ATU tune cycle' : (ch ? ch.label + ': on or off' : c.label);
       btn.addEventListener('click', () => {
@@ -1669,6 +1694,16 @@ function buildRigToggles() {
         // see the rig-controls registry). Its light is the radio's ATU state.
         if (c.momentary) { window.api.rigControl({ action: c.action }); return; }
         // The handlers read data.value (main.js): the field name must match.
+        const gain = catGain[CAT_GAIN_NAME[c.action]];
+        if (gain) {
+          // Preamp / Att: the next step of the radio's ladder (a boolean on a radio with none).
+          const value = RigGainSteps.clickValue(gain.step, gain.steps);
+          gain.step = Number(value) || 0;
+          catState[c.state] = gain.step > 0;
+          window.api.rigControl({ action: c.action, value });
+          paintCatButtons();
+          return;
+        }
         const on = !catState[c.state];
         catState[c.state] = on;
         window.api.rigControl({ action: c.action, value: on });

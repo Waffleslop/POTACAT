@@ -14,7 +14,8 @@ specific to this repo. This repo is public; nothing private goes in here.
 - lib/*_native/: N-API addons (FT8, JS8, FreeDV, RADE). `npm run build-natives`.
   `POTACAT_NO_NATIVE_FT8=1` makes tests use the WASM decoders.
 - helpers/: tiny native helpers that are pipes (yaesu-scope). Protocol meaning stays in JS.
-- test/: every test file is listed in scripts/run-tests.js, nowhere else. CI runs that list.
+- test/: every test file is listed in scripts/run-tests.js, nowhere else. CI runs that list. A file CI cannot run
+  goes in EXCEPTIONS there with its reason; test/test-manifest-complete-test.js fails on a file in neither.
 - docs/: plans, specs and decisions. docs/echocat-protocol.md is the wire contract with ECHOCAT.
   Read docs/JTCAT.md before touching FT8/FT4/JTTY/PSK/ULTRACAT.
 - data/contests.json: the one contest catalog (the server resolves dates from it).

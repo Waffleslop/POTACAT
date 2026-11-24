@@ -56,6 +56,7 @@ function makeEnv() {
   const sandbox = new Function('window', 'AudioContext', `
     let kiwiTxMuted = false;
     let smartGain = null;
+    let freedvGain = null;
     ${slice(html, 'let _rxLevelDb = 0;', 'let _txDrivePct = 100;')}
     return {
       linear: () => _rxLevelLinear(),

@@ -8427,7 +8427,7 @@ async function _shareRigRefreshList() {
         : (st === 'scheduled' ? 'scheduled'
           : (st === 'expired' ? 'expired' : 'revoked'));
       const sessions = (p.activeSessionCount || p.active_session_count || 0);
-      const sessionLine = sessions > 0 ? '<span class="lst-meta" style="color:var(--accent-green);">· ' + sessions + ' guest connected now</span>' : '';
+      const sessionLine = sessions > 0 ? '<span class="lst-meta" style="color:var(--accent-green);">· ' + _esc(PassWording.guestsUsedText(sessions)) + '</span>' : '';
       // Active and scheduled passes can both be cancelled + their link
       // copied. Expired/cancelled can't.
       const canActOn = (st === 'active' || st === 'scheduled');
