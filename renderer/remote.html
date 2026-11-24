@@ -32,6 +32,7 @@
   <!-- jtty-macros-js -->
   <!-- cw-remote-expand-js -->
   <!-- cw-sidetone-commit-js -->
+  <!-- cw-keyer-timing-diag-js -->
   <!-- pass-wording-js -->
   <!-- wsjtx-mode-notice-js -->
   <!-- freedv-display-mode-js -->
@@ -1433,7 +1434,7 @@
       </div>
       <div id="ft8-gain-strip" style="display:flex;align-items:center;gap:6px;padding:2px 10px;font-size:11px;color:var(--text-dim);background:var(--bg-header);border-bottom:1px solid var(--border);flex-shrink:0;">
         <span>RX</span>
-        <input type="range" id="ft8-rx-gain" min="0" max="300" value="100" style="width:60px;" title="RX Gain %">
+        <input type="range" id="ft8-rx-gain" min="0" max="100" value="100" style="width:60px;" title="RX Gain %">
         <span id="ft8-rx-gain-val" style="min-width:28px;text-align:right;font-size:10px;">100%</span>
         <span style="margin-left:4px;border-left:1px solid var(--border);padding-left:6px;">TX</span>
         <input type="range" id="ft8-tx-gain" min="0" max="100" value="100" style="width:60px;accent-color:#e94560;" title="TX Power % (logarithmic)">
@@ -1451,7 +1452,7 @@
         <div style="display:flex;align-items:center;gap:10px;padding:5px 10px;flex-wrap:wrap;background:var(--bg-header);border-bottom:1px solid var(--border);font-size:12px;">
           <label style="display:flex;align-items:center;gap:4px;" title="Transmit a WSPR beacon in a share of 120s cycles. The toggle reflects the host's confirmation — it may revert if arming fails."><input type="checkbox" id="wspr-tx-enable"> Beacon</label>
           <label title="Share of cycles used for beacon TX">TX% <input type="range" id="wspr-txpct" min="0" max="100" step="5" value="20" style="width:66px;vertical-align:middle;"> <span id="wspr-txpct-val">20%</span></label>
-          <label title="Power the beacon reports to WSPRnet. Auto follows the RF power the beacon runs at (1 W, or the level you set while it is armed). Pick a value to report a fixed power instead.">Reported <select id="wspr-dbm" class="ft8-mode-select" style="font-size:11px;">
+          <label title="Power the beacon reports to WSPRnet. Auto follows the RF power the beacon runs at (the radio's own setting, or the level you set while it is armed). Pick a value to report a fixed power instead.">Reported <select id="wspr-dbm" class="ft8-mode-select" style="font-size:11px;">
             <option value="auto" selected>Auto</option>
           </select></label>
           <span id="wspr-next" style="margin-left:auto;color:var(--text-dim);"></span>

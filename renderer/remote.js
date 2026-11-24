@@ -3045,7 +3045,7 @@
         // Desktop-authoritative synced RX gain — sent at connect and whenever
         // any surface moves it. Our own drags aren't echoed back (the desktop
         // skips the origin), so this can't fight the slider mid-drag.
-        var rgPct = Math.round(Number(msg.value) * 100);
+        var rgPct = Math.max(0, Math.min(100, Math.round(Number(msg.value) * 100)));
         if (isFinite(rgPct)) {
           var rgEl = document.getElementById('ft8-rx-gain');
           var rgVal = document.getElementById('ft8-rx-gain-val');
@@ -9758,6 +9758,7 @@
   var ft8TxGainVal = document.getElementById('ft8-tx-gain-val');
   // Restore saved gain levels
   var savedFt8Rx = parseInt(localStorage.getItem('echocat-ft8-rx-gain'), 10);
+  if (!isNaN(savedFt8Rx)) savedFt8Rx = Math.max(0, Math.min(100, savedFt8Rx)); // old builds allowed up to 300
   if (!isNaN(savedFt8Rx) && ft8RxGain) {
     ft8RxGain.value = savedFt8Rx;
     ft8RxGainVal.textContent = savedFt8Rx + '%';
@@ -10971,11 +10972,19 @@
       }
     }
     return {
-      paddleDit: function(pressed) { swap ? handleDah(pressed) : handleDit(pressed); },
-      paddleDah: function(pressed) { swap ? handleDit(pressed) : handleDah(pressed); },
+      // The keyer gets the edge first; the timing record (#244, measuring only) is told after.
+      paddleDit: function(pressed) { swap ? handleDah(pressed) : handleDit(pressed); if (typeof cwTimingEdge === 'function') cwTimingEdge(0, pressed); },
+      paddleDah: function(pressed) { swap ? handleDit(pressed) : handleDah(pressed); if (typeof cwTimingEdge === 'function') cwTimingEdge(1, pressed); },
+      getMode: function() { return mode; },
+      getWpm: function() { return wpm; },
       setWpm: function(v) { wpm = Math.max(5, Math.min(50, v | 0)); },
+      // cw-config-ack and every settings message carry the mode, changed or
+      // not; only a real change ends an over in progress. Re-applying the
+      // same mode used to cancel it, so a routine settings or config echo cut
+      // tones and elements mid-over.
       setMode: function(m) {
         if (m === 'iambicA' || m === 'iambicB' || m === 'straight') {
+          if (m === mode) return;
           mode = m;
           if (state !== IDLE) { clearTimers(); state = IDLE; onKey(false, undefined, { cancel: true }); }
         }
@@ -11044,6 +11053,8 @@
   var cwDiag = null, cwDiagTimer = null;
   function cwDiagNote(kind, ms) {
     ms = Math.max(0, Number(ms) || 0);
+    // An element was just scheduled: the timing record (#244) notes it too.
+    if (kind === 'ahead') cwTimingElement(paddleLastAt * 1000, ms);
     if (!cwDiag) cwDiag = { elements: 0, timerMax: 0, timerSum: 0, timerN: 0, inputMax: 0, aheadMax: 0, aheadSum: 0 };
     if (kind === 'timer') { cwDiag.timerMax = Math.max(cwDiag.timerMax, ms); cwDiag.timerSum += ms; cwDiag.timerN++; }
     else if (kind === 'input') cwDiag.inputMax = Math.max(cwDiag.inputMax, ms);
@@ -11072,6 +11083,41 @@
         inputLagMaxMs: Math.round(d.inputMax),
       }));
     } catch { /* not connected */ }
+  }
+  // --- Page keyer timing record (#244, lib/cw-keyer-timing-diag.js) ---
+  // Measuring only: for one over, when the keyer chose each element, when its
+  // sidetone was scheduled to start, the device's output latency, and when
+  // each paddle contact closed and opened, all on this page's clocks. About
+  // 2 s after the over ends ONE small cw-timing message goes to the desktop,
+  // which logs one line. Nothing here is read by the keyer or the sidetone:
+  // the keying is the same with or without it (test/cw-keyer-timing-diag-test.js).
+  // On the keying path it writes numbers into arrays made once; the one
+  // timer is armed once per over, not per element.
+  var cwTiming = (window.CwKeyerTimingDiag && window.CwKeyerTimingDiag.createRecorder) ? window.CwKeyerTimingDiag.createRecorder() : null;
+  var cwTimingTimer = null;
+  function cwTimingEdge(contact, pressed) {
+    if (!cwTiming) return;
+    cwTiming.edge(contact, pressed, performance.now());
+    if (!cwTimingTimer) cwTimingTimer = setTimeout(cwTimingFlush, 2000);
+  }
+  function cwTimingElement(startAudioMs, leadMs) {
+    if (!cwTiming) return;
+    cwTiming.element(performance.now(), startAudioMs, leadMs, cwAudioCtx ? cwAudioCtx.outputLatency : undefined);
+    if (!cwTimingTimer) cwTimingTimer = setTimeout(cwTimingFlush, 2000);
+  }
+  function cwTimingFlush() {
+    cwTimingTimer = null;
+    try {
+      // Keying went on after the timer was armed: wait out the rest of the 2 s.
+      var quiet = performance.now() - cwTiming.lastAt();
+      if (quiet < 2000) { cwTimingTimer = setTimeout(cwTimingFlush, Math.max(50, 2000 - quiet)); return; }
+      var summary = window.CwKeyerTimingDiag.summarize(cwTiming.snapshot(), {
+        mode: localCwKeyer.getMode(), wpm: localCwKeyer.getWpm(),
+        baseLatencySec: cwAudioCtx ? cwAudioCtx.baseLatency : undefined,
+      });
+      cwTiming.clear();
+      if (summary && ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(window.CwKeyerTimingDiag.toMessage(summary)));
+    } catch (e) { /* a diagnostic never gets in the way */ }
   }
   function cancelPaddleTones() {
     if (paddleGain && cwAudioCtx) {
@@ -11142,6 +11188,7 @@
     if (paddleGain && cwAudioCtx && paddleLastAt) paddleGain.gain.cancelScheduledValues(paddleLastAt);
     paddleNextAt = paddleLastAt;
     cwStreamNextAt = cwStreamLastAt;
+    if (cwTiming) cwTiming.withdrawn();
     return true;
   }
   // A stop (STOP, mode change, paddle keying lost, the socket closed): the

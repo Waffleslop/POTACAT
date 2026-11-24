@@ -45,6 +45,8 @@ contextBridge.exposeInMainWorld('api', {
   // A QSO reached the log, whatever path logged it (saveQsoRecord is the one
   // choke point). Drives the QSO-logged chime.
   onQsoLogged: (cb) => ipcRenderer.on('qso-logged', (_e, q) => cb(q)),
+  // A JTCAT chime to play ({ sound }): a station calls me, or TX stopped by itself.
+  onJtcatChime: (cb) => ipcRenderer.on('jtcat-chime', (_e, d) => cb(d)),
   // Prior contacts card (#154): the log index and the worked grid for one call, no QRZ.
   priorContacts: (call) => ipcRenderer.invoke('prior-contacts', call),
   // SWR-guard latch override ("TX anyway") — clears the tripped state.
@@ -54,6 +56,9 @@ contextBridge.exposeInMainWorld('api', {
   onExternalAtuStart: (cb) => ipcRenderer.on('external-atu-start', (_e, d) => cb(d)),
   onExternalAtuComplete: (cb) => ipcRenderer.on('external-atu-complete', () => cb()),
   externalAtuCancel: () => ipcRenderer.send('external-atu-cancel'),
+  // Rig editor: can POTACAT set this rig's power for the RF-sense tune, and was the own-power question answered
+  extAtuOwnPowerState: (q) => ipcRenderer.invoke('ext-atu-own-power-state', q),
+  extAtuOwnPowerForget: (rigId) => ipcRenderer.invoke('ext-atu-own-power-forget', rigId),
   rotateTo: (azimuth) => ipcRenderer.send('rotate-to', azimuth),
   // Scan on/off sync with ECHOCAT mobile (scan-state-sync-desktop)
   scanStateChanged: (scanning) => ipcRenderer.send('scan-state-changed', scanning),
@@ -741,6 +746,10 @@ contextBridge.exposeInMainWorld('api', {
   resetAllRigCommands: () => ipcRenderer.invoke('reset-all-rig-commands'),
   onRigState: (cb) => ipcRenderer.on('rig-state', (_e, state) => cb(state)),
   onRemoteTxState: (cb) => ipcRenderer.on('remote-tx-state', (_e, state) => cb(state)),
+  // #1041, the transmit guard: { tx, txDevices }, asked before every operator sound.
+  soundTxState: () => ipcRenderer.invoke('sound-tx-state'),
+  // #1041: a contact was not saved (logContact's result). Drives the save-failed sound.
+  onQsoLogFailed: (cb) => ipcRenderer.on('qso-log-failed', (_e, d) => cb(d)),
   onRemoteStatus: (cb) => ipcRenderer.on('remote-status', (_e, s) => cb(s)),
   onReloadPrefs: (cb) => ipcRenderer.on('reload-prefs', () => cb()),
   onActivationAutoEnded: (cb) => ipcRenderer.on('activation-auto-ended', (_e, d) => cb(d)), // #147

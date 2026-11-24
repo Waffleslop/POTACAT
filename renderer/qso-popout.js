@@ -1430,14 +1430,107 @@ dupeDeleteBtn.addEventListener('click', async () => {
 });
 
 // --- Export ADIF ---
-document.getElementById('qso-export').addEventListener('click', async () => {
+// One button, one choice of what goes in the file (#698): everything shown, a
+// UTC time range, or the selected rows. The rules are lib/log-export-choice.js;
+// the file is written by main's one 'export-adif' handler. Read-only.
+const exportOverlay = document.getElementById('export-overlay');
+const exportRangeBox = document.getElementById('export-range');
+const exportSelectedRow = document.getElementById('export-selected-row');
+const exportNote = document.getElementById('export-note');
+const exportGoBtn = document.getElementById('export-go');
+const exportRangeEls = {
+  fromDate: document.getElementById('export-from-date'),
+  fromTime: document.getElementById('export-from-time'),
+  toDate: document.getElementById('export-to-date'),
+  toTime: document.getElementById('export-to-time'),
+};
+const exportWhatEls = Array.from(document.querySelectorAll('input[name="export-what"]'));
+
+function exportWhat() {
+  const on = exportWhatEls.find((el) => el.checked);
+  return on ? on.value : 'shown';
+}
+function setExportWhat(what) {
+  for (const el of exportWhatEls) el.checked = el.value === what;
+}
+
+/** What the ticked choice exports: { what, rows, range, error }. */
+function exportPlan() {
+  const what = exportWhat();
+  if (what === 'selected') {
+    return { what, rows: filtered.filter((q) => selectedIdxs.has(q.idx)) };
+  }
+  if (what === 'range') {
+    const range = LogExportChoice.parseRange({
+      fromDate: exportRangeEls.fromDate.value, fromTime: exportRangeEls.fromTime.value,
+      toDate: exportRangeEls.toDate.value, toTime: exportRangeEls.toTime.value,
+    });
+    return { what, range, rows: LogExportChoice.filterByRange(filtered, range), error: range.ok ? '' : range.error };
+  }
+  return { what, rows: filtered };
+}
+
+function updateExportDialog() {
+  const plan = exportPlan();
+  exportRangeBox.classList.toggle('off', plan.what !== 'range');
+  if (plan.error) exportNote.textContent = plan.error;
+  else if (plan.what === 'range') exportNote.textContent = LogExportChoice.rangeNote(plan.rows.length, filtered.length, hasActiveFilters());
+  else exportNote.textContent = '';
+  exportGoBtn.textContent = LogExportChoice.exportLabel(plan.rows.length);
+  exportGoBtn.disabled = plan.rows.length === 0;
+}
+
+function openExportDialog() {
+  document.getElementById('export-shown-label').textContent = LogExportChoice.shownLabel(filtered.length, hasActiveFilters());
+  const picked = selectedIdxs.size;
+  exportSelectedRow.classList.toggle('hidden', picked === 0);
+  document.getElementById('export-selected-label').textContent = LogExportChoice.selectedLabel(picked);
+  setExportWhat(LogExportChoice.defaultWhat(picked));
+  // The range starts from the dates the filter bar already holds.
+  exportRangeEls.fromDate.value = filterFrom;
+  exportRangeEls.toDate.value = filterTo;
+  exportRangeEls.fromTime.value = '';
+  exportRangeEls.toTime.value = '';
+  updateExportDialog();
+  exportOverlay.classList.remove('hidden');
+  (exportWhatEls.find((el) => el.checked) || exportGoBtn).focus();
+}
+function closeExportDialog() { exportOverlay.classList.add('hidden'); }
+
+document.getElementById('qso-export').addEventListener('click', () => {
   if (!filtered.length) { toast('No QSOs to export'); return; }
+  openExportDialog();
+});
+for (const el of exportWhatEls) el.addEventListener('change', updateExportDialog);
+// Touching a From / To control is choosing the time range.
+function exportRangeTouched() {
+  setExportWhat('range');
+  updateExportDialog();
+}
+for (const el of Object.values(exportRangeEls)) {
+  for (const ev of ['focus', 'input', 'change']) el.addEventListener(ev, exportRangeTouched);
+}
+document.getElementById('export-close').addEventListener('click', closeExportDialog);
+document.getElementById('export-cancel').addEventListener('click', closeExportDialog);
+exportOverlay.addEventListener('keydown', (e) => {
+  // The dialog's keys stay in the dialog: Escape closes it (not the window, and
+  // the selection is kept), Ctrl+A does not reach the list behind it.
+  e.stopPropagation();
+  if (e.key === 'Escape') { closeExportDialog(); return; }
+  if (e.key === 'Enter' && !e.target.closest('button')) { e.preventDefault(); exportGoBtn.click(); }
+});
+
+exportGoBtn.addEventListener('click', async () => {
+  const plan = exportPlan();
+  const rows = plan.rows;
+  if (plan.error || !rows.length) return;
+  closeExportDialog();
   try {
-    const result = await window.api.exportAdif(filtered);
+    const result = await window.api.exportAdif(rows, { fileName: LogExportChoice.fileName({ what: plan.what, range: plan.range, count: rows.length }) });
     if (!result) return;
     if (result.success) {
       const name = result.filePath.split(/[/\\]/).pop();
-      toast(`Exported ${result.count} QSOs to ${name}`);
+      toast(`Exported ${result.count} QSO${result.count === 1 ? '' : 's'} to ${name}`);
     } else {
       toast('Export failed: ' + (result.error || 'unknown error'));
     }

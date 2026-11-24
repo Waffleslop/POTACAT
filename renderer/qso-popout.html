@@ -163,6 +163,33 @@
     }
     .dupe-delete-btn:disabled { opacity: 0.4; cursor: default; }
 
+    /* --- Export ADIF: what to export (#698) --- */
+    #export-overlay:focus { outline: none; }
+    .export-dialog { width: min(440px, calc(100vw - 32px)); }
+    .export-body { display: flex; flex-direction: column; gap: 10px; padding: 12px 14px; font-size: 13px; }
+    .export-choice { display: flex; align-items: center; gap: 8px; cursor: pointer; color: var(--text-primary); }
+    .export-choice.hidden { display: none; }
+    .export-choice input[type="radio"] { margin: 0; accent-color: var(--accent-blue); cursor: pointer; }
+    .export-range {
+      display: grid; grid-template-columns: auto auto auto; justify-content: start; align-items: center;
+      gap: 6px 8px; margin-left: 22px;
+    }
+    .export-range.off { opacity: 0.55; }
+    .export-range label { color: var(--text-secondary); }
+    .export-range input {
+      padding: 3px 6px; background: var(--bg-input); border: 1px solid var(--border-primary);
+      border-radius: 3px; color: var(--text-primary); font-size: 13px; font-family: inherit;
+    }
+    .export-range input:focus { outline: none; border-color: var(--accent-blue); }
+    .export-hint { grid-column: 1 / -1; margin: 0; font-size: 12px; color: var(--text-secondary); }
+    .export-note { font-size: 12px; color: var(--text-secondary); }
+    .export-go-btn {
+      border: 1px solid var(--accent-green, #4ecca3); background: var(--accent-green, #4ecca3); color: var(--on-accent-green);
+      padding: 4px 14px; border-radius: 4px; cursor: pointer; font-size: 13px; font-weight: 600; white-space: nowrap;
+    }
+    .export-go-btn:disabled { opacity: 0.4; cursor: default; }
+    .export-cancel-btn { font-size: 13px; }
+
     .qso-empty { text-align: center; color: var(--text-tertiary); margin: 40px 0; }
 
     .qso-footer {
@@ -377,11 +404,50 @@
     </div>
   </div>
 
+  <!-- Export ADIF: everything shown, a UTC time range, or the selected rows (#698) -->
+  <div id="export-overlay" class="dupe-overlay hidden" tabindex="-1">
+    <div class="dupe-dialog export-dialog" role="dialog" aria-labelledby="export-title">
+      <div class="dupe-head">
+        <span id="export-title">Export ADIF</span>
+        <button type="button" class="titlebar-btn" id="export-close" title="Close">&#x2715;</button>
+      </div>
+      <div class="export-body">
+        <label class="export-choice">
+          <input type="radio" name="export-what" value="shown" checked>
+          <span id="export-shown-label">All QSOs</span>
+        </label>
+        <label class="export-choice">
+          <input type="radio" name="export-what" value="range">
+          <span>A time range (UTC)</span>
+        </label>
+        <div class="export-range off" id="export-range">
+          <label for="export-from-date">From</label>
+          <input type="date" id="export-from-date" title="From date (UTC)">
+          <input type="time" id="export-from-time" step="60" title="From time (UTC)">
+          <label for="export-to-date">To</label>
+          <input type="date" id="export-to-date" title="To date (UTC)">
+          <input type="time" id="export-to-time" step="60" title="To time (UTC)">
+          <p class="export-hint">Times are UTC. Leave a time empty for the whole day.</p>
+        </div>
+        <label id="export-selected-row" class="export-choice hidden">
+          <input type="radio" name="export-what" value="selected">
+          <span id="export-selected-label">The selected QSOs</span>
+        </label>
+      </div>
+      <div class="dupe-foot">
+        <span class="dupe-note export-note" id="export-note"></span>
+        <button type="button" class="qso-clear-btn export-cancel-btn" id="export-cancel">Cancel</button>
+        <button type="button" class="export-go-btn" id="export-go">Export</button>
+      </div>
+    </div>
+  </div>
+
   <script src="../lib/qso-identity.js"></script>
   <script src="../lib/freq-dots.js"></script>
   <script src="../lib/log-freq-field.js"></script>
   <script src="../lib/adif-mode.js"></script>
   <script src="../lib/logbook-filter.js"></script>
+  <script src="../lib/log-export-choice.js"></script>
   <script src="../node_modules/leaflet/dist/leaflet.js"></script>
   <script src="qso-popout.js"></script>
 </body>

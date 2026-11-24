@@ -166,6 +166,12 @@ async function owner(port) {
   return o;
 }
 
+// A hard stop. The ports below are fixed and the server retries a busy port for
+// ever, so with a second suite on the same machine a client waited on a socket
+// that never opened: 33 minutes, until someone killed it (2026-11-24). The
+// whole file takes about 3 s.
+setTimeout(() => { console.log('  FAIL timed out after 60 s (is port 17481 or 17482 held by another test run?)'); process.exit(1); }, 60000);
+
 (async () => {
   console.log('RemoteServer');
   await checkAsync('a waiting owner device hears connected and lastActiveAt, and again only on a real change', async () => {
