@@ -1,6 +1,6 @@
 // The one door every operator sound in the main window goes through (#1041):
 // the contact sounds, the milestone sounds, the QSO logged chime flavours and
-// the Sounds pane's Test button.
+// the Sounds pane's Play and Hear buttons (preview).
 //
 // Before every play it asks lib/sound-guard.js "may this sound play now, and
 // where", with the computer's live output list, the radio's TX audio devices
@@ -107,13 +107,15 @@
   /**
    * One sound, from "it is due" to "it has finished".
    * @param {function} draw  (ctx, out) => seconds: connects its sources to `out`, starts them, says how long they last
-   * @param {object} [using]  settings to use instead of the saved ones (the Sounds pane's Test)
+   * @param {object} [using]  settings to use instead of the saved ones (the Sounds pane's previews)
    * @returns {Promise<{played: boolean, reason?: string}>}
    */
-  async function start(draw, using) {
+  async function start(draw, using, opts) {
     const due = Date.now();
     const cfg = QsoSounds.readSettings(using || settings);
+    const stale = (opts && opts.stale) || (() => false);
     for (;;) {
+      if (stale()) return { played: false, reason: 'replaced' }; // a newer preview took its place
       const st = await txState();
       const d = SoundGuard.decide({
         chosenId: cfg.output, chosenLabel: cfg.outputLabel,
@@ -133,7 +135,11 @@
       out.gain.value = v * v; // the slider is by ear: half way is a quarter of the power
       out.connect(ctx.destination);
       let wake = null; // ends the wait below when the sound is cut
-      const handle = { stop() { try { out.gain.value = 0; out.disconnect(); } catch {} if (wake) wake(); } };
+      // stop(why): why it was cut ('replaced' by a newer preview; a transmission otherwise).
+      const handle = {
+        preview: !!(opts && opts.preview), cutBy: null,
+        stop(why) { if (why && !this.cutBy) this.cutBy = why; try { out.gain.value = 0; out.disconnect(); } catch {} if (wake) wake(); },
+      };
       let seconds = 0;
       try { seconds = Number(await draw(ctx, out)) || 0; } catch (err) { console.warn('[Sounds]', err && err.message); handle.stop(); return { played: false, reason: 'error' }; }
       live.add(handle);
@@ -142,24 +148,27 @@
       const cut = !live.has(handle);
       live.delete(handle);
       handle.stop();
-      return cut ? { played: false, reason: 'transmitting' } : { played: true };
+      return cut ? { played: false, reason: handle.cutBy || 'transmitting' } : { played: true };
     }
   }
   // --- end of start
 
   /** Put a sound at the end of the queue. */
-  function enqueue(draw, using) {
+  function enqueue(draw, using, opts) {
     if (waiting >= MAX_WAITING) return Promise.resolve({ played: false, reason: 'busy' });
     waiting++;
-    const run = tail.then(() => start(draw, using)).catch(() => ({ played: false, reason: 'error' })).then((r) => { waiting--; return r; });
+    const run = tail.then(() => start(draw, using, opts)).catch(() => ({ played: false, reason: 'error' })).then((r) => { waiting--; return r; });
     tail = run;
     return run;
   }
 
   /** Play one of renderer/sounds/*.wav (an id from QsoSounds.FILES). */
   function playFile(id, using) {
+    return enqueue(fileDraw(id), using);
+  }
+  function fileDraw(id) {
     const loaded = loadFile(id);
-    return enqueue(async (c, out) => {
+    return async (c, out) => {
       const buf = await loaded;
       if (!buf) throw new Error('sound file not found: ' + id);
       const src = c.createBufferSource();
@@ -167,7 +176,7 @@
       src.connect(out);
       src.start();
       return buf.duration;
-    }, using);
+    };
   }
 
   /** Play a synthesized chime: draw(ctx, out) connects its oscillators to `out` and returns its length in seconds. */
@@ -175,9 +184,26 @@
     return enqueue(draw, using);
   }
 
-  /** The Test button: the coin, by the same road as a real contact. */
-  function test(using) {
-    return playFile(QsoSounds.COIN, using);
+  // The Sounds pane's Play and Hear buttons (Casey 2026-11-24). A new preview
+  // replaces the one before it: the one sounding stops at once and one still
+  // waiting is skipped, so previews never stack. A real contact sound is not
+  // cut by a preview; the preview waits its turn in the queue.
+  let previewGen = 0;
+  /**
+   * @param {{ file?: string, chime?: string }} sound  QsoSounds.previewSound(key)
+   * @param {object} using  the pane's unsaved choices (volume, output)
+   * @returns {Promise<{played: boolean, reason?: string}>}  reason 'replaced': a newer preview took its place
+   */
+  function preview(sound, using) {
+    const gen = ++previewGen;
+    for (const s of [...live]) if (s.preview) { live.delete(s); s.stop('replaced'); }
+    let draw = null;
+    if (sound && sound.file) draw = fileDraw(sound.file);
+    else if (sound && sound.chime && ChimeSounds.notesOf(sound.chime).length) {
+      draw = (c, out) => { ChimeSounds.play(c, sound.chime, out); return ChimeSounds.lengthOf(sound.chime); };
+    }
+    if (!draw) return Promise.resolve({ played: false, reason: 'error' });
+    return enqueue(draw, using, { preview: true, stale: () => gen !== previewGen });
   }
 
   /**
@@ -193,5 +219,5 @@
     return { list, where: SoundGuard.resolveOutput(ask), chosen: SoundGuard.chosenState(ask) };
   }
 
-  window.PotacatSounds = { configure, playFile, playChime, test, describe, cutAll, status: () => lastStatus };
+  window.PotacatSounds = { configure, playFile, playChime, preview, describe, cutAll, status: () => lastStatus };
 })();

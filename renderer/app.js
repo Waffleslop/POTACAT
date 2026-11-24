@@ -951,8 +951,10 @@ const setHideOutOfBand = document.getElementById('set-hide-out-of-band');
 const setHideWorked = document.getElementById('set-hide-worked');
 const setTuneClick = document.getElementById('set-tune-click');
 const setQsoChime = document.getElementById('set-qso-chime');
-const setQsoChimeTest = document.getElementById('set-qso-chime-test');
-if (setQsoChimeTest) setQsoChimeTest.addEventListener('click', () => { try { testSoundsPane(); } catch {} });
+const setQsoChimePlay = document.getElementById('set-qso-chime-play');
+// Play, and a new choice in the select plays it once, like a ringtone picker (previewSoundsPane).
+if (setQsoChimePlay) setQsoChimePlay.addEventListener('click', () => previewSoundsPane(setQsoChime.value));
+if (setQsoChime) setQsoChime.addEventListener('change', () => previewSoundsPane(setQsoChime.value));
 const setEnableSplit = document.getElementById('set-enable-split');
 const setEnableAtu = document.getElementById('set-enable-atu');
 const setEnableRotor = document.getElementById('set-enable-rotor');
@@ -5206,7 +5208,7 @@ blMode.addEventListener('keydown', (e) => {
 // everyone else it is the coin (lib/qso-sounds.js). Every sound here goes
 // through PotacatSounds (renderer/sounds.js), which asks the transmit guard
 // (lib/sound-guard.js) when and on which output: never the radio's sound card,
-// never while transmitting. `using` is the Sounds pane's unsaved choices (Test).
+// never while transmitting. The Sounds pane's previews go through PotacatSounds.preview.
 function playQsoChime(kind, using) {
   if (!kind || kind === 'off') return;
   // The tones are lib/chime-sounds.js, shared with the JTCAT chimes (#1043).
@@ -17655,20 +17657,31 @@ function soundOutputLabelOf(sel) {
   if (!sel.value || !opt) return '';
   return opt.dataset.label != null ? opt.dataset.label : opt.textContent;
 }
-// Test: the contact sound as the pane is set now (saved or not), by the same
-// road as a real contact, so it obeys the transmit guard.
-async function testSoundsPane() {
-  const using = { ...soundSettings, ...readSoundsPane(), soundsOn: true, soundContact: true };
-  const kind = setQsoChime ? setQsoChime.value : 'coin';
-  const r = await (QsoSounds.contactSound(kind) === 'coin' ? PotacatSounds.test(using) : playQsoChime(kind, using));
+// The pane as it is set now, saved or not: what a preview plays with.
+function soundsPaneUsing() {
+  return { ...soundSettings, ...readSoundsPane(), soundsOn: true, soundContact: true };
+}
+// Play and Hear (Casey 2026-11-24: "I can't hear what the sounds will sound
+// like"). `key` is the Sound select's value or a Hear button's data-sound
+// (QsoSounds.previewSound). By the same road as a real contact, so the
+// transmit guard decides; a new preview replaces the one before it.
+async function previewSoundsPane(key) {
+  const using = soundsPaneUsing();
+  let r;
+  try { r = await PotacatSounds.preview(QsoSounds.previewSound(key), using); } catch { r = { played: false, reason: 'error' }; }
   if (!soundsPane.status) return;
+  if (r && (r.reason === 'replaced' || r.reason === 'busy')) return; // the next preview speaks for itself
   if (r && r.played) { refreshSoundOutputs(using.soundOutput, using.soundOutputLabel); return; }
   soundsPane.status.classList.add('sound-status-warn');
   if (r && r.reason === 'transmitting') soundsPane.status.textContent = 'Not played: the radio is transmitting. Sounds wait for the transmission to end.';
   else if (r && r.reason === 'no-other-output') soundsPane.status.textContent = SoundGuard.NO_OUTPUT_TEXT;
+  else if (r && r.reason === 'error') soundsPane.status.textContent = 'Not played: that sound could not be loaded.';
   else soundsPane.status.textContent = 'Not played: that sound output could not be opened.';
 }
+document.querySelectorAll('.sounds-hear [data-sound]').forEach((b) => b.addEventListener('click', () => previewSoundsPane(b.dataset.sound)));
 if (soundsPane.volume) soundsPane.volume.addEventListener('input', () => { soundsPane.volumeVal.textContent = soundsPane.volume.value + '%'; });
+// The slider released (change, not every input step): the chosen sound once, at the new level.
+if (soundsPane.volume) soundsPane.volume.addEventListener('change', () => previewSoundsPane(setQsoChime ? setQsoChime.value : 'coin'));
 if (soundsPane.output) soundsPane.output.addEventListener('change', () => {
   refreshSoundOutputs(soundsPane.output.value, soundOutputLabelOf(soundsPane.output));
 });

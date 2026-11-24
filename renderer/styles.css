@@ -7850,10 +7850,16 @@ a.settings-echocat-badge-link:hover {
 
 /* Settings > Sounds (#1041) */
 .sounds-pane .sounds-help { display: block; margin: 0 0 10px 24px; }
-.sounds-pane .sounds-row { display: flex; align-items: center; gap: 8px; margin: 0 0 6px 24px; }
-.sounds-pane .sounds-row select { width: auto; min-width: 180px; }
+.sounds-pane .sounds-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 6px 24px; }
+.sounds-pane .sounds-row select { width: auto; min-width: 180px; max-width: 100%; }
 .sounds-pane .sounds-row input[type="range"] { width: 180px; accent-color: var(--accent-green); }
-.sounds-pane .sounds-row button { padding: 4px 14px; }
+/* Play and the Hear row: the Settings small button, at the pane's text size. */
+.sounds-pane .sounds-row .btn-sm { font-size: 13px; padding: 3px 10px; }
+.sounds-pane .sounds-hear { gap: 6px; margin-bottom: 10px; }
+.sounds-pane .sounds-row > label { margin: 0; }
+.sounds-pane .sounds-row select { margin-top: 0; }
+.sounds-pane .sounds-hear-label { margin-right: 2px; font-size: 13px; color: var(--text-secondary); }
+.sounds-pane .sounds-hear .btn-sm { min-width: 40px; text-align: center; }
 .sounds-status { margin: 0 0 6px 24px; color: var(--text-secondary); min-height: 1.3em; }
 .sounds-status.sound-status-warn { color: var(--warn); }
 

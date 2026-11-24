@@ -190,7 +190,7 @@ test('every sound the main window makes for a contact goes through PotacatSounds
   assert.ok(!/new AudioContext\(/.test(chime));
   assert.ok(/PotacatSounds\.playChime\(/.test(chime));
   assert.ok(/PotacatSounds\.playFile\(/.test(chime));
-  assert.ok(/PotacatSounds\.test\(using\)/.test(app), 'the Test button takes the same road');
+  assert.ok(/PotacatSounds\.preview\(QsoSounds\.previewSound\(key\), using\)/.test(app), 'the Play and Hear buttons take the same road');
   assert.ok(html.indexOf('<script src="../lib/sound-guard.js"></script>') < html.indexOf('<script src="sounds.js"></script>'));
   assert.ok(html.indexOf('<script src="sounds.js"></script>') < html.indexOf('<script src="app.js"></script>'));
 });
