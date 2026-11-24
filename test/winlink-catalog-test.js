@@ -504,43 +504,78 @@ test('what is kept on disk, cleaned on the way in and out', () => {
 });
 test('a sender is one plain word, whatever the mail says', () => {
   assert.strictEqual(C.cleanSender('SERVICE@winlink.org'), 'SERVICE@winlink.org');
-  assert.strictEqual(C.cleanSender('<b>x</b>\r\n  evil'), '<b>x</b>evil');
+  assert.strictEqual(C.cleanSender('<b>x</b>\r\n  evil'), '<b>x</b> evil');
+  assert.strictEqual(C.cleanSender('  Winlink   Inquiry\tServer  '), 'Winlink Inquiry Server', 'single spaces are kept');
   assert.strictEqual(C.cleanSender('a'.repeat(200)).length, 60);
   assert.strictEqual(C.cleanSender(null), 'an unknown sender');
 });
 
 console.log('the pending request, tied to the message');
 const LISTMSG = { mid: 'L1', to: ['INQUIRY'], subject: 'REQUEST' };
-test('the request just queued is found by what was not in the Outbox before', () => {
-  const before = [{ mid: 'A', to: ['INQUIRY'], subject: 'REQUEST' }, { mid: 'B', to: ['W1AW'], subject: 'Hi' }];
-  assert.strictEqual(C.newRequestMid(before, [LISTMSG].concat(before)), 'L1');
-  assert.strictEqual(C.newRequestMid(before, before), '');
-  assert.strictEqual(C.newRequestMid(before, [{ mid: 'N', to: ['W1AW'], subject: 'REQUEST' }].concat(before)), '', 'not to INQUIRY');
-  assert.strictEqual(C.isRequestEntry({ to: ['inquiry@winlink.org'], subject: ' request ' }), true);
+const KNOWN = { out: true, sentFresh: true };
+const settle = (o) => C.settleRequest({ request: { at: T0, mid: 'L1' }, outbox: [], sent: [], lists: KNOWN, now: T0 + 1000, ...o });
+test('which request is ours: the LIST message that a fresh Outbox listing shows after the send and not before', () => {
+  assert.deepStrictEqual(C.newRequest(T0, ['OLDLIST'], ['L1', 'OLDLIST']), { at: T0, mid: 'L1' });
+  assert.deepStrictEqual(C.newRequest(T0, ['A'], ['A']), { at: T0, mid: '' }, 'cannot be told: kept as unknown');
+  assert.deepStrictEqual(C.newRequest(T0, null, null), { at: T0, mid: '' });
+  assert.deepStrictEqual(C.requestEntries([{ mid: 'A', to: ['INQUIRY'], subject: 'REQUEST' }, { mid: 'B', to: ['W1AW'], subject: 'REQUEST' }, { mid: 'C', to: ['inquiry@winlink.org'], subject: ' request ' }]), ['A', 'C']);
+  assert.deepStrictEqual([C.isListBody(' list\r\n'), C.isListBody('PROP_3DAY'), C.isListBody('LIST\nPROP_3DAY')], [true, false, false]);
 });
-test('in the Outbox: queued, however long it sits there', () => {
-  const o = { request: { at: T0, mid: 'L1' }, outbox: [LISTMSG], sent: [], listsKnown: true };
-  assert.strictEqual(C.pendingState({ ...o, now: T0 + 1000 }), 'queued');
-  assert.strictEqual(C.pendingState({ ...o, now: T0 + 30 * 86400000 }), 'queued');
+test('never a second LIST while one is in the Outbox, whatever the state says; Request again only when none is', () => {
+  for (const kind of ['none', 'queued', 'sent', 'unknown']) for (const again of [false, true]) assert.strictEqual(C.listRule({ inOutbox: ['L1'], kind, again }), 'already', kind + ' ' + again);
+  assert.strictEqual(C.listRule({ inOutbox: [], kind: 'none', again: false }), 'queue');
+  assert.strictEqual(C.listRule({ inOutbox: [], kind: 'sent', again: false }), 'already');
+  assert.strictEqual(C.listRule({ inOutbox: [], kind: 'sent', again: true }), 'queue');
+  assert.strictEqual(C.listRule({ inOutbox: [], kind: 'unknown', again: false }), 'already');
 });
-test('deleted from the Outbox before it went: nothing is pending, at once', () => {
-  assert.strictEqual(C.pendingState({ request: { at: T0, mid: 'L1' }, outbox: [], sent: [], listsKnown: true, now: T0 + 1000 }), 'none');
+test('in the Outbox: queued, however long it sits there, and never forgotten', () => {
+  const o = { outbox: [LISTMSG] };
+  assert.deepStrictEqual([settle(o).kind, settle(o).pendingKind, settle(o).inOutbox, settle(o).drop, settle(o).requestedAt], ['queued', 'queued', true, false, T0]);
+  assert.strictEqual(settle({ ...o, now: T0 + 30 * 86400000 }).kind, 'queued');
+  assert.strictEqual(settle({ ...o, stored: { readAt: T0 + 5, items: [] } }).kind, 'queued', 'a catalog read meanwhile does not clear a request that is still in the Outbox');
 });
-test('sent: pending with a way out, until a catalog is read or 7 days pass', () => {
-  const o = { request: { at: T0, mid: 'L1' }, outbox: [], sent: [LISTMSG], listsKnown: true };
-  assert.strictEqual(C.pendingState({ ...o, now: T0 + 1000 }), 'sent');
-  assert.strictEqual(C.pendingState({ ...o, now: T0 + 7 * 86400000 - 1 }), 'sent');
-  assert.strictEqual(C.pendingState({ ...o, now: T0 + 7 * 86400000 }), 'none');
-  assert.strictEqual(C.pendingState({ ...o, now: T0 + 1000, stored: { readAt: T0 + 500, items: [] } }), 'none', 'a catalog read after the request');
-  assert.strictEqual(C.pendingState({ ...o, now: T0 + 1000, stored: { readAt: T0 - 500, items: [] } }), 'sent', 'an older catalog does not answer it');
+test('deleted from the Outbox before it went (gone, and a fresh Sent list does not hold it): forgotten at once', () => {
+  assert.deepStrictEqual([settle({}).kind, settle({}).drop, settle({}).request, settle({}).pending], ['none', true, null, false]);
 });
-test('the folders are not listed yet: a request stays as it was; one that cannot be identified counts as sent', () => {
-  assert.strictEqual(C.pendingState({ request: { at: T0, mid: 'L1' }, listsKnown: false, now: T0 + 1000 }), 'queued');
-  assert.strictEqual(C.pendingState({ request: { at: T0, mid: '' }, outbox: [], sent: [], listsKnown: true, now: T0 + 1000 }), 'sent');
-  assert.strictEqual(C.pendingState({ request: { at: T0, mid: '' }, listsKnown: true, now: T0 + 8 * 86400000 }), 'none');
-  assert.strictEqual(C.pendingState({ request: null, now: T0 }), 'none');
-  assert.strictEqual(C.pendingState({ request: { at: T0 + 3600000, mid: '' }, listsKnown: true, now: T0 }), 'none', 'a stamp from the future does not lock the button');
+test('a stale or failed Sent list never wipes a request: it is unknown, kept, and shown as queued', () => {
+  for (const lists of [{ out: true, sentFresh: false }, { out: false, sentFresh: false }, null]) {
+    const s = settle({ lists });
+    assert.deepStrictEqual([s.kind, s.drop, s.pendingKind, s.request], ['unknown', false, 'queued', { at: T0, mid: 'L1' }], JSON.stringify(lists));
+  }
+  assert.strictEqual(settle({ lists: { out: true, sentFresh: false }, sent: [LISTMSG] }).kind, 'sent', 'found in Sent is enough');
+});
+test('sent: pending with Request again, until a catalog is read or 7 days pass', () => {
+  const o = { sent: [LISTMSG] };
+  assert.deepStrictEqual([settle(o).kind, settle(o).pendingKind], ['sent', 'sent']);
+  assert.strictEqual(settle({ ...o, now: T0 + 7 * 86400000 - 1 }).kind, 'sent');
+  assert.deepStrictEqual([settle({ ...o, now: T0 + 7 * 86400000 }).kind, settle({ ...o, now: T0 + 7 * 86400000 }).drop], ['none', true]);
+  assert.strictEqual(settle({ ...o, stored: { readAt: T0 + 500, items: [] } }).kind, 'none', 'a catalog read after the request');
+  assert.strictEqual(settle({ ...o, stored: { readAt: T0 - 500, items: [] } }).kind, 'sent', 'an older catalog does not answer it');
+});
+test('a request whose message could not be identified: queued while any catalog request is in the Outbox, else sent', () => {
+  const r = { at: T0, mid: '' };
+  assert.strictEqual(settle({ request: r, outbox: [{ mid: 'X', to: ['INQUIRY'], subject: 'REQUEST' }] }).kind, 'queued', 'no Request again while a request sits in the Outbox');
+  assert.strictEqual(settle({ request: r }).kind, 'sent');
+  assert.strictEqual(settle({ request: r, lists: null }).kind, 'unknown');
+  assert.strictEqual(settle({ request: null }).kind, 'none');
+  assert.strictEqual(settle({ request: null }).drop, false);
+});
+test('a clock stepped back does not end the wait: up to an hour ahead counts as just made', () => {
+  assert.strictEqual(settle({ sent: [LISTMSG], now: T0 - 5000 }).kind, 'sent');
+  assert.strictEqual(settle({ sent: [LISTMSG], now: T0 - 3600000 }).kind, 'sent');
+  assert.strictEqual(settle({ sent: [LISTMSG], now: T0 - 3600001 }).kind, 'none', 'more than an hour ahead is not a real stamp');
   assert.strictEqual(C.pendingActive(T0, T0 + 7 * 86400000 - 1), true);
+  assert.strictEqual(C.pendingActive(0, T0), false);
+});
+test('which folders are known: Sent is fresh only when listed with or after the Outbox; a failed listing never counts', () => {
+  let l = C.noteListed(null, ['in', 'out', 'sent'], 'BOX');
+  assert.deepStrictEqual(l, { box: 'BOX', out: true, sentFresh: true });
+  l = C.noteListed(l, ['out'], 'BOX');
+  assert.deepStrictEqual(l, { box: 'BOX', out: true, sentFresh: false }, 'the Outbox changed: the Sent list is older now');
+  assert.strictEqual(C.noteListed(l, ['in', 'out'], 'BOX').sentFresh, false, 'Sent failed to list');
+  assert.strictEqual(C.noteListed(l, ['sent'], 'BOX').sentFresh, true);
+  assert.deepStrictEqual(C.noteListed(l, [], 'OTHER'), { box: 'OTHER', out: false, sentFresh: false }, 'another operator: nothing known');
+  assert.deepStrictEqual(C.noteListed(l, [], 'BOX'), l);
 });
 
 console.log('one Inbox message: skip, unreadable, accept or offer');
@@ -552,6 +587,7 @@ test('not a catalog: skipped, with no log line', () => {
 test('a mail that only mentions the column names is not a catalog, pending or not, and nothing of it is logged', () => {
   const words = { body: 'To ask, send the INQUIRY_ID.\nCATEGORY then INQUIRY_ID then SUBJECT are the columns.\n' + 'More words here.\n'.repeat(600) };
   assert.deepStrictEqual(C.decideMessage(words, { mid: 'M', pending: false }), { action: 'skip' });
+  assert.deepStrictEqual(C.decideMessage(words, { mid: 'M', pending: true }), { action: 'skip' }, 'pending or not');
   const mention = { body: 'Read about INQUIRY_ID.\n' + 'More words here.\n'.repeat(600) };
   assert.deepStrictEqual(C.decideMessage(mention, { mid: 'M', pending: true }), { action: 'skip' }, 'no header line: never flagged');
 });
@@ -565,7 +601,7 @@ test('unreadable: the header and at least 5 rows, or the header while a request 
   assert.ok(!/SECRET/.test(d.log));
   const few = { body: reply(ROWS.slice(0, 4), { tail: junk }) };
   assert.strictEqual(C.decideMessage(few, { mid: 'M', pending: false }).action, 'skip', '4 rows and nobody waiting: not flagged');
-  assert.strictEqual(C.decideMessage(few, { mid: 'M', pending: true }).action, 'unreadable', 'the operator is waiting for a catalog: say it could not be read');
+  assert.strictEqual(C.decideMessage(few, { mid: 'M', pending: true }).action, 'skip', 'a help text with the header never ends a wait');
   assert.strictEqual(C.UNREADABLE_MIN_ROWS, 5);
 });
 test('a catalog nobody asked for is offered, never taken', () => {
@@ -594,7 +630,7 @@ test('the forged 21-row mail in each state', () => {
   assert.strictEqual(C.decideMessage(FORGED, { mid: 'F', from: FORGED.from, pending: true, stored: stored400, now: T0 }).action, 'offer', 'pending, but it would shrink 400 items to 21');
   assert.strictEqual(C.decideMessage(FORGED, { mid: 'F', from: FORGED.from, pending: true, stored: null, now: T0 }).action, 'accept', 'pending and no catalog yet: the reply the operator asked for');
   assert.strictEqual(C.decideMessage(FORGED, { mid: 'F', from: FORGED.from, pending: false, declined: ['F'], now: T0 }).action, 'skip', 'declined once: not offered again');
-  assert.strictEqual(C.sourceRow({ items: [], offer: C.decideMessage(FORGED, { mid: 'F', from: '<i>x</i> STRANGER', pending: false, now: T0 }).offer }).text, 'A catalog message from <i>x</i>STRANGER is in your Inbox: 21 items.', 'the sender is plain text for the surface to show as text');
+  assert.strictEqual(C.sourceRow({ items: [], offer: C.decideMessage(FORGED, { mid: 'F', from: '<i>x</i> STRANGER', pending: false, now: T0 }).offer }).text, 'A catalog message from <i>x</i> STRANGER is in your Inbox: 21 items.', 'the sender is plain text for the surface to show as text');
 });
 test('declined offers are remembered by message, the last 50', () => {
   let d = [];
@@ -612,25 +648,64 @@ test('Use it: the offered message read again; gone or changed is no catalog', ()
   assert.strictEqual(C.useOffer(catMsg, null, T0), null);
 });
 
+test('while pending, only a catalog dated after the request (less 10 minutes) is the reply; an older one is offered and ends nothing', () => {
+  const at = Date.parse('2026-03-10T12:00:00Z');
+  const ctx = (date) => ({ mid: 'M1', from: 'SERVICE', date, pending: true, requestAt: at, stored: null, now: T0 });
+  const old = C.decideMessage(catMsg, ctx('2025-07-01T00:00:00Z'));
+  assert.deepStrictEqual([old.action, old.answers], ['offer', false], 'a catalog from last year is not what was asked for');
+  assert.strictEqual(C.decideMessage(catMsg, ctx('2026-03-10T11:49:59Z')).action, 'offer');
+  assert.strictEqual(C.decideMessage(catMsg, ctx('2026-03-10T11:50:00Z')).action, 'accept', '10 minutes of clock difference are allowed');
+  assert.strictEqual(C.decideMessage(catMsg, ctx('2026-03-10T12:05:00Z')).action, 'accept');
+  assert.deepStrictEqual([C.decideMessage(catMsg, ctx('not a date')).action, C.decideMessage(catMsg, ctx('not a date')).answers], ['offer', false]);
+  const shrink = C.decideMessage(catMsg, { ...ctx('2026-03-10T12:05:00Z'), stored: stored400 });
+  assert.deepStrictEqual([shrink.action, shrink.answers], ['offer', true], 'the reply arrived, but it is the operator who decides');
+  assert.strictEqual(C.REPLY_EARLY_MS, 600000);
+});
+
 console.log('what a finished pass changes');
-test('accepted: the wait is over, the flag is cleared, an outstanding offer is superseded and not offered again', () => {
-  const r = C.applyScan({ request: { at: T0, mid: 'L1' }, offer: { mid: 'OLDOFFER', from: 'X', count: 30 }, declined: ['D1'], mark: 'a', unreadable: true }, { accepted: { items: [1] }, clearPending: true, mark: 'b' });
-  assert.deepStrictEqual(r, { state: { request: null, offer: null, declined: ['D1', 'OLDOFFER'], mark: 'b', unreadable: false }, changed: true });
+const passOf = (o) => ({ accepted: null, offer: null, unreadableMid: '', clearPending: false, failed: false, examined: 1, left: 0, logs: [], ...o });
+test('accepted: the wait is over, the could-not-read note is cleared, an outstanding offer is superseded', () => {
+  const r = C.applyScan({ request: { at: T0, mid: 'L1' }, offer: { mid: 'OLDOFFER', from: 'X', count: 30 }, declined: ['D1'], unreadable: { mid: 'U1' } }, passOf({ accepted: { items: [1] }, clearPending: true }), ['A', 'B'], 5);
+  assert.deepStrictEqual(r.state, { request: null, offer: null, declined: ['D1', 'OLDOFFER'], unreadable: null, examined: ['A', 'B'] });
+  assert.deepStrictEqual([r.changed, r.save, r.lookDone, r.again], [true, true, true, false]);
 });
-test('offered: kept for the operator; an older offer is superseded; a pending request is cleared when the pass says so', () => {
+test('a request whose message is still in the Outbox is never cleared by a pass', () => {
+  const r = C.applyScan({ request: { at: T0, mid: 'L1' }, requestInOutbox: true }, passOf({ offer: { mid: 'M', from: 'X', count: 30 }, clearPending: true }), [], 5);
+  assert.deepStrictEqual(r.state.request, { at: T0, mid: 'L1' });
+});
+test('offered: kept for the operator; an older offer is superseded; the same offer again changes nothing', () => {
   const offer = { mid: 'M2', from: 'W1AW', date: '', count: 21, have: 400 };
-  const r = C.applyScan({ request: { at: T0, mid: 'L1' }, offer: { mid: 'M1', from: 'X', count: 30 }, declined: [] }, { offer, clearPending: true, mark: 'b' });
+  const r = C.applyScan({ request: { at: T0, mid: 'L1' }, offer: { mid: 'M1', from: 'X', count: 30 }, declined: [] }, passOf({ offer, clearPending: true }), [], 5);
   assert.deepStrictEqual([r.state.offer, r.state.declined, r.state.request, r.changed], [offer, ['M1'], null, true]);
-  const same = C.applyScan({ offer }, { offer });
-  assert.deepStrictEqual(same.state.declined, [], 'the same offer again is not declined');
+  const same = C.applyScan({ offer }, passOf({ offer, examined: 0 }), [], 5);
+  assert.deepStrictEqual([same.state.declined, same.changed, same.save], [[], false, false]);
 });
-test('unreadable: flagged once; nothing found: nothing changes but the mark', () => {
-  const r = C.applyScan({ request: { at: T0, mid: 'L1' } }, { unreadable: true, clearPending: true, mark: 'b' });
-  assert.deepStrictEqual([r.state.unreadable, r.state.request, r.changed], [true, null, true]);
-  assert.strictEqual(C.applyScan({ unreadable: true }, { unreadable: true }).changed, false);
-  const quiet = C.applyScan({ request: { at: T0, mid: 'L1' }, mark: 'a' }, { mark: 'b' });
-  assert.deepStrictEqual([quiet.changed, quiet.state.mark, quiet.state.request], [false, 'b', { at: T0, mid: 'L1' }]);
-  assert.strictEqual(C.applyScan({ mark: 'a' }, { mark: '', failed: true }).state.mark, 'a', 'a failed pass does not move the mark');
+test('unreadable: noted with its message, once; it survives a restart and a later pass that finds nothing', () => {
+  const r = C.applyScan({ request: { at: T0, mid: 'L1' } }, passOf({ unreadableMid: 'U1', clearPending: true }), [], 5);
+  assert.deepStrictEqual([r.state.unreadable, r.state.request, r.changed], [{ mid: 'U1' }, null, true]);
+  assert.strictEqual(C.applyScan({ unreadable: { mid: 'U1' } }, passOf({ unreadableMid: 'U1' }), [], 5).changed, false);
+  assert.deepStrictEqual(C.applyScan({ unreadable: { mid: 'U1' } }, passOf({}), [], 5).state.unreadable, { mid: 'U1' });
+  assert.strictEqual(C.cleanUnreadable({ mid: '' }), null);
+});
+test('the one-time look is finished only when nothing failed, there was mail, and none is left; more mail asks for another pass', () => {
+  assert.deepStrictEqual([C.applyScan({}, passOf({}), [], 5).lookDone, C.applyScan({}, passOf({}), [], 5).again], [true, false]);
+  assert.strictEqual(C.applyScan({}, passOf({}), [], 0).lookDone, false, 'the Inbox was not listed yet');
+  assert.deepStrictEqual([C.applyScan({}, passOf({ failed: true, left: 1 }), [], 5).lookDone, C.applyScan({}, passOf({ failed: true, left: 1 }), [], 5).again], [false, false]);
+  assert.deepStrictEqual([C.applyScan({}, passOf({ left: 300 }), [], 500).lookDone, C.applyScan({}, passOf({ left: 300 }), [], 500).again], [false, true]);
+});
+test('what is kept in settings; an empty value removes its key; the old date mark is removed', () => {
+  const s = C.toSettings({ request: { at: T0, mid: 'L1' }, offer: null, declined: [], examined: ['A'], unreadable: { mid: 'U' } });
+  assert.deepStrictEqual(s, { winlinkCatalogRequest: { at: T0, mid: 'L1' }, winlinkCatalogOffer: undefined, winlinkCatalogDeclined: undefined, winlinkCatalogExamined: ['A'], winlinkCatalogUnreadable: { mid: 'U' }, winlinkCatalogScannedTo: undefined });
+  assert.ok('winlinkCatalogScannedTo' in s);
+  const many = [];
+  for (let i = 0; i < 1200; i++) many.push('M' + i);
+  assert.deepStrictEqual([C.cleanExamined(many).length, C.cleanExamined(many)[999], C.EXAMINED_MAX], [1000, 'M1199', 1000]);
+});
+test('after Use it or No thanks: the answered offer goes; one that arrived meanwhile stays', () => {
+  const a = { mid: 'M1', from: 'X', count: 30 };
+  const b = { mid: 'M2', from: 'Y', date: '', count: 50, have: 0 };
+  assert.deepStrictEqual(C.afterOffer({ offer: a, declined: [], unreadable: { mid: 'U' } }, a, true), { offer: null, declined: ['M1'], unreadable: null });
+  assert.deepStrictEqual(C.afterOffer({ offer: b, declined: [], unreadable: { mid: 'U' } }, a, false), { offer: b, declined: ['M1'], unreadable: { mid: 'U' } });
 });
 
 console.log('which messages a pass reads');
@@ -638,12 +713,12 @@ const INBOX = [
   { mid: 'OLD', date: '2026-03-01T00:00:00Z', from: 'A' }, { mid: 'MID', date: '2026-03-10T00:00:00Z', from: 'B' },
   { mid: 'NEW1', date: '2026-03-11T00:00:00Z', from: 'C' }, { mid: 'NEW2', date: '2026-03-12T00:00:00Z', from: 'D' }, { mid: 'SEEN', date: '2026-03-13T00:00:00Z', from: 'E' },
 ];
-test('newer than the mark and not seen in this run; newest first; capped', () => {
-  assert.deepStrictEqual(C.toExamine(INBOX, { seen: new Set(['SEEN']), mark: '2026-03-10T00:00:00Z' }), ['NEW2', 'NEW1']);
-  assert.deepStrictEqual(C.toExamine(INBOX, { seen: new Set(), mark: '' }), ['SEEN', 'NEW2', 'NEW1', 'MID', 'OLD']);
-  assert.deepStrictEqual(C.toExamine(INBOX, { seen: new Set(), cap: 2 }), ['SEEN', 'NEW2']);
-  assert.deepStrictEqual(C.toExamine(INBOX, { seen: new Set(), mark: '2026-03-13T00:00:00Z' }), [], 'nothing is fetched twice across launches');
-  assert.deepStrictEqual(C.toExamine(null, {}), []);
+test('every message not examined before, whatever its date; newest-dated first; capped, with the rest counted', () => {
+  assert.deepStrictEqual(C.toExamine(INBOX, { seen: new Set(['SEEN']) }), { mids: ['NEW2', 'NEW1', 'MID', 'OLD'], left: 0 });
+  assert.deepStrictEqual(C.toExamine(INBOX, { seen: new Set(), cap: 2 }), { mids: ['SEEN', 'NEW2'], left: 3 });
+  assert.deepStrictEqual(C.toExamine(INBOX, { seen: new Set(INBOX.map((m) => m.mid)) }), { mids: [], left: 0 }, 'nothing is fetched twice across launches');
+  assert.deepStrictEqual(C.toExamine(null, {}), { mids: [], left: 0 });
+  assert.deepStrictEqual([C.shouldScan({ pending: true }), C.shouldScan({ want: true }), C.shouldScan({})], [true, true, false]);
 });
 
 console.log('what a surface is given');
@@ -685,6 +760,12 @@ test('more than 200 ticked: the first 200 go, the rest are counted', () => {
   assert.strictEqual(C.buildRequests(r.ids).length, 20);
   assert.strictEqual(C.overText(200, 30), '200 of the 230 items are in the Outbox. The other 30 are still ticked.');
   assert.strictEqual(C.overText(200, 1), '200 of the 201 items are in the Outbox. The other 1 is still ticked.');
+  const huge = Array.from({ length: 5300 }, (_, i) => ({ category: 'A', id: 'H' + i, subject: '', size: null }));
+  const big = C.checkRequest(huge.map((m) => m.id), huge.slice(0, 5000));
+  assert.deepStrictEqual([big.ok, big.ids.length, big.over], [true, 200, 5100], 'IDs past 5,000 are counted, not lost');
+});
+test('a star goes only on an item of the catalog in force; it can always be taken off', () => {
+  assert.deepStrictEqual([C.mayStar('PROP_WWV', true, null), C.mayStar('MADE_UP', true, null), C.mayStar('MADE_UP', false, null), C.mayStar('<b>', false, null), C.mayStar('LIST', true, FULL), C.mayStar('PUB_VARA', true, FULL)], [true, false, true, false, false, true]);
 });
 
 console.log('the source row');
@@ -835,7 +916,7 @@ async function realPat() {
     assert.strictEqual(p.modified, '2026/03/09 17:08');
     const after = (await c.mailbox('in')).find((m) => m.mid === queued.mid);
     assert.strictEqual(after.read, false, 'reading the message for its catalog does not mark it read');
-    assert.deepStrictEqual(C.toExamine(await c.mailbox('in'), { seen: new Set(), stored: null }), [queued.mid]);
+    assert.deepStrictEqual(C.toExamine(await c.mailbox('in'), { seen: new Set() }).mids, [queued.mid]);
   } finally {
     c.close();
     try { proc.kill(); } catch { /* gone */ }
@@ -870,7 +951,7 @@ async function scanTests() {
     assert.strictEqual(res.accepted.modified, '2026/03/09 17:08');
     assert.strictEqual(writes.length, 1);
     assert.strictEqual(res.clearPending, true, 'pending is cleared on read');
-    assert.strictEqual(res.mark, '2026-03-13T00:00:00Z', 'nothing here is fetched again on the next launch');
+    assert.strictEqual(res.left, 3, 'the three older ones were not needed');
     assert.ok(seen.has('SEEN') && seen.has('NEW2') && !seen.has('NEW1'));
     assert.deepStrictEqual(res.logs, ['catalog: read the Winlink catalog you asked for, from D (120 items)']);
   });
@@ -896,13 +977,13 @@ async function scanTests() {
     assert.deepStrictEqual(reads, ['SEEN', 'NEW2']);
     assert.strictEqual(res.failed, true);
     assert.ok(!seen.has('SEEN') && seen.has('NEW2'));
-    assert.strictEqual(res.mark, '', 'asked again on the next pass');
+    assert.strictEqual(res.left, 4, 'the failed one is asked for again on the next pass');
     assert.strictEqual(res.accepted.sourceMid, 'NEW2');
   });
   await check('a write that is refused or throws: nothing accepted, not seen, no success logged, pending kept', async () => {
     for (const o of [{ storeRefused: true }, { storeThrows: true }]) {
       const { res, seen } = await run({ pending: true, ...o });
-      assert.deepStrictEqual([res.accepted, res.failed, res.clearPending, res.logs.length, res.mark], [null, true, false, 0, '']);
+      assert.deepStrictEqual([res.accepted, res.failed, res.clearPending, res.logs.length, res.left], [null, true, false, 0, 4]);
       assert.ok(!seen.has('NEW2'));
     }
   });
@@ -911,13 +992,28 @@ async function scanTests() {
     for (let i = 0; i < 60; i++) junk.push('line ' + i + ' ' + 'pad '.repeat(20));
     const b = { ...box, SEEN: { body: reply(ROWS.slice(0, 8), { tail: junk }), from: 'E' }, NEW2: { body: 'x' }, NEW1: { body: 'y' } };
     const { res, reads } = await run({ pending: true, box: b });
-    assert.deepStrictEqual([res.unreadable, res.clearPending, res.accepted, res.offer], [true, true, null, null]);
+    assert.deepStrictEqual([res.unreadableMid, res.clearPending, res.accepted, res.offer], ['SEEN', true, null, null]);
     assert.strictEqual(reads.length, 5);
-    assert.strictEqual(res.mark, '2026-03-13T00:00:00Z');
   });
-  await check('nothing new since the mark: nothing is read', async () => {
-    const { res, reads } = await run({ pending: true, mark: '2026-03-13T00:00:00Z' });
-    assert.deepStrictEqual([reads.length, res.examined, res.mark], [0, 0, '2026-03-13T00:00:00Z']);
+  await check('everything examined before: nothing is read', async () => {
+    const { res, reads } = await run({ pending: true, seen: new Set(INBOX.map((m) => m.mid)) });
+    assert.deepStrictEqual([reads.length, res.examined, res.left], [0, 0, 0]);
+  });
+  await check('dates out of order or in the future never hide the reply: a small future-dated mail first, the older-dated 70 kB reply still read', async () => {
+    const list = [{ mid: 'FUTURE', date: '2031-01-01T00:00:00Z', from: 'X' }, { mid: 'NOTE', date: '2026-03-14T00:00:00Z', from: 'Y' }, { mid: 'REPLY', date: '2026-03-09T23:55:00Z', from: 'SERVICE' }];
+    const b = { FUTURE: { body: 'hi' }, NOTE: { body: 'hello' }, REPLY: catMsg };
+    const seen = new Set();
+    const go = (l) => C.scanInbox({ list: l, seen, pending: true, requestAt: Date.parse('2026-03-10T00:00:00Z'), stored: null, now: T0, read: (mid) => Promise.resolve(b[mid]), store: () => true });
+    const first = await go(list.slice(0, 2));
+    assert.deepStrictEqual([first.accepted, first.examined], [null, 2]);
+    const second = await go(list);
+    assert.strictEqual(second.accepted.sourceMid, 'REPLY', 'the reply listed later, with an older date, is still examined');
+    assert.strictEqual(second.examined, 1, 'and only it');
+  });
+  await check('pending, and the Inbox holds a catalog dated long before the request: offered, the wait goes on', async () => {
+    const list = [{ mid: 'ANCIENT', date: '2025-07-01T00:00:00Z', from: 'SERVICE' }];
+    const res = await C.scanInbox({ list, seen: new Set(), pending: true, requestAt: T0, stored: null, now: T0, read: () => Promise.resolve(catMsg), store: () => { throw new Error('must not be written'); } });
+    assert.deepStrictEqual([res.accepted, res.offer.mid, res.clearPending], [null, 'ANCIENT', false]);
   });
   await check('capped: two reads in a pass of two', async () => {
     const { reads } = await run({ pending: false, cap: 2, box: { ...box, NEW2: { body: 'n' } } });
