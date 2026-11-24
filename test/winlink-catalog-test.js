@@ -564,5 +564,93 @@ test('the same file loads in the mail window as window.WinlinkCatalog', () => {
   assert.ok(!/=>|`|\bconst\b|\blet\b/.test(src.replace(/\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '')), 'plain ES5, like the other dual-mode modules');
 });
 
-console.log(`\n${pass} passed, ${fail} failed`);
-process.exit(fail ? 1 : 0);
+// ── a real Pat, offline (skipped when there is none) ──────────────────────
+// Pat takes a request To INQUIRY into its Outbox with the body byte for byte,
+// and reading an Inbox message does not mark it read: the two things the
+// glue in main.js relies on. Pat never connects here (no --listen, a closed
+// proxy, its own folders).
+async function realPat() {
+  const fs = require('fs');
+  const os = require('os');
+  const path = require('path');
+  const net = require('net');
+  const { spawn } = require('child_process');
+  const WinlinkPat = require('../lib/winlink-pat');
+  const { WinlinkClient } = require('../lib/winlink-client');
+  const bin = process.env.POTACAT_TEST_PAT || path.join(__dirname, '..', 'assets', 'pat', WinlinkPat.patBinaryName());
+  if (!fs.existsSync(bin)) return 'skip';
+  const { patTestEnv } = require('./modem-loopback/pat-env');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'potacat-catalog-'));
+  const port = await new Promise((resolve) => { const s = net.createServer(); s.listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => resolve(p)); }); });
+  const cfgPath = path.join(dir, 'config.json');
+  fs.writeFileSync(cfgPath, JSON.stringify(WinlinkPat.buildPatConfig({ mycall: 'N0CALL', httpPort: port }), null, 2));
+  const mbox = path.join(dir, 'mailbox');
+  fs.mkdirSync(mbox, { recursive: true });
+  const args = WinlinkPat.buildPatArgs({ configPath: cfgPath, mboxDir: mbox, logPath: path.join(dir, 'pat.log'), eventLogPath: path.join(dir, 'pat-events.json'), formsDir: path.join(dir, 'forms') });
+  const proc = spawn(bin, args, { stdio: 'ignore', env: patTestEnv(dir, ['N0CALL']), windowsHide: true });
+  const c = new WinlinkClient({ port });
+  try {
+    let up = false;
+    for (let i = 0; i < 60 && !up; i++) { try { await c.status(); up = true; } catch { await new Promise((r) => setTimeout(r, 250)); } }
+    assert.ok(up, 'Pat answered');
+    // 12 items: two messages, 10 and 2, exactly as built.
+    const ids = FULL.slice(0, 12).map((i) => i.id);
+    const msgs = C.buildRequests(ids);
+    for (const m of msgs) {
+      const f = composeFields({ to: m.to, subject: m.subject, body: m.body });
+      assert.strictEqual(f.ok, true, f.error);
+      await c.send(f.fields, []);
+    }
+    const out = await c.mailbox('out');
+    assert.strictEqual(out.length, 2, 'two request messages in the Outbox');
+    const bodies = [];
+    for (const q of out) {
+      assert.deepStrictEqual([q.to.join(','), q.subject], ['INQUIRY', 'REQUEST']);
+      bodies.push((await c.message('out', q.mid)).body.replace(/\r\n/g, '\n').trim());
+    }
+    assert.deepStrictEqual(bodies.sort(), msgs.map((m) => m.body).sort(), 'Pat holds the IDs as sent, one per line');
+    // A catalog reply in the Inbox: a message file put there, as a session would.
+    const big = reply(ROWS.concat(ROWS.map((r, i) => [r[0], 'EXTRA' + i, r[2] + ' again and again and again and again and again', r[3]])).concat(ROWS.map((r, i) => [r[0], 'MORE' + i, r[2] + ' once more with a longer line of words', r[3]])));
+    assert.ok(big.length > C.LIST_MIN_BYTES);
+    const f = composeFields({ to: 'N0CALL', subject: 'INQUIRY: LIST', body: big });
+    await c.send(f.fields, []);
+    const queued = (await c.mailbox('out')).find((m) => m.subject === 'INQUIRY: LIST');
+    const outDir = path.join(mbox, 'N0CALL', 'out');
+    const file = fs.readdirSync(outDir).find((n) => n.indexOf(queued.mid) === 0);
+    assert.ok(file, 'the message file: ' + fs.readdirSync(outDir).join(' '));
+    fs.mkdirSync(path.join(mbox, 'N0CALL', 'in'), { recursive: true });
+    fs.renameSync(path.join(outDir, file), path.join(mbox, 'N0CALL', 'in', file));
+    await c.markRead('in', queued.mid, false);
+    const before = (await c.mailbox('in')).find((m) => m.mid === queued.mid);
+    assert.strictEqual(before.read, false, 'unread to begin with');
+    const msg = await c.message('in', queued.mid);
+    assert.strictEqual(C.looksLikeCatalog(msg), true);
+    const p = C.parseCatalogList(msg.body);
+    assert.strictEqual(p.ok, true, p.reason);
+    assert.strictEqual(p.items.length, 120);
+    assert.strictEqual(p.modified, '2026/03/09 17:08');
+    const after = (await c.mailbox('in')).find((m) => m.mid === queued.mid);
+    assert.strictEqual(after.read, false, 'reading the message for its catalog does not mark it read');
+    assert.deepStrictEqual(C.toExamine(await c.mailbox('in'), { seen: new Set(), stored: null }), [queued.mid]);
+  } finally {
+    c.close();
+    try { proc.kill(); } catch { /* gone */ }
+    await new Promise((r) => setTimeout(r, 300));
+    try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* Pat still has a file open: the temp folder is cleaned by the OS */ }
+  }
+  return 'ok';
+}
+
+(async () => {
+  console.log('a real Pat, offline');
+  const name = 'Pat queues the request To INQUIRY as built; reading the catalog message leaves it unread';
+  let skipped = 0;
+  try {
+    const r = await realPat();
+    if (r === 'skip') { skipped++; console.log('  skip ' + name + ' (no Pat binary: assets/pat or POTACAT_TEST_PAT)'); }
+    else { pass++; console.log('  ok  ' + name); }
+  } catch (e) { fail++; console.log('  FAIL ' + name + '\n       ' + (e && e.stack ? e.stack.split('\n').slice(0, 3).join('\n       ') : e)); }
+  console.log(`\n${pass} passed, ${fail} failed${skipped ? `, ${skipped} skipped` : ''}`);
+  // exitCode, not exit(): exiting under a just-closed fetch socket trips a libuv assert on Windows.
+  process.exitCode = fail ? 1 : 0;
+})();
