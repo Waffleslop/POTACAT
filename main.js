@@ -367,7 +367,7 @@ const { KenwoodCodec } = require('./lib/codecs/kenwood-codec');
 const { YaesuLegacyCodec } = require('./lib/codecs/yaesu-legacy-codec');
 const { RigctldCodec } = require('./lib/codecs/rigctld-codec');
 // flrig holds the radio, POTACAT is one of its clients (KM4CFT 2026-10-25).
-const { FlrigCodec, flrigModel } = require('./lib/codecs/flrig-codec');
+const { FlrigCodec, flrigModel, normalizeRadioMode } = require('./lib/codecs/flrig-codec');
 const { FlrigTransport, probeFlrig } = require('./lib/flrig-transport');
 const { CivCodec } = require('./lib/codecs/civ-codec');
 const IcomScope = require('./lib/icom-scope');
@@ -602,6 +602,7 @@ const CwSideband = require('./lib/cw-sideband'); // #753: CW or CW-R (CW-U or CW
 const FreedvPtt = require('./lib/freedv-ptt'); // FreeDV mode: voice PTT refused until FreeDV transmit exists
 const FreedvStatus = require('./lib/freedv-status'); // freedv-status to ECHOCAT: state, modes, sync, SNR, plain reason
 const FreedvDisplayMode = require('./lib/freedv-display-mode'); // #716: FREEDV-<codec> on every surface while the engine runs
+const DataModePicker = require('./lib/data-mode-picker'); // DIGU / DIGL in a mode picker: which radios have them, the badge
 const { FreedvDiag } = require('./lib/freedv-diag'); // #717: audio in, sync and a 30 s summary in the session log
 const { decideDialFollow, followsKnob } = require('./lib/jtcat-dial-follow');
 const JtcatRxSource = require('./lib/jtcat-rx-source'); // #243: JTCAT can hear a WebSDR instead of the radio
@@ -3920,6 +3921,9 @@ function getRigCapabilities(rigType) {
   caps.afgain = rigSupportsAfGain(rigType);
   // The bands this radio is used on (null = not restricted), lib/rig-bands.js.
   caps.bands = activeRigBands();
+  // The data sub-modes (DIGU / DIGL) this radio can be set to: ECHOCAT Web
+  // offers exactly these in its mode picker (lib/data-mode-picker.js).
+  caps.dataModes = DataModePicker.dataModesFor(rigDataModeInput(rigType));
   // #293, #768: Power Off where POTACAT can switch the radio back on (a
   // direct serial port, an SCU-LAN10), unless the operator chose otherwise
   // for this rig: its stored allowPowerOffNoWake, true or false, wins. Every
@@ -3942,6 +3946,21 @@ function getRigCapabilities(rigType) {
     if (caps.minPower != null && Number(caps.minPower) > caps.maxPower) caps.minPower = caps.maxPower;
   }
   return caps;
+}
+
+/** What lib/data-mode-picker.js needs to know about the live link. */
+function rigDataModeInput(rigType) {
+  const codec = cat && cat._codec;
+  let model = null;
+  try { model = getActiveRigModel(); } catch { model = null; }
+  return {
+    rigType,
+    protocol: model && model.protocol,
+    dataFlagUnsupported: !!(codec && codec._dataModeUnsupported),
+    resolve: codec instanceof KenwoodCodec ? (m) => codec.resolveMode(m, _currentFreqHz || 14074000) : null,
+    hasDaCmd: !!(codec instanceof KenwoodCodec && codec._cmds && codec._cmds.setDa),
+    radioModes: codec instanceof FlrigCodec && Array.isArray(codec._radioModes) ? codec._radioModes.map(normalizeRadioMode) : null,
+  };
 }
 
 function _rigCapabilitiesForType(rigType) {
@@ -35320,6 +35339,12 @@ function broadcastRemoteRadioStatus() {
   // WSJT-X has been heard in the last 60 s. ECHOCAT shows the chip and note.
   status.wsjtxMode = !!settings.enableWsjtx;
   status.wsjtxHeard = !!(settings.enableWsjtx && _wsjtxHeard);
+  // An Icom reports USB/LSB with its DATA flag apart (1A 06): say it, so a
+  // client can show DIGU / DIGL. Only with a mode, never while transmitting
+  // (a voice over in USB-D is not the operator's mode) and never while a
+  // voice request is being sent as DATA (#24). Absent = the client keeps its last.
+  const dms = cat && cat._codec && cat._codec.dataModeState;
+  status.modeData = (modeVal && dms && !_isEffectivelyTransmitting() && !cat._voiceSentAsData) ? !!dms.on : undefined;
   remoteServer.broadcastRadioStatus(status);
 }
 
