@@ -177,7 +177,7 @@ test('hostile input never throws: not a string, empty, binary, only quotes', () 
 test('lines built to be slow are not: thousands of spaces, repeated header words', () => {
   const rows = ROWS.map((r) => line(r));
   const slow = [];
-  for (let i = 0; i < 1500; i++) slow.push('CAT' + i + ' ID' + i + ' "s"' + ' '.repeat(900) + 'x');
+  for (let i = 0; i < 1500; i++) slow.push('CAT' + i + ' ID' + i + ' "s"' + ' '.repeat(900) + '7');
   for (let i = 0; i < 300; i++) slow.push('CATEGORY INQUIRY_ID '.repeat(48));
   const t0 = Date.now();
   const pre = [];
@@ -185,8 +185,41 @@ test('lines built to be slow are not: thousands of spaces, repeated header words
   const p = C.parseCatalogList(pre.concat([HEADER], rows, slow).join('\n'));
   assert.ok(Date.now() - t0 < 1500, 'took ' + (Date.now() - t0) + ' ms');
   assert.strictEqual(p.ok, true);
-  assert.strictEqual(p.items.length, 40 + 1500, 'a row with unknown text after the subject is still a row');
-  assert.strictEqual(p.items[45].size, null);
+  assert.strictEqual(p.items.length, 40 + 1500);
+  assert.strictEqual(p.items[45].size, 7);
+  const quotes = [];
+  for (let i = 0; i < 1500; i++) quotes.push('CAT ID' + i + ' ' + '" '.repeat(480));
+  const t1 = Date.now();
+  C.parseCatalogList([HEADER].concat(rows, quotes).join('\n'));
+  assert.ok(Date.now() - t1 < 1500, 'quotes: ' + (Date.now() - t1) + ' ms');
+});
+test('the subject closes at the quote before the size, the date or the end, not at the last quote on the line', () => {
+  const rows = ROWS.map((r) => line(r));
+  rows.push('CATX  Q1  "Forecast for "Big Bend" area"   5855   2026/03/01 03:44   [G]');
+  rows.push('CATX  Q2  "Plain subject"   100   2026/03/01 03:44   [G]   "a later column"');
+  rows.push('CATX  Q3  "Ends in a quote""');
+  rows.push('CATX  Q4  "No size here"   2026/03/01 03:44   "note"');
+  rows.push('CATX  Q5  "Flag only"   [L]');
+  rows.push('CATX  Q6  "Never closed properly" and more words');
+  const p = C.parseCatalogList([HEADER].concat(rows).join('\n'));
+  const get = (id) => p.items.find((i) => i.id === id);
+  assert.deepStrictEqual(get('Q1'), { category: 'CATX', id: 'Q1', subject: 'Forecast for "Big Bend" area', size: 5855 });
+  assert.deepStrictEqual(get('Q2'), { category: 'CATX', id: 'Q2', subject: 'Plain subject', size: 100 }, 'a quote in a later column does not stretch the subject');
+  assert.strictEqual(get('Q3').subject, 'Ends in a quote"');
+  assert.deepStrictEqual([get('Q4').subject, get('Q4').size], ['No size here', null]);
+  assert.strictEqual(get('Q5').subject, 'Flag only');
+  assert.strictEqual(get('Q6'), undefined, 'no closing quote before a size, a date or the end: not a row');
+  assert.strictEqual(p.skipped, 1);
+});
+test('a size with thousands separators', () => {
+  const rows = ROWS.map((r) => line(r));
+  rows.push('CATX  T1  "Comma size"   219,867   2026/03/01 03:44');
+  rows.push('CATX  T2  "Small"   1,234');
+  rows.push('CATX  T3  "Not a size"   12,34');
+  const p = C.parseCatalogList([HEADER].concat(rows).join('\n'));
+  assert.strictEqual(p.items.find((i) => i.id === 'T1').size, 219867);
+  assert.strictEqual(p.items.find((i) => i.id === 'T2').size, 1234);
+  assert.strictEqual(p.items.find((i) => i.id === 'T3'), undefined);
 });
 test('an ID or category with markup or spaces in it is never a row', () => {
   const rows = ROWS.map((r) => line(r));
@@ -240,7 +273,11 @@ test('friendly names for the four we name, Weather for WX_, the code for the res
   assert.strictEqual(C.categoryName('WL2K_RMS'), 'Gateway lists');
   assert.strictEqual(C.categoryName('WL2K_USERS'), 'Stations');
   assert.strictEqual(C.categoryName('WL2K_HELP'), 'Help');
-  assert.strictEqual(C.categoryName('WX_US_TX'), 'Weather: US TX');
+  assert.strictEqual(C.categoryName('WX_US_TX'), 'Weather: Texas');
+  assert.strictEqual(C.categoryName('wx_us_nj'), 'Weather: New Jersey');
+  assert.strictEqual(C.categoryName('WX_US_ZZ'), 'Weather: US ZZ', 'not a state: the code, with spaces');
+  assert.strictEqual(C.categoryName('WX_US_RAD'), 'Weather: US RAD');
+  assert.strictEqual(Object.keys(C.US_STATES).length, 52);
   assert.strictEqual(C.categoryName('WX_FAX'), 'Weather: FAX');
   assert.strictEqual(C.categoryName('SAT_PIX'), 'SAT_PIX');
 });
@@ -272,7 +309,7 @@ test('groups: our four first in a fixed order, then the rest by name, each with 
   const g = C.groupItems(C.mergeCatalog(FULL).items);
   assert.deepStrictEqual(g.map((x) => x.code), ['PROPAGATION', 'WL2K_RMS', 'WL2K_USERS', 'WL2K_HELP', 'SAT_PIX', 'WX_US_TX']);
   assert.deepStrictEqual(g.map((x) => x.items.length), [4, 4, 2, 4, 12, 14]);
-  assert.strictEqual(g[5].name, 'Weather: US TX');
+  assert.strictEqual(g[5].name, 'Weather: Texas');
   const s = C.groupItems(C.mergeCatalog(null).items);
   assert.deepStrictEqual(s.map((x) => x.name), ['Propagation', 'Gateway lists', 'Stations', 'Help']);
 });
@@ -295,6 +332,8 @@ test('finds by our name, Winlink\'s subject, the ID and the category, every word
   assert.strictEqual(ids('wx_us_tx').length, 14);
   assert.strictEqual(ids('texas forecast 3').length, 2, 'TX_ZON_3 and TX_ZON_13');
   assert.strictEqual(ids('weather').length, 14, 'the friendly category name');
+  assert.strictEqual(ids('texas forecast').length, 14, 'the placeholder example finds the Texas items');
+  assert.strictEqual(C.searchItems(C.mergeCatalog([{ category: 'WX_US_TX', id: 'TX_TAB', subject: 'Tabular state forecast', size: 1 }]).items, 'texas').length, 1, 'by the state name alone');
   assert.deepStrictEqual(ids('packet gateways'), ['PUB_PACKET']);
   assert.deepStrictEqual(ids('zzzz'), []);
   assert.deepStrictEqual(ids('   '), []);
@@ -365,7 +404,8 @@ test('formatSize: bytes, then whole KB of 1000 bytes', () => {
   assert.strictEqual(C.formatSize(null), '');
   assert.strictEqual(C.formatSize(-5), '');
   assert.strictEqual(C.isLarge({ size: 60000 }), true);
-  assert.strictEqual(C.isLarge({ size: 59999 }), false);
+  assert.strictEqual(C.isLarge({ size: 59499 }), false);
+  assert.strictEqual(C.isLarge({ size: 59500 }), true, 'it reads 60 KB, so it is tagged');
   assert.strictEqual(C.isLarge({ size: null }), false);
   assert.strictEqual(C.showLargeTag({ id: 'X', name: '', subject: 'Big thing', size: 70000 }), true);
   assert.strictEqual(C.showLargeTag({ id: 'PUB_PACKET', name: 'Packet gateways and frequencies (large)', subject: '', size: 219867 }), false, 'the name says it already');
@@ -381,11 +421,13 @@ test('Telnet: no advice at any size', () => {
   assert.strictEqual(C.sizeAdvice([it(100000)], 'telnet').advice, '');
 });
 test('radio, under 15 KB: no advice', () => {
-  for (const mode of ['ardop', 'vara', 'varafm', 'packet', 'mercury']) assert.strictEqual(C.sizeAdvice([it(14999)], mode).advice, '', mode);
+  for (const mode of ['ardop', 'vara', 'varafm', 'packet', 'mercury']) assert.strictEqual(C.sizeAdvice([it(14499)], mode).advice, '', mode);
 });
 test('radio, 15 KB to under 60 KB: several minutes', () => {
   assert.strictEqual(C.sizeAdvice([it(15000)], 'ardop').advice, 'About 15 KB. That is several minutes over the radio.');
-  assert.strictEqual(C.sizeAdvice([it(30000), it(29999)], 'packet').advice, 'About 60 KB. That is several minutes over the radio.');
+  assert.strictEqual(C.sizeAdvice([it(30000), it(29499)], 'packet').advice, 'About 59 KB. That is several minutes over the radio.');
+  assert.strictEqual(C.sizeAdvice([it(14500)], 'ardop').advice, 'About 15 KB. That is several minutes over the radio.', 'the figure shown decides: 15 KB is never without the line');
+  assert.strictEqual(C.sizeAdvice([it(59500)], 'ardop').advice, 'About 60 KB. That is slow over the radio; consider Telnet for this one.');
 });
 test('radio, 60 KB or more: slow, consider Telnet', () => {
   assert.strictEqual(C.sizeAdvice([it(60000)], 'vara').advice, 'About 60 KB. That is slow over the radio; consider Telnet for this one.');
@@ -445,14 +487,13 @@ test('Your picks shows only items the current list holds', () => {
   assert.deepStrictEqual(C.pickItems(view.items, p).map((i) => i.id), ['PROP_WWV']);
 });
 
-console.log('the stored catalog and the pending request');
+console.log('the stored catalog');
+const T0 = 1770000000000;
+const BIG = reply(ROWS.concat(ROWS.map((r, i) => [r[0], 'EXTRA' + i, r[2] + ' again and again and again and again and again', r[3]])).concat(ROWS.map((r, i) => [r[0], 'MORE' + i, r[2] + ' once more with a longer line of words', r[3]])));
+const catMsg = { body: BIG, from: 'SERVICE' };
 test('what is kept on disk, cleaned on the way in and out', () => {
-  const s = C.storedFrom(C.parseCatalogList(LIST), { mid: 'ABC123', date: '2026-03-10T14:15:00Z' }, 1770000000000);
-  assert.strictEqual(s.modified, '2026/03/09 17:08');
-  assert.strictEqual(s.sourceMid, 'ABC123');
-  assert.strictEqual(s.sourceDate, '2026-03-10T14:15:00Z');
-  assert.strictEqual(s.readAt, 1770000000000);
-  assert.strictEqual(s.items.length, 40);
+  const s = C.storedFrom(C.parseCatalogList(LIST), { mid: 'ABC123', date: '2026-03-10T14:15:00Z', from: 'SERVICE' }, T0);
+  assert.deepStrictEqual([s.modified, s.sourceMid, s.sourceDate, s.sourceFrom, s.readAt, s.items.length], ['2026/03/09 17:08', 'ABC123', '2026-03-10T14:15:00Z', 'SERVICE', T0, 40]);
   assert.deepStrictEqual(C.cleanStored(JSON.parse(JSON.stringify(s))), s);
   assert.strictEqual(C.cleanStored(null), null);
   assert.strictEqual(C.cleanStored({ items: [] }), null);
@@ -461,65 +502,207 @@ test('what is kept on disk, cleaned on the way in and out', () => {
   assert.deepStrictEqual(dirty.items, [{ category: 'A', id: 'OK', subject: '5', size: null }]);
   assert.strictEqual(dirty.modified, '');
 });
-test('which Inbox messages are worth reading: not seen, not the stored one, not older than it; newest first, capped', () => {
-  const list = [
-    { mid: 'OLD', date: '2026-03-01T00:00:00Z' }, { mid: 'SRC', date: '2026-03-10T00:00:00Z' },
-    { mid: 'NEW1', date: '2026-03-11T00:00:00Z' }, { mid: 'NEW2', date: '2026-03-12T00:00:00Z' }, { mid: 'SEEN', date: '2026-03-13T00:00:00Z' },
-  ];
-  const stored = { sourceMid: 'SRC', sourceDate: '2026-03-10T00:00:00Z' };
-  assert.deepStrictEqual(C.toExamine(list, { seen: new Set(['SEEN']), stored }), ['NEW2', 'NEW1']);
-  assert.deepStrictEqual(C.toExamine(list, { seen: new Set(), stored: null }), ['SEEN', 'NEW2', 'NEW1', 'SRC', 'OLD']);
-  assert.deepStrictEqual(C.toExamine(list, { seen: new Set(), stored: null, cap: 2 }), ['SEEN', 'NEW2']);
+test('a sender is one plain word, whatever the mail says', () => {
+  assert.strictEqual(C.cleanSender('SERVICE@winlink.org'), 'SERVICE@winlink.org');
+  assert.strictEqual(C.cleanSender('<b>x</b>\r\n  evil'), '<b>x</b>evil');
+  assert.strictEqual(C.cleanSender('a'.repeat(200)).length, 60);
+  assert.strictEqual(C.cleanSender(null), 'an unknown sender');
+});
+
+console.log('the pending request, tied to the message');
+const LISTMSG = { mid: 'L1', to: ['INQUIRY'], subject: 'REQUEST' };
+test('the request just queued is found by what was not in the Outbox before', () => {
+  const before = [{ mid: 'A', to: ['INQUIRY'], subject: 'REQUEST' }, { mid: 'B', to: ['W1AW'], subject: 'Hi' }];
+  assert.strictEqual(C.newRequestMid(before, [LISTMSG].concat(before)), 'L1');
+  assert.strictEqual(C.newRequestMid(before, before), '');
+  assert.strictEqual(C.newRequestMid(before, [{ mid: 'N', to: ['W1AW'], subject: 'REQUEST' }].concat(before)), '', 'not to INQUIRY');
+  assert.strictEqual(C.isRequestEntry({ to: ['inquiry@winlink.org'], subject: ' request ' }), true);
+});
+test('in the Outbox: queued, however long it sits there', () => {
+  const o = { request: { at: T0, mid: 'L1' }, outbox: [LISTMSG], sent: [], listsKnown: true };
+  assert.strictEqual(C.pendingState({ ...o, now: T0 + 1000 }), 'queued');
+  assert.strictEqual(C.pendingState({ ...o, now: T0 + 30 * 86400000 }), 'queued');
+});
+test('deleted from the Outbox before it went: nothing is pending, at once', () => {
+  assert.strictEqual(C.pendingState({ request: { at: T0, mid: 'L1' }, outbox: [], sent: [], listsKnown: true, now: T0 + 1000 }), 'none');
+});
+test('sent: pending with a way out, until a catalog is read or 7 days pass', () => {
+  const o = { request: { at: T0, mid: 'L1' }, outbox: [], sent: [LISTMSG], listsKnown: true };
+  assert.strictEqual(C.pendingState({ ...o, now: T0 + 1000 }), 'sent');
+  assert.strictEqual(C.pendingState({ ...o, now: T0 + 7 * 86400000 - 1 }), 'sent');
+  assert.strictEqual(C.pendingState({ ...o, now: T0 + 7 * 86400000 }), 'none');
+  assert.strictEqual(C.pendingState({ ...o, now: T0 + 1000, stored: { readAt: T0 + 500, items: [] } }), 'none', 'a catalog read after the request');
+  assert.strictEqual(C.pendingState({ ...o, now: T0 + 1000, stored: { readAt: T0 - 500, items: [] } }), 'sent', 'an older catalog does not answer it');
+});
+test('the folders are not listed yet: a request stays as it was; one that cannot be identified counts as sent', () => {
+  assert.strictEqual(C.pendingState({ request: { at: T0, mid: 'L1' }, listsKnown: false, now: T0 + 1000 }), 'queued');
+  assert.strictEqual(C.pendingState({ request: { at: T0, mid: '' }, outbox: [], sent: [], listsKnown: true, now: T0 + 1000 }), 'sent');
+  assert.strictEqual(C.pendingState({ request: { at: T0, mid: '' }, listsKnown: true, now: T0 + 8 * 86400000 }), 'none');
+  assert.strictEqual(C.pendingState({ request: null, now: T0 }), 'none');
+  assert.strictEqual(C.pendingState({ request: { at: T0 + 3600000, mid: '' }, listsKnown: true, now: T0 }), 'none', 'a stamp from the future does not lock the button');
+  assert.strictEqual(C.pendingActive(T0, T0 + 7 * 86400000 - 1), true);
+});
+
+console.log('one Inbox message: skip, unreadable, accept or offer');
+const stored400 = { items: Array.from({ length: 400 }, (_, i) => ({ category: 'A', id: 'S' + i, subject: '', size: null })), readAt: 1 };
+const FORGED = { body: reply(ROWS.slice(0, 21)) + '\n' + ' '.repeat(5000), from: 'STRANGER@example.com' };
+test('not a catalog: skipped, with no log line', () => {
+  for (const m of [{ body: 'hello' }, { body: 'x'.repeat(9000) }, null]) assert.deepStrictEqual(C.decideMessage(m, { mid: 'M', pending: true }), { action: 'skip' });
+});
+test('a mail that only mentions the column names is not a catalog, pending or not, and nothing of it is logged', () => {
+  const words = { body: 'To ask, send the INQUIRY_ID.\nCATEGORY then INQUIRY_ID then SUBJECT are the columns.\n' + 'More words here.\n'.repeat(600) };
+  assert.deepStrictEqual(C.decideMessage(words, { mid: 'M', pending: false }), { action: 'skip' });
+  const mention = { body: 'Read about INQUIRY_ID.\n' + 'More words here.\n'.repeat(600) };
+  assert.deepStrictEqual(C.decideMessage(mention, { mid: 'M', pending: true }), { action: 'skip' }, 'no header line: never flagged');
+});
+test('unreadable: the header and at least 5 rows, or the header while a request is pending; the log has counts only', () => {
+  const junk = [];
+  for (let i = 0; i < 60; i++) junk.push('SECRET LINE OF MAIL number ' + i + ' ' + 'pad '.repeat(20));
+  const broken = { body: reply(ROWS.slice(0, 6), { tail: junk }), from: 'SERVICE' };
+  const d = C.decideMessage(broken, { mid: 'M', pending: false, from: 'SERVICE' });
+  assert.strictEqual(d.action, 'unreadable');
+  assert.strictEqual(d.log, 'catalog: a message from SERVICE looks like the Winlink catalog but its table could not be read (6 rows read, 60 lines skipped)');
+  assert.ok(!/SECRET/.test(d.log));
+  const few = { body: reply(ROWS.slice(0, 4), { tail: junk }) };
+  assert.strictEqual(C.decideMessage(few, { mid: 'M', pending: false }).action, 'skip', '4 rows and nobody waiting: not flagged');
+  assert.strictEqual(C.decideMessage(few, { mid: 'M', pending: true }).action, 'unreadable', 'the operator is waiting for a catalog: say it could not be read');
+  assert.strictEqual(C.UNREADABLE_MIN_ROWS, 5);
+});
+test('a catalog nobody asked for is offered, never taken', () => {
+  const d = C.decideMessage(catMsg, { mid: 'M1', from: 'SERVICE', date: '2026-03-10T14:15:00Z', pending: false, stored: null, now: T0 });
+  assert.strictEqual(d.action, 'offer');
+  assert.deepStrictEqual(d.offer, { mid: 'M1', from: 'SERVICE', date: '2026-03-10T14:15:00Z', count: 120, have: 0 });
+  assert.strictEqual(d.log, 'catalog: a catalog message from SERVICE is in the Inbox (120 items); it is used only if the operator says so');
+  assert.strictEqual(d.stored, undefined);
+});
+test('a catalog the operator asked for is accepted', () => {
+  const d = C.decideMessage(catMsg, { mid: 'M1', from: 'SERVICE', date: '2026-03-10T14:15:00Z', pending: true, stored: null, now: T0 });
+  assert.strictEqual(d.action, 'accept');
+  assert.deepStrictEqual([d.stored.items.length, d.stored.sourceMid, d.stored.sourceFrom, d.stored.readAt], [120, 'M1', 'SERVICE', T0]);
+  assert.strictEqual(d.log, 'catalog: read the Winlink catalog you asked for, from SERVICE (120 items)');
+});
+test('asked for, but fewer than half the items of the catalog in use: offered, with both counts', () => {
+  const d = C.decideMessage(catMsg, { mid: 'M1', from: 'SERVICE', pending: true, stored: stored400, now: T0 });
+  assert.strictEqual(d.action, 'offer');
+  assert.deepStrictEqual([d.offer.count, d.offer.have], [120, 400]);
+  const half = { items: stored400.items.slice(0, 240) };
+  assert.strictEqual(C.decideMessage(catMsg, { mid: 'M1', pending: true, stored: half, now: T0 }).action, 'accept', 'exactly half is not a shrink');
+});
+test('the forged 21-row mail in each state', () => {
+  assert.strictEqual(C.decideMessage(FORGED, { mid: 'F', from: FORGED.from, pending: false, stored: null, now: T0 }).action, 'offer', 'nothing asked for: the operator decides');
+  assert.strictEqual(C.decideMessage(FORGED, { mid: 'F', from: FORGED.from, pending: false, stored: stored400, now: T0 }).action, 'offer');
+  assert.strictEqual(C.decideMessage(FORGED, { mid: 'F', from: FORGED.from, pending: true, stored: stored400, now: T0 }).action, 'offer', 'pending, but it would shrink 400 items to 21');
+  assert.strictEqual(C.decideMessage(FORGED, { mid: 'F', from: FORGED.from, pending: true, stored: null, now: T0 }).action, 'accept', 'pending and no catalog yet: the reply the operator asked for');
+  assert.strictEqual(C.decideMessage(FORGED, { mid: 'F', from: FORGED.from, pending: false, declined: ['F'], now: T0 }).action, 'skip', 'declined once: not offered again');
+  assert.strictEqual(C.sourceRow({ items: [], offer: C.decideMessage(FORGED, { mid: 'F', from: '<i>x</i> STRANGER', pending: false, now: T0 }).offer }).text, 'A catalog message from <i>x</i>STRANGER is in your Inbox: 21 items.', 'the sender is plain text for the surface to show as text');
+});
+test('declined offers are remembered by message, the last 50', () => {
+  let d = [];
+  for (let i = 0; i < 60; i++) d = C.addDeclined(d, 'M' + i);
+  assert.strictEqual(d.length, 50);
+  assert.strictEqual(d[49], 'M59');
+  assert.deepStrictEqual(C.addDeclined(['A'], 'A'), ['A']);
+  assert.deepStrictEqual(C.cleanDeclined(['A', 5, '', null]), ['A']);
+  assert.strictEqual(C.cleanOffer({ mid: 'M', count: 0 }), null);
+});
+test('Use it: the offered message read again; gone or changed is no catalog', () => {
+  const offer = { mid: 'M1', from: 'SERVICE', date: '2026-03-10T14:15:00Z', count: 120, have: 0 };
+  assert.strictEqual(C.useOffer(catMsg, offer, T0).items.length, 120);
+  assert.strictEqual(C.useOffer({ body: 'gone' }, offer, T0), null);
+  assert.strictEqual(C.useOffer(catMsg, null, T0), null);
+});
+
+console.log('which messages a pass reads');
+const INBOX = [
+  { mid: 'OLD', date: '2026-03-01T00:00:00Z', from: 'A' }, { mid: 'MID', date: '2026-03-10T00:00:00Z', from: 'B' },
+  { mid: 'NEW1', date: '2026-03-11T00:00:00Z', from: 'C' }, { mid: 'NEW2', date: '2026-03-12T00:00:00Z', from: 'D' }, { mid: 'SEEN', date: '2026-03-13T00:00:00Z', from: 'E' },
+];
+test('newer than the mark and not seen in this run; newest first; capped', () => {
+  assert.deepStrictEqual(C.toExamine(INBOX, { seen: new Set(['SEEN']), mark: '2026-03-10T00:00:00Z' }), ['NEW2', 'NEW1']);
+  assert.deepStrictEqual(C.toExamine(INBOX, { seen: new Set(), mark: '' }), ['SEEN', 'NEW2', 'NEW1', 'MID', 'OLD']);
+  assert.deepStrictEqual(C.toExamine(INBOX, { seen: new Set(), cap: 2 }), ['SEEN', 'NEW2']);
+  assert.deepStrictEqual(C.toExamine(INBOX, { seen: new Set(), mark: '2026-03-13T00:00:00Z' }), [], 'nothing is fetched twice across launches');
   assert.deepStrictEqual(C.toExamine(null, {}), []);
 });
-test('the pending flag lasts 7 days', () => {
-  const t = 1770000000000;
-  assert.strictEqual(C.pendingActive(t, t + 1000), true);
-  assert.strictEqual(C.pendingActive(t, t + 7 * 86400000 - 1), true);
-  assert.strictEqual(C.pendingActive(t, t + 7 * 86400000), false);
-  assert.strictEqual(C.pendingActive(0, t), false);
-  assert.strictEqual(C.pendingActive(undefined, t), false);
-  assert.strictEqual(C.pendingActive(t + 3600000, t), false, 'a stamp from the future (the clock was wrong) does not lock the button');
-});
-test('what a surface is given: the full items or none, the picks, pending, the stamp', () => {
+
+console.log('what a surface is given');
+test('the full items or none, the picks, where the request stands, an offer, the stamp', () => {
   const s = C.storedFrom(C.parseCatalogList(LIST), { mid: 'M', date: '2026-03-10T14:15:00Z' }, 5);
-  const p = C.payload(s, { picks: { starred: ['PROP_WWV'], recent: [] }, requestedAt: 0, now: 10 });
-  assert.strictEqual(p.items.length, 40);
-  assert.strictEqual(p.count, 40);
-  assert.strictEqual(p.pending, false);
-  assert.strictEqual(p.modified, '2026/03/09 17:08');
+  const p = C.payload(s, { picks: { starred: ['PROP_WWV'], recent: [] } });
+  assert.deepStrictEqual([p.items.length, p.count, p.pending, p.pendingKind, p.modified, p.offer], [40, 40, false, '', '2026/03/09 17:08', null]);
   assert.deepStrictEqual(p.picks, { starred: ['PROP_WWV'], recent: [] });
-  const none = C.payload(null, { requestedAt: 9, now: 10, unreadable: true });
-  assert.deepStrictEqual(none.items, []);
-  assert.strictEqual(none.pending, true);
-  assert.strictEqual(none.unreadable, true);
-  assert.deepStrictEqual(C.stamp(s, { requestedAt: 9, now: 10 }), { count: 40, readAt: 5, requestedAt: 9, unreadable: false });
-  assert.deepStrictEqual(C.stamp(null, { requestedAt: 9, now: 9 + 8 * 86400000 }), { count: 0, readAt: 0, requestedAt: 0, unreadable: false });
+  const none = C.payload(null, { pendingKind: 'sent', requestedAt: 9, unreadable: true, offer: { mid: 'M', from: 'X', count: 30 } });
+  assert.deepStrictEqual([none.items, none.pending, none.pendingKind, none.requestedAt, none.unreadable], [[], true, 'sent', 9, true]);
+  assert.deepStrictEqual(none.offer, { mid: 'M', from: 'X', date: '', count: 30, have: 0 });
+  assert.strictEqual(C.payload(null, { pendingKind: 'bogus', requestedAt: 9 }).pending, false);
+  assert.deepStrictEqual(C.stamp(s, { pendingKind: 'queued', requestedAt: 9, picksAt: 77, offer: { mid: 'M', count: 3 } }), { count: 40, readAt: 5, requestedAt: 9, pendingKind: 'queued', unreadable: false, offerMid: 'M', picksAt: 77 });
+  assert.deepStrictEqual(C.stamp(null, {}), { count: 0, readAt: 0, requestedAt: 0, pendingKind: '', unreadable: false, offerMid: '', picksAt: 0 });
+});
+
+console.log('what may be requested');
+test('only items of the catalog in force: the starter list, or the full catalog', () => {
+  assert.deepStrictEqual(C.checkRequest(['PROP_3DAY', 'DIDUNO', 'PROP_3DAY'], null), { ok: true, ids: ['PROP_3DAY', 'DIDUNO'], over: 0, error: '' });
+  assert.strictEqual(C.checkRequest(['PUB_VARA'], null).ok, false, 'not in the starter list');
+  assert.strictEqual(C.checkRequest(['PUB_VARA'], FULL).ok, true, 'in the full catalog');
+  assert.strictEqual(C.checkRequest(['DIDUNO', 'MADE_UP'], FULL).ok, false, 'one unknown ID refuses the whole request');
+  assert.deepStrictEqual(C.checkRequest(['DIDUNO', 'MADE_UP'], FULL).ids, []);
+  assert.strictEqual(C.checkRequest(['DIDUNO', 'MADE_UP'], FULL).error, C.TEXT.notInCatalog);
+  assert.strictEqual(C.checkRequest([], FULL).error, 'Tick at least one item.');
+  assert.strictEqual(C.checkRequest('PROP_3DAY', FULL).ok, false);
+  for (const bad of [null, 5, {}, ['x'], '__proto__', 'constructor', 'hasOwnProperty']) assert.strictEqual(C.checkRequest([bad], FULL).ok, false, String(bad));
+});
+test('the command words are never items, even when a catalog lists them', () => {
+  const withWords = FULL.concat([{ category: 'WL2K_HELP', id: 'LIST', subject: 'x', size: 1 }, { category: 'WL2K_HELP', id: 'UPDATE_CAT', subject: 'y', size: 1 }, { category: 'WL2K_HELP', id: 'list', subject: 'z', size: 1 }]);
+  assert.strictEqual(C.mergeCatalog(withWords).items.length, 40, 'not listed');
+  for (const w of ['LIST', 'UPDATE_CAT', 'list']) assert.strictEqual(C.checkRequest([w], withWords).ok, false, w);
+  assert.strictEqual(C.checkRequest(['LIST'], null).ok, false);
+});
+test('more than 200 ticked: the first 200 go, the rest are counted', () => {
+  const many = Array.from({ length: 230 }, (_, i) => ({ category: 'A', id: 'N' + i, subject: '', size: null }));
+  const r = C.checkRequest(many.map((m) => m.id), many);
+  assert.deepStrictEqual([r.ok, r.ids.length, r.over, r.ids[199]], [true, 200, 30, 'N199']);
+  assert.strictEqual(C.buildRequests(r.ids).length, 20);
+  assert.strictEqual(C.overText(200, 30), '200 of the 230 items are in the Outbox. The other 30 are still ticked.');
+  assert.strictEqual(C.overText(200, 1), '200 of the 201 items are in the Outbox. The other 1 is still ticked.');
 });
 
 console.log('the source row');
 test('the short list', () => {
-  assert.deepStrictEqual(C.sourceRow({ items: [], pending: false }), { kind: 'starter', text: 'Showing the short list. Winlink has several hundred more items.', button: 'Get the full catalog' });
+  assert.deepStrictEqual(C.sourceRow({ items: [], pending: false }), { kind: 'starter', text: 'Showing the short list. Winlink has several hundred more items.', button: 'Get the full catalog', button2: '' });
 });
-test('requested: no button, so it cannot be queued twice', () => {
-  const r = C.sourceRow({ items: [], pending: true });
-  assert.strictEqual(r.kind, 'pending');
-  assert.strictEqual(r.text, 'The full catalog is requested. It arrives as a message of about 70 KB after your next Send / Receive, and this list fills in by itself.');
-  assert.strictEqual(r.button, '');
-  assert.strictEqual(C.sourceRow({ items: FULL, count: 40, pending: true }).kind, 'pending');
+test('requested and still in the Outbox: no button, so it cannot be queued twice', () => {
+  assert.deepStrictEqual(C.sourceRow({ items: [], pending: true, pendingKind: 'queued' }), { kind: 'pending', text: 'The full catalog is requested. It arrives as a message of about 70 KB after your next Send / Receive, and this list fills in by itself.', button: '', button2: '' });
+});
+test('requested and sent: the same words and a quiet Request again', () => {
+  assert.deepStrictEqual(C.sourceRow({ items: FULL, count: 40, pending: true, pendingKind: 'sent' }), { kind: 'pending', text: C.TEXT.sourcePending, button: '', button2: 'Request again' });
 });
 test('the full catalog: how many items and as of when (Winlink\'s date, else the message date)', () => {
-  assert.deepStrictEqual(C.sourceRow({ items: FULL, count: 40, modified: '2026/03/09 17:08', sourceDate: '2026-03-10T14:15:00Z' }), { kind: 'full', text: 'Full catalog: 40 items, as of 9 March 2026.', button: 'Update the catalog' });
+  assert.deepStrictEqual(C.sourceRow({ items: FULL, count: 40, modified: '2026/03/09 17:08', sourceDate: '2026-03-10T14:15:00Z' }), { kind: 'full', text: 'Full catalog: 40 items, as of 9 March 2026.', button: 'Update the catalog', button2: '' });
   assert.strictEqual(C.sourceRow({ items: FULL, count: 40, modified: '', sourceDate: '2026-03-10T14:15:00Z' }).text, 'Full catalog: 40 items, as of 10 March 2026.');
   assert.strictEqual(C.sourceRow({ items: FULL, count: 40, modified: '', sourceDate: '' }).text, 'Full catalog: 40 items.');
   assert.strictEqual(C.sourceRow({ items: FULL, count: 1400 }).text, 'Full catalog: 1,400 items.');
 });
-test('a catalog message that could not be read: the short list still works', () => {
-  const r = C.sourceRow({ items: [], pending: false, unreadable: true });
-  assert.strictEqual(r.kind, 'unreadable');
-  assert.strictEqual(r.text, 'A catalog message arrived but POTACAT could not read it. The short list still works.');
-  assert.strictEqual(r.button, 'Get the full catalog');
-  assert.strictEqual(C.sourceRow({ items: FULL, count: 40, unreadable: true }).kind, 'full', 'an older full catalog is still shown');
+test('pending and unreadable, every combination: unreadable always wins and always has a button', () => {
+  const kinds = [];
+  for (const full of [false, true]) for (const pending of [false, true]) for (const unreadable of [false, true]) {
+    const r = C.sourceRow({ items: full ? FULL : [], count: full ? 40 : 0, pending, pendingKind: pending ? 'queued' : '', unreadable });
+    kinds.push([full, pending, unreadable, r.kind, r.button].join(' '));
+    if (unreadable) assert.ok(r.kind === 'unreadable' && r.button, 'never left waiting with no button');
+  }
+  assert.deepStrictEqual(kinds, [
+    'false false false starter Get the full catalog', 'false false true unreadable Get the full catalog',
+    'false true false pending ', 'false true true unreadable Get the full catalog',
+    'true false false full Update the catalog', 'true false true unreadable Update the catalog',
+    'true true false pending ', 'true true true unreadable Update the catalog',
+  ]);
+  assert.strictEqual(C.sourceRow({ items: [], unreadable: true }).text, 'A catalog message arrived but POTACAT could not read it. The short list still works.');
+  assert.strictEqual(C.sourceRow({ items: FULL, count: 40, unreadable: true }).text, 'A newer catalog message arrived but POTACAT could not read it. Your catalog is unchanged.');
+});
+test('a catalog waiting for the operator: Use it / No thanks, and both counts when it is much smaller', () => {
+  assert.deepStrictEqual(C.sourceRow({ items: [], offer: { mid: 'M', from: 'SERVICE', count: 1400, have: 0 } }), { kind: 'offer', text: 'A catalog message from SERVICE is in your Inbox: 1,400 items.', button: 'Use it', button2: 'No thanks' });
+  assert.strictEqual(C.sourceRow({ items: FULL, count: 400, offer: { mid: 'M', from: 'W1AW', count: 21, have: 400 } }).text, 'A catalog message from W1AW is in your Inbox: 21 items. Yours has 400.');
+  assert.strictEqual(C.sourceRow({ items: FULL, count: 400, offer: { mid: 'M', from: 'W1AW', count: 390, have: 400 } }).text, 'A catalog message from W1AW is in your Inbox: 390 items.');
+  assert.strictEqual(C.sourceRow({ items: [], pending: true, unreadable: true, offer: { mid: 'M', from: 'X', count: 30 } }).kind, 'offer', 'the one with something to decide goes first');
 });
 
 console.log('every sentence');
@@ -641,7 +824,93 @@ async function realPat() {
   return 'ok';
 }
 
+console.log('');
+async function scanTests() {
+  const check = async (name, fn) => {
+    try { await fn(); pass++; console.log('  ok  ' + name); }
+    catch (e) { fail++; console.log('  FAIL ' + name + '\n       ' + (e && e.message)); }
+  };
+  const box = { NEW2: catMsg, NEW1: { body: BIG.replace('Global_Modified: 2026/03/09', 'Global_Modified: 2026/01/01'), from: 'OLDER' }, SEEN: { body: 'hello' }, MID: { body: 'hi' }, OLD: { body: 'yo' } };
+  const run = (o) => {
+    const reads = [];
+    const writes = [];
+    const seen = o.seen || new Set();
+    return C.scanInbox({
+      list: INBOX, seen, mark: o.mark || '', stored: o.stored || null, pending: !!o.pending, declined: o.declined || [], now: T0, cap: o.cap,
+      read: (mid) => { reads.push(mid); if (o.fail && o.fail.includes(mid)) return Promise.reject(new Error('Pat did not answer')); return Promise.resolve((o.box || box)[mid]); },
+      store: (s) => { writes.push(s); if (o.storeThrows) throw new Error('disk'); return o.storeRefused ? undefined : true; },
+    }).then((res) => ({ res, reads, writes, seen }));
+  };
+  console.log('a pass over the Inbox');
+  await check('newest wins: the first catalog found ends the pass, and it is accepted when one was asked for', async () => {
+    const { res, reads, writes, seen } = await run({ pending: true });
+    assert.deepStrictEqual(reads, ['SEEN', 'NEW2'], 'one at a time, newest first, and no further');
+    assert.strictEqual(res.accepted.sourceMid, 'NEW2');
+    assert.strictEqual(res.accepted.modified, '2026/03/09 17:08');
+    assert.strictEqual(writes.length, 1);
+    assert.strictEqual(res.clearPending, true, 'pending is cleared on read');
+    assert.strictEqual(res.mark, '2026-03-13T00:00:00Z', 'nothing here is fetched again on the next launch');
+    assert.ok(seen.has('SEEN') && seen.has('NEW2') && !seen.has('NEW1'));
+    assert.deepStrictEqual(res.logs, ['catalog: read the Winlink catalog you asked for, from D (120 items)']);
+  });
+  await check('nothing asked for: offered, not written', async () => {
+    const { res, writes } = await run({ pending: false });
+    assert.strictEqual(res.accepted, null);
+    assert.strictEqual(writes.length, 0);
+    assert.deepStrictEqual(res.offer, { mid: 'NEW2', from: 'D', date: '2026-03-12T00:00:00Z', count: 120, have: 0 });
+    assert.strictEqual(res.clearPending, false);
+  });
+  await check('asked for, but it would shrink the catalog in use: offered, and the wait is over', async () => {
+    const { res, writes } = await run({ pending: true, stored: stored400 });
+    assert.strictEqual(writes.length, 0);
+    assert.deepStrictEqual([res.offer.count, res.offer.have, res.clearPending], [120, 400, true]);
+  });
+  await check('a declined message is passed over; the next catalog is the one offered', async () => {
+    const { res, reads } = await run({ pending: false, declined: ['NEW2'] });
+    assert.deepStrictEqual(reads, ['SEEN', 'NEW2', 'NEW1']);
+    assert.strictEqual(res.offer.mid, 'NEW1');
+  });
+  await check('a read that fails: the message is not marked seen, the mark does not move, the rest is still read', async () => {
+    const { res, reads, seen } = await run({ pending: true, fail: ['SEEN'] });
+    assert.deepStrictEqual(reads, ['SEEN', 'NEW2']);
+    assert.strictEqual(res.failed, true);
+    assert.ok(!seen.has('SEEN') && seen.has('NEW2'));
+    assert.strictEqual(res.mark, '', 'asked again on the next pass');
+    assert.strictEqual(res.accepted.sourceMid, 'NEW2');
+  });
+  await check('a write that is refused or throws: nothing accepted, not seen, no success logged, pending kept', async () => {
+    for (const o of [{ storeRefused: true }, { storeThrows: true }]) {
+      const { res, seen } = await run({ pending: true, ...o });
+      assert.deepStrictEqual([res.accepted, res.failed, res.clearPending, res.logs.length, res.mark], [null, true, false, 0, '']);
+      assert.ok(!seen.has('NEW2'));
+    }
+  });
+  await check('pending plus an unreadable reply: flagged, the wait is over, older mail is still looked at', async () => {
+    const junk = [];
+    for (let i = 0; i < 60; i++) junk.push('line ' + i + ' ' + 'pad '.repeat(20));
+    const b = { ...box, SEEN: { body: reply(ROWS.slice(0, 8), { tail: junk }), from: 'E' }, NEW2: { body: 'x' }, NEW1: { body: 'y' } };
+    const { res, reads } = await run({ pending: true, box: b });
+    assert.deepStrictEqual([res.unreadable, res.clearPending, res.accepted, res.offer], [true, true, null, null]);
+    assert.strictEqual(reads.length, 5);
+    assert.strictEqual(res.mark, '2026-03-13T00:00:00Z');
+  });
+  await check('nothing new since the mark: nothing is read', async () => {
+    const { res, reads } = await run({ pending: true, mark: '2026-03-13T00:00:00Z' });
+    assert.deepStrictEqual([reads.length, res.examined, res.mark], [0, 0, '2026-03-13T00:00:00Z']);
+  });
+  await check('capped: two reads in a pass of two', async () => {
+    const { reads } = await run({ pending: false, cap: 2, box: { ...box, NEW2: { body: 'n' } } });
+    assert.deepStrictEqual(reads, ['SEEN', 'NEW2']);
+  });
+  await check('a rule that throws rejects the pass (the caller catches it); it never hangs', async () => {
+    let said = '';
+    await C.scanInbox({ list: INBOX, seen: { has: () => false, add: () => { throw new Error('boom'); } }, read: () => Promise.resolve({ body: 'x' }), store: () => true }).catch((e) => { said = e.message; });
+    assert.strictEqual(said, 'boom');
+  });
+}
+
 (async () => {
+  await scanTests();
   console.log('a real Pat, offline');
   const name = 'Pat queues the request To INQUIRY as built; reading the catalog message leaves it unread';
   let skipped = 0;
