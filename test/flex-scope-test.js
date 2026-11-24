@@ -161,7 +161,7 @@ check('every pan centre we send is remembered, so its status answer is known', (
 check('the axis follows the pan\'s reported centre; centerHz stays the dial', () => {
   const ap = main.slice(main.indexOf('function flexScopeApplyGeometry('), main.indexOf('function startFlexScope('));
   assert.ok(/if \(flexScopeFollowPan\(\)\) changed = true;/.test(ap));
-  assert.ok(/ScopeDigitalView\.panOffsetFromStatus\(\{ reportedCentreHz: g\.centerHz, ask: flexPanCenterAsk, nowMs: now \}\)/.test(ap));
+  assert.ok(/ScopeDigitalView\.panOffsetFromStatus\(\{ reportedCentreHz: g.centerHz, reportedAtMs: g.centerAt, ask: flexPanCenterAsk, nowMs: now \}\)/.test(ap));
   assert.ok(/yaesuScopeState\.centerOffsetHz = off;/.test(ap));
   assert.ok(!/yaesuScopeState\.centerHz = g\.centerHz;/.test(ap), 'centerHz is never the pan centre');
   assert.ok(/smartSdr\.on\('pan-geometry'[\s\S]{0,200}if \(flexScopeOn && flexScopeApplyGeometry\(\)\) yaesuScopeBroadcastState\(\);/.test(main), 'broadcast on change');

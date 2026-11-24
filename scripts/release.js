@@ -96,7 +96,7 @@ function main() {
 1. Download **\`${installerName}\`** below (or the portable version)
 2. Run the installer — Windows SmartScreen may show **"Windows protected your PC"**
    - Click **More info** then **Run anyway**
-   - This is normal for unsigned open-source apps
+   - The Windows build is not code-signed yet; this is expected
 3. POTACAT will launch automatically after install`);
   }
 
@@ -111,7 +111,7 @@ function main() {
     installSections.push(`### macOS
 1. Download **\`${macFile}\`**
 2. Open the .dmg and drag POTACAT to Applications
-3. On first launch: right-click -> Open (Gatekeeper will block double-click)`);
+3. Open POTACAT normally (the macOS builds are signed and notarized by Apple)`);
   }
 
   const body = `${whatsNew}
@@ -122,8 +122,9 @@ function main() {
 
 ${installSections.join('\n\n')}
 
-> POTACAT is open source and not code-signed. Your OS may warn on first run.
-> This is expected. You can verify the download using the SHA-256 checksums below.
+> The macOS builds are signed and notarized by Apple. The Windows and Linux builds are not
+> code-signed yet, so Windows may warn on first run. This is expected. You can verify any
+> download using the SHA-256 checksums below.
 
 ## SHA-256 Checksums
 

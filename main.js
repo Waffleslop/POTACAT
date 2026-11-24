@@ -91,6 +91,7 @@ require('./lib/fetch-policy').installNoBrotliFetch(globalThis);
 const CleanExitMarker = require('./lib/clean-exit-marker');
 const FreqDots = require('./lib/freq-dots'); // display only: 14.074.00 MHz, the VFO way
 const RemoteBridge = require('./lib/remote-bridge');
+const ExternalUrl = require('./lib/external-url'); // open-external allowlist + file reveal roots
 const AprsRemoteShack = require('./lib/aprs-remote-shack'); // #868: APRS listening on the shack from this desktop
 const WinlinkRemoteShack = require('./lib/winlink-remote-shack'); // #299: the Winlink window drives the shack's Winlink
 const WaterfallPalettes = require('./lib/waterfall-palettes');
@@ -367,7 +368,7 @@ const { KenwoodCodec } = require('./lib/codecs/kenwood-codec');
 const { YaesuLegacyCodec } = require('./lib/codecs/yaesu-legacy-codec');
 const { RigctldCodec } = require('./lib/codecs/rigctld-codec');
 // flrig holds the radio, POTACAT is one of its clients (KM4CFT 2026-10-25).
-const { FlrigCodec, flrigModel } = require('./lib/codecs/flrig-codec');
+const { FlrigCodec, flrigModel, normalizeRadioMode } = require('./lib/codecs/flrig-codec');
 const { FlrigTransport, probeFlrig } = require('./lib/flrig-transport');
 const { CivCodec } = require('./lib/codecs/civ-codec');
 const IcomScope = require('./lib/icom-scope');
@@ -602,6 +603,7 @@ const CwSideband = require('./lib/cw-sideband'); // #753: CW or CW-R (CW-U or CW
 const FreedvPtt = require('./lib/freedv-ptt'); // FreeDV mode: voice PTT refused until FreeDV transmit exists
 const FreedvStatus = require('./lib/freedv-status'); // freedv-status to ECHOCAT: state, modes, sync, SNR, plain reason
 const FreedvDisplayMode = require('./lib/freedv-display-mode'); // #716: FREEDV-<codec> on every surface while the engine runs
+const DataModePicker = require('./lib/data-mode-picker'); // DIGU / DIGL in a mode picker: which radios have them, the badge
 const { FreedvDiag } = require('./lib/freedv-diag'); // #717: audio in, sync and a 30 s summary in the session log
 const { decideDialFollow, followsKnob } = require('./lib/jtcat-dial-follow');
 const JtcatRxSource = require('./lib/jtcat-rx-source'); // #243: JTCAT can hear a WebSDR instead of the radio
@@ -1727,6 +1729,16 @@ let vfoPopoutWin = null;     // pop-out VFO window
 let _lastVfoTunedSpot = null; // the last activator card sent to the VFO window
 let conditionsPopoutWin = null; // pop-out Conditions (solar / propagation)
 let jtcatPopoutWin = null;   // pop-out JTCAT window
+let jtcatWorkAreaWatched = false; // #857: the screen listeners below are attached once
+// #857: the work-area height of the display the JTCAT window is on, for its
+// Automatic layout (lib/jtcat-layout.js). Sent on a move or a display change.
+function sendJtcatWorkArea() {
+  if (!jtcatPopoutWin || jtcatPopoutWin.isDestroyed()) return;
+  try {
+    const d = screen.getDisplayMatching(jtcatPopoutWin.getBounds());
+    if (d && d.workArea && d.workArea.height > 0) jtcatPopoutWin.webContents.send('jtcat-work-area', d.workArea.height);
+  } catch { /* a display going away mid-call */ }
+}
 let sstvPopoutWin = null;    // pop-out SSTV window
 let sstvPackStore = null;    // SSTV style packs (lib/sstv-packs.js)
 // Who opened the SSTV window: 'app' (ECHOCAT sstv-open) or 'desktop'. An
@@ -1916,6 +1928,18 @@ async function openFolderLogged(dir, label, tag) {
   if (!r.ok) sendCatLog(`[${tag}] Open folder failed: ${r.error}`);
   else if (r.created) sendCatLog(`[${tag}] Made the missing ${label} ${r.dir}`);
   return r;
+}
+/** The folders a file:// link from a window may reveal (open-external). */
+function externalRevealRoots() {
+  const roots = [];
+  const add = (p) => { if (p && typeof p === 'string') roots.push(p); };
+  for (const k of ['userData', 'logs']) { try { add(app.getPath(k)); } catch { /* not set */ } }
+  try { add(getSstvGalleryDir()); add(path.dirname(defaultSstvGalleryDir())); } catch { /* no pictures dir */ }
+  // The QSO log may live where the operator chose; its folder and the last
+  // export folder are the operator's own choice, not the window's.
+  if (settings && settings.adifLogPath) add(path.dirname(settings.adifLogPath));
+  if (settings && settings.lastAdifExportDir) add(settings.lastAdifExportDir);
+  return roots;
 }
 function defaultSstvGalleryDir() {
   return path.join(app.getPath('pictures'), 'POTACAT', 'SSTV-RX');
@@ -2352,6 +2376,13 @@ function onRemoteServer(fn) {
   _remoteServerHooks.push(fn);
   if (remoteServer) fn(remoteServer);
 }
+// /api/ptt usage stamp (lib/ptt-api-usage.js): when and over which route
+// (https/http) the HTTP PTT shortcut last worked, at most one write a minute.
+// Its own file, never settings: not exported, not sent to devices or Cloud.
+const pttApiUsage = require('./lib/ptt-api-usage').createPttApiUsage({
+  filePath: () => path.join(app.getPath('userData'), 'ptt-api-usage.json'),
+});
+onRemoteServer((rs) => { rs.on('ptt-api-used', ({ route } = {}) => pttApiUsage.record(route)); });
 // Guest Pass hand-back rule (#200 step 4): the owner used the radio at the
 // station. kind is one of lib/pass-owner-activity.js KINDS; remote-server
 // ignores it unless the owner holds a guest's radio. The idle-receive
@@ -3911,6 +3942,9 @@ function getRigCapabilities(rigType) {
   caps.afgain = rigSupportsAfGain(rigType);
   // The bands this radio is used on (null = not restricted), lib/rig-bands.js.
   caps.bands = activeRigBands();
+  // The data sub-modes (DIGU / DIGL) this radio can be set to: ECHOCAT Web
+  // offers exactly these in its mode picker (lib/data-mode-picker.js).
+  caps.dataModes = DataModePicker.dataModesFor(rigDataModeInput(rigType));
   // #293, #768: Power Off where POTACAT can switch the radio back on (a
   // direct serial port, an SCU-LAN10), unless the operator chose otherwise
   // for this rig: its stored allowPowerOffNoWake, true or false, wins. Every
@@ -3933,6 +3967,21 @@ function getRigCapabilities(rigType) {
     if (caps.minPower != null && Number(caps.minPower) > caps.maxPower) caps.minPower = caps.maxPower;
   }
   return caps;
+}
+
+/** What lib/data-mode-picker.js needs to know about the live link. */
+function rigDataModeInput(rigType) {
+  const codec = cat && cat._codec;
+  let model = null;
+  try { model = getActiveRigModel(); } catch { model = null; }
+  return {
+    rigType,
+    protocol: model && model.protocol,
+    dataFlagUnsupported: !!(codec && codec._dataModeUnsupported),
+    resolve: codec instanceof KenwoodCodec ? (m) => codec.resolveMode(m, _currentFreqHz || 14074000) : null,
+    hasDaCmd: !!(codec instanceof KenwoodCodec && codec._cmds && codec._cmds.setDa),
+    radioModes: codec instanceof FlrigCodec && Array.isArray(codec._radioModes) ? codec._radioModes.map(normalizeRadioMode) : null,
+  };
 }
 
 function _rigCapabilitiesForType(rigType) {
@@ -26115,8 +26164,9 @@ function connectSmartSdr() {
   // (every center-freq drag) and must not become a broadcast storm.
   // The Flex panadapter scope source: frames, and the pan's own axis.
   smartSdr.on('pan-frame', (f) => { if (flexScopeOn) { flexDigitalViewSync(); yaesuScopeOnFrame(f); } });
+  // centerAt: when a status last carried a centre, so a pre-ask centre is not taken for the answer (issue 1002)
   smartSdr.on('pan-geometry', (g) => {
-    flexPanGeometry[g.panId] = { ...(flexPanGeometry[g.panId] || {}), ...g };
+    flexPanGeometry[g.panId] = { ...(flexPanGeometry[g.panId] || {}), ...g, ...(g.centerHz > 0 ? { centerAt: Date.now() } : {}) };
     if (flexScopeOn && flexScopeApplyGeometry()) yaesuScopeBroadcastState();
   });
   smartSdr.on('pan-status', ({ panId, wnb, wnbLevel, rfgain }) => {
@@ -34940,6 +34990,13 @@ function sendVfoState() {
     // The radio states a custom CAT toggle can FOLLOW (lib/custom-cat-follow.js).
     preamp: _currentPreampState,
     att: _currentAttState,
+    // The ladder position and the ladder (#997): the window cycles IPO / AMP1 /
+    // AMP2 and 6 / 12 / 18 dB like the Rig panel; [] = plain on/off. The preamp
+    // ladder is cut to off/on on bands where the radio has only that.
+    preampStep: _currentPreampStep,
+    attStep: _currentAttStep,
+    preampSteps: vfoGainLadder('preampSteps', true),
+    attSteps: vfoGainLadder('attSteps', false),
     comp: _currentCompState,
     vox: _currentVoxState,
     nr: _currentNrState,
@@ -34984,6 +35041,15 @@ function vfoWfmAvailable() {
     const m = RIG_MODELS[rig.model] || RIG_MODELS[ct.civModel] || null;
     return !!(m && m.wfm);
   } catch { return false; }
+}
+/** Preamp / Att ladder for the VFO window (#997), [] when the radio has none.
+ *  Band from the RADIO's own frequency (the codec's rule), not the display: an SDR
+ *  holding the dial at 100 MHz+ must not cut an HF radio's ladder. */
+function vfoGainLadder(key, perBand) {
+  try {
+    const caps = getRigCapabilities(detectRigType()) || {};
+    return _rigGainSteps.ladderForFreq(caps[key], perBand ? caps.preampTargets : undefined, _currentFreqHz || 0);
+  } catch { return []; }
 }
 // The caps flags the VFO's CAT buttons check (VfoLayout.CAT_CHOICES), or null
 // when the radio is not known yet (the VFO then offers them all).
@@ -35293,6 +35359,12 @@ function broadcastRemoteRadioStatus() {
   // WSJT-X has been heard in the last 60 s. ECHOCAT shows the chip and note.
   status.wsjtxMode = !!settings.enableWsjtx;
   status.wsjtxHeard = !!(settings.enableWsjtx && _wsjtxHeard);
+  // An Icom reports USB/LSB with its DATA flag apart (1A 06): say it, so a
+  // client can show DIGU / DIGL. Only with a mode, never while transmitting
+  // (a voice over in USB-D is not the operator's mode) and never while a
+  // voice request is being sent as DATA (#24). Absent = the client keeps its last.
+  const dms = cat && cat._codec && cat._codec.dataModeState;
+  status.modeData = (modeVal && dms && !_isEffectivelyTransmitting() && !cat._voiceSentAsData) ? !!dms.on : undefined;
   remoteServer.broadcastRadioStatus(status);
 }
 
@@ -39446,7 +39518,7 @@ function flexScopeFollowPan() {
   const now = Date.now();
   let changed = false;
   // No ask yet (the scope is starting): a centre left from an earlier session says nothing; hold.
-  const off = ScopeDigitalView.panOffsetFromStatus({ reportedCentreHz: g.centerHz, ask: flexPanCenterAsk, nowMs: now });
+  const off = ScopeDigitalView.panOffsetFromStatus({ reportedCentreHz: g.centerHz, reportedAtMs: g.centerAt, ask: flexPanCenterAsk, nowMs: now });
   if (off != null && off !== (yaesuScopeState.centerOffsetHz || 0)) { yaesuScopeState.centerOffsetHz = off; changed = true; }
   const ask = flexDigitalSpanAsk;
   const spanSettled = ask && g.spanHz && (Math.abs(g.spanHz - ask.hz) <= ask.hz * 0.05 || now - ask.at >= ScopeDigitalView.SETTLE_MS);
@@ -48766,6 +48838,14 @@ function cloudShackNotice(text, kind) {
     jtcatPopoutWin.show();
     jtcatPopoutWin.setMenuBarVisibility(false);
     jtcatPopoutWin.loadFile(path.join(__dirname, 'renderer', 'jtcat-popout.html'), { query: themeQuery() });
+    // #857: the layout's Automatic pick follows the work area of the display
+    // the window is on; tell it when the window moves or a display changes.
+    jtcatPopoutWin.on('moved', sendJtcatWorkArea);
+    if (!jtcatWorkAreaWatched) {
+      jtcatWorkAreaWatched = true;
+      screen.on('display-metrics-changed', sendJtcatWorkArea);
+      screen.on('display-removed', sendJtcatWorkArea);
+    }
     jtcatPopoutWin.on('close', () => {
       if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
         if (!jtcatPopoutWin.isMaximized() && !jtcatPopoutWin.isMinimized()) {
@@ -52276,66 +52356,30 @@ function cloudShackNotice(text, kind) {
 
   ipcMain.on('open-external', (_e, url) => { openExternalIfAllowed(url); });
   // The one gate for a link leaving the app: the IPC above, and a link or
-  // window.open in any app window (lib/window-security.js).
+  // window.open in any app window (lib/window-security.js). The allowlist
+  // itself lives in lib/external-url.js.
   function openExternalIfAllowed(url) {
     if (typeof url !== 'string') return false;
     const { shell } = require('electron');
-    // Allow opening local log files
-    if (url.startsWith('file://')) {
-      const filePath = url.replace('file://', '');
-      shell.showItemInFolder(filePath);
-      return true;
+    // A local file (the QSO log): reveal it in Explorer/Finder, only inside
+    // POTACAT's own folders (lib/external-url.js).
+    if (/^file:/i.test(url)) {
+      const filePath = ExternalUrl.fileRevealPath(url, externalRevealRoots());
+      if (filePath) { shell.showItemInFolder(filePath); return true; }
+      console.log('[open-external] refused to reveal a path outside the app folders');
+      return false;
     }
-    // Only allow known URLs
-    const allowed = [
-      'https://www.qrz.com/', 'https://caseystanton.com/', 'https://github.com/Waffleslop/POTACAT/',
-      'https://hamlib.github.io/', 'https://github.com/Hamlib/', 'https://discord.gg/',
-      // flrig (W1HKJ) downloads: the rig editor's "FLRig (a shared radio)" help.
-      // w1hkj.com no longer hosts them; SourceForge is the project's home.
-      'https://sourceforge.net/projects/fldigi/',
-      // Mercury HF data modem (Rhizomatica) — download + docs links in Settings.
-      'https://github.com/Rhizomatica/', 'https://rhizomatica.github.io/',
-      // Winlink: Pat, ardopcf and the Winlink network (Settings > Station > Winlink).
-      'https://getpat.io/', 'https://github.com/la5nta/', 'https://github.com/pflarue/', 'https://winlink.org/', 'https://www.winlink.org/',
-      // VARA (the operator brings their own copy) and the virtual audio cable it
-      // needs: links in Settings > Station > Winlink. Neither is downloaded by
-      // POTACAT. No apostrophes in this comment: the links test reads the
-      // quoted strings of this block.
-      'https://rosmodem.wordpress.com/', 'https://vb-audio.com/',
-      // JS8Call — download + docs links in Settings. The gate is a prefix
-      // match that fails CLOSED with no error, so the scheme matters: the
-      // project site is http-only.
-      'https://github.com/js8call/', 'http://js8call.com/', 'https://js8call.com/',
-      'https://potacat.com/', 'https://docs.potacat.com/', 'https://buymeacoffee.com/potacat', 'https://docs.google.com/spreadsheets/',
-      'https://pota.app/', 'https://www.sotadata.org.uk/', 'https://wwff.co/', 'https://llota.app/',
-      'https://tailscale.com', 'https://worldradioleague.com',
-      // Tailscale admin DNS page (MagicDNS / HTTPS certs help in Settings);
-      // 'https://tailscale.com' does not cover the login. host.
-      'https://login.tailscale.com/admin/',
-      // TrustedQSL download — the LoTW upload block in Settings > Logging.
-      'https://www.arrl.org/tqsl-download', 'https://lotw.arrl.org/',
-      // Club Log — Application Passwords page link in Settings > Logging.
-      'https://clublog.org/',
-      // FCC Part 97 §97.119 (station identification) — the link in Settings >
-      // Share Rig. Never on this list, so the click was refused in silence.
-      'https://www.ecfr.gov/current/title-47/',
-      'https://api.potacat.com/',
-      'https://login.potacat.com/',
-      'http://rx.linkfanel.net', 'http://kiwisdr.com', 'http://websdr.org',
-      // CW Club Spotter (DJ5CW): the two links in Settings > CW spots.
-      'https://rbn.telegraphy.de/',
-      // ECHOCAT mobile app store links (Settings footer promo).
-      'https://apps.apple.com/', 'https://play.google.com/',
-      // Rig editor Setup instructions: "email us your setup".
-      'mailto:k3sbp@potacat.com',
-    ];
+    // Known sites: lib/external-url.js parses the URL and compares host and
+    // path exactly; the OS gets the parsed form it checked.
+    const known = ExternalUrl.checked(url);
+    if (known) { shell.openExternal(known); return true; }
     // Event sponsor sites (13 Colonies, Route 66, ...) come from the event
-    // definition itself — see eventUrlAllowed — rather than this list.
+    // definition itself — see eventUrlAllowed — rather than the list.
     // A DXpedition's own link (DX-World, DXNews, QRZ) is allowed when the
     // current feed names that exact URL — data-driven, like contest links.
-    const dxpLink = typeof url === 'string' && /^https?:///.test(url)
+    const dxpLink = /^https?:\/\//i.test(url)
       && [...expeditionMeta.values()].some((m) => m && m.link === url);
-    if (allowed.some(prefix => url.startsWith(prefix)) || eventUrlAllowed(url) || landmarksFeed.urlAllowed(url) || dxpLink) {
+    if (eventUrlAllowed(url) || landmarksFeed.urlAllowed(url) || dxpLink) {
       shell.openExternal(url);
       return true;
     }

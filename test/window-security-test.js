@@ -75,7 +75,7 @@ test('a page that is not the app\'s own is refused, even for a used permission',
 test('navigation: the app\'s pages only; web links go to open-external, the rest is dropped', () => {
   assert.deepStrictEqual(WS.navigationVerdict(WIN_PAGE, WIN_ROOT, 'win32'), { allow: true, external: null });
   assert.deepStrictEqual(WS.navigationVerdict('file:///C:/Program%20Files/POTACAT/resources/app.asar/renderer/log-popout.html?theme=x', WIN_ROOT, 'win32').allow, true);
-  assert.deepStrictEqual(WS.navigationVerdict('https://rbn.telegraphy.de', WIN_ROOT, 'win32'), { allow: false, external: 'https://rbn.telegraphy.de/' });
+  assert.deepStrictEqual(WS.navigationVerdict('https://rbn.telegraphy.de', WIN_ROOT, 'win32'), { allow: false, external: 'https://rbn.telegraphy.de' });
   assert.deepStrictEqual(WS.navigationVerdict('https://evil.example/phish', WIN_ROOT, 'win32'), { allow: false, external: 'https://evil.example/phish' }, 'the allowlist decides, not the guard');
   for (const u of ['file:///C:/Windows/System32/', 'javascript:alert(1)', 'data:text/html,x', 'ms-settings:privacy', 'smb://host/share', 'not a url']) {
     assert.deepStrictEqual(WS.navigationVerdict(u, WIN_ROOT, 'win32'), { allow: false, external: null }, u);
@@ -84,7 +84,8 @@ test('navigation: the app\'s pages only; web links go to open-external, the rest
 
 test('window.open: never a new window; http(s) and mailto go to open-external, anything else is dropped', () => {
   assert.deepStrictEqual(WS.windowOpenVerdict('https://tailscale.com/download'), { action: 'deny', external: 'https://tailscale.com/download' });
-  assert.deepStrictEqual(WS.windowOpenVerdict('https://www.sotadata.org.uk'), { action: 'deny', external: 'https://www.sotadata.org.uk/' }, 'bare host gains its slash so the allowlist matches');
+  assert.deepStrictEqual(WS.windowOpenVerdict('https://www.sotadata.org.uk'), { action: 'deny', external: 'https://www.sotadata.org.uk' }, 'passed on as given');
+  assert.strictEqual(require('../lib/external-url').checked('https://www.sotadata.org.uk'), 'https://www.sotadata.org.uk/', 'the allowlist normalises a bare host itself');
   assert.deepStrictEqual(WS.windowOpenVerdict('mailto:k3sbp@potacat.com'), { action: 'deny', external: 'mailto:k3sbp@potacat.com' });
   for (const u of ['', 'about:blank', WIN_PAGE, 'file:///C:/x.html', 'javascript:void(0)', 'ftp://x/']) {
     assert.deepStrictEqual(WS.windowOpenVerdict(u), { action: 'deny', external: null }, u);
@@ -149,7 +150,7 @@ test('install: the default session gets the rules and every app window the guard
   assert.strictEqual(wc.emit('will-navigate', 'https://rbn.telegraphy.de'), true);
   assert.strictEqual(wc.emit('will-redirect', 'https://evil.example/'), true);
   assert.strictEqual(wc.emit('will-navigate', 'file:///C:/Users/op/evil.html'), true);
-  assert.deepStrictEqual(opened, ['https://rbn.telegraphy.de/', 'https://evil.example/']);
+  assert.deepStrictEqual(opened, ['https://rbn.telegraphy.de', 'https://evil.example/']);
   assert.strictEqual(wc.emit('will-attach-webview', 'x'), true, 'no webviews');
 
   // window.open
@@ -199,10 +200,9 @@ test('main.js: the rules are installed before the first window; no window grants
 });
 
 test('every hard-coded web link in the app\'s pages passes the open-external allowlist', () => {
-  const at = main.indexOf('function openExternalIfAllowed(url) {');
-  const block = main.slice(main.indexOf('const allowed = [', at), main.indexOf('];', main.indexOf('const allowed = [', at)));
-  const allowed = [...block.matchAll(/'([^']+)'/g)].map((m) => m[1]);
-  assert.ok(allowed.length > 10);
+  // One allowlist: lib/external-url.js (parsed, exact host), used by openExternalIfAllowed.
+  const ExternalUrl = require('../lib/external-url');
+  assert.ok(/ExternalUrl\.checked\(url\)/.test(main.slice(main.indexOf('function openExternalIfAllowed(url) {'))), 'openExternalIfAllowed uses lib/external-url.js');
   const dir = path.join(ROOT, 'renderer');
   const bad = [];
   for (const f of fs.readdirSync(dir)) {
@@ -210,7 +210,7 @@ test('every hard-coded web link in the app\'s pages passes the open-external all
     const src = readSrc(path.join(dir, f));
     for (const m of src.matchAll(/href="(https?:\/\/[^"$]+)"/g)) {
       const u = WS.externalUrlOf(m[1]);
-      if (!u || !allowed.some((p) => u.startsWith(p))) bad.push(f + ': ' + m[1]);
+      if (!u || !ExternalUrl.allowed(u)) bad.push(f + ': ' + m[1]);
     }
   }
   assert.deepStrictEqual(bad, []);

@@ -69,7 +69,7 @@ function postPairRequest(port, requestId, opts = {}) {
     const retry = await postPairRequest(port, r1);
     check(retry.status === 200 && retry.json && retry.json.deviceToken === device.token,
       'same-requestId retry collects the minted credentials');
-    const again = await postPairRequest(port, 'different-id-12345');
+    const again = postPairRequest(port, 'different-id-12345'); // held until denied below
     // No pending request now; this should create a fresh popup (not busy).
     await sleep(100);
     check(popups.length === 2, 'stored result is consumed — server back to normal afterwards');

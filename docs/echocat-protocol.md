@@ -135,6 +135,32 @@ Application close codes (mirrored in `CLOSE_CODES` in
 | `4003` | `AUTH_FAILED_TERMINAL` | Auth rejected and retrying won't help — stop reconnecting. |
 | `4004` | `AUTH_REVOKED` | Operator revoked this device's pairing mid-session. Preceded by a `revoked` message. Don't reconnect. Older clients that don't know `4004` ignore the `revoked` message, treat the close as generic, reconnect once, and land on a terminal `auth-fail` — degraded but safe. |
 
+The shack also uses the standard RFC 6455 code `1009` (Message Too Big); see
+"Frame size limits" below.
+
+#### Frame size limits
+
+Since 2026-11-23 the shack's WebSocket server limits what a client may send
+it (lib/ws-limits.js). These apply to frames the server RECEIVES; what the
+server sends is unchanged.
+
+| Limit | Value | What happens |
+|---|---|---|
+| Any frame, any socket | 16 MiB (16,777,216 bytes, after permessage-deflate inflation) | ws closes the socket with `1009` and an empty reason. Before 2026-11-23 the limit was ws's default, 100 MiB. |
+| Any frame before sign-in | 64 KiB (65,536 bytes) | The socket is closed with `1009`, reason `Frame too large before sign-in`, before the frame is parsed. "Signed in" means the shack sent `auth-ok` (or auto-authenticated the socket: a LAN shack with no token is signed in from its first frame). Before sign-in the shack reads only `hello` and `auth`, which are under 1 kB. |
+| `sstv-photo` `image` | 4 MiB (4,194,304 characters of the data URL or base64 string) | Not sent and never decoded: the sender gets `sstv-tx-status {state: 'rx' (or 'auto-rx' while Idle Mode SSTV runs), error: "Picture not sent: the picture is too large to send (4 MB at most)."}`. An `image` that is not a non-empty string gets the same message with error "Picture not sent: the picture could not be read.". The socket stays open. |
+| `voice-macro-play-audio` `audio` | 4 MiB of base64 (unchanged) | `tune-blocked` "That recording is too long to send (two minutes at most)." |
+
+The largest legitimate client frames measured on 2026-11-23: an `sstv-photo`
+at the largest SSTV size (640x496, PD-120/160/180/240) as a lossless RGBA PNG
+of noise is 1.69 MB as a data URL (the phone's 320x256 JPEG at quality 0.9 is
+40-90 kB); a 30 s phone voice recording at 128 kbit/s AAC is 0.64 MB of
+base64; `save-settings` with every SSTV template at the template sync limits
+(24 templates, 150 KiB background, 32 KiB thumbnail) is about 4.3 MiB;
+`winlink-compose` attachments are refused over 2 MiB, 2.7 MiB as base64.
+A client should cap its own sends at these limits and show the reason rather
+than send a frame that closes its socket.
+
 ### Spots and sources
 
 | Message | Dir | Purpose |
@@ -158,6 +184,7 @@ The `status` message is a kitchen-sink snapshot. The canonical fields are:
 | `freq` | number | Hz. **Not `frequency`.** |
 | `mode` | string | "USB", "LSB", "CW", "PKTUSB", "FREEDV-RADEV1", … |
 | `band` | string | "20m", "40m", … (derived from freq) |
+| `modeData` | boolean | Added 2026-11-23. The radio's DATA flag where it reports it apart from the mode (an Icom in USB or LSB with `1A 06` on): `true` = the radio is in USB-D / LSB-D although `mode` says USB / LSB, so show DIGU / DIGL. Sent only with a `mode`, never while transmitting; absent = keep the last value (every other radio names its data mode in `mode`: PKTUSB, DIGU, ...). Older desktops never send it. |
 | `catConnected` | boolean | true when CAT or SmartSDR is up |
 | `txState` | boolean | true while transmitting |
 | `rigType` | string | "flex", "yaesu", "icom", "kenwood", "rigctld", "wsjtx" |
@@ -167,6 +194,7 @@ The `status` message is a kitchen-sink snapshot. The canonical fields are:
 | `atu` | boolean | ATU enabled |
 | `vfo` | string | "A" or "B" — READBACK-fed since 2026-08-03 (Kenwood `IF;` / rigctld `v`, polled every cycle), so it now follows front-panel and custom-CAT VFO changes instead of only POTACAT-initiated ones |
 | `split` | boolean | rig split on/off, readback-fed (Kenwood `IF;` P12 / rigctld `s`). NEW 2026-08-03 — absent from older desktops. Live split is commanded via `rig-control {action:'set-split', value}`; the similarly-named `set-enable-split` only toggles the spot-tune setting |
+| `capabilities.dataModes` | string[] | Added 2026-11-23. The data sub-modes the radio can be set to, a subset of `["DIGU", "DIGL"]` (lib/data-mode-picker.js): both on Flex, TCI, Hamlib/rigctld (the Xiegu G90 included), DXLab Commander, Icom CI-V (none once the radio has refused the DATA flag), flrig (what the radio lists) and Yaesu / Kenwood / Elecraft text CAT where the model's codes give a real data mode; `["DIGU"]` on a radio with one data code for both sidebands (QMX); `[]` on the FT-817/818/857/897 legacy CAT, a (tr)uSDX and a radio with no CAT. Set them with the existing `set-mode` (`mode: "DIGU"` or `"DIGL"`), as the ECHOCAT app already does; the shack maps them to the radio's own (PKTUSB/PKTLSB, USB/LSB + DATA, MD0C/MD08, MD + DA1, ...). ECHOCAT Web shows DIGU / DIGL buttons in its mode picker only for the entries listed. Absent (older desktops) = not offered. |
 | `capabilities.splitUp` | boolean | Added 2026-11-23 (#689). `true` = the shack can do Split up N in one step: `rig-control {action:'split-up', offsetKhz}` with `offsetKhz` 1, 2, 5 or -1 turns split on and sets the TX VFO to the dial + offset (lib/split-up.js). Back to simplex is `set-split` false. Refused (logged, nothing sent) while the VFO is locked or when the TX frequency is outside the radio's range; refused for a Guest Pass like `set-split`. Never on a Flex. Absent (older desktops) = not offered. From the same date `splitFreq` is `false` where the link would decline the TX frequency (Yaesu other than FT-991/991A, Icom firmware that NAKs 25). |
 | `filterWidth` | number | Hz |
 | `rfgain` | number | 0–255 |
@@ -194,7 +222,7 @@ for the history.
 | `tune-blocked` | S→C | Tune was rejected (VFO locked, out of band, etc.). |
 | `rig-reconnect` | C→S | "My radio is back on, retry now." Rate-limited (5 s). The desktop re-dials the active rig unless WSJT-X Mode is on. |
 | `rig-reconnect-ack` | S→C | Answer to `rig-reconnect`. Since 2026-11-14 (#547) it carries `ok` (boolean). `{ ok: true }`: reconnecting; the outcome follows in `status` (`catConnected`). `{ ok: false, code: "wsjtx-mode", reason }`: nothing reconnects because WSJT-X Mode is on; `reason` is the display string "WSJT-X Mode is on: WSJT-X has the radio. Untick WSJT-X Mode (click CAT in the top bar) for POTACAT to tune it". Older desktops send `{ type }` alone: treat a missing `ok` as `true`. |
-| `set-mode` | C→S | Change mode without retuning frequency. |
+| `set-mode` | C→S | Change mode without retuning frequency. `mode` is a POTACAT mode name; `DIGU` / `DIGL` set the radio's data sub-mode (see `capabilities.dataModes`). |
 | `set-vfo` | C→S | Switch VFO A/B. |
 | `swap-vfo` | C→S | A↔B swap. |
 | `set-filter` | C→S | Set filter width in Hz. |
@@ -420,7 +448,7 @@ and non-private respectively. The predicate is the thread store's own
 | Message | Dir | Purpose |
 |---|---|---|
 | `sstv-open` | C→S | Open SSTV view (starts decoder). |
-| `sstv-photo` | C→S | TX a photo (mode chosen client-side). `{image, mode, freqKhz?}`. `freqKhz` (#357, capability `sstv-send-tune`): the SSTV frequency chosen on the client, a number in kHz. The desktop tunes the radio there BEFORE the picture keys, unless the radio is already within 10 kHz of it. Without `freqKhz` it tunes to the SSTV channel of the radio's band (14.230, 7.171 LSB, 3.845 LSB, 18.161, 21.340, 24.975, 28.680, 50.680) unless the radio is within 10 kHz of an SSTV channel, and to 20 m (day) or 40 m (night) from a band with none. Never to a band the radio is not set up for, never with split on, and never for a Guest Pass picture (the pass is checked where the radio is). Rules: lib/sstv-send.js `sendChannel`. `waitQuiet` (#326, optional boolean, capability `sstv-wait-quiet`): `true` asks the shack to wait for a quiet frequency before this picture keys (see `sstv-tx-status` `waiting`). It can only ask for the wait: absent or `false` leaves the shack's own setting (SSTV window, Sending, "Wait for the frequency to be quiet before sending", off by default) in force, so a Guest Pass client cannot turn the owner's wait off. |
+| `sstv-photo` | C→S | TX a photo (mode chosen client-side). `{image, mode, freqKhz?}`. `image` is a JPEG or PNG data URL (or bare base64) of at most 4 MiB (4,194,304 characters, 2026-11-23); a larger one is refused with `sstv-tx-status` `error` and never decoded (see "Frame size limits"). `freqKhz` (#357, capability `sstv-send-tune`): the SSTV frequency chosen on the client, a number in kHz. The desktop tunes the radio there BEFORE the picture keys, unless the radio is already within 10 kHz of it. Without `freqKhz` it tunes to the SSTV channel of the radio's band (14.230, 7.171 LSB, 3.845 LSB, 18.161, 21.340, 24.975, 28.680, 50.680) unless the radio is within 10 kHz of an SSTV channel, and to 20 m (day) or 40 m (night) from a band with none. Never to a band the radio is not set up for, never with split on, and never for a Guest Pass picture (the pass is checked where the radio is). Rules: lib/sstv-send.js `sendChannel`. `waitQuiet` (#326, optional boolean, capability `sstv-wait-quiet`): `true` asks the shack to wait for a quiet frequency before this picture keys (see `sstv-tx-status` `waiting`). It can only ask for the wait: absent or `false` leaves the shack's own setting (SSTV window, Sending, "Wait for the frequency to be quiet before sending", off by default) in force, so a Guest Pass client cannot turn the owner's wait off. |
 | `sstv-stop` | C→S | Close SSTV. |
 | `sstv-halt-tx` | C→S | Cancel an in-progress TX. Since `sstv-wait-quiet` (#326) it also drops a picture that is still waiting for a quiet frequency; nothing is sent. A Guest Pass client cancels only a waiting picture it queued; on anyone else's it gets the same `refused` (`of: 'sstv-halt-tx'`) and the picture keeps waiting. A guest's HALT during a real transmission still stops it. |
 | `sstv-send-now` | C→S | #326, capability `sstv-wait-quiet`. `{}`. The picture waiting for a quiet frequency is sent now, busy or not (the operator's own decision; the Send now button). With nothing waiting it does nothing. A Guest Pass client may send it only for a picture that same pass queued; otherwise it is answered with `refused` (`of: 'sstv-send-now'`, text "Not sent or cancelled: that picture was queued by someone else. Only they or the station owner can send it now or cancel it.") and nothing changes. The owner may send any waiting picture. |
@@ -991,6 +1019,28 @@ reply is `{ptt: true|false}`. Since 2026-11-22:
   started by another web page (an image, a form, a script) is refused.
 - From a public address with the Cloud Tunnel off it is refused unless a
   token is set (see "Who may connect").
+
+Since 2026-11-23 (lib/ptt-api-gate.js), when the server is in its plain-HTTP
+fallback (it could not create its TLS certificate at start and the Cloud
+Tunnel is off). Browsers send no `Sec-Fetch-*` to an `http://` URL and an
+image request carries no `Origin`, so the rule above cannot see a web page
+there:
+
+- A call that would key the radio (`on`, or `toggle` while receiving) is
+  refused with 403 and nothing keys, unless "Require a password" is on and
+  the right `?token=` is given. The reply is
+  `{error: "PTT over plain HTTP is refused: ..."}` and says to restart
+  POTACAT or use the password; POTACAT logs it once a minute.
+- Releasing is never refused by this rule: `off`, and `toggle` while
+  transmitting, unkey as before (with the token when the password is on,
+  as on HTTPS). Unkeying is the safe direction.
+- Over HTTPS nothing changed.
+
+Each successful call writes `pttApiLastUsed` (ISO time) and
+`pttApiLastRoute` (`https` or `http`) to `ptt-api-usage.json` in POTACAT's
+user-data folder, at most once a minute. It is local only: not in the
+settings object, so never exported, sent to a device, device-writable or
+sent to POTACAT Cloud.
 
 #### ECHOCAT Web over POTACAT Cloud (HTTP, 2026-09-11)
 

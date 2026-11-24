@@ -195,6 +195,13 @@ test('rig editor: the Transmit audio input row is offered for the FT-891 and sav
   const save = APP.slice(APP.indexOf("const txAudioInputEl = document.getElementById('set-tx-audio-input');"));
   assert.ok(/Ft891TxAudioInput\.hasChoice\(model\)/.test(save.slice(0, 600)), 'choice saved for the FT-891');
   assert.ok(/ft891-tx-audio-input-test\.js/.test(fs.readFileSync(path.join(ROOT, 'scripts', 'run-tests.js'), 'utf8')));
+  // The row's help text is the lib's HELP, shown as it is.
+  assert.ok(/help\.textContent = ft891 \? window\.Ft891TxAudioInput\.HELP/.test(sync.slice(0, 1500)), 'the help is HELP');
+});
+
+test('rig editor help: says the hand mic is silent with Rear (Casey, 2026-11-23)', () => {
+  assert.ok(F.HELP.includes('With Rear, the hand mic is silent while POTACAT is connected.'), F.HELP);
+  assert.ok(/Serial CAT link only\.$/.test(F.HELP), 'the link note stays last');
 });
 
 Promise.all(pending).then(() => {

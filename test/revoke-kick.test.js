@@ -3,8 +3,8 @@
 // closes with 4004 AUTH_REVOKED and kills CAT control immediately;
 // revoking a non-connected device leaves the live client alone; a
 // reconnect with the revoked token gets auth-fail and never re-auths.
-// Not part of the npm-test chain (spins a network listener).
-// Run manually: node test/revoke-kick.test.js
+// In the npm-test chain since 2026-11-23, in SERIAL (fixed port 17310, real-time waits).
+// Run: node test/revoke-kick.test.js
 
 'use strict';
 

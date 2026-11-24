@@ -441,7 +441,7 @@ function rig(port, { model } = {}) {
     assert.ok(/if \(rigType === 'flrig'\) return flrigModel\(explicit \|\| getModel\(null, 'flrig'\)\);/.test(main), 'getActiveRigModel merges the picked model');
     assert.ok(/case 'flrig':\s+return flrigModel\(null\)\.caps;/.test(main), 'caps fallback');
     assert.ok(/ipcMain\.handle\('test-flrig'/.test(main) && /probeFlrig\(\{ host, port \}\)/.test(main), 'Test Connection IPC');
-    assert.ok(/'https:\/\/sourceforge\.net\/projects\/fldigi\/'/.test(main), 'download link allowed');
+    assert.ok(require('../lib/external-url').allowed('https://sourceforge.net/projects/fldigi/files/flrig/'), 'download link allowed');
     assert.ok(/rigType === 'flrig';\n\}/.test(main) || /\|\| rigType === 'flrig'/.test(main), 'AF gain offered');
     const pre = readSrc(path.join(__dirname, '..', 'preload.js'));
     assert.ok(/testFlrig: \(config\) => ipcRenderer\.invoke\('test-flrig', config\)/.test(pre));

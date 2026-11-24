@@ -43,7 +43,7 @@ test('a wrong or empty token still fails', () => {
 
 test('the server uses the forgiving compare on both token paths', () => {
   const rs = readSrc(path.join(__dirname, '..', 'lib', 'remote-server.js'));
-  assert.ok(/if \(!EchocatToken\.sameToken\(qToken, this\._token\)\)/.test(rs), 'PTT REST endpoint');
+  assert.ok(/tokenOk: !!\(this\._token && EchocatToken\.sameToken\(qToken, this\._token\)\)/.test(rs), 'PTT REST endpoint (decided in lib/ptt-api-gate.js)');
   assert.ok(/msg\.token && this\._token && EchocatToken\.sameToken\(msg\.token, this\._token\)/.test(rs), 'WS auth');
   assert.ok(/return EchocatToken\.generateToken\(\);/.test(rs));
 });

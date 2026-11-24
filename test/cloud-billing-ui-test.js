@@ -234,6 +234,7 @@ section('Source guards');
   const main = read('main.js');
   const allow = main.slice(main.indexOf("ipcMain.on('open-external'"), main.indexOf("ipcMain.on('open-external'") + 3000);
   assert(!/stripe\.com/.test(allow), 'no Stripe host on the renderer allow-list (they open from main)');
+  assert(!require('../lib/external-url').ALLOWED.some((e) => /stripe\.com/.test(e)), 'no Stripe host in lib/external-url.js either');
   for (const f of ['renderer/cloud-ui.js', 'renderer/app.js']) {
     const src = read(f);
     assert(!/openExternal\([^)]*stripe/i.test(src), `${f}: no Stripe URL through open-external`);
