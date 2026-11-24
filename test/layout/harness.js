@@ -37,11 +37,36 @@ const MEASURE = `
       cells: [...row.children].map(c => ({ cls: c.className, text: c.textContent, sw: c.scrollWidth, cw: c.clientWidth, ...r(c) })),
     }));
   }
+  // The viewport the page was really laid out in; the test checks it against the width it names.
+  out.viewport = { width: window.innerWidth, height: window.innerHeight };
   return out;
 })()`;
 
+// The viewport is stated here, never taken from the machine's display. A
+// window cannot be larger than the display it opens on (Windows cuts a 900 px
+// window down to 640 px on the 640x480 display of a disconnected Remote
+// Desktop session), and the Stations columns step aside at 640 px, so a window
+// size alone made this test depend on the monitor. The window itself is small
+// on purpose: every machine, CI too, measures the emulated viewport.
+const VIEW_HEIGHT = 900;
+const WINDOW = { width: 400, height: 300 };
+async function setViewport(w, width) {
+  // After the page has loaded: with no renderer yet the call ends the process (Electron 39).
+  w.webContents.enableDeviceEmulation({
+    screenPosition: 'desktop', screenSize: { width, height: VIEW_HEIGHT },
+    viewPosition: { x: 0, y: 0 }, viewSize: { width, height: VIEW_HEIGHT }, deviceScaleFactor: 1, scale: 1,
+  });
+  // The new size reaches the page a moment later. Wait for it; if it never
+  // comes, the measurement still goes back with the real viewport and the test fails on it.
+  for (let i = 0; i < 150; i++) {
+    const v = await w.webContents.executeJavaScript('[window.innerWidth, window.innerHeight]');
+    if (v[0] === width && v[1] === VIEW_HEIGHT) return;
+    await new Promise(r => setTimeout(r, 20));
+  }
+}
+
 async function render(width, css, body, scripts) {
-  const w = new BrowserWindow({ show: false, width, height: 900, webPreferences: { offscreen: true, sandbox: false } });
+  const w = new BrowserWindow({ show: false, width: WINDOW.width, height: WINDOW.height, webPreferences: { offscreen: true, sandbox: false } });
   const html = `<!doctype html><html${body.theme ? ` data-theme="${body.theme}"` : ''}><head><meta charset="utf-8">
 <style>${css}</style>${scripts.map(s => `<script>${s}</script>`).join('')}</head><body>${body.html}</body></html>`;
   try {
@@ -51,6 +76,7 @@ async function render(width, css, body, scripts) {
       if (process.env.LAYOUT_DUMP) fs.writeFileSync(process.env.LAYOUT_DUMP, html);
       throw new Error(`could not load the ${width}px page (${html.length} chars): ${e.message.slice(0, 60)}`);
     }
+    await setViewport(w, width);
     await w.webContents.executeJavaScript('document.fonts ? document.fonts.ready.then(() => true) : true');
     return await w.webContents.executeJavaScript(MEASURE);
   } finally {
