@@ -220,7 +220,7 @@ const MAIN = readSrc(path.join(ROOT, 'main.js'));
     const h = MAIN.slice(MAIN.indexOf('function catFrequencyHandler(hz) {'));
     assert.ok(/^function catFrequencyHandler\(hz\) \{\n[^\n]*\n  if \(fakeItIsEcho\(hz\)\) return;/.test(h), 'CAT reads');
     assert.ok(/smartSdr\.on\('frequency', \(hz\) => \{\n    if \(fakeItIsEcho\(hz\)\) return;/.test(MAIN), 'Flex slice reads, before rememberFlexSlice');
-    assert.ok(/ft8Engine\.setFakeIt\(fakeItEnabled\(\) && !multi && !isRemoteMode\(\) && !noCat\)/.test(MAIN), 'one band, CAT, not a remote laptop');
+    assert.ok(/ft8Engine\.setFakeIt\(FakeIt\.engineCanShift\(\{/.test(MAIN), 'one band, CAT, not a remote laptop (jtcat-fake-it-default-test.js has the rest)');
     assert.ok(/fakeItSyncEngine\(\); \/\/ split operation/.test(MAIN), 'armed at engine start');
     assert.ok(/'jtcatFakeIt' in newSettings\) setImmediate\(\(\) => \{ fakeItSyncEngine\(\)/.test(MAIN), 'follows the window toggle');
     assert.ok(/if \(key === 'jtcatFakeIt'\) \{\s+fakeItSyncEngine\(\);\s+updateRemoteSettings\(\);/.test(MAIN), 'follows a remote window or device, and tells every device');

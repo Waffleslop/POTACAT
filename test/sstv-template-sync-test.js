@@ -226,8 +226,10 @@ test('main stamps identities on every template write path and syncs', () => {
 
 test('Share my Rig: a guest never writes the owner\'s settings and never receives their templates', () => {
   const src = R('lib/remote-server.js');
-  const c = src.slice(src.indexOf("case 'save-settings':"), src.indexOf("case 'save-settings':") + 700);
-  assert.ok(/if \(ws\._passSession\) \{[\s\S]*?break;\s*\}\s*if \(msg\.settings\) this\.emit\('save-settings'/.test(c));
+  const c = src.slice(src.indexOf("case 'save-settings':"), src.indexOf("case 'save-settings':") + 1600);
+  // The guest is refused first; only then does the owner's device patch go
+  // through the device allowlist (lib/device-settings.js) to main.
+  assert.ok(/if \(ws\._passSession\) \{[\s\S]*?break;\s*\}\s*if \(msg\.settings\) \{[\s\S]*?DeviceSettings\.filterDevicePatch\(msg\.settings\)[\s\S]*?this\.emit\('save-settings', patch\)/.test(c));
   const { RemoteServer } = require('../lib/remote-server');
   const rs = Object.create(RemoteServer.prototype);
   rs._remoteSettings = { myCallsign: 'K3SBP', sstvTemplates: [{ id: 'a' }], sstvTextElements: [{}] };

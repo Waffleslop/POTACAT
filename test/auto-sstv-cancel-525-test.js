@@ -54,7 +54,7 @@ test('the operator taking the window over keeps it open on cancel', () => {
   assert.ok(/if \(!\(opts && opts\.auto\)\) autoSstvOpenedPopout = false;/.test(open), 'opened again by desk or phone');
   const enc = body("ipcMain.on('sstv-encode', (_e, data) => {", 300);
   assert.ok(/autoSstvOpenedPopout = false;/.test(enc), 'a send from the window');
-  const photo = body("remoteServer.on('sstv-photo', ({ image, mode, guest, freqKhz }) => {", 300);
+  const photo = body("remoteServer.on('sstv-photo', ({ image, mode, guest, freqKhz, waitQuiet }) => {", 300);
   assert.ok(/autoSstvOpenedPopout = false;/.test(photo), 'a picture from the phone');
 });
 

@@ -135,7 +135,8 @@ test('the 10 MHz / 60 m sideband thresholds appear in one place only (lib/ssb-si
 test('VFO window: band buttons and type-to-tune ask for the band\'s sideband; dial and wheel do not', () => {
   const html = R('renderer/vfo-popout.html');
   assert.ok(/function tuneJumpFromPopout\(freqKhz\) \{[\s\S]{0,200}window\.api\.tuneByBand\(freqKhz\);/.test(html));
-  assert.ok(/if \(vfoLocked\) return;\n\s+tuneJumpFromPopout\(b\.freq\);/.test(html), 'band button');
+  // The same jump, to the radio's last frequency on the band or the preset (#680).
+  assert.ok(/if \(vfoLocked\) return;[\s\S]{0,400}?bandJumpTarget\(b\.freq\)[\s\S]{0,200}?tuneJumpFromPopout\(khz\);/.test(html), 'band button');
   assert.ok(/if \(!khz\) return;\n\s+tuneJumpFromPopout\(khz\);/.test(html), 'type-to-tune Go (typed, pasted, recent)');
   const dial = html.slice(html.indexOf('function processDelta('), html.indexOf('canvas.addEventListener(\'mousedown\''));
   assert.ok(/tuneFromPopout\(currentFreqHz \/ 1000\)/.test(dial) && !/tuneJumpFromPopout/.test(dial), 'the dial keeps the mode');

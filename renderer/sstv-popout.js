@@ -183,6 +183,8 @@ const MODE_RES = {
   rebuildLook();
   try { const on = document.getElementById('op-name'); if (on) on.value = settings.sstvOperatorName || ''; } catch {}
   try { const sa = document.getElementById('save-all-decodes'); if (sa) sa.checked = settings.sstvSaveAllDecodes === true; } catch {}
+  try { const wq = document.getElementById('wait-quiet'); if (wq) wq.checked = settings.sstvWaitQuiet === true; } catch {}
+  try { showSstvTxPower(settings.sstvTxPowerW); } catch {}
   try { await refreshPacks(); } catch (e) { console.error('[SSTV] Packs list error:', e); }
 
   // Load saved templates
@@ -1402,6 +1404,7 @@ function renderTemplateStrip() {
 // Abort the current TX: stop audio, release PTT, reset UI. Used both when
 // the operator taps HALT on the desktop and when ECHOCAT halts remotely.
 function abortTxLocal(reason) {
+  showQuietWait(null);
   if (txAudioCtx) { try { txAudioCtx.close(); } catch {} txAudioCtx = null; }
   txPlaying = false;
   isTx = false;
@@ -1456,6 +1459,7 @@ txBtn.addEventListener('click', () => {
 
 // TX audio received — play it
 window.api.onSstvTxAudio(async (data) => {
+  showQuietWait(null);
   // Mark TX active — stops decoder from hearing our own audio
   isTx = true;
   txBtn.textContent = 'HALT TX';
@@ -1580,9 +1584,41 @@ window.api.onSstvTxAudio(async (data) => {
   }
 });
 
+// #326: a picture waiting for the frequency to clear. The words are
+// lib/sstv-quiet-wait.js's, the same on ECHOCAT Web.
+const quietWaitBar = document.getElementById('quiet-wait');
+function showQuietWait(data) {
+  if (!quietWaitBar) return;
+  if (!data) { quietWaitBar.hidden = true; return; }
+  document.getElementById('quiet-title').textContent = window.SstvQuietWait.WAIT_TITLE;
+  document.getElementById('quiet-detail').textContent = window.SstvQuietWait.waitDetail(data);
+  quietWaitBar.hidden = false;
+  statusBar.textContent = window.SstvQuietWait.WAIT_TITLE;
+}
+document.getElementById('quiet-send-now').addEventListener('click', () => {
+  showQuietWait(null);
+  statusBar.textContent = 'Sending...';
+  window.api.sstvWaitSendNow();
+});
+document.getElementById('quiet-cancel').addEventListener('click', () => {
+  showQuietWait(null);
+  window.api.sstvWaitCancel();
+});
+
 // TX status updates
 window.api.onSstvTxStatus((data) => {
+  if (data.state === 'waiting') {
+    isTx = true; // HALT TX also drops the waiting picture
+    txBtn.textContent = 'HALT TX';
+    txBtn.classList.add('transmitting');
+    showQuietWait(data);
+    return;
+  }
+  showQuietWait(null);
+  if (data.state === 'tx') { statusBar.textContent = 'Sending...'; return; }
   if (data.state === 'rx') {
+    progressBar.classList.remove('tx');
+    progressBar.style.width = '0%';
     isTx = false;
     txBtn.textContent = replyImage ? 'REPLY' : 'TRANSMIT';
     txBtn.classList.remove('transmitting');
@@ -1937,8 +1973,10 @@ async function startRxAudio() {
       // fallback (2026-07-07): if no VITA frame in 3 s, the local capture
       // resumes feeding decoder + waterfall; the paths stay mutually
       // exclusive by construction. Main mirrors this gate (sstv-feed-gate).
-      if (settings && settings.audioSource === 'smartsdr'
-          && (Date.now() - _lastVitaAudioTs) < 3000) return;
+      // Icom network audio arrives the same way (sstv-vita49-audio) and
+      // yields the same: without it the local input, a Mac's webcam
+      // microphone, painted over the radio on the waterfall (#936).
+      if (window.RxDirectSource.sstvLocalCaptureYields(settings && settings.audioSource, _lastVitaAudioTs, Date.now())) return;
       _markDecoderAudio(e.data, 'mic');
       if (!isTx) sstvMicNote(e.data); // #463
       // Send audio samples to main process for SSTV decoder (skip during TX to avoid self-decode)
@@ -1960,7 +1998,11 @@ async function startRxAudio() {
     // on the laptop microphone.
     const track = sstvStream.getAudioTracks()[0];
     const heard = (track && track.label) || pick.label || 'default device';
-    setStatusDevice(heard, !audioInputSelect.value);
+    // Icom network: the radio's audio is the network stream; the local input
+    // is only its fallback, so naming it "(from the radio)" was wrong (#936).
+    if (settings.audioSource === 'icom-network') setStatusDevice('Icom network audio', true, heard);
+    else if (settings.audioSource === 'yaesu-lan') setStatusDevice('Yaesu LAN audio', true, heard); // #951
+    else setStatusDevice(heard, !audioInputSelect.value);
     statusBar.textContent = (pick.notice && !directStream) ? pick.notice : 'Listening (' + actualRate + ' Hz)';
   } catch (err) {
     console.error('[SSTV] RX audio start error:', err);
@@ -3339,6 +3381,32 @@ function showLookLock() {
   if (shuf) shuf.disabled = !!settings.sstvLookLocked;
 }
 document.getElementById('look-lock').addEventListener('click', () => setLookLocked(!settings.sstvLookLocked));
+document.getElementById('wait-quiet').addEventListener('change', (e) => {
+  settings.sstvWaitQuiet = !!e.target.checked;
+  window.api.saveSettings({ sstvWaitQuiet: settings.sstvWaitQuiet });
+});
+// Transmit power for SSTV (#279): empty = the radio's own power. Main sets the
+// level before each picture and puts the radio's power back after it.
+const sstvTxPowerInput = document.getElementById('sstv-tx-power');
+function showSstvTxPower(saved) {
+  if (!sstvTxPowerInput || document.activeElement === sstvTxPowerInput) return;
+  const w = window.SstvTxPower.parseWatts(saved);
+  sstvTxPowerInput.value = w === null ? '' : String(w);
+}
+function showSstvTxPowerState(p) {
+  const el = document.getElementById('sstv-tx-power-state');
+  if (!el || !p) return;
+  el.textContent = p.text || '';
+  el.hidden = !p.text;
+  if (sstvTxPowerInput) sstvTxPowerInput.disabled = !!p.remote;
+}
+if (sstvTxPowerInput) sstvTxPowerInput.addEventListener('change', () => {
+  const w = window.SstvTxPower.parseWatts(sstvTxPowerInput.value);
+  sstvTxPowerInput.value = w === null ? '' : String(w);
+  settings.sstvTxPowerW = w;
+  window.api.saveSettings({ sstvTxPowerW: w });
+  statusBar.textContent = w === null ? "SSTV uses the radio's current power." : 'SSTV transmits at ' + w + " W, and the radio's own power goes back after each picture.";
+});
 document.getElementById('save-all-decodes').addEventListener('change', (e) => {
   settings.sstvSaveAllDecodes = !!e.target.checked;
   window.api.saveSettings({ sstvSaveAllDecodes: settings.sstvSaveAllDecodes });
@@ -3383,12 +3451,13 @@ function showRigScopedControls() {
   if (redecode) redecode.hidden = !!settings.remoteShack;
 }
 
-function setStatusDevice(label, fromRigs) {
+function setStatusDevice(label, fromRigs, fallback) {
   const el = document.getElementById('status-device');
   el.textContent = '';
   el.append('Listening on ');
   const b = document.createElement('b'); b.textContent = label; el.appendChild(b);
   el.append(fromRigs ? ' (from the radio)' : ' (chosen for SSTV)');
+  if (fallback) el.append('; if it stops, ' + fallback);
 }
 
 // ---- Radio: meters, tuner, SWR trip ----------------------------------------------
@@ -3429,6 +3498,7 @@ document.getElementById('trip-atu').addEventListener('click', (e) => runAtu(e.cu
 document.getElementById('trip-override').addEventListener('click', () => { if (window.api.swrGuardOverride) window.api.swrGuardOverride(); });
 if (window.api.onSstvRigState) window.api.onSstvRigState((st) => {
   rigHasAtu = !!(st && st.atu);
+  if (st && st.power) { showSstvTxPowerState(st.power); showSstvTxPower(st.power.watts); }
   atuBtn.hidden = !rigHasAtu;
   document.getElementById('trip-atu').hidden = !rigHasAtu;
   const tripped = !!(st && st.swrTripped);

@@ -91,7 +91,9 @@ require('./lib/fetch-policy').installNoBrotliFetch(globalThis);
 const CleanExitMarker = require('./lib/clean-exit-marker');
 const FreqDots = require('./lib/freq-dots'); // display only: 14.074.00 MHz, the VFO way
 const RemoteBridge = require('./lib/remote-bridge');
+const ExternalUrl = require('./lib/external-url'); // open-external allowlist + file reveal roots
 const AprsRemoteShack = require('./lib/aprs-remote-shack'); // #868: APRS listening on the shack from this desktop
+const WinlinkRemoteShack = require('./lib/winlink-remote-shack'); // #299: the Winlink window drives the shack's Winlink
 const WaterfallPalettes = require('./lib/waterfall-palettes');
 const GpuStatus = require('./lib/gpu-status'); // #773: the GPU line in the session log
 const ShackGrid = require('./lib/shack-grid'); // #774: the JTCAT map on the shack's grid
@@ -102,7 +104,7 @@ const ShackGrid = require('./lib/shack-grid'); // #774: the JTCAT map on the sha
     : fn);
   // Invokes that answer from the shack (the JS8 window): undefined = run locally.
   const _ipcHandle = ipcMain.handle.bind(ipcMain);
-  ipcMain.handle = (channel, fn) => _ipcHandle(channel, (RemoteBridge.JS8_INVOKES.includes(channel) || RemoteBridge.SSTV_INVOKES.includes(channel))
+  ipcMain.handle = (channel, fn) => _ipcHandle(channel, (RemoteBridge.JS8_INVOKES.includes(channel) || RemoteBridge.SSTV_INVOKES.includes(channel) || RemoteBridge.WINLINK_INVOKES.includes(channel))
     ? async (e, ...args) => { const r = await bridgeInvokeToShack(channel, args, e); return r !== undefined ? r : fn(e, ...args); }
     : fn);
 }
@@ -366,7 +368,7 @@ const { KenwoodCodec } = require('./lib/codecs/kenwood-codec');
 const { YaesuLegacyCodec } = require('./lib/codecs/yaesu-legacy-codec');
 const { RigctldCodec } = require('./lib/codecs/rigctld-codec');
 // flrig holds the radio, POTACAT is one of its clients (KM4CFT 2026-10-25).
-const { FlrigCodec, flrigModel } = require('./lib/codecs/flrig-codec');
+const { FlrigCodec, flrigModel, normalizeRadioMode } = require('./lib/codecs/flrig-codec');
 const { FlrigTransport, probeFlrig } = require('./lib/flrig-transport');
 const { CivCodec } = require('./lib/codecs/civ-codec');
 const IcomScope = require('./lib/icom-scope');
@@ -380,13 +382,17 @@ const { gridToLatLon, latLonToGrid, haversineDistanceMiles, bearing } = require(
 const ActivationMapData = require('./lib/activation-map-data');
 const LogFreq = require('./lib/log-freq');
 const LogFreqField = require('./lib/log-freq-field'); // kHz to the hertz (#794)
+const LogGear = require('./lib/log-gear'); // the rig and antenna a device sends with a contact (#975)
 const LogTxPower = require('./lib/log-tx-power'); // the power a contact is logged at, never a guessed 100 W (#523)
 const RigBands = require('./lib/rig-bands');
+const RotorBands = require('./lib/rotor-bands'); // rotor only on chosen bands (#356)
+const SplitUp = require('./lib/split-up'); // #689: split up N from the VFO window
 const SpotBandFilter = require('./lib/spot-band-filter');
 const SstvStartBand = require('./lib/sstv-start-band');
 const AwardTables = require('./lib/award-tables');
 const { activationStationFill } = require('./lib/activation-station'); // N7VBN: station side of activation records
 const { freqToBand, BANDS } = require('./lib/bands');
+const BandLastFreq = require('./lib/band-last-freq'); // a band button returns to the rig's last frequency there (#680)
 const { splitHostPort } = require('./lib/host-port');
 const activationProgram = require('./lib/activation-program');
 const { applyQsoEdit, modeEditFields, activationSigOf } = require('./lib/qso-edit'); // Logbook cell edits (#509)
@@ -405,6 +411,7 @@ const wsprlive = require('./lib/wspr/wsprlive');
 const wsprBandhop = require('./lib/wspr/bandhop');
 const jtcatModehop = require('./lib/jtcat-modehop');
 const { operatorModeChange: jtcatModeChangeRule } = require('./lib/jtcat-mode-change');
+const ProtocolRegistration = require('./lib/protocol-registration'); // who may claim potacat:// links
 const TuneLinkGuard = require('./lib/tune-link-guard'); // a potacat://tune link stops automatic JTCAT TX before it tunes
 const FakeIt = require('./lib/jtcat-fake-it'); // split operation "Fake It" (fakeItShiftForTx / fakeItRestoreDial)
 const JtcatCaptureGate = require('./lib/jtcat-capture-gate'); // #746: ECHOCAT off releases a phone-driven capture
@@ -453,6 +460,7 @@ const AmpDrive = require('./lib/amp-drive-limit'); // per-rig amplifier drive li
 const { decideBandPowerReapply } = require('./lib/band-power-reapply');
 const AtuWizard = require('./lib/atu-wizard');
 const AppTheme = require('./lib/app-theme');
+const WindowFrame = require('./lib/window-frame');
 const { stripSecrets, restoreSecrets, stripSdrUserinfo, sdrUserinfo } = require('./lib/settings-secrets');
 const { buildContestHistory } = require('./lib/contest-history');
 const contestsDb = require('./lib/contests-db');
@@ -464,6 +472,7 @@ const { DxClusterClient, looksLikeCallsign: clusterCallsignOk } = require('./lib
 const { RbnClient } = require('./lib/rbn');
 const mercuryProcess = require('./lib/mercury-process');
 const { MercuryClient } = require('./lib/mercury-client');
+const MercuryOffer = require('./lib/mercury-offer');
 const { Js8Threads } = require('./lib/js8call-threads');
 const js8Addr = require('./lib/js8call-threads');   // composeDirected / isAddressed
 const { Js8RxAssembler } = require('./lib/js8-rx-assembler');
@@ -482,6 +491,7 @@ const WinlinkAutoRetry = require('./lib/winlink-auto-retry'); // one automatic r
 const WinlinkPatRecover = require('./lib/winlink-pat-recover'); // Pat still on a call nobody owns: restart it, never refuse for ever (#430)
 const WinlinkSummaryStore = require('./lib/winlink-summary-store'); // the session summary lines, kept across a restart (#425)
 const WinlinkFav = require('./lib/winlink-favourites');
+const WinlinkMine = require('./lib/winlink-my-gateways'); // #585: the shack's check of a typed gateway
 const WinlinkTemplates = require('./lib/winlink-templates');
 const WinlinkContacts = require('./lib/winlink-contacts');
 const WinlinkReach = require('./lib/winlink-reach');
@@ -494,6 +504,7 @@ const WinlinkSentRoutes = require('./lib/winlink-sent-routes'); // how each sent
 const WinlinkGpsd = require('./lib/winlink-gpsd'); // #346: the Settings grid's centre for Pat's forms, as a GPSd on 127.0.0.1
 const WinlinkForms = require('./lib/winlink-forms'); // #346: Winlink forms through Pat (1.0.1 or newer), its catalog, and what the form window may load
 const { createRigctldServer } = require('./lib/rigctld-server');
+const { RIGCTLD_HOST, rigctldListenArgs } = require('./lib/rigctld-bind'); // POTACAT's own rigctld: loopback only (Casey 2026-11-22)
 const ArdopProcess = require('./lib/ardop-process');
 const DirewolfProcess = require('./lib/direwolf-process');
 const DirewolfAgwMonitor = require('./lib/direwolf-agw-monitor');
@@ -505,9 +516,11 @@ const IdleRadioUse = require('./lib/idle-radio-use');      // Idle Mode yields t
 const RadioTuneRoute = require('./lib/radio-tune-route'); // the path tuneRadio drives the radio on: TCI, Flex Direct, CAT, or none
 const IcomNetworkDataMod = require('./lib/icom-network-data-mod'); // #853: which DATA MOD item gets LAN over the network (DATA1/2/3 on an IC-7610)
 const IcomUsbDataMod = require('./lib/icom-usb-data-mod'); // sweep 1a: DATA MOD to USB for a data session over USB, put back after
+const Ft891TxAudioInput = require('./lib/ft891-tx-audio-input'); // #602: FT-891 MIC SELECT / DATA IN SELECT per rig, put back after
 const AprsRfFrequency = require('./lib/aprs-rf-frequency'); // APRS: the 2 m frequency by grid square (phase 2), 30 m worldwide (phase 3)
 const AprsRfFrames = require('./lib/aprs-rf-frames');       // APRS phase 2: Dire Wolf's AGW monitor frames -> APRS packets
 const AprsRadioReturn = require('./lib/aprs-radio-return'); // APRS phase 2: the radio goes back after listening
+const SstvTxPower = require('./lib/sstv-tx-power'); // #279: Transmit power for SSTV, set before a picture and put back after
 const AprsListenAudio = require('./lib/aprs-listen-audio'); // APRS listening: one line a minute about the audio Dire Wolf gets
 const AprsParser = require('./lib/aprs-parser');
 const AprsIgate = require('./lib/aprs-igate');             // APRS phase 4: the receive-only iGate's rules and the uplink login
@@ -539,8 +552,10 @@ const { adifAppMode, adifModeSubmode } = require('./lib/adif-mode');
 const { PassQsoOutbox } = require('./lib/pass-qso-outbox');
 const { ClublogOutbox } = require('./lib/clublog-outbox');
 const QsoLog = require('./lib/qso-log');
+const LogbookEdit = require('./lib/logbook-edit'); // Logbook edit/delete act only on the record the operator chose (#988)
 const StationCounty = require('./lib/station-county');
 const JtcatSnrFloor = require('./lib/jtcat-snr-floor');
+const JtcatCallingTime = require('./lib/jtcat-calling-time');
 const OriginHealth = require('./lib/origin-health');
 const RemoteAccess = require('./lib/remote-access'); // ECHOCAT access: off | cloud | lan (the door itself)
 const { planImport, findDuplicateGroups } = require('./lib/qso-match');
@@ -552,6 +567,7 @@ const { TunerGeniusClient } = require('./lib/tuner-genius');
 const { FreedvEngine } = require('./lib/freedv-engine');
 const { SstvEngine, sstvRxVisLogLine } = require('./lib/sstv-engine');
 const SstvSend = require('./lib/sstv-send'); // #357: a picture from ECHOCAT: copy, tune first, fail as a status line
+const SstvQuietWait = require('./lib/sstv-quiet-wait'); // #326: wait for the frequency to be quiet before a picture keys
 const { decideSstvStop, sstvDecoderState } = require('./lib/sstv-decoder-state');
 const SstvFeedGate = require('./lib/sstv-feed-gate'); // pure ingress-gate decisions (table-tested)
 const HuntedPark = require('./lib/hunted-park'); // worked-call → live program-spot park refs (JTCAT logging)
@@ -583,10 +599,12 @@ const { PskrClient } = require('./lib/pskreporter');
 const PskrTx = require('./lib/pskreporter-tx');
 const { Ft8Engine, freqsForMode } = require('./lib/ft8-engine');
 const DialSnap = require('./lib/dial-snap');
-const PlainSsbForDigital = require('./lib/plain-ssb-for-digital');
+const RigAudioJack = require('./lib/rig-audio-jack'); // #153: sound card on the data jack or the mic jack, per rig; the one DATA-mode rule
+const CwSideband = require('./lib/cw-sideband'); // #753: CW or CW-R (CW-U or CW-L) per rig; the one CW sideband rule
 const FreedvPtt = require('./lib/freedv-ptt'); // FreeDV mode: voice PTT refused until FreeDV transmit exists
 const FreedvStatus = require('./lib/freedv-status'); // freedv-status to ECHOCAT: state, modes, sync, SNR, plain reason
 const FreedvDisplayMode = require('./lib/freedv-display-mode'); // #716: FREEDV-<codec> on every surface while the engine runs
+const DataModePicker = require('./lib/data-mode-picker'); // DIGU / DIGL in a mode picker: which radios have them, the badge
 const { FreedvDiag } = require('./lib/freedv-diag'); // #717: audio in, sync and a 30 s summary in the session log
 const { decideDialFollow, followsKnob } = require('./lib/jtcat-dial-follow');
 const JtcatRxSource = require('./lib/jtcat-rx-source'); // #243: JTCAT can hear a WebSDR instead of the radio
@@ -614,6 +632,7 @@ const MacMicAccess = require('./lib/mac-mic-access'); // #463: macOS microphone 
 const { healActiveRig } = require('./lib/active-rig');
 const { healRigAudioMirror } = require('./lib/rig-audio-mirror');
 const Cm108Ptt = require('./lib/cm108-ptt');
+const WindowSecurity = require('./lib/window-security');
 const { decideAtuKeepOn, ATU_KEEP_ON_POLL_MS, ATU_KEEP_ON_FIRST_POLL_MS } = require('./lib/atu-keep-on');
 // Per-rig "Keep the tuner on after a tune cycle" (lib/atu-keep-on.js): after
 // the tune command, ask `AC;` until the radio reports the tuner off, then
@@ -751,7 +770,7 @@ function parkInfoFor(ref) {
 // the community feed served by worker/dxpeditions — aggregated DX-World +
 // DXNews + NG3K, refreshed server-side every 6h. See README in that
 // worker for the schema served at /feeds/dxpeditions.json.
-const { getModel, getModelList, RIG_MODELS, migrateRigModelNames, modelFromYaesuId } = require('./lib/rig-models');
+const { getModel, getModelList, hamlibTwinQuirks, RIG_MODELS, migrateRigModelNames, modelFromYaesuId } = require('./lib/rig-models');
 const { resolveSetupNotes, radioTypeFromCatTarget, icomScopeBaudAction } = require('./lib/rig-setup-notes');
 const StationSetup = require('./lib/station-setup');
 const ReviewAsk = require('./lib/review-ask'); // one-time "Rate ECHOCAT" card
@@ -910,6 +929,7 @@ const GLOBAL_KEYS = new Set([
   'profiles',          // (reserved — currently unused but reserved against name collision)
   'rigs',              // rig hardware definitions
   'activeRigId',       // last-selected rig (global default)
+  'bandLastFreq',      // { rigId: { band: kHz } } the last dial on each band, per rig: band buttons go back there (#680)
   'rigPresets',        // named TX power / RF gain / AF gain sets, per rig (lib/rig-presets.js)
   'rigPresetByMode',   // { rigId|'*': { ssb|cw|digital|fm|am: presetId } } — applied on a mode-family change
   'rigPresetRules',    // { rigId|'*': [{ bands, families, presetId }] } — band + mode rules, first match wins; byMode is the fallback
@@ -942,7 +962,9 @@ const GLOBAL_KEYS = new Set([
   'jtcatWaterfallSpeed', // waterfall lines/sec — display property of this screen
   'jtcatWaterfallFloor', // waterfall display noise floor (0..200) — same nature
   'jtcatShowBandScope',  // band-scope strip in the JTCAT pop-out (FT-710) — display
+  'jtcatShowWaterfall',  // #391: the JTCAT pop-out's audio waterfall shown (default on) — display
   'jtcatStationsExpiryMin', // JTCAT Stations view: minutes a station stays (2/5/10) — display (#557)
+  'jtcatLayout',         // #857: JTCAT pop-out layout auto | full | compact — display
   'waterfallPalette',  // waterfall / band scope colours (lib/waterfall-palettes.js) — display
                        // (same reasoning as lightMode/darkVariant above)
   'wsprPreCapPower',   // {watts, rigId, at}: the RF power the WSPR beacon found on the
@@ -951,6 +973,9 @@ const GLOBAL_KEYS = new Set([
   'aprsRfBeaconLastAt', // when this station last beaconed over its radio (confirmed): the radio timer counts from it after a restart
   'aprsListenReturn',  // {freqHz, mode, rigId, listenHz, state}: where the radio was before APRS
                        // listening tuned it (lib/aprs-radio-return.js) — this machine's radio
+  'sstvTxPowerW',      // #279: Transmit power for SSTV in W (null = the radio's own power) — this machine's radio
+  'sstvTxPowerRestore', // {watts, sstvWatts, rigId, at, state}: the power to put back after an SSTV
+                       // picture (lib/sstv-tx-power.js) — this machine's radio
   'wsprBeaconWatts',   // {watts, rigId}: the beacon's RF power when the operator set one
                        // while it was armed (#268) — also this machine's radio
   'mainMicDeviceId', 'mainPlaybackDeviceId',
@@ -1185,7 +1210,7 @@ function loadSettingsFromDisk() {
     // mode is WSPR (Casey 2026-09-25). Written here, not as read-side
     // fallbacks, so installs that never chose keep what they were looking at:
     // the theme migration maps them once, idle stays SSTV.
-    return { grid: 'FN20jb', catTarget: null, enablePota: true, enableSota: false, enableRbn: true, enablePskrMap: true, firstRun: true, watchlist: 'K3SBP', ...AppTheme.DEFAULTS, idleRxMode: 'wspr', enableTelemetry: true };
+    return { grid: 'FN20jb', catTarget: null, enablePota: true, enableSota: false, enableRbn: true, enablePskrMap: true, firstRun: true, watchlist: 'K3SBP', ...AppTheme.DEFAULTS, idleRxMode: 'wspr', enableTelemetry: true, jtcatFakeIt: FakeIt.NEW_SETUP_DEFAULT };
   }
   // Migration path: legacy settings.json (no activeProfile) gets migrated
   // when it has a myCallsign. We do this lazily on first save rather than
@@ -1705,6 +1730,16 @@ let vfoPopoutWin = null;     // pop-out VFO window
 let _lastVfoTunedSpot = null; // the last activator card sent to the VFO window
 let conditionsPopoutWin = null; // pop-out Conditions (solar / propagation)
 let jtcatPopoutWin = null;   // pop-out JTCAT window
+let jtcatWorkAreaWatched = false; // #857: the screen listeners below are attached once
+// #857: the work-area height of the display the JTCAT window is on, for its
+// Automatic layout (lib/jtcat-layout.js). Sent on a move or a display change.
+function sendJtcatWorkArea() {
+  if (!jtcatPopoutWin || jtcatPopoutWin.isDestroyed()) return;
+  try {
+    const d = screen.getDisplayMatching(jtcatPopoutWin.getBounds());
+    if (d && d.workArea && d.workArea.height > 0) jtcatPopoutWin.webContents.send('jtcat-work-area', d.workArea.height);
+  } catch { /* a display going away mid-call */ }
+}
 let sstvPopoutWin = null;    // pop-out SSTV window
 let sstvPackStore = null;    // SSTV style packs (lib/sstv-packs.js)
 // Who opened the SSTV window: 'app' (ECHOCAT sstv-open) or 'desktop'. An
@@ -1894,6 +1929,18 @@ async function openFolderLogged(dir, label, tag) {
   if (!r.ok) sendCatLog(`[${tag}] Open folder failed: ${r.error}`);
   else if (r.created) sendCatLog(`[${tag}] Made the missing ${label} ${r.dir}`);
   return r;
+}
+/** The folders a file:// link from a window may reveal (open-external). */
+function externalRevealRoots() {
+  const roots = [];
+  const add = (p) => { if (p && typeof p === 'string') roots.push(p); };
+  for (const k of ['userData', 'logs']) { try { add(app.getPath(k)); } catch { /* not set */ } }
+  try { add(getSstvGalleryDir()); add(path.dirname(defaultSstvGalleryDir())); } catch { /* no pictures dir */ }
+  // The QSO log may live where the operator chose; its folder and the last
+  // export folder are the operator's own choice, not the window's.
+  if (settings && settings.adifLogPath) add(path.dirname(settings.adifLogPath));
+  if (settings && settings.lastAdifExportDir) add(settings.lastAdifExportDir);
+  return roots;
 }
 function defaultSstvGalleryDir() {
   return path.join(app.getPath('pictures'), 'POTACAT', 'SSTV-RX');
@@ -2330,6 +2377,13 @@ function onRemoteServer(fn) {
   _remoteServerHooks.push(fn);
   if (remoteServer) fn(remoteServer);
 }
+// /api/ptt usage stamp (lib/ptt-api-usage.js): when and over which route
+// (https/http) the HTTP PTT shortcut last worked, at most one write a minute.
+// Its own file, never settings: not exported, not sent to devices or Cloud.
+const pttApiUsage = require('./lib/ptt-api-usage').createPttApiUsage({
+  filePath: () => path.join(app.getPath('userData'), 'ptt-api-usage.json'),
+});
+onRemoteServer((rs) => { rs.on('ptt-api-used', ({ route } = {}) => pttApiUsage.record(route)); });
 // Guest Pass hand-back rule (#200 step 4): the owner used the radio at the
 // station. kind is one of lib/pass-owner-activity.js KINDS; remote-server
 // ignores it unless the owner holds a guest's radio. The idle-receive
@@ -3049,8 +3103,110 @@ function pushSstvRigState() {
     sstvPopoutWin.webContents.send('sstv-rig-state', {
       atu, atuActive: !!_currentAtuState,
       swrTripped: !!_swrTripped, swrMessage: _swrTripMessage || '',
+      power: sstvPowerState(),
     });
   } catch {}
+}
+
+// ---- Transmit power for SSTV (#279, lib/sstv-tx-power.js) --------------------
+// Empty (the default) changes nothing. A level is set just before the picture
+// keys (handleRemotePtt, txKind 'sstv', after every refusal) and the radio's
+// own level goes back at the key-up, however the picture ends. The level to
+// put back is on disk first, so a crash mid-picture is repaired by the next
+// session's first power report (sendCatPower). The commands go through the
+// gated setters, so a Guest Pass cap clamps them; nothing here keys the radio.
+const sstvTxPower = SstvTxPower.createSession({
+  load: () => (settings && settings.sstvTxPowerRestore) || null,
+  save: (m) => {
+    if (m) settings.sstvTxPowerRestore = m; else delete settings.sstvTxPowerRestore;
+    try { saveSettings(settings); } catch {}
+  },
+  setPower: (w) => sstvCommandTxPower(w),
+  log: (s) => sendCatLog(s),
+});
+
+/** Can POTACAT set this radio's power for a picture now? {canSet, why, remote} */
+function sstvPowerControl() {
+  if (isRemoteMode()) return { canSet: false, remote: true, why: 'remote' };
+  if (tciRigTarget()) return { canSet: false, why: 'no-power-control' };
+  const t = settings && settings.catTarget;
+  if (!t || t.type === 'none') return { canSet: false, why: 'no-power-control' };
+  const rigType = detectRigType();
+  if (rigType === 'flex') {
+    if (smartSdr && smartSdr.connected) return { canSet: true };
+    return { canSet: false, why: cat && cat.connected ? 'no-power-control' : 'no-radio' };
+  }
+  if (!cat || !cat.connected) return { canSet: false, why: 'no-radio' };
+  let caps = {};
+  try { caps = getRigCapabilities(rigType) || {}; } catch {}
+  return caps.txpower ? { canSet: true } : { canSet: false, why: 'no-power-control' };
+}
+
+/** The SSTV window's view: the saved level, whether it can be used, the line to show. */
+function sstvPowerState() {
+  const c = sstvPowerControl();
+  return {
+    watts: SstvTxPower.parseWatts(settings && settings.sstvTxPowerW),
+    canSet: !!c.canSet, remote: !!c.remote, why: c.why || '', text: SstvTxPower.stateText(c),
+  };
+}
+
+/** Command the radio's RF power for SSTV. Gated setters only (the Guest Pass cap). */
+function sstvCommandTxPower(watts) {
+  try {
+    const rigType = detectRigType();
+    if (rigType === 'flex') {
+      if (!smartSdr || !smartSdr.connected || !gatedSmartSdrTxPower(watts)) return false;
+    } else if (!cat || !cat.connected || !gatedSetTxPower(watts, { rigType })) {
+      return false;
+    }
+  } catch (e) {
+    sendCatLog('[SSTV] TX power command failed: ' + ((e && e.message) || e));
+    return false;
+  }
+  // Every surface's TX Pwr shows the level now; the radio's readback confirms it.
+  _currentTxPower = watts;
+  broadcastRigState();
+  return true;
+}
+
+/** Just before an SSTV picture keys, after every refusal (handleRemotePtt). */
+function sstvTxPowerBegin() {
+  const want = SstvTxPower.parseWatts(settings.sstvTxPowerW);
+  if (want === null) return; // empty: the radio's own power, nothing changes
+  const ctl = sstvPowerControl();
+  // The Guest Pass cap, asked the same way the gated setter asks it.
+  let capW = 0;
+  try {
+    if (passEnforcement) {
+      const r = passEnforcement.interceptCatCommand({ type: 'tx_power', watts: want });
+      if (r && r.clampTo != null) capW = Number(r.clampTo) || 0;
+    }
+  } catch {}
+  let limitW = 0;
+  try { const m = getActiveRigModel(); if (m && Number(m.maxPower) > 0) limitW = Number(m.maxPower); } catch {}
+  const ampW = activeAmpDriveLimitW();
+  if (ampW > 0 && (!limitW || ampW < limitW)) limitW = ampW;
+  const p = sstvTxPower.begin({ wantW: want, currentW: _currentTxPower, canSet: ctl.canSet, capW, limitW, rigId: settings.activeRigId || null });
+  if (p.action === 'set') {
+    sendCatLog(`[SSTV] TX power ${p.watts} W for this picture (Transmit power for SSTV${p.capped ? ', capped by the Guest Pass' : ''}); ${p.restoreW} W goes back when it ends`);
+  } else if (p.why === 'no-power-control') {
+    sendCatLog(`[SSTV] Transmit power for SSTV is ${want} W, but POTACAT cannot set this radio's power: the picture goes out at the power the radio is set to`);
+  } else if (p.why === 'power-unknown') {
+    sendCatLog(`[SSTV] Transmit power for SSTV is ${want} W, but the radio has not reported its power yet, so POTACAT leaves it as it is (there would be nothing to put back)`);
+  } else if (p.why === 'not-set') {
+    sendCatLog(`[SSTV] Could not set ${want} W for this picture: it goes out at the radio's own power`);
+  }
+}
+
+/** The picture ended, any way. Idempotent: only the first call after a begin acts. */
+function sstvTxPowerEnd(why) {
+  try { sstvTxPower.end(why); } catch (e) { console.error('[SSTV] power restore:', e); }
+}
+
+/** Every power report (sendCatPower): a restore lost to a crash or a slow radio. */
+function sstvTxPowerReconcile(watts) {
+  try { sstvTxPower.onReadback(watts, { rigId: settings.activeRigId || null }); } catch {}
 }
 
 // An ATU tune transmits its own carrier through the WORST of the match while
@@ -3209,8 +3365,12 @@ let _currentSplit = false; // rig split state, readback-fed (IF; P12 / rigctld s
 // panel opens; never while transmitting. Results ride the rig state as
 // customCatStates and every surface lights its toggles from them.
 const { createCustomCatReader } = require('./lib/custom-cat-read');
+// #164: up to 25 buttons, each optionally tied to some radios (slot.rigs).
+// One filter (visibleSlots) for every surface and for the reader.
+const CustomCatFollow = require('./lib/custom-cat-follow');
 const customCatReader = createCustomCatReader({
   getSlots: () => (settings && Array.isArray(settings.customCatButtons)) ? settings.customCatButtons : [],
+  getActiveRigId: () => (settings && settings.activeRigId) || null, // a toggle tied to another radio is not read
   query: (cmd) => {
     if (!cat || !cat.connected || typeof cat.queryRaw !== 'function') return Promise.reject(new Error('this rig link cannot read replies to raw commands'));
     return cat.queryRaw(cmd, { timeoutMs: 1200 });
@@ -3346,6 +3506,7 @@ function setTypedCall(source, call) {
   const prev = typedCalls.current();
   const now = typedCalls.set(source, call);
   if (now === prev) return;
+  if (now) n3fjpCip.note(now, 'typed'); // #712: debounced in the module
   if (win && !win.isDestroyed()) win.webContents.send('log-popout-callsign', now);
   if (vfoPopoutWin && !vfoPopoutWin.isDestroyed()) vfoPopoutWin.webContents.send('log-popout-callsign', now);
   if (remoteServer && remoteServer.running) remoteServer.sendTypedCall(now);
@@ -3618,6 +3779,17 @@ AmpDrive.setLimitSource(() => {
   return { watts, fullW };
 });
 
+/**
+ * The active rig's sound card jack and voice tick box (lib/rig-audio-jack.js,
+ * #153). Every decision to put the radio in a DATA mode reads this.
+ */
+function activeRigAudioJack() {
+  const rig = (settings.rigs || []).find((r) => r && r.id === settings.activeRigId) || null;
+  let family;
+  try { family = RigFamily.rigFamily(rig); } catch { family = undefined; }
+  return { rig, jack: RigAudioJack.jackOf(rig, family), voiceSwitch: RigAudioJack.voiceSwitchOf(rig) };
+}
+
 function getActiveRigModel() {
   const activeRig = (settings.rigs || []).find(r => r && r.id === settings.activeRigId);
   return RigFullPower.applyFullPower(_activeRigModelBase(), activeRig);
@@ -3654,9 +3826,7 @@ function _activeRigModelPicked() {
   // TX, #109). Panel caps stay generic.
   if (rigType === 'rigctld' && generic) {
     const ct = activeRig?.catTarget || settings.catTarget || null;
-    const hamlibId = Number(ct && ct.rigId);
-    const twin = hamlibId ? Object.values(RIG_MODELS).find((m) => m && m.hamlib && m.hamlib.rigId === hamlibId) : null;
-    if (twin && twin.pollDuringTx === false) return { ...generic, pollDuringTx: false };
+    return hamlibTwinQuirks(generic, ct && ct.rigId);
   }
   // Icom CI-V rigs are identified by CI-V address, so rigs[].model is usually
   // empty and we land on the conservative generic Icom caps — which assume a
@@ -3738,6 +3908,9 @@ function getRigCapabilities(rigType) {
   // FB/FA, rigctld I. Clients show the TX-frequency editor only where this is
   // true, so a radio that lacks the command never gets a dead field.
   caps.splitFreq = !!(caps.split && cat && cat.connected && cat.hasFrequencyOther);
+  // Split up N (#689): split on and the TX VFO at RX + N in one click. Not on
+  // a Flex, where a second TX frequency is a second slice (set-freq-other).
+  caps.splitUp = !!(caps.splitFreq && rigType !== 'flex');
   // The band scope's synthetic signal needs no radio, but every client gates
   // its scope controls on nativeScope — so with the switch on, any rig
   // reports one. That is how all three clients get bench-tested without an
@@ -3770,6 +3943,9 @@ function getRigCapabilities(rigType) {
   caps.afgain = rigSupportsAfGain(rigType);
   // The bands this radio is used on (null = not restricted), lib/rig-bands.js.
   caps.bands = activeRigBands();
+  // The data sub-modes (DIGU / DIGL) this radio can be set to: ECHOCAT Web
+  // offers exactly these in its mode picker (lib/data-mode-picker.js).
+  caps.dataModes = DataModePicker.dataModesFor(rigDataModeInput(rigType));
   // #293, #768: Power Off where POTACAT can switch the radio back on (a
   // direct serial port, an SCU-LAN10), unless the operator chose otherwise
   // for this rig: its stored allowPowerOffNoWake, true or false, wins. Every
@@ -3792,6 +3968,21 @@ function getRigCapabilities(rigType) {
     if (caps.minPower != null && Number(caps.minPower) > caps.maxPower) caps.minPower = caps.maxPower;
   }
   return caps;
+}
+
+/** What lib/data-mode-picker.js needs to know about the live link. */
+function rigDataModeInput(rigType) {
+  const codec = cat && cat._codec;
+  let model = null;
+  try { model = getActiveRigModel(); } catch { model = null; }
+  return {
+    rigType,
+    protocol: model && model.protocol,
+    dataFlagUnsupported: !!(codec && codec._dataModeUnsupported),
+    resolve: codec instanceof KenwoodCodec ? (m) => codec.resolveMode(m, _currentFreqHz || 14074000) : null,
+    hasDaCmd: !!(codec instanceof KenwoodCodec && codec._cmds && codec._cmds.setDa),
+    radioModes: codec instanceof FlrigCodec && Array.isArray(codec._radioModes) ? codec._radioModes.map(normalizeRadioMode) : null,
+  };
 }
 
 function _rigCapabilitiesForType(rigType) {
@@ -4223,7 +4414,7 @@ function spawnRigctld(target, portOverride) {
       '-m', String(target.rigId),
       '-r', serialPort,
       '-s', String(target.baudRate || 9600),
-      '-t', port,
+      ...rigctldListenArgs(port),
     ];
     // Separate PTT port (DigiRig / SignaLink / etc.) — tell rigctld to
     // drive PTT via DTR or RTS on the supplied serial port instead of
@@ -4538,15 +4729,22 @@ function fakeItSetDial(hz) {
   if (route === 'cat') return cat.setDialNow(hz) !== false;
   return false;
 }
-// The engine renders shifted audio only where this PC can move the dial: one
-// band (multi-band engines are built fresh and never shift), a radio with
-// CAT, not driving a remote shack (the shack applies its own). A link that is
-// down at transmit time is fakeItShiftForTx's refusal, not this one's.
+// The engine renders shifted audio only where this PC can move the dial
+// (lib/jtcat-fake-it.js engineCanShift): one band (multi-band engines are
+// built fresh and never shift), a CAT radio that is not TCI and not in split,
+// not driving a remote shack (the shack applies its own). Anywhere else the
+// tone goes out at the plain offset. A link that is down at transmit time is
+// fakeItShiftForTx's refusal, not this one's.
 function fakeItSyncEngine() {
   if (!ft8Engine || typeof ft8Engine.setFakeIt !== 'function') return;
-  const multi = !!(jtcatManager && jtcatManager.sliceCount > 1);
-  const noCat = !!(settings.catTarget && settings.catTarget.type === 'none');
-  ft8Engine.setFakeIt(fakeItEnabled() && !multi && !isRemoteMode() && !noCat);
+  ft8Engine.setFakeIt(FakeIt.engineCanShift({
+    enabled: fakeItEnabled(),
+    multiBand: !!(jtcatManager && jtcatManager.sliceCount > 1),
+    remote: isRemoteMode(),
+    catTarget: settings.catTarget,
+    catNone: !!settings.catNone,
+    split: _currentSplit,
+  }));
 }
 // A read at the shifted dial after the restore sends the dial back again
 // (lib/jtcat-fake-it.js onDialRead): a late poll answer or a dropped restore.
@@ -4599,7 +4797,27 @@ function catFrequencyHandler(hz) {
   // frequency (kg6odijohn, IC-7100 repeater memory: POTACAT acted on the
   // offset). The controller drops them too; this is the net for every path.
   if (_remoteTxState || (cat && cat._transmitting)) return;
+  noteBandLastFreq(hz);
   sendCatFrequency(hz);
+}
+
+// The radio's last dial on each band, per rig (lib/band-last-freq.js, #680).
+// Kept in memory on every read; written to settings when the band changes, so
+// the frequency left behind on a band is saved without a write per poll.
+let _bandLastFreqBand = null;
+let _bandLastFreqSaveTimer = null;
+let _bandLastFreqSavedAtQuit = false;
+function noteBandLastFreq(hz) {
+  try {
+    if (!settings.bandLastFreq || typeof settings.bandLastFreq !== 'object') settings.bandLastFreq = {};
+    const band = BandLastFreq.noteDial(settings.bandLastFreq, settings.activeRigId, hz);
+    if (!band || band === _bandLastFreqBand) return;
+    const first = _bandLastFreqBand === null;
+    _bandLastFreqBand = band;
+    if (first) return;
+    clearTimeout(_bandLastFreqSaveTimer);
+    _bandLastFreqSaveTimer = setTimeout(() => { try { saveSettings(settings); } catch {} }, 2000);
+  } catch {}
 }
 function catModeHandler(md) {
   if (smartSdr && smartSdr.mode === 'self') return;
@@ -4654,11 +4872,12 @@ function js8FollowBand(dialHz, band) {
 // is where they mean to transmit, whatever the frequency.
 function jtcatFollowRadioNow(who) {
   const dialLive = !!((cat && cat.connected) || (smartSdr && smartSdr.canTune && smartSdr.connected));
-  if (!dialLive || !(_currentFreqHz > 0) || !ft8Engine || !ft8Engine._running) {
+  const dialHz = tciRigLinked() ? tciRigDial : (dialLive ? _currentFreqHz : 0);
+  if (!(dialHz > 0) || !ft8Engine || !ft8Engine._running) {
     sendCatLog('[JTCAT] Follow the radio: no live dial from the radio, nothing to follow');
     return false;
   }
-  jtcatFollowBand(_currentFreqHz, freqToBand(_currentFreqHz / 1e6) || '', `${who} pressed Follow the radio`);
+  jtcatFollowBand(dialHz, freqToBand(dialHz / 1e6) || '', `${who} pressed Follow the radio`);
   return true;
 }
 
@@ -5241,6 +5460,8 @@ function sendCatPower(watts) {
   _powerReadbackThisLink = true; // this radio reports its power (#184)
   _lastPowerReadback = { watts: Number(watts) || 0, at: Date.now() };
   if (!isRemoteMode()) stationSetupReconcilePower(Number(watts) || 0);
+  // ...and an SSTV picture's power (#279).
+  if (!isRemoteMode()) sstvTxPowerReconcile(Number(watts) || 0);
 }
 
 // Band change on a radio that cannot report its power (deskHPSDR, Zeus: PC;
@@ -5400,6 +5621,7 @@ function sendCatSplit(on) {
   if (v === _currentSplit) return false;
   _currentSplit = v;
   sendCatLog(`[CAT] Split ${v ? 'ON' : 'OFF'}`);
+  fakeItSyncEngine();   // a radio in split transmits on the other VFO: no Fake It shift
   if (!v) sendCatFreqOther(0);   // split off -> hide the TX line everywhere
   broadcastRigState();
   return true;
@@ -5698,6 +5920,7 @@ function broadcastRigState() {
     vfo: _currentVfo,
     split: _currentSplit,
     customCatStates: customCatReader.states(), // #242: custom toggles' own reads
+    activeRigId: settings.activeRigId || null, // #164: the Rig panel shows the buttons for this radio
     capabilities: caps,
     // Control registry — lets clients render the rig panel (labels, grouping,
     // TX-only tags, which caps gate each) from one source of truth instead of
@@ -6744,7 +6967,7 @@ async function runStationSetupTxTest(rigId, opts) {
   }
   _stationSetupTxBusy = true;
   try { return await _runStationSetupTxTest(rigId, opts); }
-  finally { _stationSetupTxBusy = false; }
+  finally { _stationSetupTxBusy = false; releaseRadio('setup-test'); }
 }
 
 async function _runStationSetupTxTest(rigId, { keepPower = false, voice = false } = {}) {
@@ -6760,7 +6983,17 @@ async function _runStationSetupTxTest(rigId, { keepPower = false, voice = false 
   const live = stationSetupLive(rig);
   if (!live.catConnected) return done({ result: 'error', message: 'Radio control is not working yet.' });
   if (_swrTripped) return done({ result: 'error', message: 'Transmit is blocked by the SWR guard. Run the antenna tuner or change bands, then test again.' });
-  if (jtcatTuneState.active || radioOwner !== 'none') return done({ result: 'error', message: 'Something else is transmitting right now (FT8, JS8 or a data mode). Stop it, then test again.' });
+  // Name whoever holds the radio, on screen and in session.log (#919): a bare
+  // "something else is transmitting" with no log line looked like broken CAT.
+  const heldBy = radioOwnerLib.txTestRefusal(radioOwner, { tuneActive: jtcatTuneState.active });
+  if (heldBy) { sendCatLog(heldBy.log); return done({ result: 'error', message: heldBy.message }); }
+  // Hold the radio for the whole test (released by runStationSetupTxTest), so
+  // an inbound Mercury call cannot key in the middle of it.
+  if (!acquireRadio('setup-test')) {
+    const late = radioOwnerLib.txTestRefusal(radioOwner);
+    if (late) sendCatLog(late.log);
+    return done({ result: 'error', message: late ? late.message : 'The radio is busy. Try again in a moment.' });
+  }
   // The test sends an AUDIO tone. In CW the radio keys but ignores audio, so
   // it transmits nothing — 0.0 W, SWR 1.0 — and the result blamed the audio
   // (K3SBP's 8600, 2026-09-25). Say so instead of keying. Never switch the
@@ -7086,8 +7319,47 @@ function restoreIcomUsbDataMod(reason) {
   try { h.guard.restore(reason); } catch (e) { sendCatLog('[Icom DATA MOD] ' + e.message); }
 }
 
+// #602: the FT-891's transmit audio input (rig.txAudioInput), set on its
+// MIC SELECT / DATA IN SELECT menus while POTACAT is connected over serial CAT,
+// and put back when it disconnects (lib/ft891-tx-audio-input.js).
+let _ft891TxAudioInput = null; // { guard, controller }
+function ft891TxAudioInputAttach(controller, transport, target) {
+  _ft891TxAudioInput = null;
+  const modelName = getActiveRigModelName();
+  if (!Ft891TxAudioInput.hasChoice(modelName) || !Ft891TxAudioInput.appliesToLink(target && target.type)) return;
+  const rigOf = () => (settings.rigs || []).find((r) => r && r.id === settings.activeRigId);
+  if (!Ft891TxAudioInput.choiceFor(rigOf())) return; // the default: the radio's menus are not touched
+  const guard = Ft891TxAudioInput.createGuard({
+    choice: () => Ft891TxAudioInput.choiceFor(rigOf()),
+    query: (cmd) => controller.queryRaw(cmd, { timeoutMs: 1500 }).catch(() => null),
+    send: (cmd) => controller.sendRaw(cmd),
+    log: (line) => sendCatLog('[FT-891 audio input] ' + line),
+    notice: (message) => { if (win && !win.isDestroyed()) win.webContents.send('app-notice', { message, duration: 15000 }); },
+  });
+  _ft891TxAudioInput = { guard, controller };
+  // Each time the link comes up (a dropped USB cable reconnects the same
+  // controller); menus already set stay set and keep the operator's values.
+  transport.on('connect', () => {
+    setTimeout(() => {
+      if (cat !== controller || !_ft891TxAudioInput || _ft891TxAudioInput.guard !== guard || !controller.connected) return;
+      guard.apply().catch((e) => sendCatLog('[FT-891 audio input] ' + e.message));
+    }, 1000);
+  });
+}
+function restoreFt891TxAudioInput(reason) {
+  const h = _ft891TxAudioInput;
+  _ft891TxAudioInput = null;
+  if (!h) return;
+  if (!h.controller || !h.controller.connected) {
+    if (Object.keys(h.guard.held).length) sendCatLog(`[FT-891 audio input] the link is already closed (${reason}): POTACAT could not put the radio's own transmit audio input menus back; set them on the radio if needed`);
+    return;
+  }
+  try { h.guard.restore(reason); } catch (e) { sendCatLog('[FT-891 audio input] ' + e.message); }
+}
+
 async function restoreIcomNetworkDataMod(reason = 'disconnect') {
   restoreIcomUsbDataMod(reason); // every disconnect path calls this one: the USB DATA MOD goes back first
+  restoreFt891TxAudioInput(reason); // and the FT-891's transmit audio input menus (#602)
   const state = _icomNetworkDataModRestore;
   if (!state) return false;
   _icomNetworkDataModRestore = null;
@@ -7769,6 +8041,15 @@ let remoteShackCw = { enabled: false, paddle: false, paddleReason: '' };
 // The driven shack's grid (auth-ok / settings-update settings.grid), so the
 // JTCAT map centres where the decodes are heard (#774). '' = not known.
 let remoteShackGrid = '';
+// The driven shack's station location (auth-ok / settings-update
+// settings.stationLocation, #909): { grid, state, county }, or null when the
+// shack sends none. A contact logged here on a Guest Pass carries it.
+let remoteShackLocation = null;
+/** The lending station's location while this PC is on a Guest Pass; null otherwise. */
+function guestPassShackLocation() {
+  const t = remoteClient && remoteClient._target;
+  return isRemoteMode() && t && t.kind === 'pass' ? remoteShackLocation : null;
+}
 let remoteShackVoice = { labels: [], filled: [] };
 const REMOTE_CW_OFF_MSG = 'Remote CW is off on the shack. Turn on Settings > ECHOCAT > Remote CW Keyer on the shack PC.';
 function remoteCwRefusal(paddle) {
@@ -7893,6 +8174,7 @@ function bridgeIpcToShack(channel, args, e) {
   const rule = RemoteBridge.OUT[channel];
   if (!rule) return false;
   const r = rule(args || [], _remoteBridgeState) || { drop: true };
+  if (r.local) return false; // this PC's own preference (the Winlink window's waterfall speed)
   if (r.drop) return true;
   const fromSstv = !!(sstvPopoutWin && !sstvPopoutWin.isDestroyed() && e && e.sender === sstvPopoutWin.webContents);
   const fromAprs = !!(aprsWin && !aprsWin.isDestroyed() && e && e.sender === aprsWin.webContents);
@@ -7938,13 +8220,16 @@ function bridgeIpcToShack(channel, args, e) {
   return true;
 }
 function bridgeInboundFromShack(msg) {
+  if (remoteWinlinkInbound(msg)) return true;
   if (remoteJs8Inbound(msg)) return true;
   if (remoteSstvInbound(msg)) return true;
   const rule = RemoteBridge.IN[msg.type];
   if (!rule) return false;
   RemoteBridge.trackState(_remoteBridgeState, msg);
+  _remoteBridgeState.serverCaps = (remoteClient && remoteClient.state && remoteClient.state().serverCapabilities) || null; // the shack's hello (#585 winlink-mine)
   const out = rule(msg, _remoteBridgeState) || [];
   for (const [ch, payload] of out) {
+    if (ch.startsWith('winlink-')) { remoteWinlinkToWindow(ch, payload); continue; }
     if (ch.startsWith('aprs-')) {
       if (ch === 'aprs-listen') _remoteAprsListen = payload;
       if (aprsWin && !aprsWin.isDestroyed()) aprsWin.webContents.send(ch, payload);
@@ -8057,8 +8342,73 @@ function remoteJs8Inbound(msg) {
     default: return false;
   }
 }
+// Winlink on the shack (#299). The Winlink Mail window shows the SHACK's
+// Winlink while this desktop drives one: its state, folders and session
+// arrive as the winlink-* frames every owner device gets (kept here, so a
+// window opened later is filled at once), and its requests go out as the
+// wire's winlink-* messages, answered by reqId. The mapping is
+// lib/winlink-remote-shack.js; this PC's own Pat is not started.
+const _remoteWinlink = { state: null, mailboxes: {}, session: null, pending: new Map(), wanted: false };
+let _remoteWinlinkSeq = 0;
+function remoteWinlinkReset() {
+  for (const p of _remoteWinlink.pending.values()) p(null);
+  Object.assign(_remoteWinlink, { state: null, mailboxes: {}, session: null, pending: new Map() });
+}
+/** A shack frame for the Winlink window: kept, and shown when the window is open. */
+function remoteWinlinkToWindow(ch, payload) {
+  if (ch === 'winlink-state') _remoteWinlink.state = payload;
+  else if (ch === 'winlink-mailbox' && payload && payload.box) _remoteWinlink.mailboxes[payload.box] = payload;
+  else if (ch === 'winlink-session') _remoteWinlink.session = payload;
+  if (winlinkPopoutWin && !winlinkPopoutWin.isDestroyed()) winlinkPopoutWin.webContents.send(ch, payload);
+}
+/** A reply by reqId wakes the request that asked; a reply-only frame stops here. */
+function remoteWinlinkInbound(msg) {
+  if (!msg || typeof msg.type !== 'string' || !msg.type.startsWith('winlink-')) return false;
+  const p = msg.reqId && _remoteWinlink.pending.get(msg.reqId);
+  if (p) p(msg);
+  return !RemoteBridge.IN[msg.type];
+}
+/** The window opened (true) or closed (false): the shack counts it as a Mail view, as a phone's tab. */
+function remoteWinlinkView(on) {
+  _remoteWinlink.wanted = !!on;
+  if (!isRemoteLinked()) return;
+  remoteClient.sendRaw({ type: 'winlink-mail-view', open: !!on });
+  if (on) remoteClient.sendRaw({ type: 'winlink-list', box: 'in' }); // starts the shack's Pat, refreshes the Inbox
+  else { remoteClient.sendRaw({ type: 'winlink-watch', on: false }); remoteClient.sendRaw({ type: 'winlink-qsy-restore' }); }
+}
+/** Fill a freshly loaded window from what the shack last sent. */
+function remoteWinlinkHydrateWindow() {
+  if (!winlinkPopoutWin || winlinkPopoutWin.isDestroyed()) return;
+  const send = (ch, p) => winlinkPopoutWin.webContents.send(ch, p);
+  send('winlink-state', _remoteWinlink.state || { ...WinlinkRemoteShack.waitingState(), ...(isRemoteLinked() ? {} : { patError: REMOTE_NOT_LINKED_MSG }) });
+  for (const m of Object.values(_remoteWinlink.mailboxes)) send('winlink-mailbox', m);
+  if (_remoteWinlink.session) send('winlink-session', _remoteWinlink.session);
+}
+async function remoteWinlinkInvoke(channel, args) {
+  const r = WinlinkRemoteShack.INVOKES[channel](args) || {};
+  if (r.answer !== undefined) return r.answer;
+  if (r.cached === 'state') return _remoteWinlink.state || { ...WinlinkRemoteShack.waitingState(), ...(isRemoteLinked() ? {} : { patError: REMOTE_NOT_LINKED_MSG }) };
+  if (!isRemoteLinked()) return { ok: false, error: REMOTE_NOT_LINKED_MSG };
+  const wire = r.send || r.save;
+  if (!wire) return { ok: false, error: WinlinkRemoteShack.NO_ANSWER };
+  const reqId = 'd2d-wl-' + (++_remoteWinlinkSeq);
+  const frame = await new Promise((resolve) => {
+    const t = setTimeout(() => { _remoteWinlink.pending.delete(reqId); resolve(null); }, r.ms || WinlinkRemoteShack.MS.default);
+    _remoteWinlink.pending.set(reqId, (m) => { clearTimeout(t); _remoteWinlink.pending.delete(reqId); resolve(m); });
+    remoteClient.sendRaw({ ...wire, reqId });
+  });
+  const out = WinlinkRemoteShack.reply(channel, frame, args);
+  if (!r.save || !out.ok) return out;
+  // An attachment from the shack is saved on this PC, as a local one is.
+  const safe = path.basename(String(out.name)).replace(/[<>:"/\\|?*\x00-\x1f]/g, '_') || 'attachment';
+  const pick = await dialog.showSaveDialog(winlinkPopoutWin || win, { title: 'Save attachment', defaultPath: path.join(app.getPath('downloads'), safe) });
+  if (pick.canceled || !pick.filePath) return { ok: false, canceled: true };
+  fs.writeFileSync(pick.filePath, Buffer.from(out.dataBase64, 'base64'));
+  return { ok: true, path: pick.filePath };
+}
 async function bridgeInvokeToShack(channel, args, e) {
   if (!isRemoteMode()) return undefined;
+  if (WinlinkRemoteShack.INVOKES[channel]) return remoteWinlinkInvoke(channel, args || []);
   if (!isRemoteLinked()) return { ok: false, error: REMOTE_NOT_LINKED_MSG };
   const reqId = 'd2d-' + (++_remoteJs8Seq);
   const st = _remoteJs8.state || {};
@@ -8214,6 +8564,7 @@ function ensureRemoteClient() {
   // already early-returns in remote mode, but an ALREADY-running `cat` was never
   // torn down. The user re-selects a local rig (→ connectCat) to come back.
   if (cat) {
+    restoreFt891TxAudioInput('remote shack'); // #602: the radio's own menus back before the port closes
     try { cat.removeAllListeners(); cat.disconnect(); _rememberCatClose(cat); } catch {}
     cat = null;
   }
@@ -8263,6 +8614,7 @@ function ensureRemoteClient() {
     if (target.kind === 'pass') { delete target.passSessionClosed; delete target.passEndReason; }
     remoteShackCw = { enabled: !!info.cwAvailable, paddle: !!info.cwPaddleAvailable, paddleReason: String(info.cwPaddleReason || '') };
     remoteShackGrid = ShackGrid.shackGridFrom(info.settings);
+    remoteShackLocation = ShackGrid.shackLocationFrom(info.settings);
     remoteShackVoice = { labels: [], filled: [] };
     remoteJs8Reset();
     _vfoLocked = !!info.vfoLocked;
@@ -8278,6 +8630,9 @@ function ensureRemoteClient() {
     // APRS (#868): this shack's aprs-state follows (an older shack sends none); watch again while the window is open.
     _remoteBridgeState.aprs = false; _remoteBridgeState.aprsListenOn = false; _remoteAprsListen = null;
     if (aprsWin && !aprsWin.isDestroyed()) remoteAprsWatch(true);
+    // Winlink (#299): the shack hydrates this session; a stale shack's folders go first.
+    remoteWinlinkReset();
+    if (winlinkPopoutWin && !winlinkPopoutWin.isDestroyed()) { remoteWinlinkHydrateWindow(); remoteWinlinkView(true); }
     if (sstvPopoutWin && !sstvPopoutWin.isDestroyed()) { _remoteSstvWindowOpen = false; remoteClient.sendRaw({ type: 'sstv-open' }); }
     if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed() && _remoteJtcatMode) {
       remoteClient.sendRaw({ type: 'jtcat-start', mode: _remoteJtcatMode });
@@ -8375,8 +8730,10 @@ function ensureRemoteClient() {
       freq: snap.freq || 0,
       rigType: snap.rigType || 'remote',
     });
-    // The JS8 and SSTV windows show the dial too (they hear cat-* locally).
-    for (const w of [win, js8PopoutWin, sstvPopoutWin]) {
+    // The JS8 and SSTV windows show the dial too (they hear cat-* locally),
+    // and the Band Scope window centres its axis and tuning lines on it: it
+    // kept the frequency it opened with while a desktop drove a shack (#944).
+    for (const w of [win, js8PopoutWin, sstvPopoutWin, scopePopoutWin]) {
       if (!w || w.isDestroyed()) continue;
       if (typeof snap.freq === 'number' && snap.freq > 0) w.webContents.send('cat-frequency', snap.freq);
       if (snap.mode) w.webContents.send('cat-mode', snap.mode);
@@ -8388,6 +8745,7 @@ function ensureRemoteClient() {
   remoteClient.on('message', (msg) => {
     if (bridgeInboundFromShack(msg)) return;
     if (msg.type === 'settings-update' && msg.settings && typeof msg.settings.grid === 'string') remoteShackGrid = ShackGrid.shackGridFrom(msg.settings);
+    if (msg.type === 'settings-update' && msg.settings && msg.settings.stationLocation) remoteShackLocation = ShackGrid.shackLocationFrom(msg.settings);
     // Skip Grid / Hound ride the shack's settings blob, not a JTCAT frame.
     if (msg.type === 'settings-update' && msg.settings && jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
       for (const key of ['jtcatSkipTx1', 'jtcatHoundMode']) {
@@ -8654,11 +9012,22 @@ function tearDownRemoteClient() {
   pushRemoteShackInfo();
   remoteShackCw = { enabled: false, paddle: false, paddleReason: '' };
   remoteShackVoice = { labels: [], filled: [] };
+  remoteShackLocation = null;
   // A scope window left open goes back to this PC's own source (or says why not).
   if (_remoteScopeWanted) { _remoteScopeWanted = false; if (yaesuScopeWanted()) startYaesuScope(); }
   // APRS (#868): the listening card goes back to this PC's own radio.
   _remoteAprsWanted = false; _remoteBridgeState.aprs = false; _remoteBridgeState.aprsListenOn = false; _remoteAprsListen = null;
   try { aprsListenPush(); } catch { /* the APRS state is declared further down; nothing to show yet */ }
+  // Winlink (#299): an open Mail window goes back to this PC's own Pat.
+  remoteWinlinkReset(); _remoteWinlink.wanted = false;
+  if (!isRemoteMode() && winlinkPopoutWin && !winlinkPopoutWin.isDestroyed()) {
+    try {
+      winlinkPopoutSend('winlink-state', winlinkPayload());
+      for (const box of WinlinkStateLib.FOLDERS) winlinkPopoutSend('winlink-mailbox', { box, messages: winlinkState.list(box) });
+      winlinkPopoutSend('winlink-session', winlinkSessionView());
+      winlinkEnsureStarted();
+    } catch { /* Winlink is declared further down; nothing to show yet */ }
+  }
   if (_remotePaddleHoldTimer) { clearInterval(_remotePaddleHoldTimer); _remotePaddleHoldTimer = null; }
   // The shack's VFO lock was mirrored here; this PC's radio starts unlocked.
   if (_vfoLocked) {
@@ -9184,6 +9553,7 @@ async function connectCat() {
   killRigctld();
   healActiveRigNow('connect');
   let target = settings.catTarget;
+  fakeItSyncEngine();   // the rig changed: Fake It shifts only on a CAT radio (not TCI, not None)
   if (!target && settings.catNone) {
     // The operator picked "None": no radio, and no auto-activating the only
     // configured rig behind their back (G90 owner, 2026-10-24: "even when I
@@ -9211,6 +9581,7 @@ async function connectCat() {
       if (rig.audioSource) settings.audioSource = rig.audioSource; // per-rig mirror rides activation
       saveSettings(settings);
       target = settings.catTarget;
+      fakeItSyncEngine();
       sendCatLog('[CAT] No active rig was selected — auto-activating the only configured rig (' + (rig.name || rig.model || 'rig') + ').');
     } else if (rigsWithTarget.length > 1) {
       sendCatLog('[CAT] Not connecting: ' + rigsWithTarget.length + ' rigs are configured but none is set ACTIVE. Pick one in Settings > Radio.');
@@ -9434,7 +9805,7 @@ async function connectCat() {
     cat.on('powerMeter', sendCatFwdPower);
     cat.on('ptt', (on) => _radioTxWatch.cat(on)); // the radio's TX status: owner use during a hold (#200)
     sendCatLog(`Connecting to rigctld on 127.0.0.1:${rigctldPort}`);
-    transport.connect({ host: '127.0.0.1', port: rigctldPort });
+    transport.connect({ host: RIGCTLD_HOST, port: rigctldPort });
 
   } else if (target.type === 'rigctldnet') {
     transport = new TcpTransport();
@@ -9886,6 +10257,7 @@ async function connectCat() {
     if (hs.source !== 'rig' && SerialHsTrial.trialSkipReason(model, target) === 'ptt-rts') {
       if (_serialHsTrial.get(target.path) !== 'ptt-rts') { _serialHsTrial.set(target.path, 'ptt-rts'); sendCatLog(SerialHsTrial.pttRtsSkipLine(target.path)); }
     } else if (hs.source !== 'rig' && SerialHsTrial.trialApplies(model, target)) armSerialHandshakeNoAnswerTrial(cat, transport, target, hs);
+    if (model.protocol === 'kenwood') ft891TxAudioInputAttach(cat, transport, target); // #602: FT-891 transmit audio input, put back on disconnect
     // Lines low at open on every Yaesu (holdSerialLinesLow): Windows raises DTR/RTS on open.
     transport.connect({ path: target.path, baudRate: target.baudRate || 9600, dtrOff: holdSerialLinesLow(model, target), connectDelay: model.connectDelay, serialHandshake: hs.handshake, stopBits: model.serialStopBits });
   }
@@ -9901,9 +10273,19 @@ async function connectCat() {
   // Voice in DATA mode (GitHub #24): this rig takes voice as USB-D/LSB-D.
   // Any edit of a rig reconnects CAT, so connecting is the one place to apply it.
   if (cat && typeof cat.setVoiceAsData === 'function') {
-    const vRig = (settings.rigs || []).find(r => r.id === settings.activeRigId);
-    cat.setVoiceAsData(!!(vRig && vRig.voiceAsData));
-    if (vRig && vRig.voiceAsData) sendCatLog("[CAT] Voice in DATA mode is on for this rig: USB and LSB go to the radio as USB-D and LSB-D, and the radio's own microphone is off.");
+    const { rig: vRig, jack: vJack } = activeRigAudioJack();
+    const vOn = RigAudioJack.voiceAsDataOn(vRig, vJack); // never on a microphone-jack rig (#153)
+    cat.setVoiceAsData(vOn);
+    if (vRig && vRig.voiceAsData && !vOn) sendCatLog("[CAT] Voice in DATA mode is ticked for this rig, but its sound card interface is on the microphone jack: voice stays in USB and LSB.");
+    if (vOn) sendCatLog("[CAT] Voice in DATA mode is on for this rig: USB and LSB go to the radio as USB-D and LSB-D, and the radio's own microphone is off.");
+  }
+  // CW sideband (#753, lib/cw-sideband.js): every CW mode this rig is sent
+  // carries the rig's choice. Any edit of a rig reconnects CAT, as above.
+  if (cat && typeof cat.setCwSideband === 'function') {
+    const cwRig = (settings.rigs || []).find((r) => r && r.id === settings.activeRigId) || null;
+    const cwSb = CwSideband.settingOf(cwRig);
+    cat.setCwSideband(CwSideband.settingOf(cwRig));
+    if (cwSb !== CwSideband.AUTO) sendCatLog(`[CAT] CW sideband for this rig: always ${cwSb === CwSideband.UPPER ? 'CW / CW-U' : 'CW-R / CW-L'} on every band (Settings > Radio, Edit the rig).`);
   }
   // Linux cdc_acm radios reject TIOCMSET, so node-serialport's port.set()
   // call to flip DTR for paddle keying fails on the first try and every try
@@ -11118,7 +11500,12 @@ function openMercuryClient() {
   // state so disconnectMercury / the failsafe timer can see it.
   attachMercuryRadioBridge(mercuryClient, {
     keyPtt: (on) => { mercuryTxActive = on; handleRemotePtt(on, on ? { audio: true, emission: 'DATA', txKind: 'winlink' } : {}); },
-    acquire: () => acquireRadio('mercury'),
+    // A tune (the Tune button, the Transmit Test's tone) keys the radio
+    // without owning it; Mercury yields to it like to any owner (#919).
+    acquire: () => {
+      if (jtcatTuneState.active) { sendCatLog('[radio] mercury could not take the radio — a tune is in progress'); return false; }
+      return acquireRadio('mercury');
+    },
     release: () => releaseRadio('mercury'),
     abort: () => { try { mercuryClient.abort(); } catch {} },
     armFailsafe: armMercuryTxFailsafe,
@@ -11150,24 +11537,21 @@ function openMercuryClient() {
 }
 
 // Register the callsign + bandwidth, and (opt-in) put Mercury in LISTEN so it
-// answers inbound calls. LISTEN claims the radio up-front because an inbound
-// CALL will key PTT — Part 97 wants that attended, so it's default-OFF and the
-// operator opts in. Runs on every control (re)connect and after a session ends.
+// answers inbound calls. An inbound CALL will key PTT — Part 97 wants that
+// attended, so it's default-OFF and the operator opts in. LISTEN takes no radio
+// lock (#919): an idle listener held it for hours and refused FT8 and the
+// Transmit Test. The bridge takes the radio when a session actually starts
+// (CONNECTED or Mercury's PTT ON) and yields — ABORT, no PTT — when FT8, a tune
+// or the Transmit Test has it. Runs on every control (re)connect and after a
+// session ends.
 function onMercuryReady() {
   if (!mercuryClient || !mercuryClient.connected) return;
   const call = (settings.myCallsign || '').trim();
   if (call) mercuryClient.myCall(call);
-  const bw = parseInt(settings.mercuryBw, 10);
-  if (bw === 500 || bw === 2300 || bw === 2750) mercuryClient.setBandwidth(bw);
+  mercuryClient.setBandwidth(MercuryOffer.bandwidthChoice(settings.mercuryBw));
   if (settings.mercuryListen && call) {
-    if (acquireRadio('mercury')) {
-      mercuryClient.listen('ON');
-      sendCatLog(`[Mercury] LISTEN ON as ${call}`);
-    } else {
-      // Radio busy (JTCAT) — don't listen; we'd only collide on an inbound call.
-      mercuryClient.listen('OFF');
-      sendCatLog(`[Mercury] LISTEN deferred — radio in use by ${radioOwner}`);
-    }
+    mercuryClient.listen('ON');
+    sendCatLog(`[Mercury] LISTEN ON as ${call}`);
   }
 }
 
@@ -11627,6 +12011,12 @@ async function winlinkVaraReady(mode, { configured } = {}) {
       : ' on that computer';
     throw new Error(`${name} is not answering at ${where} — start ${name}${how} with its TCP port set to ${port} and its PTT set to VOX, then try again`);
   }
+  // Mercury in VARA HF's place (Settings, own VARA HF, the Mercury box;
+  // lib/winlink-pat.js mercuryChosen): POTACAT never starts or sets up VARA for it.
+  if (!probe.ok && kind === 'hf' && WinlinkPat.mercuryChosen(settings)) {
+    _winlinkSessionErrorKind = 'vara-not-answering';
+    throw new Error(`Mercury (experimental) is not answering at ${where} — start Mercury on this computer with its TCP port ${port} and -P none, then try again`);
+  }
   if (!probe.ok) {
     const bin = findVara(kind);
     if (settings.winlinkVaraAutoLaunch !== false && bin.found) {
@@ -11835,6 +12225,8 @@ function winlinkPayload() {
 }
 
 function winlinkPopoutSend(channel, payload) {
+  // Driving a remote shack (#299): the window shows the shack's Winlink, fed by the bridge.
+  if (isRemoteMode() && WinlinkRemoteShack.SHACK_CHANNELS.includes(channel)) return;
   if (winlinkPopoutWin && !winlinkPopoutWin.isDestroyed()) winlinkPopoutWin.webContents.send(channel, payload);
 }
 
@@ -11937,6 +12329,8 @@ function stopWinlinkGpsd() {
   _winlinkGpsd = null;
 }
 
+/** The service codes in the config Pat was last given (winlinkGateways downloads again when they changed). */
+let _patServiceCodes = ['PUBLIC'];
 /** Write Pat's config for this launch / this session. Returns the varahf address written. */
 function writePatConfig({ varaAddr } = {}) {
   const p = winlinkPaths();
@@ -11960,7 +12354,12 @@ function writePatConfig({ varaAddr } = {}) {
     prediction: winlinkPredictionConfig(),
     // #346: the Settings grid's centre for Pat's forms, from POTACAT's GPSd stand-in (lib/winlink-gpsd.js).
     gpsdAddr: _winlinkGpsd ? `127.0.0.1:${_winlinkGpsd.port}` : '',
+    // MERCURY gateways only when the operator has chosen Mercury (Settings, own VARA HF, Mercury box).
+    mercury: WinlinkPat.mercuryChosen(settings),
+    // Settings' Other service codes: a club's own gateways (plan docs/winlink-custom-gateways-plan.md 2.2).
+    serviceCodes: settings.winlinkServiceCodes || '',
   });
+  _patServiceCodes = cfg.service_codes;
   // Written owner-only where the OS honours it: it holds the Winlink password.
   fs.writeFileSync(p.config, JSON.stringify(cfg, null, 2), { mode: 0o600 });
   _patVaraAddr = addr;
@@ -12829,7 +13228,6 @@ function ensureModemBridgeWindow() {
       backgroundThrottling: false, // a throttled worklet starves the modem
     },
   });
-  modemBridgeWin.webContents.session.setPermissionRequestHandler((_wc, _perm, cb) => cb(true));
   modemBridgeWin.loadFile(path.join(__dirname, 'renderer', 'modem-audio-bridge.html'));
   modemBridgeWin.webContents.on('did-finish-load', () => {
     if (!modemBridgeWin || modemBridgeWin.isDestroyed()) return;
@@ -13002,7 +13400,7 @@ function winlinkModemBw() {
   return {
     ardop: pick(settings.winlinkArdopBw, [200, 500, 1000, 2000], 500),
     vara: pick(settings.winlinkVaraBw, [500, 2300, 2750], 2300),
-    mercury: pick(settings.mercuryBw, [500, 2300, 2750], 2300),
+    mercury: MercuryOffer.bandwidthChoice(settings.mercuryBw), // 2750 hidden: same speed as 2300 today
   };
 }
 
@@ -13061,6 +13459,17 @@ function winlinkReachOpts() {
 }
 
 /**
+ * A gateway the operator typed in (#585, Add a gateway): the saved My gateways
+ * entry with `mine: true` for this call, mode and dial, or null. Read from
+ * settings, never from the request, so a window cannot ask for the typed reach
+ * rule (no band checks) on a listed gateway.
+ */
+function winlinkMineGateway({ gateway, mode, dialKhz } = {}) {
+  if (!gateway) return null;
+  return WinlinkFav.findMine(settings.winlinkFavourites, { call: String(gateway), mode: String(mode || ''), dialKhz: Number(dialKhz) });
+}
+
+/**
  * A gateway was picked (not yet connected): tune there now, so the waterfall
  * shows that frequency and the operator can see whether it is in use. The
  * dial/mode from before the FIRST pick is remembered across attempts and put
@@ -13069,13 +13478,15 @@ function winlinkReachOpts() {
  * regardless, so a dial moved in between is corrected before the first
  * transmission.
  */
-function winlinkPreviewQsy({ dialKhz, mode } = {}) {
+function winlinkPreviewQsy({ dialKhz, mode, gateway } = {}) {
   const khz = Number(dialKhz);
   if (!Number.isFinite(khz) || khz <= 0) return { ok: false, error: 'No frequency' };
   if (isRemoteMode()) return { ok: false, error: 'Radio sessions key the shack\'s radio — tune from the shack PC', reason: 'remote' };
   if (winlinkSessionActive()) return { ok: false, error: 'A session is running' };
   if (radioOwner !== 'none' && radioOwner !== 'winlink') return { ok: false, error: `The radio is in use by ${radioOwner}`, reason: 'radio-busy' };
-  const reach = WinlinkReach.gatewayReach(khz, winlinkReachOpts());
+  // A typed gateway (#585) skips the band checks and keeps the radio's range.
+  const mine = winlinkMineGateway({ gateway, mode, dialKhz: khz });
+  const reach = WinlinkReach.gatewayReach(khz, { ...winlinkReachOpts(), typed: !!mine });
   if (!reach.ok) { winlinkLog(`gateway pick refused: ${reach.why}`); return { ok: false, error: reach.why, reason: 'out-of-reach' }; }
   winlinkNoteHandTune();
   aprsListenYieldToWinlink('gateway pick'); // the modem and the radio are Winlink's now; APRS's saved place becomes the return point
@@ -13380,6 +13791,7 @@ const aprsListen = {
   heard: 0,           // frames heard this session
   lastAt: 0,
   note: '',           // the rig's setup line (lib/rig-setup-notes.js), verbatim
+  handover: '',       // "Stopped FT8 so APRS can listen." when this start stopped JTCAT (aprsStopJtcatForListen)
   proc: null,         // its Dire Wolf
   monitor: null,      // its AGW monitor
   lane: null,         // the winlinkAudio lane Dire Wolf was started on
@@ -13732,17 +14144,36 @@ async function aprsRxFilterWiden(seq) {
   if (seq !== aprsListen.seq) return;
   const r = aprsRxFilter.widen(aprsListen.band);
   if (r.action === 'unknown') return; // nothing usable read: the width warning stays
-  aprsListen.note = [aprsSetupLine(), r.sentence, r.rit].filter(Boolean).join(' ');
+  aprsListen.note = [aprsListen.handover, aprsSetupLine(), r.sentence, r.rit].filter(Boolean).join(' ');
   aprsListenPush();
 }
 
-async function aprsListenStart({ resume = false } = {}) {
+/**
+ * The operator pressed Start while FT8 (any JTCAT mode) decodes: hand the
+ * radio over the way opening SSTV does (lib/aprs-listen.js startPlan). Halt
+ * first, so Run, Hunt, a WSPR beacon or a message on the air stop and PTT
+ * drops; then the shared tear-down closes the JTCAT window and stops the
+ * engine, phone-started or not, and every ECHOCAT device hears running:false.
+ * Nothing transmits here and FT8 is not started again when APRS stops.
+ * Returns the one line the window and the log show.
+ */
+function aprsStopJtcatForListen() {
+  const mode = ft8Engine && ft8Engine._mode ? ft8Engine._mode : 'FT8';
+  jtcatHaltTxNow('APRS listening');
+  releaseJtcatFor('APRS');
+  const line = AprsListen.ft8StoppedSentence(mode);
+  aprsLog(line);
+  return line;
+}
+
+async function aprsListenStart({ resume = false, operator = false, guest = false } = {}) {
   const seq = ++aprsListen.seq;
   aprsListen.on = true;
   aprsListen.sentence = '';
   aprsListen.restarts = 0;
   aprsListen.moved = null; // turning it on again after the radio moved: the normal start, it tunes back to APRS
   aprsListen.watch = null;
+  aprsListen.handover = ''; // "Stopped FT8 so APRS can listen." for this start only
   if (!resume) { aprsListen.heard = 0; aprsListen.lastAt = 0; }
   const bands = aprsRigBands();
   aprsListen.band = AprsListen.chooseBand(bands, aprsListen.bandWanted) || '';
@@ -13761,7 +14192,8 @@ async function aprsListenStart({ resume = false } = {}) {
   }
   // The radio is reachable when tuneRadio can tune it: Flex Direct, TCI or CAT.
   const route = radioTuneRoute();
-  const no = AprsListen.whyNot({
+  // FT8 in the way and the operator asked: FT8 stops and APRS listens (startPlan).
+  const start = AprsListen.startPlan({
     remote: isRemoteMode(),
     catConnected: route !== '',
     bands,
@@ -13770,8 +14202,14 @@ async function aprsListenStart({ resume = false } = {}) {
     modemFound: DirewolfProcess.direwolfSupported(process.platform) && findDirewolf().found,
     ft8Decoding: autoSstvBlockedByJtcat(),
     winlinkHasModem: aprsWinlinkHoldsRadio(),
-  });
+  }, { operatorAsked: operator, guest });
+  const no = start.no;
   if (no) { aprsNotNow(no); return; }
+  if (start.stopFt8) {
+    aprsListen.handover = aprsStopJtcatForListen();
+    aprsListen.noteBase = [aprsListen.handover, aprsListen.noteBase].filter(Boolean).join(' ');
+    aprsListen.note = aprsListen.noteBase;
+  }
   aprsListen.state = 'starting';
   aprsListenPush();
   const pm = aprsListen.band === '2m' ? winlinkPacketRigMode('packet') : null;
@@ -14055,11 +14493,16 @@ function aprsAutoListenOnOpen() {
   aprsListenSet(true);
 }
 
-function aprsListenSet(on) {
+/**
+ * opts.operator: the operator pressed Start (the window's switch, a phone's
+ * Listen); only then may FT8 be stopped for it (lib/aprs-listen.js startPlan).
+ * opts.guest: the request came from a Guest Pass guest, who never stops FT8.
+ */
+function aprsListenSet(on, opts = {}) {
   if (on) {
     if (aprsListen.on && aprsListen.state !== 'refused') return;
     if (!_aprsTickTimer) _aprsTickTimer = setInterval(aprsListenTick, 2000);
-    aprsListenStart().catch((e) => { aprsLog('start failed: ' + e.message); aprsListenStop('start failed'); });
+    aprsListenStart({ operator: !!opts.operator, guest: !!opts.guest }).catch((e) => { aprsLog('start failed: ' + e.message); aprsListenStop('start failed'); });
   } else {
     aprsListenStop('switched off');
   }
@@ -15138,7 +15581,12 @@ async function aprsMsgRadioTransmit(job) {
   aprsLog(`${what} over the radio: ${f.packet} on ${mhz} MHz, about ${(cap.airMs / 1000).toFixed(1)} s on air, cap ${(cap.capMs / 1000).toFixed(1)} s`);
   const res = await aprsRfRunner().send({ packet: f, capMs: cap.capMs });
   if (_aprsRfPeak.active()) aprsRfUi.lastPeak = _aprsRfPeak.end();
-  if (res.ok && res.confirmed) sendCatLog(`[APRS ${what}] sent over the radio (${AprsRfBeacon.BAND_LABEL[band]}, ${mhz} MHz; the radio reported transmit): ${f.packet}`);
+  if (res.ok && res.confirmed) {
+    sendCatLog(`[APRS ${what}] sent over the radio (${AprsRfBeacon.BAND_LABEL[band]}, ${mhz} MHz; the radio reported transmit): ${f.packet}`);
+    // A confirmed radio message also starts the 15-minute "heard you" watch, as a beacon does
+    // (Casey 2026-11-22: "yes, messages too"). Read only: who carried it to APRS-IS.
+    try { aprsEcho.beaconSent(f.source); } catch (e) { aprsLog('heard you: ' + e.message); }
+  }
   else if (res.ok) sendCatLog(`[APRS ${what}] keyed but not confirmed (${AprsRfBeacon.BAND_LABEL[band]}, ${mhz} MHz)`);
   else aprsLog(`${what} over the radio not sent: ${res.sentence}`);
   return res;
@@ -15179,10 +15627,11 @@ const aprsEcho = AprsEchocat.createController({
   setFollow: (calls) => { if (aprsFeedHooks) aprsFeedHooks.setFollow(calls); }, // aprs-find: calls passed beyond the range
   sendTo: (id, m) => { if (remoteServer && remoteServer.sendAprsTo) remoteServer.sendAprsTo(id, m); },
   setWatch: (calls) => { if (aprsFeedHooks) aprsFeedHooks.setWatch(calls); }, // heard you: my beacon's call and who heard it
+  setArea: (area) => { if (aprsFeedHooks) aprsFeedHooks.setArea(area); }, // Map view: the devices' map areas
   ownLogin: () => { const l = AprsIgate.uplinkLogin(settings.myCallsign); return l.ok ? l.call : ''; },
   heardChanged: (map) => { if (aprsWin && !aprsWin.isDestroyed()) aprsWin.webContents.send('aprs-heard-you', map); },
   windowOpen: () => !!(aprsWin && !aprsWin.isDestroyed()),
-  listenSet: (on) => aprsListenSet(on),
+  listenSet: (on) => aprsListenSet(on, { operator: true, guest: !!(aprsEcho && aprsEcho.guestListening()) }), // a guest never stops FT8
   listenSetBand: (b) => aprsListenSetBand(b),
   igateSet: (on) => aprsIgateSetFromDevice(on),
   beaconNow: () => aprsBeaconSend('now').catch((e) => aprsLog('beacon failed: ' + e.message)),
@@ -15407,13 +15856,16 @@ async function winlinkStartSession({ mode, gateway, dialKhz, url: rowUrl, origin
     // A second Connect may have started a session while Pat was restarting.
     if (clear.restarted && winlinkSessionActive()) return { ok: false, error: 'A Winlink session is already running' };
   }
+  // A gateway the operator typed in (#585): its packet via path and its ARDOP
+  // bandwidth come from the saved entry, never from the request.
+  const mine = radio ? winlinkMineGateway({ gateway, mode, dialKhz }) : null;
   // The operator's ARDOP/VARA bandwidth caps the list row's bw for the dial (#663).
-  const url = WinlinkPat.sessionUrl({ mode, gateway, dialKhz, bw: mode === 'vara' ? settings.winlinkVaraBw : undefined, ardopBw: winlinkModemBw().ardop, rowUrl });
+  const url = WinlinkPat.sessionUrl({ mode, gateway, dialKhz, bw: mode === 'vara' ? settings.winlinkVaraBw : undefined, ardopBw: winlinkModemBw().ardop, rowUrl, via: mine ? mine.via : undefined, mineBw: mine ? mine.bw : undefined });
   if (!url) return { ok: false, error: 'Pick a gateway first' };
   if (radio) {
     // Never an attempt on a frequency this radio cannot transmit on: nothing
     // tunes, no modem starts, nothing keys (lib/winlink-reach.js).
-    const reach = WinlinkReach.gatewayReach(dialKhz, winlinkReachOpts());
+    const reach = WinlinkReach.gatewayReach(dialKhz, { ...winlinkReachOpts(), typed: !!mine });
     if (!reach.ok) { winlinkLog(`session refused: ${String(gateway || '').toUpperCase()} — ${reach.why}`); return { ok: false, error: reach.why, reason: 'out-of-reach' }; }
     if (!_winlinkShimPort) return { ok: false, error: WinlinkMailView.SHIM_DOWN };
     if (_swrTripped) return { ok: false, error: 'The SWR guard has tripped — fix the antenna match first' };
@@ -15580,7 +16032,9 @@ function winlinkPacketRigMode(mode) {
   let family = 'none';
   try { family = rig ? RigFamily.rigFamily(rig) : (settings.catTarget ? RigFamily.familyFromCatTarget(settings.catTarget) : 'none'); } catch {}
   const model = getActiveRigModel();
-  return PacketRigMode.resolvePacketRigMode({ choice: rig && rig.packetMode, family, brand: model && model.brand, protocol: model && model.protocol });
+  // A microphone-jack rig runs packet in plain FM (lib/rig-audio-jack.js, #153).
+  const jack = RigAudioJack.jackOf(rig, family);
+  return PacketRigMode.resolvePacketRigMode({ choice: RigAudioJack.packetChoice(rig && rig.packetMode, jack), family, brand: model && model.brand, protocol: model && model.protocol });
 }
 let _winlinkUnreportedDataMode = ''; // a data mode sent to a radio that reads it back as FM (#128, the FT-857's PKT)
 /**
@@ -16956,7 +17410,7 @@ function winlinkRmslistSafe(opts) {
   return p;
 }
 
-async function winlinkGateways(mode, band) {
+async function winlinkGateways(mode, band, { refresh = false } = {}) {
   if (!patClient) return { ok: false, error: 'Pat is not running' };
   // Winlink lists Mercury-capable gateways under VARA (Mercury speaks VARA's
   // TNC protocol); the operator's own tagged list rides on top.
@@ -16966,8 +17420,47 @@ async function winlinkGateways(mode, band) {
   const predicting = !WinlinkModes.isFmMode(mode) && settings.winlinkPrediction !== false;
   const timeoutMs = predicting ? WINLINK_PREDICTED_LIST_MS : 30000;
   const t0 = Date.now();
+  let listNote = '';
   try {
-    let list = await winlinkRmslistSafe({ mode: patMode, band, timeoutMs });
+    // Pat never downloads its list file again by itself (plan 2.1). Download it
+    // when the operator pressed Refresh, when the service codes changed, and
+    // when the last download (per profile) is over 24 hours old. Always through
+    // winlinkRmslistSafe: its chain keeps list requests one at a time.
+    const listNow = Date.now();
+    let why = WinlinkPat.listDownloadReason({
+      codes: _patServiceCodes, lastCodes: settings.winlinkListCodes,
+      fetchedAt: settings.winlinkListFetchedAt, now: listNow, refresh, failedAt: _winlinkListFailedAt,
+    });
+    // A download already queued for the same automatic reason: this request
+    // waits behind it in the chain and gets the fresh file without a second one.
+    if (why && why !== 'refresh' && _winlinkListForcing) why = '';
+    const logOpts = { codeCount: _patServiceCodes.length, fetchedAt: settings.winlinkListFetchedAt, now: listNow };
+    if (why) _winlinkListForcing++;
+    let list = await winlinkRmslistSafe({ mode: patMode, band, timeoutMs, ...(why ? { forceDownload: true } : {}) })
+      .catch((e) => {
+        if (!why) throw e;
+        // Pat writes nothing when a forced download fails: its own list is still there.
+        _winlinkListFailedAt = Date.now();
+        const fellBack = WinlinkPat.listFallsBackToCache(e && e.message);
+        winlinkLog(WinlinkPat.listDownloadLogLine(why, { ...logOpts, ok: false, error: e && e.message, fellBack }));
+        if (!fellBack) throw e;
+        listNote = 'Winlink could not be reached, so this is the list downloaded before.';
+        return winlinkRmslistSafe({ mode: patMode, band, timeoutMs });
+      })
+      .finally(() => { if (why) _winlinkListForcing--; });
+    if (why && !listNote) {
+      _winlinkListFailedAt = 0;
+      settings.winlinkListCodes = _patServiceCodes.join(',');
+      settings.winlinkListFetchedAt = Date.now();
+      winlinkLog(WinlinkPat.listDownloadLogLine(why, { ...logOpts, ok: true }));
+      try { saveSettings(settings); } catch {}
+    }
+    // MERCURY gateways only in the VARA HF list and only when Mercury is chosen;
+    // then that list is Mercury gateways only. Before anything sees the list.
+    list = WinlinkPat.gatewaysForChoice(list, { mode, mercury: WinlinkPat.mercuryChosen(settings) });
+    // Gateways whose service code says they run a community modem (DATA2G and
+    // the like) go after the standard ones, marked ownModem; Connect stays allowed.
+    list = WinlinkPat.groupOwnModemGateways(list);
     const secs = Math.round((Date.now() - t0) / 1000);
     if (secs >= 20) winlinkLog(`gateway list (${mode}): Pat took ${secs} s to rank ${list.length} gateways by propagation`);
     if (predicting && list.some((g) => g.quality != null)) {
@@ -16999,7 +17492,7 @@ async function winlinkGateways(mode, band) {
     const note = WinlinkMailView.gridNote(settings.grid) || WinlinkPat.rankingNote({ predicted, count: list.length, hf });
     const tell = `gateways (${mode}${band ? ', ' + band : ''})${WinlinkMailView.hasGrid(settings.grid) ? '' : ' with no grid square set'}: ${list.length} listed${onBands.dropped ? ' (' + onBands.dropped + ' the radio cannot call left out)' : ''}, ${predicted ? list.filter((g) => g.quality != null).length + ' with a propagation prediction' : 'nearest first' + (hf && settings.winlinkPrediction !== false && list.length ? (_voacapService.up === false ? ` — POTACAT's VOACAP service is not available (${_voacapService.why})` : ' — no prediction came back') : '')}`;
     if (tell !== _winlinkGatewaysLogged) { _winlinkGatewaysLogged = tell; winlinkLog(tell); }
-    return { ok: true, mode, band: band || '', list, predicted, note, leftOut };
+    return { ok: true, mode, band: band || '', list, predicted, note, leftOut, ...(listNote ? { listNote } : {}) };
   } catch (e) {
     // Said in the log: a list that never arrives was invisible in every bug
     // report (i5ekx: VARA HF, "it no longer downloads the list of gateways").
@@ -17008,6 +17501,10 @@ async function winlinkGateways(mode, band) {
   }
 }
 let _winlinkGatewaysLogged = '';
+/** When a forced list download last failed (the automatic reasons then wait an hour; lib/winlink-pat.js LIST_RETRY_MS). */
+let _winlinkListFailedAt = 0;
+/** Forced list downloads queued or running (an automatic reason does not queue a second). */
+let _winlinkListForcing = 0;
 const WINLINK_PREDICTED_LIST_MS = 120000;
 
 /**
@@ -17040,12 +17537,37 @@ function winlinkTemplate(op, t) {
   return { ok: true, id: r.id || null };
 }
 
-/** Save ('add') or remove a gateway in My gateways; every surface gets the list on winlink-state. */
+/**
+ * The fields of a favourite request (the mail window's invoke, an ECHOCAT
+ * device's winlink-favourite), typed. #585: a gateway typed in on the Add a
+ * gateway form carries mine, note, via and bw; Edit also names the entry it
+ * replaces (was). lib/winlink-favourites.js clean() drops any that are not valid.
+ */
+function winlinkFavouriteFields(r = {}) {
+  const was = r.was && typeof r.was === 'object' ? { call: String(r.was.call || ''), mode: String(r.was.mode || ''), dialKhz: Number(r.was.dialKhz) } : undefined;
+  return {
+    call: String(r.call || ''), mode: String(r.mode || ''), khz: Number(r.dialKhz), url: String(r.url || ''),
+    mine: r.mine === true, note: typeof r.note === 'string' ? r.note : undefined,
+    via: Array.isArray(r.via) ? r.via.map(String) : undefined, bw: Number(r.bw) || undefined, was,
+  };
+}
+
+/** Save ('add'), change ('edit', #585) or remove a gateway in My gateways; every surface gets the list on winlink-state. */
 function winlinkFavourite(op, g) {
+  // A gateway typed in (#585) is checked here too, with the form's words, so
+  // a device shows the shack's answer as it is. No band check, ever.
+  if ((op === 'add' || op === 'edit') && g.mine) {
+    const chk = WinlinkMine.checkSaved(g);
+    if (!chk.ok) return { ok: false, error: chk.error };
+  }
   const before = WinlinkFav.normalize(settings.winlinkFavourites);
   let list;
   if (op === 'add') {
     const r = WinlinkFav.add(before, g);
+    if (!r.ok) return { ok: false, error: r.error };
+    list = r.list;
+  } else if (op === 'edit') {
+    const r = WinlinkFav.edit(before, g.was, g);
     if (!r.ok) return { ok: false, error: r.error };
     list = r.list;
   } else if (op === 'remove') {
@@ -17055,7 +17577,7 @@ function winlinkFavourite(op, g) {
   }
   settings.winlinkFavourites = list;
   saveSettings(settings);
-  winlinkLog(`My gateways: ${op === 'add' ? 'saved' : 'removed'} ${String(g.call || '').toUpperCase()} (${g.mode}, ${Number(g.khz).toFixed(1)} kHz)`);
+  winlinkLog(`My gateways: ${op === 'add' ? 'saved' : op === 'edit' ? 'changed' : 'removed'} ${String(g.call || '').toUpperCase()} (${g.mode}, ${Number(g.khz).toFixed(1)} kHz)${g.mine ? ', typed in' : ''}`);
   // A finished session's card offers Save until it is saved.
   const res = winlinkState.session.result;
   if (res) winlinkState.setSession({ result: { ...res, saved: WinlinkFav.has(list, { call: res.call, mode: res.mode, khz: res.khz }) } });
@@ -17150,7 +17672,7 @@ async function winlinkHandleRemote({ type, req = {}, reply, clientId }) {
         return;
       case 'winlink-qsy':
         winlinkRetryCancel('gateway-pick');
-        result('qsy', winlinkPreviewQsy({ dialKhz: req.dialKhz, mode: req.mode }));
+        result('qsy', winlinkPreviewQsy({ dialKhz: req.dialKhz, mode: req.mode, gateway: req.gateway }));
         return;
       case 'winlink-qsy-restore':
         // This device left its Mail tab; the radio goes back only when no other Mail view is open.
@@ -17184,8 +17706,9 @@ async function winlinkHandleRemote({ type, req = {}, reply, clientId }) {
         result('recovery-email', await winlinkRecoveryEmailSet(req.email));
         return;
       case 'winlink-gateways-get': {
-        const r = await winlinkGateways(String(req.mode || 'ardop'), req.band || '');
-        if (r.ok) reply({ type: 'winlink-gateways', mode: r.mode, band: r.band, list: r.list, predicted: !!r.predicted, note: r.note || '', leftOut: r.leftOut || 0 });
+        // refresh (optional): the client's Refresh, a fresh download from Winlink.
+        const r = await winlinkGateways(String(req.mode || 'ardop'), req.band || '', { refresh: req.refresh === true });
+        if (r.ok) reply({ type: 'winlink-gateways', mode: r.mode, band: r.band, list: r.list, predicted: !!r.predicted, note: r.note || '', leftOut: r.leftOut || 0, ...(r.listNote ? { listNote: r.listNote } : {}) });
         else result('gateways', r);
         return;
       }
@@ -17198,7 +17721,7 @@ async function winlinkHandleRemote({ type, req = {}, reply, clientId }) {
       }
       // My gateways (#254): save or remove one; the list rides winlink-state.
       case 'winlink-favourite':
-        result('favourite', winlinkFavourite(req.op, { call: req.call, mode: req.mode, khz: req.dialKhz, url: req.url }));
+        result('favourite', winlinkFavourite(req.op, winlinkFavouriteFields(req)));
         return;
       // Message templates: op 'save' (a new one, or the one with that id) | 'delete' {id}.
       // The address book: op 'save' (new, or the one with id) | 'delete' {id}.
@@ -18896,6 +19419,7 @@ function liveActivationMyRefs() {
 // The clock lives in its own file in userData, not in settings.
 let _activationClock = null; // { startedAt, lastContactAt, refs }
 let _activationAutoEnding = false;
+let _activationLaunchNotice = null; // #700: an activation ended at launch; shown once the main window has loaded
 function activationClockFile() { return path.join(app.getPath('userData'), 'activation-clock.json'); }
 function activationClockLoad() {
   try { _activationClock = JSON.parse(fs.readFileSync(activationClockFile(), 'utf8')); } catch { _activationClock = null; }
@@ -19055,7 +19579,7 @@ function logQsoReplyFromLog(uuid) {
 
 // The saved record's own fields for a log-ok `records[]` entry (additive;
 // older devices ignore them). Only fields the record actually holds.
-const LOG_OK_SAVED_FIELDS = ['frequency', 'band', 'mode', 'state', 'gridsquare', 'country', 'dxcc', 'name', 'county'];
+const LOG_OK_SAVED_FIELDS = ['frequency', 'band', 'mode', 'state', 'gridsquare', 'country', 'dxcc', 'name', 'county', 'txPower'];
 function logOkSavedFields(r) {
   const out = {};
   for (const k of LOG_OK_SAVED_FIELDS) {
@@ -19438,25 +19962,33 @@ async function saveQsoRecord(qsoData, opts) {
     qsoData.operator = logAs.call;
     qsoData.stationCallsign = logAs.call;
   }
+  // On a Guest Pass to another station, a contact logged from this PC's own
+  // forms was made at that station: its grid, state and county, and the
+  // Guest Pass mark, as the station stamps the contacts it logs for a guest
+  // (#909, #822). Nothing changes off a pass or with a station that sends none.
+  if (origin !== 'forwarded-from-host') {
+    Object.assign(qsoData, StationCounty.guestDeskStationFor(qsoData, { shack: guestPassShackLocation(), fill: (r) => stationLocationFillFor(r, ops) }));
+  }
   // Activation record: MY_GRIDSQUARE / MY_STATE from the park when the
   // logging path did not supply them (lib/activation-station.js).
   Object.assign(qsoData, stationLocationFillFor(qsoData, ops));
 
-  // Auto-fill TX power when the caller didn't supply one (the Logbook pop-out's
-  // "+ New QSO" form, JTCAT, the banner logger, ECHOCAT): the radio's power as
-  // read or as POTACAT last set it, else the operator's own Default TX Power,
-  // else empty. Never a guessed 100 W (#523, lib/log-tx-power.js).
-  // A supplied value is coerced to a String here rather than trusted: the Log
-  // QSO pop-out sends a Number while every other log path sends text, and the
-  // transports downstream do string work on this field (W9TEF 2026-09-19).
-  if (!qsoData.txPower) {
-    // A TCI rig's level is a drive percent: log the watts it measured, or the operator's default.
-    const w = tciRigTarget()
-      ? (tciMeasuredWattsForLog() || LogTxPower.operatorDefaultPower(ops) || 0)
-      : LogTxPower.txPowerForLog({ knownW: _currentTxPower, defaultW: LogTxPower.operatorDefaultPower(ops) });
-    if (w) qsoData.txPower = String(w);
-  } else {
-    qsoData.txPower = String(qsoData.txPower);
+  // TX power (lib/log-tx-power.js): a power supplied for this contact (a log
+  // form, a device) is kept; otherwise the operator's "Always log this power"
+  // (an amplifier, #837), else the radio's power as read or as POTACAT last
+  // set it, else their own Default TX Power, else empty. Never a guessed
+  // 100 W (#523). Stored as a String: the Log QSO pop-out sends a Number while
+  // every other log path sends text, and the transports downstream do string
+  // work on this field (W9TEF 2026-09-19).
+  {
+    const tp = LogTxPower.txPowerForContact({
+      typed: qsoData.txPower,
+      fixedW: LogTxPower.fixedLogPower(ops),
+      // A TCI rig's level is a drive percent: it logs the watts it measured.
+      knownW: tciRigTarget() ? tciMeasuredWattsForLog() : _currentTxPower,
+      defaultW: LogTxPower.operatorDefaultPower(ops),
+    });
+    if (tp) qsoData.txPower = tp;
   }
 
   // COMMENT tag handling. saveQsoRecord is the single authority: strip the
@@ -19945,6 +20477,7 @@ function connectWsjtx() {
         rstRcvd: f.RST_RCVD || '',
         txPower: f.TX_PWR || '',
         myRig: f.MY_RIG || '',
+        myAntenna: f.MY_ANTENNA || '',
         band: f.BAND || '',
         sig: f.SIG || '',
         sigInfo: f.SIG_INFO || '',
@@ -20272,7 +20805,13 @@ const JTCAT_FULL_AUTO_CQ_WATCHDOG_MS = 30 * 60 * 1000; // 30 min unattended cap
 // operator (lloyd KO4L 2026-10-25: "POTACAT will not cease transmissions").
 // The per-phase tries cap ends a single QSO; this is the backstop no path can
 // skip, Hunt and Run included. ULTRACAT's Run/Hunt keep their own rules.
-const JTCAT_TX_WATCHDOG_MS = 6 * 60 * 1000;
+// The span is the operator's "calling time" (#161), settings.jtcatCallingTimeMin:
+// default 6 minutes (WSJT-X's figure and the old fixed value), 1..30, read live
+// at every key-down. lib/jtcat-calling-time.js holds the rule; its ceiling is
+// the 30-minute attended limit above, which still bounds Run and Hunt.
+function jtcatTxWatchdogMs() {
+  return JtcatCallingTime.callingTimeMs(settings);
+}
 let _jtcatTxWatchArmedAt = 0;
 // Drained-band pause: Run works everyone it can, then used to keep calling CQ
 // into an empty band until the 30-minute watchdog killed it. It now stops
@@ -21588,12 +22127,12 @@ function jtcatTxWatchdogTripped(mode) {
   const now = Date.now();
   const last = Math.max(jtcatFullAutoCqLastActivity || 0, _jtcatTxWatchArmedAt || 0);
   if (!last) { _jtcatTxWatchArmedAt = now; return false; }
-  return now - last > JTCAT_TX_WATCHDOG_MS;
+  return now - last > jtcatTxWatchdogMs();
 }
 
 function jtcatTxWatchdogStop() {
-  const mins = Math.round(JTCAT_TX_WATCHDOG_MS / 60000);
-  const why = `TX watchdog: ${mins} minutes of transmitting with no answer and nothing from the operator. TX stopped. Call CQ or reply again to carry on.`;
+  const mins = Math.round(jtcatTxWatchdogMs() / 60000);
+  const why = `TX watchdog: ${mins} ${mins === 1 ? 'minute' : 'minutes'} of transmitting with no answer and nothing from the operator. TX stopped. Call CQ or reply again to carry on.`;
   jtcatHaltTxNow('TX watchdog');
   _jtcatTxWatchArmedAt = 0;
   if (win && !win.isDestroyed()) win.webContents.send('app-notice', { message: why, warn: true, duration: 12000 });
@@ -22342,6 +22881,7 @@ function remoteJtcatBroadcastQso() {
   if (remoteServer) remoteServer.broadcastJtcatQsoState(remoteJtcatQso || { phase: 'idle' });
   wsjtxStatusOnQsoChange();
   jtcatNferPrefetch('remote', remoteJtcatQso);
+  if (remoteJtcatQso && remoteJtcatQso.call) n3fjpCip.note(remoteJtcatQso.call, 'jtcat'); // #712
 }
 
 // WSJT-X sends a Status whenever its QSO state changes; GridTracker's roster
@@ -22363,6 +22903,7 @@ function popoutBroadcastQso() {
   }
   wsjtxStatusOnQsoChange();
   jtcatNferPrefetch('popout', popoutJtcatQso);
+  if (popoutJtcatQso && popoutJtcatQso.call) n3fjpCip.note(popoutJtcatQso.call, 'jtcat'); // #712
 }
 
 // call|band|mode -> ms of the last JTCAT auto-log (lib/jtcat-relog-guard.js).
@@ -23161,11 +23702,16 @@ function rememberJtcatTxFreq(eng) {
 // Closing the FT8/JS8 windows stops them (the main window's close handler
 // releases capture); an engine the ECHOCAT app is driving has no window to
 // close, so it is stopped here the way the app's own jtcat-stop does.
-function releaseJtcatForSstv() {
+function releaseJtcatForSstv() { return releaseJtcatFor('SSTV'); }
+
+// The hand-over itself, shared by every mode that needs the radio's audio
+// JTCAT holds: SSTV above, APRS listening (aprsStopJtcatForListen, Casey
+// 2026-11-22). `who` names the mode in the log line.
+function releaseJtcatFor(who) {
   const ft8Win = jtcatPopoutWin && !jtcatPopoutWin.isDestroyed();
   const js8Win = js8PopoutWin && !js8PopoutWin.isDestroyed();
   if (!ft8Win && !js8Win && !ft8Engine) return false;
-  sendCatLog('[SSTV] Closing ' + (js8Win && !ft8Win ? 'JS8' : 'JTCAT') + ' — SSTV and JTCAT cannot share the audio input');
+  sendCatLog('[' + who + '] Closing ' + (js8Win && !ft8Win ? 'JS8' : 'JTCAT') + ' — ' + who + ' and JTCAT cannot share the audio input');
   if (ft8Win) { try { jtcatPopoutWin.close(); } catch {} }
   if (js8Win) { try { js8PopoutWin.close(); } catch {} }
   if (ft8Engine) {
@@ -23968,8 +24514,9 @@ function startJtcat(mode) {
     // Mercury holds the radio, refuse this transmission and unwind the engine
     // cleanly. tx-end is guarded to NOT drop Mercury's PTT in this case.
     if (radioOwner === 'mercury') {
-      sendCatLog('[JTCAT] TX blocked — Mercury (HF data) owns the radio. Stop Mercury to transmit FT8.');
-      jtcatRefuseTx('Mercury (HF data) owns the radio');
+      const held = radioOwnerLib.describeRadioHolder(radioOwner);
+      sendCatLog(`[JTCAT] TX blocked — ${held.busy} ${held.fix} to transmit FT8.`);
+      jtcatRefuseTx(held.busy.replace(/\.$/, ''));
       return;
     }
     // Receiving from the WebSDR (#243): it cannot hear us and is not on the
@@ -24321,6 +24868,7 @@ function startJtcat(mode) {
   // Emit it again now that the listeners exist. K3SBP 2026-09-10.
   ft8Engine.emit('status', { state: 'running', mode: mode || 'FT8' });
   console.log('[JTCAT] Engine started, mode:', mode || 'FT8');
+  resumeMobileSpectrum(); // #943: the stopJtcat() above stopped the phone's waterfall feed
 }
 
 // --- JTCAT clock-offset monitor -----------------------------------------
@@ -24982,6 +25530,15 @@ function stopInProcessSpectrum() {
   console.log('[JTCAT] In-process spectrum loop stopped');
 }
 
+// An engine start (band change, mode change, a fresh Start) runs stopJtcat()
+// first, which stops the loop above. The phone's waterfall panel stays open
+// through that and never re-subscribes, so its feed went grey until the
+// operator toggled the waterfall (#943). Resume from the sticky intent, as a
+// reconnect does. Idempotent; the loop self-guards on hasClient().
+function resumeMobileSpectrum() {
+  if (_mobileWantsSpectrum) startInProcessSpectrum();
+}
+
 // JS8 waterfall spectrum. The JS8 popout has no renderer audio graph (JS8
 // decodes in MAIN, unlike FT8's WebAudio path), so main runs the same FFT
 // over Js8Engine._specBuffer and pushes bins to the popout at ~10 fps. Runs
@@ -25060,8 +25617,9 @@ function stopJtcat() {
     try { setWsprBeacon(false, { immediate: true, why: 'stopped with JTCAT' }); } catch {}
   }
   // Spectrum loop has no reason to keep running once the engine is
-  // gone — audioBuffer reads would all return zeros anyway. Mobile
-  // re-subscribes on the next FT8-tab open.
+  // gone — audioBuffer reads would all return zeros anyway. The phone's
+  // intent (_mobileWantsSpectrum) stays: the next engine start resumes the
+  // feed (resumeMobileSpectrum, #943), since an open panel never re-subscribes.
   stopInProcessSpectrum();
 
   // Clean up any active QSOs to prevent stuck state
@@ -25607,8 +26165,9 @@ function connectSmartSdr() {
   // (every center-freq drag) and must not become a broadcast storm.
   // The Flex panadapter scope source: frames, and the pan's own axis.
   smartSdr.on('pan-frame', (f) => { if (flexScopeOn) { flexDigitalViewSync(); yaesuScopeOnFrame(f); } });
+  // centerAt: when a status last carried a centre, so a pre-ask centre is not taken for the answer (issue 1002)
   smartSdr.on('pan-geometry', (g) => {
-    flexPanGeometry[g.panId] = { ...(flexPanGeometry[g.panId] || {}), ...g };
+    flexPanGeometry[g.panId] = { ...(flexPanGeometry[g.panId] || {}), ...g, ...(g.centerHz > 0 ? { centerAt: Date.now() } : {}) };
     if (flexScopeOn && flexScopeApplyGeometry()) yaesuScopeBroadcastState();
   });
   smartSdr.on('pan-status', ({ panId, wnb, wnbLevel, rfgain }) => {
@@ -27272,7 +27831,7 @@ function tciRigTxMeter(kind, value) {
 function tciRigJtcatTx(data, mode) {
   const refuse = (why) => {
     sendCatLog(`[TCI TX] Refused: ${why}`);
-    if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) jtcatPopoutWin.webContents.send('jtcat-qso-state', { phase: 'error', error: why });
+    if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) jtcatPopoutWin.webContents.send('jtcat-qso-state', { phase: 'error', error: why, txRefused: true });
     if (remoteServer && remoteServer.hasClient()) remoteServer.broadcastJtcatQsoState({ phase: 'error', error: why });
     setTimeout(() => jtcatRefuseTx(why), 0);
     return false;
@@ -27535,7 +28094,7 @@ function stopTciScope(why) {
 /** Tune a TCI rig (tuneRadio). */
 function tciRigTune(freqHz, mode) {
   const why = !tciRig ? 'The TCI server is not connected'
-    : tciRig.tune(freqHz, mode, { dataMode: settings.jtcatUseDataMode !== false });
+    : tciRig.tune(freqHz, CwSideband.requestFor(mode, CwSideband.settingOf(activeRigAudioJack().rig)), { dataMode: RigAudioJack.digitalUsesData({ jack: activeRigAudioJack().jack, useDataMode: settings.jtcatUseDataMode !== false }) });
   if (!why) return;
   sendCatLog(`[TCI] Tune refused: ${why}`);
   for (const w of [win, jtcatPopoutWin, vfoPopoutWin]) {
@@ -27867,6 +28426,9 @@ function updateRemoteSettings() {
   remoteServer.setRemoteSettings({
     myCallsign: settings.myCallsign || '',
     grid: settings.grid || '',
+    // Where this station is, as it stamps a Guest Pass contact (#909): a
+    // guest desktop's own log forms put it on what they save. Additive.
+    stationLocation: StationCounty.stationLocationForGuests(settings.grid, (r) => stationLocationFillFor(r, settings)),
     clusterConnected: anyCluster,
     respotDefault: settings.respotDefault !== false,
     logCommentTags: settings.logCommentTags !== false,
@@ -27908,6 +28470,10 @@ function updateRemoteSettings() {
     // retry ceiling so the phone's matching control shows the same value.
     ultracat: !!settings.ultracat,
     jtcatMaxQsoAttempts: jtcatMaxQsoRetries(),
+    // JTCAT calling time (#161): minutes the FT8/FT4/FT2 transmit watchdog
+    // allows with no answer and nothing from the operator (1-30, default 6).
+    // Optional; a device sets it with jtcat-set-pref {key:'jtcatCallingTimeMin'}.
+    jtcatCallingTimeMin: JtcatCallingTime.clampMinutes(settings.jtcatCallingTimeMin),
     // Chase target — the entity/tag the operator is chasing. Rides the auth-ok
     // blob so a (re)connecting phone seeds its picker; live changes come via the
     // jtcat-chase-target S2C message.
@@ -27935,6 +28501,11 @@ function updateRemoteSettings() {
     // (AB9AI 2026-07-24). tuneRadio already honors it; this only closes the
     // display gap. Default-true idiom, like logCommentTags above.
     jtcatUseDataMode: settings.jtcatUseDataMode !== false,
+    // Where the active rig's sound card interface is plugged in (#153,
+    // lib/rig-audio-jack.js): 'mic' keeps every transmission out of DATA,
+    // whatever jtcatUseDataMode says, so a device shows "Plain USB" for it.
+    // Read-only and additive; set in the desktop rig editor.
+    rigAudioJack: activeRigAudioJack().jack,
     idleRxMode: IDLE_RX_MODES.includes(settings.idleRxMode) ? settings.idleRxMode : 'sstv',
     // The rest of Idle Mode, so a mobile device can show and set all of it
     // (capability 'idle-mode'), with the desktop window's own defaults.
@@ -27968,7 +28539,9 @@ function updateRemoteSettings() {
     // localStorage wipes on the phone (Safari ITP, cache clears).
     // Currently: echocatWelcomeDismissed.
     echocatWelcomeDismissed: !!(settings.echocatPrefs && settings.echocatPrefs.echocatWelcomeDismissed),
-    customCatButtons: settings.customCatButtons || null,
+    // Every saved button, up to 25 (#164); the device filters by slot.rigs
+    // against the activeRigId of the `rigs` message.
+    customCatButtons: settings.customCatButtons ? CustomCatFollow.capSlots(settings.customCatButtons) : null,
     // Watchlist groups — three color-coded buckets with optional emoji
     // badges and Ham2K PoLo URL subscriptions. The whole array including
     // each group's remoteEntries cache rides this push so mobile decorates
@@ -28052,6 +28625,9 @@ function updateRemoteSettings() {
     // hook in startSstv (main.js, generateMorseSamples). Including it
     // here so reconnecting mobiles see the persisted state.
     sstvCwId: !!settings.sstvCwId,
+    // #279 Transmit power for SSTV, watts or null (= the radio's own power).
+    // The shack applies it to every picture, whichever device sends it.
+    sstvTxPowerW: SstvTxPower.parseWatts(settings.sstvTxPowerW),
     // Forwarded so ECHOCAT's phone-side iambic keyer stays in sync with the
     // desktop's. The phone owns the mode selector so this is mostly a fresh-
     // connect snapshot; swap is desktop-only, so the phone needs it to
@@ -30403,13 +30979,14 @@ function connectRemote() {
 
   // Scan on/off sync (scan-state-sync-desktop). The scan engine lives in the
   // renderer, so these inbound peer messages are forwarded over IPC.
-  remoteServer.on('scan-control', ({ action, filters, dwellSec, fromFreqKhz }) => {
+  remoteServer.on('scan-control', ({ action, filters, dwellSec, fromFreqKhz, guest }) => {
     // #37 (scan-remote-v1): a start that carries the phone's own scan runs here,
     // in main, with the phone's filters; the desktop's own scan stops first.
     if (action === 'start' && filters && !isRemoteMode()) {
       if (desktopScanning && win && !win.isDestroyed()) win.webContents.send('remote-scan-control', { action: 'stop' });
       markUserActive();
-      phoneScanRun().start({ filters, dwellSec, fromFreqKhz });
+      // #961: who started it, so the end of a Guest Pass stops a guest's scan only.
+      phoneScanRun().start({ filters, dwellSec, fromFreqKhz, by: guest ? 'guest' : 'owner' });
       return;
     }
     if (action === 'stop' && _phoneScanRun && _phoneScanRun.scanning) _phoneScanRun.stop('stop');
@@ -30894,7 +31471,7 @@ function connectRemote() {
 
   // Phone updated custom CAT buttons — save to settings and sync desktop
   remoteServer.on('save-custom-cat-buttons', (buttons) => {
-    settings.customCatButtons = buttons;
+    settings.customCatButtons = CustomCatFollow.capSlots(buttons); // #164: at most 25
     saveSettings(settings);
     if (win && !win.isDestroyed()) {
       win.webContents.send('reload-prefs');
@@ -31850,55 +32427,47 @@ function connectRemote() {
     }
   });
 
-  remoteServer.on('update-qso', ({ idx, fields: edit }) => {
+  remoteServer.on('update-qso', ({ idx, fields: edit, identity }) => {
     try {
-      let found = false;
-      let applied = null;
-      mutateQsoLog((qsos) => {
-        if (!qsos[idx]) return false;
-        found = true;
-        // My Park also sets MY_SIG and its mirror (lib/qso-edit.js, #509).
-        applied = applyQsoEdit(qsos[idx], edit);
-        if (applied.error) return false;
-      });
-      if (!found) {
-        remoteServer.sendQsoUpdated({ success: false, idx, error: 'Invalid index' });
+      // Only the record the device chose, by identity when it sent one
+      // (lib/logbook-edit.js, #988). My Park also sets MY_SIG and its
+      // mirror (lib/qso-edit.js, #509).
+      const r = LogbookEdit.updateOne(mutateQsoLog, idx, identity, edit, applyQsoEdit);
+      if (!r.success) {
+        // idx echoes the request (the phone matches its ack by it).
+        remoteServer.sendQsoUpdated({ success: false, idx, error: r.error, ...(r.reason ? { reason: r.reason } : {}) });
         return;
       }
-      if (applied.error) {
-        remoteServer.sendQsoUpdated({ success: false, idx, error: applied.error });
-        return;
-      }
-      const fields = applied.fields;
+      const fields = r.fields;
       loadWorkedQsos();
-      // Notify desktop QSO pop-out
+      // Notify desktop QSO pop-out (by position in the file)
       if (qsoPopoutWin && !qsoPopoutWin.isDestroyed()) {
-        qsoPopoutWin.webContents.send('qso-popout-updated', { idx, fields });
+        qsoPopoutWin.webContents.send('qso-popout-updated', { idx: r.index, fields });
       }
-      remoteServer.sendQsoUpdated({ success: true, idx, fields });
+      // idx echoes the request; logIdx is where the record really is.
+      remoteServer.sendQsoUpdated({ success: true, idx, logIdx: r.index, fields });
     } catch (err) {
       remoteServer.sendQsoUpdated({ success: false, idx, error: err.message });
     }
   });
 
-  remoteServer.on('delete-qso', ({ idx }) => {
+  remoteServer.on('delete-qso', ({ idx, identity }) => {
     try {
-      let found = false;
-      mutateQsoLog((qsos) => {
-        if (!qsos[idx]) return false;
-        found = true;
-        qsos.splice(idx, 1);
-      });
-      if (!found) {
-        remoteServer.sendQsoDeleted({ success: false, idx, error: 'Invalid index' });
+      // Only the record the device chose, and success only when it left the
+      // file (#988: a record with no uuid used to report success and stay).
+      const r = LogbookEdit.deleteOne(mutateQsoLog, idx, identity);
+      if (!r.success) {
+        remoteServer.sendQsoDeleted({ success: false, idx, error: r.error, ...(r.reason ? { reason: r.reason } : {}) });
         return;
       }
       loadWorkedQsos();
       // Notify desktop QSO pop-out
       if (qsoPopoutWin && !qsoPopoutWin.isDestroyed()) {
-        qsoPopoutWin.webContents.send('qso-popout-deleted', idx);
+        qsoPopoutWin.webContents.send('qso-popout-deleted', r.index);
       }
-      remoteServer.sendQsoDeleted({ success: true, idx });
+      // idx echoes the request (the phone matches its ack by it); logIdx is
+      // the position the record was removed from (later records shift down).
+      remoteServer.sendQsoDeleted({ success: true, idx, logIdx: r.index });
     } catch (err) {
       remoteServer.sendQsoDeleted({ success: false, idx, error: err.message });
     }
@@ -31966,6 +32535,21 @@ function connectRemote() {
       // The state the activator was in, for a park spanning several
       // (lib/qso-expand.js parkStateFor: "NJ", "US-NJ" or "US-0001:NJ,...").
       if (typeof data.parkState === 'string' && data.parkState.length <= 200) entry.parkState = data.parkState;
+      // The power the operator typed on the device (ECHOCAT #85), in watts.
+      // Unset when absent or not a sane number: saveQsoRecord then fills it
+      // (radio, Default TX Power, empty). A guest's is the guest's own; kept.
+      {
+        const tp = LogTxPower.deviceTxPower(data.txPower);
+        if (tp) entry.txPower = tp;
+      }
+      // The activation's rig and antenna from the device (#975). The phone's
+      // rig wins over the desktop's station rig; none sent, logContact fills it.
+      {
+        const rig = LogGear.gearText(data.myRig);
+        if (rig) entry.myRig = rig;
+        const ant = LogGear.gearText(data.myAntenna);
+        if (ant) entry.myAntenna = ant;
+      }
       // One cloud record, shared with the device's own copy (dupe fix 2026-07-08).
       if (data.uuid && typeof data.uuid === 'string' && data.uuid.length <= 64) entry.uuid = data.uuid;
       for (const k of ['respot', 'wwffRespot', 'llotaRespot', 'wwbotaRespot', 'dxcRespot']) if (data[k]) entry[k] = true;
@@ -32531,6 +33115,7 @@ function connectRemote() {
       if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) jtcatPopoutWin.webContents.send('jtcat-flag-state', { key, enabled: v === true });
     }
     if (key === 'jtcatAutoRespot') updateRemoteSettings(); // every device shows the new state
+    if (key === 'jtcatCallingTimeMin') updateRemoteSettings(); // every device shows the new calling time
   });
   // Hunt filters from a device (Guest Pass refused in remote-server).
   remoteServer.on('jtcat-hunt-filters', (msg = {}) => applyJtcatHuntFilters(msg, 'remote'));
@@ -32894,7 +33479,7 @@ function connectRemote() {
   // (lib/sstv-send.js): the radio goes to the SSTV frequency before the
   // picture keys, the encoder gets its own copy of the pixels, and a failure
   // is a status line here and on the phone, never a dialog box.
-  remoteServer.on('sstv-photo', ({ image, mode, guest, freqKhz }) => {
+  remoteServer.on('sstv-photo', ({ image, mode, guest, freqKhz, waitQuiet }) => {
     autoSstvOpenedPopout = false; // a picture going out keeps its window (#525)
     if (guest && passEnforcement) {
       const res = passEnforcement.interceptCatCommand({ type: 'sstv_tx', freqHz: effectiveTxFreqHz(), split: _currentSplit });
@@ -32976,6 +33561,9 @@ function connectRemote() {
       }
       // The encoder's own copy: it hands its pixels to a worker, which leaves
       // the array it was given empty, and pushTxImage reads rgba later.
+      // #326: the picture waits at encode-complete for a quiet frequency when
+      // the shack's setting is on, or when this client asked (waitQuiet).
+      _sstvNextPicture = { requested: waitQuiet === true, from: guest ? 'guest ' + (guest.call || '') : 'ECHOCAT', queuedBy: guest ? { code: guest.code, call: guest.call || '' } : null };
       sstvEngine.encode(SstvSend.ownCopy(rgba), size.width, size.height, mode);
     } catch (err) {
       sstvSendFailed(SstvSend.failText(err), { log: 'ECHOCAT picture not sent: ' + err.message });
@@ -33022,7 +33610,19 @@ function connectRemote() {
   // Phone requested an immediate TX abort.
   // Release PTT FIRST (FCC safety — don't leave the Flex keyed), then tell
   // the popout to stop audio playback, then notify all clients.
-  remoteServer.on('sstv-halt-tx', () => {
+  remoteServer.on('sstv-send-now', ({ guest, refuse } = {}) => sstvQuietSendNow('ECHOCAT', guest, refuse)); // #326: the waiting picture goes now
+  remoteServer.on('sstv-halt-tx', ({ guest, refuse } = {}) => {
+    // #974: a guest's HALT while someone else's picture waits does not cancel
+    // that picture (refused, with the reason); a real transmission still stops.
+    if (guest && _sstvQuietGate && _sstvQuietGate.waiting()) {
+      const may = _sstvQuietGate.mayAct(guest);
+      if (!may.ok) {
+        if (refuse) refuse(may.why);
+        sendCatLog(`[SSTV] Cancel from guest ${guest.call || '(no callsign)'} refused: the waiting picture is not theirs`);
+        if (_remoteTxState || (cat && cat._transmitting)) sstvHaltTxNow({ keepWait: true });
+        return;
+      }
+    }
     console.log('[SSTV] ECHOCAT requested TX halt');
     sstvHaltTxNow();
   });
@@ -33472,6 +34072,9 @@ function connectRemote() {
     // Where the shack's VARA runs is typed at the shack only (#287): Pat
     // connects to that host, so a device never names it.
     if (partial) { delete partial.winlinkVaraHost; delete partial.winlinkVaraFmHost; }
+    // #279: saved as watts or null, whatever the device sent.
+    const sstvPowerChanged = !!partial && 'sstvTxPowerW' in partial;
+    if (sstvPowerChanged) partial.sstvTxPowerW = SstvTxPower.parseWatts(partial.sstvTxPowerW);
     Object.assign(settings, partial);
     saveSettings(settings);
     afterSstvSettingsSaved(partial);
@@ -33483,6 +34086,7 @@ function connectRemote() {
     // the web pane and vice versa, so those keys push too.
     const jttyKeys = ['jttySerial', 'jttyMacros', 'jttyFt8Macros', 'jttyMacroStyle', 'jttyProfile', 'jtcatFdExch', 'pskMacros'];
     if (sdrSync || dxeChanged || jttyKeys.some((k) => Object.prototype.hasOwnProperty.call(partial || {}, k))) updateRemoteSettings();
+    if (sstvPowerChanged) { updateRemoteSettings(); pushSstvRigState(); }
     rigBandsBroadcast();
   });
 }
@@ -33518,6 +34122,7 @@ function releasePhoneDrivenJtcat() {
 let _ssbModeBeforePtt = null; // original mode saved during DATA-mode PTT workaround
 let _ssbFreqBeforePtt = 0;    // dial freq saved at swap time — restore re-anchors here, never to a mid-TX polled freq
 let _ssbOverDataYaesuWarned = false; // log the rig-menu hint once per session
+const _micJackPttLogged = new Set(); // #153: the microphone-jack line, once per kind of transmission per session
 let _ssbOverDataFmAmWarned = false; // log 'SSB-over-DATA does not apply in FM or AM' once per session (#561)
 
 // --- Flex TX audio source (transmit set dax=) -------------------------------
@@ -34112,23 +34717,39 @@ function handleRemotePtt(state, opts = {}) {
   // reaches the rig in DATA mode (SSTV on an Icom, whose factory DATA OFF MOD
   // is MIC,ACC — plain USB keys with silence; WB8IMY IC-7300, 2026-09-26),
   // so the switch happens whether or not the SSB-over-DATA setting is on.
-  const forceData = !!opts.forceDataMode;
   // A Yaesu's DATA-U is not a mic-off USB: it takes the DATA filter and TX
   // processing, and with DATA MODE = PSK it shifts the carrier too, so a voice
   // macro or phone audio sent that way goes out narrow and wrong (K3SBP
   // FT-710, 2026-10-24: "kicks the 710 into Data-U, transmitting the voice all
   // wonky"). Voice stays in USB/LSB there; FreeDV and forced callers still switch.
-  const _pttRig = getActiveRigModel();
-  const yaesuVoice = !forceData && !!(_pttRig && _pttRig.brand === 'Yaesu') &&
-    !(typeof freedvEngine !== 'undefined' && freedvEngine);
-  if (state && settings.ssbOverData && !forceData && yaesuVoice && audioActive && !ft8Engine && !_ssbOverDataYaesuWarned) {
-    _ssbOverDataYaesuWarned = true;
-    sendCatLog('[PTT] SSB-over-DATA skipped for voice on a Yaesu: its DATA-U narrows and shifts voice. To keep the hand mic quiet during voice macros, set the SSB audio source to the rear/USB input in the radio menu.');
-  }
   // A rig with Voice in DATA mode is in USB-D/LSB-D already (GitHub #24).
-  const _voiceRig = (settings.rigs || []).find(r => r.id === settings.activeRigId);
-  const voiceInData = !forceData && !!(_voiceRig && _voiceRig.voiceAsData);
-  if (state && (settings.ssbOverData || forceData) && !opts.noDataSwap && !yaesuVoice && !voiceInData && audioActive && (!ft8Engine || forceData)) {
+  // The rig's sound card jack decides all of it (lib/rig-audio-jack.js, #153):
+  // on the microphone jack nothing switches to DATA, forced or not; on the
+  // data jack the rig's "voice switches to DATA" tick box, when set, replaces
+  // the global SSB-over-DATA setting and its Yaesu exception.
+  const _pttRig = getActiveRigModel();
+  const _jackNow = activeRigAudioJack();
+  const _dataPlanJack = RigAudioJack.pttDataPlan({
+    jack: _jackNow.jack, voiceSwitch: _jackNow.voiceSwitch, ssbOverData: !!settings.ssbOverData,
+    forced: !!opts.forceDataMode, yaesu: !!(_pttRig && _pttRig.brand === 'Yaesu'),
+    freedvRunning: !!(typeof freedvEngine !== 'undefined' && freedvEngine),
+    voiceAsData: !!(_jackNow.rig && _jackNow.rig.voiceAsData),
+  });
+  const forceData = _dataPlanJack.forceData;
+  const yaesuVoice = _dataPlanJack.yaesuVoice;
+  const voiceInData = _dataPlanJack.voiceInData;
+  if (state && _dataPlanJack.yaesuSkip && audioActive && !ft8Engine && !_ssbOverDataYaesuWarned) {
+    _ssbOverDataYaesuWarned = true;
+    sendCatLog('[PTT] SSB-over-DATA skipped for voice on a Yaesu: its DATA-U narrows and shifts voice. To keep the hand mic quiet during voice macros, set the SSB audio source to the rear/USB input in the radio menu, or tick "' + RigAudioJack.VOICE_SWITCH_LABEL + '" for this rig in Settings > Radio.');
+  }
+  if (state && _dataPlanJack.micSkip && !opts.noDataSwap && audioActive && (!ft8Engine || opts.forceDataMode)) {
+    const _micKey = opts.txKind || (opts.forceDataMode ? 'forced' : 'voice');
+    if (!_micJackPttLogged.has(_micKey)) {
+      _micJackPttLogged.add(_micKey);
+      sendCatLog(RigAudioJack.micJackPttLog({ txKind: opts.txKind, forced: !!opts.forceDataMode, mode: _currentMode }));
+    }
+  }
+  if (state && _dataPlanJack.want && !opts.noDataSwap && !yaesuVoice && !voiceInData && audioActive && (!ft8Engine || forceData)) {
     // Switch to DATA mode before TX to prevent local mic bleed
     // Skip when JTCAT is active — it manages its own DATA mode
     const curMode = (_currentMode || '').toUpperCase();
@@ -34176,7 +34797,7 @@ function handleRemotePtt(state, opts = {}) {
       _ssbFreqBeforePtt = _currentFreqHz;
       // Say WHY: a forced switch is not the SSB-over-DATA setting, and calling
       // it that sent EA1BZN to check two options that were already off.
-      sendCatLog(`[PTT] ${curMode} -> ${dataMode} (${forceData ? (opts.dataReason || 'this audio reaches the radio only in DATA mode') : 'SSB-over-DATA: mic disabled'})${_dataPlan === 'switch-hold' ? ' — held until the Winlink session ends' : ''}`);
+      sendCatLog(`[PTT] ${curMode} -> ${dataMode} (${forceData ? (opts.dataReason || 'this audio reaches the radio only in DATA mode') : _dataPlanJack.reason})${_dataPlan === 'switch-hold' ? ' — held until the Winlink session ends' : ''}`);
       // Yaesu rigs have a "DATA MODE" menu that controls whether DIGL/DIGU
       // behave as mic-disabled SSB (DATA MODE = Others/STD — carrier freq
       // unchanged) or as a subcarrier-offset PSK mode (DATA MODE = PSK —
@@ -34217,6 +34838,10 @@ function handleRemotePtt(state, opts = {}) {
       if (_ssbActiveRig && _ssbActiveRig.brand === 'Icom') _civPttDelayMs = 120;
     }
   }
+
+  // Transmit power for SSTV (#279): set now, after every refusal above and
+  // before the key-down below, on the same link, so it lands first.
+  if (state && opts.txKind === 'sstv') sstvTxPowerBegin();
 
   if (isFlexRig) {
     // FlexRadio: prefer SmartSDR API so TX is pinned to POTACAT's slice. If
@@ -34308,6 +34933,10 @@ function handleRemotePtt(state, opts = {}) {
       pttConfirmRestore(restoreMode, restoreFreq, _restoreIcom, restoreSince).catch(() => {});
     }
   }
+
+  // The SSTV picture's power goes back after the unkey (#279). A no-op unless
+  // a picture set one: every key-up passes here, whatever ended the picture.
+  if (!state) sstvTxPowerEnd('picture ended');
 
   txLimitNote(state, opts);
   if (!state && _fakeIt.active) fakeItRestoreDial('key-up');
@@ -34405,6 +35034,13 @@ function sendVfoState() {
     // The radio states a custom CAT toggle can FOLLOW (lib/custom-cat-follow.js).
     preamp: _currentPreampState,
     att: _currentAttState,
+    // The ladder position and the ladder (#997): the window cycles IPO / AMP1 /
+    // AMP2 and 6 / 12 / 18 dB like the Rig panel; [] = plain on/off. The preamp
+    // ladder is cut to off/on on bands where the radio has only that.
+    preampStep: _currentPreampStep,
+    attStep: _currentAttStep,
+    preampSteps: vfoGainLadder('preampSteps', true),
+    attSteps: vfoGainLadder('attSteps', false),
     comp: _currentCompState,
     vox: _currentVoxState,
     nr: _currentNrState,
@@ -34415,7 +35051,8 @@ function sendVfoState() {
     breakIn: _currentBreakInState,
     catCaps: vfoCatCaps(),          // which CAT buttons this radio can take (lib/vfo-layout.js)
     customCatStates: customCatReader.states(), // #242: custom toggles' own reads
-    customCatButtons: settings.customCatButtons || [],
+    customCatButtons: CustomCatFollow.capSlots(settings.customCatButtons),
+    activeRigId: settings.activeRigId || null, // #164: the custom row shows the buttons for this radio
     meters: vfoMetersAvailable(),   // only these meter rows are drawn
     // Power On/Off at the bottom of the window. From the radio MODEL, never
     // from the CAT link: a switched-off radio does not answer, and the main
@@ -34449,13 +35086,22 @@ function vfoWfmAvailable() {
     return !!(m && m.wfm);
   } catch { return false; }
 }
+/** Preamp / Att ladder for the VFO window (#997), [] when the radio has none.
+ *  Band from the RADIO's own frequency (the codec's rule), not the display: an SDR
+ *  holding the dial at 100 MHz+ must not cut an HF radio's ladder. */
+function vfoGainLadder(key, perBand) {
+  try {
+    const caps = getRigCapabilities(detectRigType()) || {};
+    return _rigGainSteps.ladderForFreq(caps[key], perBand ? caps.preampTargets : undefined, _currentFreqHz || 0);
+  } catch { return []; }
+}
 // The caps flags the VFO's CAT buttons check (VfoLayout.CAT_CHOICES), or null
 // when the radio is not known yet (the VFO then offers them all).
 function vfoCatCaps() {
   try {
     const caps = getRigCapabilities(detectRigType()) || {};
     const out = {};
-    for (const k of ['nb', 'nr', 'anf', 'apf', 'preamp', 'att', 'comp', 'vox', 'mon', 'rit', 'split', 'atu']) out[k] = !!caps[k];
+    for (const k of ['nb', 'nr', 'anf', 'apf', 'preamp', 'att', 'comp', 'vox', 'mon', 'rit', 'split', 'splitUp', 'atu']) out[k] = !!caps[k];
     return out;
   } catch { return null; }
 }
@@ -34757,6 +35403,12 @@ function broadcastRemoteRadioStatus() {
   // WSJT-X has been heard in the last 60 s. ECHOCAT shows the chip and note.
   status.wsjtxMode = !!settings.enableWsjtx;
   status.wsjtxHeard = !!(settings.enableWsjtx && _wsjtxHeard);
+  // An Icom reports USB/LSB with its DATA flag apart (1A 06): say it, so a
+  // client can show DIGU / DIGL. Only with a mode, never while transmitting
+  // (a voice over in USB-D is not the operator's mode) and never while a
+  // voice request is being sent as DATA (#24). Absent = the client keeps its last.
+  const dms = cat && cat._codec && cat._codec.dataModeState;
+  status.modeData = (modeVal && dms && !_isEffectivelyTransmitting() && !cat._voiceSentAsData) ? !!dms.on : undefined;
   remoteServer.broadcastRadioStatus(status);
 }
 
@@ -34998,7 +35650,6 @@ async function startRemoteClientAudio() {
       backgroundThrottling: false,
     },
   });
-  remoteAudioClientWin.webContents.session.setPermissionRequestHandler((_wc, _perm, cb) => cb(true));
   // Chromium can mute getUserMedia in a never-shown window — show off-screen.
   remoteAudioClientWin.setPosition(-9999, -9999);
   remoteAudioClientWin.showInactive();
@@ -35385,9 +36036,6 @@ function prewarmRemoteAudioWindow() {
       backgroundThrottling: false,
     },
   });
-
-  // Grant media permissions to the audio window's session
-  remoteAudioWin.webContents.session.setPermissionRequestHandler((_wc, perm, cb) => cb(true));
 
   remoteAudioWin.loadFile(path.join(__dirname, 'renderer', 'remote-audio.html'));
 
@@ -38914,7 +39562,7 @@ function flexScopeFollowPan() {
   const now = Date.now();
   let changed = false;
   // No ask yet (the scope is starting): a centre left from an earlier session says nothing; hold.
-  const off = ScopeDigitalView.panOffsetFromStatus({ reportedCentreHz: g.centerHz, ask: flexPanCenterAsk, nowMs: now });
+  const off = ScopeDigitalView.panOffsetFromStatus({ reportedCentreHz: g.centerHz, reportedAtMs: g.centerAt, ask: flexPanCenterAsk, nowMs: now });
   if (off != null && off !== (yaesuScopeState.centerOffsetHz || 0)) { yaesuScopeState.centerOffsetHz = off; changed = true; }
   const ask = flexDigitalSpanAsk;
   const spanSettled = ask && g.spanHz && (Math.abs(g.spanHz - ask.hz) <= ask.hz * 0.05 || now - ask.at >= ScopeDigitalView.SETTLE_MS);
@@ -40168,6 +40816,7 @@ function rawQsoToQsoData(raw) {
     rstRcvd: raw.RST_RCVD || '',
     txPower: raw.TX_PWR || '',
     myRig: raw.MY_RIG || '',
+    myAntenna: raw.MY_ANTENNA || '',
     band: raw.BAND || '',
     sig: raw.SIG || '',
     sigInfo: raw.SIG_INFO || '',
@@ -40388,18 +41037,25 @@ function sendN3fjpTcp(qsoData, host, port) {
     });
 
     // Wait for socket to fully close + brief delay — N3FJP needs time
-    // between connections before it can accept the next one
+    // between connections before it can accept the next one. The call in
+    // progress (#712) learns the call is logged (N3FJP's entry window is
+    // emptied after it) and whether N3FJP is there at all.
     sock.on('close', () => {
-      if (!settled) { settled = true; setTimeout(resolve, 250); }
+      if (!settled) {
+        settled = true;
+        n3fjpCip.reachable(true);
+        n3fjpCip.logged(qsoData.callsign);
+        setTimeout(resolve, 250);
+      }
     });
 
     sock.setTimeout(5000);
     sock.on('timeout', () => {
       sock.destroy();
-      if (!settled) { settled = true; reject(new Error('N3FJP connection timed out')); }
+      if (!settled) { settled = true; n3fjpCip.reachable(false); reject(new Error('N3FJP connection timed out')); }
     });
     sock.on('error', (err) => {
-      if (!settled) { settled = true; reject(new Error(`N3FJP: ${err.message}`)); }
+      if (!settled) { settled = true; n3fjpCip.reachable(false); reject(new Error(`N3FJP: ${err.message}`)); }
     });
   });
 }
@@ -40411,6 +41067,50 @@ function n3fjpQueue(fn) {
   const run = _n3fjpChain.then(fn, fn);
   _n3fjpChain = run.catch(() => {});
   return run;
+}
+
+// The call in progress in N3FJP's entry window (#712, lib/n3fjp-call-in-progress.js):
+// a spot pick, a call typed in a log field, the JTCAT QSO partner. Only the
+// documented UPDATE TXTENTRYCALL + ACTION CALLTAB (and CLEAR after logging);
+// nothing is logged here. N3FJP closed: nothing is said.
+const N3fjpCip = require('./lib/n3fjp-call-in-progress');
+const n3fjpCip = new N3fjpCip.CallInProgress({
+  isEnabled: () => N3fjpCip.wanted(settings),
+  send: (job) => n3fjpQueue(() => {
+    // Waited behind a QSO send or the log pull: a newer call may have come.
+    if (job.kind === 'call' && !n3fjpCip.isCurrent(job.call)) return { skipped: true };
+    return sendN3fjpCommands(job.commands, settings.logbookHost || '127.0.0.1', parseInt(settings.logbookPort, 10) || 1100);
+  }),
+});
+
+/**
+ * Write N3FJP API commands on one connection, a short pause between them
+ * (the API page asks for at least 5 ms after an ACTION). A short timeout: a
+ * closed N3FJP must not hold up a real QSO waiting in the same queue.
+ */
+function sendN3fjpCommands(commands, host, port) {
+  return new Promise((resolve, reject) => {
+    const net = require('net');
+    let settled = false;
+    const done = (err) => {
+      if (settled) return;
+      settled = true;
+      if (err) reject(err); else setTimeout(resolve, 250); // N3FJP needs a moment between connections
+    };
+    const sock = net.createConnection({ host, port }, async () => {
+      try {
+        for (let i = 0; i < commands.length; i++) {
+          if (i) await new Promise((r) => setTimeout(r, 30));
+          await new Promise((r) => sock.write(commands[i], 'utf-8', r));
+        }
+      } catch { /* the error handler settles */ }
+      sock.end();
+    });
+    sock.on('close', () => done());
+    sock.setTimeout(1500);
+    sock.on('timeout', () => { sock.destroy(); done(new Error('N3FJP connection timed out')); });
+    sock.on('error', (err) => done(new Error(`N3FJP: ${err.message}`)));
+  });
 }
 
 // Bring in contacts logged in N3FJP on its own (W6ING, lib/n3fjp-pull.js).
@@ -40471,6 +41171,7 @@ async function n3fjpPull(reason) {
   try {
     const reply = await n3fjpQueue(() => N3fjpPull.requestList(host, port, N3fjpPull.listCommand({ recent: (full || daily) ? 0 : N3FJP_PULL_RECENT })));
     _n3fjpPullUnreachableLogged = false;
+    n3fjpCip.reachable(true); // N3FJP is open again: the call in progress may go (#712)
     const { records, dropped } = N3fjpPull.parseListReply(reply);
     if (!_n3fjpPullSampleLogged || (!records.length && reply.trim())) {
       _n3fjpPullSampleLogged = true;
@@ -40707,10 +41408,24 @@ function resolveTheme() {
   try { dark = !!nativeTheme.shouldUseDarkColors; } catch { /* no nativeTheme in a test harness */ }
   return AppTheme.resolveAppTheme(settings, dark);
 }
+// #345: the frame every visible window opens with (lib/window-frame.js). The
+// setting is read once, at the first window, so a change applies on restart and
+// every window of a run matches the main window.
+let _windowFrameSettings = null;
+function windowFrameSettings() {
+  if (!_windowFrameSettings && settings) _windowFrameSettings = { linuxNativeFrame: settings.linuxNativeFrame === true };
+  return _windowFrameSettings || {};
+}
+function windowFrame() {
+  return WindowFrame.windowFrameFor(process.platform, windowFrameSettings());
+}
+
 function themeQuery() {
   const r = resolveTheme();
   const q = { theme: r.theme, variant: r.variant };
   if (r.ds) q.ds = r.ds;
+  // The page hides its own window buttons under the system frame (native-frame.css).
+  if (WindowFrame.usesNativeFrame(process.platform, windowFrameSettings())) q.frame = 'native';
   return q;
 }
 
@@ -40761,7 +41476,7 @@ function createWindow() {
     height: defaultH,
     title: `POTACAT - v${getAppDisplayVersion()}`,
     backgroundColor: getThemeWindowBg(),
-    ...(isMac ? { titleBarStyle: 'hiddenInset' } : { frame: false }),
+    ...windowFrame(),
     icon: getIconPath(),
     show: false,
     webPreferences: {
@@ -40783,14 +41498,11 @@ function createWindow() {
     win.maximize();
   }
 
-  // Allow MIDI device access for CW keyer
-  win.webContents.session.setPermissionRequestHandler((wc, perm, cb) => cb(true));
+  // Permissions (mic, MIDI paddles, WebHID, ...) are set once for the default
+  // session before this window opens: lib/window-security.js.
   // Sound-card PTT (CM108 GPIO, lib/cm108-ptt.js): WebHID may open C-Media /
   // SSS sound cards and nothing else, and a PTT from a phone must work with
   // no click on this PC, so those devices are granted without a chooser.
-  // Electron allows every permission check by default; saying so for 'hid'
-  // keeps WebHID on whatever Electron's default becomes.
-  win.webContents.session.setPermissionCheckHandler(() => true);
   win.webContents.session.setDevicePermissionHandler((d) => d.deviceType === 'hid' && !!(d.device && Cm108Ptt.isCm108(d.device.vendorId, d.device.productId)));
   win.webContents.session.on('select-hid-device', (event, details, callback) => {
     event.preventDefault();
@@ -40893,6 +41605,7 @@ function createWindow() {
   win.webContents.on('did-finish-load', () => {
     setTimeout(kiwiStatusHint, 500);   // the Landmarks tab learns what the SDR can hear
     logStartupStage('main window did-finish-load (renderer ready)');
+    if (_activationLaunchNotice) { win.webContents.send('activation-auto-ended', _activationLaunchNotice); _activationLaunchNotice = null; } // #700
     // Replay the pre-load log history: everything sendCatLog'd before this
     // point never reached the renderer (no window to send to), so without
     // this the log panel — and any bug report built from it — starts blind
@@ -42984,6 +43697,109 @@ function sstvSendFailed(text, { log } = {}) {
   }
 }
 
+// #326: SSTV waits for the frequency to be quiet before it transmits. The
+// rules are in lib/sstv-quiet-wait.js (the Winlink busy detector and the
+// automatic retry's channel watch, on 1100-2300 Hz); here the picture is held
+// at encode-complete, before PTT, and every way out is wired: the picture
+// goes, it gives up, or Cancel / HALT / window close / SSTV stop drop it.
+let _sstvQuietListener = null; // SstvQuietWait.QuietListener for the dial it is hearing
+let _sstvQuietGate = null;     // SstvQuietWait.SendGate: at most one held picture
+let _sstvQuietTimer = null;
+let _sstvNextPicture = null;   // set by a picture from ECHOCAT: { requested, from } for the next encode-complete
+
+/** The SSTV engine's receive audio, before it goes to the decoder (lib/sstv-engine.js setAudioTap). */
+function sstvQuietFeed(samples, rate) {
+  // Only listen while it can matter: the setting is on, or a client asked for this picture.
+  if (settings.sstvWaitQuiet !== true && !(_sstvQuietGate && _sstvQuietGate.waiting())) return;
+  if (_remoteTxState || (cat && cat._transmitting)) return; // our own transmission is not the band
+  const now = Date.now();
+  const hz = _currentFreqHz || 0;
+  if (!_sstvQuietListener || SstvQuietWait.dialMoved(_sstvQuietListener.hz, hz)) {
+    _sstvQuietListener = new SstvQuietWait.QuietListener({ hz, now });
+  }
+  _sstvQuietListener.push(samples, rate, now);
+}
+
+function sstvQuietShow(status) {
+  if (sstvPopoutWin && !sstvPopoutWin.isDestroyed()) {
+    try { sstvPopoutWin.webContents.send('sstv-tx-status', status); } catch {}
+  }
+}
+
+function sstvQuietStopTimer() {
+  if (_sstvQuietTimer) { clearInterval(_sstvQuietTimer); _sstvQuietTimer = null; }
+}
+
+function sstvQuietGateGet() {
+  if (_sstvQuietGate) return _sstvQuietGate;
+  _sstvQuietGate = new SstvQuietWait.SendGate({
+    onSend: (p, why) => {
+      sstvQuietStopTimer();
+      if (why === 'quiet' && p.waited) sendCatLog(`[SSTV] the frequency has been quiet for ${SstvQuietWait.QUIET_S} s: sending the picture`);
+      if (why === 'now') sendCatLog(`[SSTV] Send now (${p.by || 'the operator'}): sending the picture without waiting for the frequency to clear`);
+      if (p.waited) sstvQuietShow({ state: 'tx' });
+      p.send(p.data);
+    },
+    onStatus: (s) => {
+      sstvQuietShow(s);
+      if (remoteServer) { try { remoteServer.broadcastSstvTxStatus(s); } catch {} }
+    },
+    onGiveUp: (p, text) => {
+      sstvQuietStopTimer();
+      sstvSendFailed(text);
+      sstvQuietShow({ state: 'rx', error: text });
+    },
+    onCancel: (p, reason) => {
+      sstvQuietStopTimer();
+      sendCatLog(`[SSTV] picture not sent: the wait for a quiet frequency was ${reason === 'replaced' ? 'replaced by a newer picture' : 'cancelled (' + reason + ')'}`);
+      if (reason === 'replaced') return;
+      sstvQuietShow({ state: 'rx', error: SstvQuietWait.CANCELLED_TEXT });
+      if (remoteServer) { try { remoteServer.broadcastSstvTxStatus(SstvSend.notSentStatus({ autoActive: autoSstvActive, error: SstvQuietWait.CANCELLED_TEXT })); } catch {} }
+    },
+  });
+  return _sstvQuietGate;
+}
+
+/** encode-complete: send now, or hold until the frequency is quiet (#326). */
+function sstvHoldPicture(data, send) {
+  const want = _sstvNextPicture;
+  _sstvNextPicture = null;
+  const gate = sstvQuietGateGet();
+  const now = Date.now();
+  const opts = { enabled: settings.sstvWaitQuiet === true, requested: !!(want && want.requested), now, queuedBy: want && want.queuedBy ? want.queuedBy : null };
+  if (SstvQuietWait.shouldWait(opts)) {
+    // Listen from here if nothing was listening (or the dial moved: ECHOCAT tunes first).
+    const hz = _currentFreqHz || 0;
+    if (!_sstvQuietListener || SstvQuietWait.dialMoved(_sstvQuietListener.hz, hz)) _sstvQuietListener = new SstvQuietWait.QuietListener({ hz, now });
+  }
+  const picture = { data, send, by: want && want.from, waited: false };
+  const r = gate.hold(picture, { ...opts, listener: _sstvQuietListener });
+  if (r === 'waiting') {
+    picture.waited = true;
+    sendCatLog(`[SSTV] waiting for the frequency to clear before sending${want && want.from ? ' (picture from ' + want.from + ')' : ''}: sends after ${SstvQuietWait.QUIET_S} s of quiet, gives up after ${SstvQuietWait.MAX_WAIT_S / 60} min`);
+    sstvQuietStopTimer();
+    _sstvQuietTimer = setInterval(() => { if (_sstvQuietGate) _sstvQuietGate.tick(Date.now(), _sstvQuietListener); }, 1000);
+  }
+}
+
+// guest (#974): a Guest Pass device acts only on a picture it queued; the
+// owner (no guest) on any. A refusal tells that device why and changes nothing.
+function sstvQuietSendNow(by, guest, refuse) {
+  if (!_sstvQuietGate || !_sstvQuietGate.waiting()) return;
+  const may = _sstvQuietGate.mayAct(guest);
+  if (!may.ok) {
+    if (refuse) refuse(may.why);
+    sendCatLog(`[SSTV] Send now from guest ${(guest && guest.call) || '(no callsign)'} refused: the waiting picture is not theirs`);
+    return;
+  }
+  _sstvQuietGate.held.picture.by = guest ? 'guest ' + (guest.call || '') : by;
+  _sstvQuietGate.sendNow(Date.now(), _sstvQuietListener, guest);
+}
+
+function sstvQuietCancel(reason) {
+  if (_sstvQuietGate) _sstvQuietGate.cancel(reason);
+}
+
 function startAutoSstvTimer() {
   stopAutoSstvTimer();
   if (!settings.enableAutoSstv) return;
@@ -43634,6 +44450,8 @@ let _ownTxRefusedLogAt = 0;
 let _ownTxRefusedLast = '';
 let _ownTxRefused = null; // { why, at } of the latest refusal, logged or not
 function ownTxPrivilegeRefused(emission, freqHz) {
+  // A live Guest Pass judges by the guest's class at every gate (#913).
+  if (passEnforcement && passEnforcement.getState && PassEnforcementLib.passJudgesTx(passEnforcement.getState())) return false;
   const why = Privileges.txPrivilegeRefusal({
     freqHz: freqHz != null ? freqHz : _currentFreqHz,
     mode: emission || _currentMode,
@@ -43669,7 +44487,8 @@ function passTxAllowed(mode) {
 /**
  * The end of a Guest Pass stops everything the guest started, whatever
  * surface started it: Run/Hunt, the WSPR beacon, an FT8/JTTY/PSK message in
- * flight, CW text or a held paddle, an SSTV picture, a Mercury session, PTT.
+ * flight, CW text or a held paddle, an SSTV picture, a Mercury session, PTT,
+ * and a desktop-run scan the guest started (#961).
  * Returns what it stopped, for the log. (docs/share-my-rig-lease-plan.md, 8)
  */
 function passLeaseStopTransmitters(reason) {
@@ -43688,6 +44507,8 @@ function passLeaseStopTransmitters(reason) {
   });
   step('SSTV', () => { sstvHaltTxNow(); return false; });
   step('Mercury', () => { if (!mercuryClient) return false; mercuryClient.abort(); return false; });
+  // #961: a desktop-run scan the guest started stops (the owner's never); the radio stays where it is.
+  step('scan', () => { const why = ScanRun.guestScanEndWhy(reason); return !!(why && _phoneScanRun && _phoneScanRun.stopGuestRun(why)); });
   step('PTT', () => {
     handleRemotePtt(false);
     if (cat && cat.connected) gatedSetTransmit(false);
@@ -43798,11 +44619,13 @@ function jtcatAnyTxActive() {
   return false;
 }
 
-function sstvHaltTxNow() {
+function sstvHaltTxNow({ keepWait = false } = {}) {
+  if (!keepWait) sstvQuietCancel('halt'); // a picture still waiting for a quiet frequency is dropped too (#326)
   // SCU-LAN10: HALT also stops the picture on the wire, and gives the LAN
   // back; it never unkeys another transmitter holding it.
   if (settings.audioSource === 'yaesu-lan') { try { endYaesuLanTx('sstv', 'SSTV halt'); } catch (e) { console.error('[SSTV] halt LAN release:', e); } }
   else { try { handleRemotePtt(false); } catch (e) { console.error('[SSTV] halt PTT release:', e); } }
+  sstvTxPowerEnd('HALT'); // #279: after the unkey; a no-op when the key-up above already put it back
   if (sstvPopoutWin && !sstvPopoutWin.isDestroyed()) {
     sstvPopoutWin.webContents.send('sstv-abort-tx');
   }
@@ -44221,7 +45044,16 @@ function tuneRadio(freqKhz, mode, brng, { clearXit, origin, purpose } = {}) {
   }
 
   if (settings.enableRotor && settings.rotorActive !== false && settings.rotorMode !== 'manual' && brng != null && !isNaN(brng)) {
-    sendRotorBearing(Math.round(brng));
+    // Rotor only on chosen bands (#356, lib/rotor-bands.js): off = every band.
+    const rotorBand = freqToBand(freqHz / 1e6) || '';
+    const rotorRule = RotorBands.decide(settings, rotorBand);
+    if (rotorRule.turn) {
+      tuneRadio._rotorBandSkipNoted = null;
+      sendRotorBearing(Math.round(brng));
+    } else if (tuneRadio._rotorBandSkipNoted !== rotorBand) {
+      tuneRadio._rotorBandSkipNoted = rotorBand;   // one line per band, not one per click
+      sendCatLog(rotorRule.line);
+    }
   } else if (settings.enableRotor && settings.rotorActive !== false && settings.rotorMode === 'manual'
       && brng != null && !isNaN(brng) && !tuneRadio._rotorManualNoted) {
     // Say once why a spot click did not turn the antenna (IK4IDF 2026-10-05).
@@ -44344,11 +45176,13 @@ function tuneRadio(freqKhz, mode, brng, { clearXit, origin, purpose } = {}) {
   // resolved to DIGU/USB per the independent freedvUseDataMode setting) isn't
   // re-rewritten here.
   // A Winlink radio session is not JTCAT and keeps the data mode (lib/plain-ssb-for-digital.js).
+  // A rig whose sound card interface is on the microphone jack never goes to a
+  // DATA mode, on any tune (lib/rig-audio-jack.js, #153).
   {
-    const plain = PlainSsbForDigital.plainSsbForDigital(mode, { useDataMode: settings.jtcatUseDataMode !== false, purpose, freedv: isFreedvMode });
-    if (plain !== mode) {
-      sendCatLog(`[tune] ${String(mode).toUpperCase()} -> ${plain}: "Switch radio to DATA mode (PKTUSB) for FT8 / FT4 (JTCAT)" is off`);
-      mode = plain;
+    const t = RigAudioJack.tuneMode(mode, { jack: activeRigAudioJack().jack, useDataMode: settings.jtcatUseDataMode !== false, purpose, freedv: isFreedvMode });
+    if (t.mode !== mode) {
+      sendCatLog(t.log);
+      mode = t.mode;
     }
   }
 
@@ -44486,8 +45320,27 @@ function wsprRunOwedAtuTune() {
 }
 
 // --- potacat:// protocol handler ---
-if (!app.isDefaultProtocolClient('potacat')) {
-  app.setAsDefaultProtocolClient('potacat');
+// A packaged POTACAT claims it; a development run only from the main checkout
+// with the default user data folder, and with its app path (lib/protocol-registration.js).
+{
+  let appIsWorktree = false;
+  try { appIsWorktree = fs.statSync(path.join(app.getAppPath(), '.git')).isFile(); } catch { /* no .git: not a worktree */ }
+  const reg = ProtocolRegistration.decideProtocolRegistration({
+    isPackaged: app.isPackaged,
+    execPath: process.execPath,
+    appPath: app.getAppPath(),
+    userDataPath: app.getPath('userData'),
+    defaultUserDataPath: path.join(app.getPath('appData'), app.getName()),
+    hasUserDataSwitch: app.commandLine.hasSwitch('user-data-dir'),
+    appIsWorktree,
+  });
+  if (!reg.register) {
+    console.log(`[protocol] potacat:// links left alone: ${reg.why}`);
+  } else if (reg.args) {
+    if (!app.isDefaultProtocolClient('potacat', reg.path, reg.args)) app.setAsDefaultProtocolClient('potacat', reg.path, reg.args);
+  } else if (!app.isDefaultProtocolClient('potacat')) {
+    app.setAsDefaultProtocolClient('potacat');
+  }
 }
 
 /**
@@ -44762,6 +45615,11 @@ async function redeemGuestPass(rawInput) {
   try {
     if (settings.cloudAccessToken) {
       r = await post('/redeem', settings.cloudAccessToken);
+      // This computer was removed from its Cloud account: signed out here
+      // too (lib/cloud-revoked.js), and the pass is tried anonymously.
+      if (require('./lib/cloud-revoked').classifyCloudResponse(r.status, r.body) === 'device_revoked' && cloudIpc) {
+        cloudIpc.signOutRevoked(r.body);
+      }
       if (r.status === 401 || r.status === 403) {
         sendCatLog(`[guest-pass] authed redeem refused (HTTP ${r.status}) — retrying anonymously`);
         r = await post('/redeem-anonymous', null);
@@ -45381,6 +46239,13 @@ app.whenReady().then(() => {
       console.error('[multi-op] activeProfile self-heal failed:', err.message);
     }
   }
+  // JTCAT split "Fake It" is on for new installs (Casey 2026-11-23). A
+  // station set up before that never had the key: write it off, once, so
+  // nothing changes for it. A saved choice is never touched.
+  if (FakeIt.seedSetting(settings)) {
+    saveSettings(settings);
+    console.log('[JTCAT] Fake It: this station set up before it was on by default; kept off (turn it on in the FT8 window Options)');
+  }
   // One-time defaults (lib/install-defaults.js): SOTA/WWFF/LLOTA spots on,
   // a DX cluster node picked at random for a station that never set one, and
   // the band activity heatmap off (a choice again since 2026-10-29).
@@ -45421,6 +46286,18 @@ app.whenReady().then(() => {
   {
     const preWindowModules = Object.keys(require.cache);
     setTimeout(() => StartupPrefetch.record({ appDir: __dirname, userDataDir: app.getPath('userData'), fs, path, moduleKeys: preWindowModules }), 15000);
+  }
+  // Every app window: only the permissions POTACAT uses, for its own pages;
+  // no navigating away from them; no new windows, a web link opens in the
+  // browser through the open-external allowlist (lib/window-security.js).
+  {
+    const { session } = require('electron');
+    const securityLog = (m) => appendSessionLog(`[security ${new Date().toISOString().slice(11, 23)}] ${m}`);
+    WindowSecurity.install({
+      app, session: session.defaultSession, appRoot: __dirname,
+      openExternal: (u) => { if (!openExternalIfAllowed(u)) securityLog(`link not on the open-external allowlist: ${String(u).slice(0, 160)}`); },
+      log: securityLog,
+    });
   }
   createWindow();
   logStartupStage('createWindow returned (BrowserWindow constructed)');
@@ -45549,7 +46426,22 @@ app.whenReady().then(() => {
         teardownCloudDeviceHeartbeat();
         setImmediate(() => ensureCloudDeviceRegistered(reason).catch(() => {}));
         // A new account brings its own templates (and takes this machine's).
-        if (reason !== 'signout' && sstvTemplateSync) setTimeout(() => sstvTemplateSync.sync('signin').catch(() => {}), 2000);
+        if (!require('./lib/cloud-ipc').isSignOutReason(reason) && sstvTemplateSync) setTimeout(() => sstvTemplateSync.sync('signin').catch(() => {}), 2000);
+      },
+      // Cloud answered device_revoked: this computer was removed from the
+      // account and is signed out (lib/cloud-revoked.js). cloud-ipc has
+      // cleared the tokens and stopped sync; these are main's loops.
+      deviceRevokedSteps: {
+        stopDevice: () => teardownCloudDeviceHeartbeat(),
+        stopTunnel: () => { if (cloudTunnel && typeof cloudTunnel.stopSignedOut === 'function') cloudTunnel.stopSignedOut(); },
+        stopOther: () => { _stopTurnRemint(); _turnIceServers = null; _turnExpiresAt = 0; },
+        notify: (text) => {
+          sendCatLog('[Cloud] ' + text);
+          // ECHOCAT clients (web + app) repaint their Cloud section signed out.
+          if (remoteServer && typeof remoteServer.broadcastCloudStatus === 'function') {
+            try { remoteServer.broadcastCloudStatus({ loggedIn: false }); } catch {}
+          }
+        },
       },
     });
     cloudIpc.startBackgroundSync();
@@ -46444,7 +47336,7 @@ function cloudShackNotice(text, kind) {
       title: 'POTACAT Map',
       backgroundColor: getThemeWindowBg(),
       show: false,
-      ...(isMac ? { titleBarStyle: 'hiddenInset' } : { frame: false }),
+      ...windowFrame(),
       icon: getIconPath(),
       webPreferences: {
         preload: path.join(__dirname, 'preload-popout.js'),
@@ -46533,7 +47425,7 @@ function cloudShackNotice(text, kind) {
       title: 'POTACAT — Propagation',
       backgroundColor: getThemeWindowBg(),
       show: false,
-      ...(isMac ? { titleBarStyle: 'hiddenInset' } : { frame: false }),
+      ...windowFrame(),
       icon: getIconPath(),
       webPreferences: {
         preload: path.join(__dirname, 'preload-prop-popout.js'),
@@ -46610,7 +47502,7 @@ function cloudShackNotice(text, kind) {
       backgroundColor: getThemeWindowBg(),
       show: false,
       resizable: true,
-      ...(isMac ? { titleBarStyle: 'hiddenInset' } : { frame: false }),
+      ...windowFrame(),
       icon: getIconPath(),
       webPreferences: {
         preload: path.join(__dirname, 'preload-pair-popout.js'),
@@ -46661,7 +47553,7 @@ function cloudShackNotice(text, kind) {
       backgroundColor: getThemeWindowBg(),
       resizable: false,
       alwaysOnTop: true,
-      ...(isMac ? { titleBarStyle: 'hiddenInset' } : { frame: false }),
+      ...windowFrame(),
       icon: getIconPath(),
       webPreferences: {
         preload: path.join(__dirname, 'preload-pair-request-popout.js'),
@@ -46853,7 +47745,7 @@ function cloudShackNotice(text, kind) {
       title: 'POTACAT Logbook',
       show: false,
       backgroundColor: getThemeWindowBg(),
-      ...(isMac ? { titleBarStyle: 'hiddenInset' } : { frame: false }),
+      ...windowFrame(),
       icon: getIconPath(),
       webPreferences: {
         preload: path.join(__dirname, 'preload-qso-popout.js'),
@@ -46980,7 +47872,7 @@ function cloudShackNotice(text, kind) {
       title: 'Log QSO',
       backgroundColor: getThemeWindowBg(),
       show: false,
-      ...(isMac ? { titleBarStyle: 'hiddenInset' } : { frame: false }),
+      ...windowFrame(),
       icon: getIconPath(),
       webPreferences: {
         preload: path.join(__dirname, 'preload-log-popout.js'),
@@ -47061,6 +47953,9 @@ function cloudShackNotice(text, kind) {
   // the other's call and the macro went out addressed to the wrong station.
   // Every callsign field reports here, naming itself; a sender that predates
   // the source argument is the main log dialog or the Log pop-out.
+  // A station picked in the main window (spot row, arrow keys, map, Bandspread,
+  // Log dialog): its call goes to N3FJP's entry window (#712).
+  ipcMain.on('n3fjp-call-in-progress', (_e, call) => n3fjpCip.note(call, 'spot'));
   ipcMain.on('log-popout-callsign', (_e, call, source) => {
     const from = source || ((win && !win.isDestroyed() && _e.sender === win.webContents) ? 'main:log' : 'popout');
     setTypedCall(from, call);
@@ -47124,7 +48019,7 @@ function cloudShackNotice(text, kind) {
       title: 'POTACAT Spots',
       backgroundColor: getThemeWindowBg(),
       show: false,
-      ...(isMac ? { titleBarStyle: 'hiddenInset' } : { frame: false }),
+      ...windowFrame(),
       icon: getIconPath(),
       webPreferences: {
         preload: path.join(__dirname, 'preload-spots-popout.js'),
@@ -47215,7 +48110,7 @@ function cloudShackNotice(text, kind) {
       title: 'DX Cluster Terminal',
       backgroundColor: getThemeWindowBg(),
       show: false,
-      ...(isMac ? { titleBarStyle: 'hiddenInset' } : { frame: false }),
+      ...windowFrame(),
       icon: getIconPath(),
       webPreferences: {
         preload: path.join(__dirname, 'preload-cluster-popout.js'),
@@ -47296,7 +48191,7 @@ function cloudShackNotice(text, kind) {
       title: 'Bandspread',
       backgroundColor: getThemeWindowBg(),
       show: false,
-      ...(isMac ? { titleBarStyle: 'hiddenInset' } : { frame: false }),
+      ...windowFrame(),
       icon: getIconPath(),
       webPreferences: {
         preload: path.join(__dirname, 'preload-bandspread-popout.js'),
@@ -47430,7 +48325,7 @@ function cloudShackNotice(text, kind) {
       title: 'Activation Map',
       backgroundColor: getThemeWindowBg(),
       show: false,
-      ...(isMac ? { titleBarStyle: 'hiddenInset' } : { frame: false }),
+      ...windowFrame(),
       icon: getIconPath(),
       webPreferences: {
         preload: path.join(__dirname, 'preload-actmap-popout.js'),
@@ -47627,7 +48522,7 @@ function cloudShackNotice(text, kind) {
       backgroundColor: getThemeWindowBg(),
       show: false,
       alwaysOnTop: vfoAlwaysOnTop,
-      ...(isMac ? { titleBarStyle: 'hiddenInset' } : { frame: false }),
+      ...windowFrame(),
       icon: getIconPath(),
       webPreferences: {
         preload: path.join(__dirname, 'preload-vfo-popout.js'),
@@ -47801,7 +48696,7 @@ function cloudShackNotice(text, kind) {
       width: 1100, height: 720, title: 'POTACAT — Conditions',
       backgroundColor: getThemeWindowBg(),
       show: false,
-      ...(isMac ? { titleBarStyle: 'hiddenInset' } : { frame: false }),
+      ...windowFrame(),
       icon: getIconPath(),
       webPreferences: {
         preload: path.join(__dirname, 'preload-conditions-popout.js'),
@@ -47964,7 +48859,7 @@ function cloudShackNotice(text, kind) {
       title: 'POTACAT — JTCAT',
       backgroundColor: getThemeWindowBg(),
       show: false,
-      ...(isMac ? { titleBarStyle: 'hiddenInset' } : { frame: false }),
+      ...windowFrame(),
       icon: getIconPath(),
       webPreferences: {
         preload: path.join(__dirname, 'preload-jtcat-popout.js'),
@@ -47987,6 +48882,14 @@ function cloudShackNotice(text, kind) {
     jtcatPopoutWin.show();
     jtcatPopoutWin.setMenuBarVisibility(false);
     jtcatPopoutWin.loadFile(path.join(__dirname, 'renderer', 'jtcat-popout.html'), { query: themeQuery() });
+    // #857: the layout's Automatic pick follows the work area of the display
+    // the window is on; tell it when the window moves or a display changes.
+    jtcatPopoutWin.on('moved', sendJtcatWorkArea);
+    if (!jtcatWorkAreaWatched) {
+      jtcatWorkAreaWatched = true;
+      screen.on('display-metrics-changed', sendJtcatWorkArea);
+      screen.on('display-removed', sendJtcatWorkArea);
+    }
     jtcatPopoutWin.on('close', () => {
       if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
         if (!jtcatPopoutWin.isMaximized() && !jtcatPopoutWin.isMinimized()) {
@@ -48150,7 +49053,7 @@ function cloudShackNotice(text, kind) {
       minWidth: 480, minHeight: 360, // never smaller than its own controls (N0KAH 2026-10-24)
       width: 720, height: 560, title: 'POTACAT — Mercury HF Data',
       backgroundColor: getThemeWindowBg(), show: false,
-      ...(isMac ? { titleBarStyle: 'hiddenInset' } : { frame: false }),
+      ...windowFrame(),
       icon: getIconPath(),
       webPreferences: {
         preload: path.join(__dirname, 'preload-mercury-popout.js'),
@@ -48190,7 +49093,7 @@ function cloudShackNotice(text, kind) {
       minWidth: 600, minHeight: 420, // never smaller than its own controls (N0KAH 2026-10-24)
       width: 900, height: 640, title: 'POTACAT — Winlink Mail',
       backgroundColor: getThemeWindowBg(), show: false,
-      ...(isMac ? { titleBarStyle: 'hiddenInset' } : { frame: false }),
+      ...windowFrame(),
       icon: getIconPath(),
       webPreferences: {
         preload: path.join(__dirname, 'preload-winlink-popout.js'),
@@ -48224,7 +49127,10 @@ function cloudShackNotice(text, kind) {
         settings.winlinkPopoutBounds = winlinkPopoutWin.getBounds(); saveSettings(settings);
       }
     });
-    winlinkPopoutWin.on('closed', () => { winlinkPopoutWin = null; _winlinkWatchAudio = false; winlinkMailViewClosed('window closed'); winlinkSyncModemBridge(); });
+    winlinkPopoutWin.on('closed', () => {
+      winlinkPopoutWin = null; _winlinkWatchAudio = false; winlinkMailViewClosed('window closed'); winlinkSyncModemBridge();
+      if (_remoteWinlink.wanted) remoteWinlinkView(false); // #299: the shack's dial goes back, as when a phone leaves its Mail tab
+    });
     winlinkPopoutWin.webContents.on('did-finish-load', () => {
       winlinkPopoutSend('winlink-state', winlinkPayload());
       if (_winlinkPendingCompose) { winlinkPopoutSend('winlink-compose-prefill', _winlinkPendingCompose); _winlinkPendingCompose = null; }
@@ -48236,6 +49142,7 @@ function cloudShackNotice(text, kind) {
       pushWinlinkRigPower(true);
       winlinkPopoutSend('winlink-remote-watch', _winlinkRemoteWatchers > 0);
       winlinkSyncModemBridge();
+      if (isRemoteMode()) remoteWinlinkHydrateWindow(); // #299: the shack's state, folders and session
     });
     winlinkPopoutWin.webContents.on('before-input-event', (_e, input) => {
       if (input.key === 'F12' && input.type === 'keyDown') winlinkPopoutWin.webContents.toggleDevTools();
@@ -48249,7 +49156,7 @@ function cloudShackNotice(text, kind) {
       minWidth: 560, minHeight: 420, // never smaller than its own controls (N0KAH 2026-10-24)
       width: 760, height: 600, title: 'POTACAT — JS8Call',
       backgroundColor: getThemeWindowBg(), show: false,
-      ...(isMac ? { titleBarStyle: 'hiddenInset' } : { frame: false }),
+      ...windowFrame(),
       icon: getIconPath(),
       webPreferences: {
         preload: path.join(__dirname, 'preload-js8call-popout.js'),
@@ -48343,7 +49250,7 @@ function cloudShackNotice(text, kind) {
       minWidth: 400, minHeight: 300, // never smaller than its own controls (N0KAH 2026-10-24)
       width: 700, height: 500, title: 'JS8 Heartbeat Map',
       backgroundColor: getThemeWindowBg(),
-      ...(isMac ? { titleBarStyle: 'hiddenInset' } : { frame: false }), // #866: the macOS traffic lights, as every other pop-out
+      ...windowFrame(), // #866: the macOS traffic lights, as every other pop-out
       icon: getIconPath(),
       webPreferences: { preload: path.join(__dirname, 'preload-js8-map-popout.js'), contextIsolation: true, nodeIntegration: false },
     });
@@ -48385,7 +49292,7 @@ function cloudShackNotice(text, kind) {
     const Feed = require('./lib/aprs-is-feed');
     const AprsParser = require('./lib/aprs-parser');
     const dev = APRS_IS_DEV_SERVER || {}; // dev builds only: a local fake APRS-IS server
-    aprsFeed = new Feed.AprsIsFeed({ call: settings.myCallsign, version: app.getVersion(), lat: home.lat, lon: home.lon, km: settings.aprsRangeKm, follow: aprsEcho.followCalls(), watch: aprsEcho.watchCalls(), host: dev.host, port: dev.port });
+    aprsFeed = new Feed.AprsIsFeed({ call: settings.myCallsign, version: app.getVersion(), lat: home.lat, lon: home.lon, km: settings.aprsRangeKm, follow: aprsEcho.followCalls(), watch: aprsEcho.watchCalls(), area: aprsEcho.feedArea(), host: dev.host, port: dev.port });
     aprsBatch = Feed.createBatcher((packets) => aprsSend('aprs-packets', packets), 500);
     aprsFeed.on('line', (line) => {
       try { aprsMessagesFeedLine(line); } catch (e) { aprsLog('message: ' + e.message); } // A1: messages, acks and rejs for us
@@ -48408,6 +49315,7 @@ function cloudShackNotice(text, kind) {
     setRange: (km) => { if (aprsFeed) aprsFeed.setRange(null, null, require('./lib/aprs-is-feed').clampRangeKm(km)); },
     setFollow: (calls) => { if (aprsFeed) aprsFeed.setFollow(calls); },
     setWatch: (calls) => { if (aprsFeed) aprsFeed.setWatch(calls); },
+    setArea: (area) => { if (aprsFeed) aprsFeed.setArea(area); },
   };
   ipcMain.on('aprs-popout-open', () => {
     if (aprsWin && !aprsWin.isDestroyed()) { aprsWin.focus(); return; }
@@ -48416,7 +49324,7 @@ function cloudShackNotice(text, kind) {
       minWidth: 640, minHeight: 400,
       width: 1280, height: 860, title: 'APRS', // the approved layout's size; a saved place wins (rememberWindowPlace)
       backgroundColor: getThemeWindowBg(),
-      ...(isMac ? { titleBarStyle: 'hiddenInset' } : { frame: false }), // #866: plain frame:false left a Mac with no way to close it
+      ...windowFrame(), // #866: plain frame:false left a Mac with no way to close it
       icon: getIconPath(),
       webPreferences: { preload: path.join(__dirname, 'preload-aprs-popout.js'), contextIsolation: true, nodeIntegration: false },
     });
@@ -48435,6 +49343,7 @@ function cloudShackNotice(text, kind) {
       if (!aprsEcho.keepsFeed()) aprsStopFeed();
       if (_remoteAprsWanted) remoteAprsWatch(false); // #868: the shack stops listening this desktop started, as closing its own window would
       aprsWin = null;
+      aprsEcho.windowChanged(); // Map view: with the window gone, a device's map area may take the range term's place
       _aprsMsgViewing = ''; // A1: messages still going out carry on; nothing is being read now
       aprsBeaconStop(); // phase 5: the beacon timer runs only while the window is open
       aprsRfTimerStop(); // and the 2 m radio timer
@@ -48512,7 +49421,7 @@ function cloudShackNotice(text, kind) {
   ipcMain.on('aprs-igate-set', (_e, on) => aprsIgateSetFromWindow(on === true));
   // APRS phase 2: the "Listen on my radio" switch (receive only).
   // The operator at the switch is using the radio: an APRS idle session ends first.
-  ipcMain.on('aprs-listen-set', (_e, on) => { markUserActive(); aprsListenSet(!!on); if (!on) _aprsListenOffByOperator = true; });
+  ipcMain.on('aprs-listen-set', (_e, on) => { markUserActive(); aprsListenSet(!!on, { operator: true }); if (!on) _aprsListenOffByOperator = true; });
   // The bar asks once its listener is attached: the push after 'aprs-ready' can
   // arrive while its script is still loading (the 8600M's empty bar, 2026-11-18).
   // The iGate mark answered 'aprs-ready' the same way, so it comes too.
@@ -48753,18 +49662,18 @@ function cloudShackNotice(text, kind) {
   ipcMain.on('mercury-cmd-listen', (_e, on) => {
     settings.mercuryListen = !!on; saveSettings(settings);
     if (!mercuryClient) return mercuryNotReady();
+    // LISTEN takes no radio lock (#919); a session takes it in the bridge.
     if (on) {
-      const got = acquireRadio('mercury');
-      if (got) { mercuryClient.myCall(onAirCall()); mercuryClient.listen('ON'); sendCatLog('[Mercury] LISTEN ON'); }
-      mercuryPopoutSend('mercury-link', { listening: got });
+      mercuryClient.myCall(onAirCall()); mercuryClient.listen('ON'); sendCatLog('[Mercury] LISTEN ON');
+      mercuryPopoutSend('mercury-link', { listening: true });
     } else {
-      mercuryClient.listen('OFF'); releaseRadio('mercury'); sendCatLog('[Mercury] LISTEN OFF');
+      mercuryClient.listen('OFF'); sendCatLog('[Mercury] LISTEN OFF');
       mercuryPopoutSend('mercury-link', { listening: false });
     }
   });
   ipcMain.on('mercury-cmd-bw', (_e, bw) => {
     const n = parseInt(bw, 10);
-    if (n === 500 || n === 2300 || n === 2750) { settings.mercuryBw = n; saveSettings(settings); if (mercuryClient) mercuryClient.setBandwidth(n); }
+    if (MercuryOffer.BANDWIDTHS.includes(n)) { settings.mercuryBw = n; saveSettings(settings); if (mercuryClient) mercuryClient.setBandwidth(n); }
   });
   ipcMain.on('mercury-cmd-send-text', (_e, text) => {
     const t = String(text || '');
@@ -48780,14 +49689,15 @@ function cloudShackNotice(text, kind) {
   });
   // ─── Winlink IPC (the mail window + Settings). Every surface goes through
   // the same winlink* functions; a radio session starts only from Connect.
-  ipcMain.on('winlink-popout-open', () => { openWinlinkPopout(); winlinkEnsureStarted(); });
+  // Driving a remote shack (#299): the window is the shack's; this PC's Pat is not started.
+  ipcMain.on('winlink-popout-open', () => { openWinlinkPopout(); if (isRemoteMode()) remoteWinlinkView(true); else winlinkEnsureStarted(); });
   ipcMain.handle('winlink-pota-spot-template', (_e, o = {}) => winlinkPotaSpotTemplate(o));
   // Activation's "Winlink" spot button: the Mail window opens on the spot,
   // filled in; the operator reads it, queues it and starts the session.
   ipcMain.on('winlink-pota-spot-open', (_e, o = {}) => {
     _winlinkPendingCompose = winlinkPotaSpotTemplate(o);
     const wasOpen = !!(winlinkPopoutWin && !winlinkPopoutWin.isDestroyed());
-    openWinlinkPopout(); winlinkEnsureStarted();
+    openWinlinkPopout(); if (isRemoteMode()) remoteWinlinkView(true); else winlinkEnsureStarted();
     if (wasOpen && !winlinkPopoutWin.webContents.isLoading()) { winlinkPopoutSend('winlink-compose-prefill', _winlinkPendingCompose); _winlinkPendingCompose = null; }
   });
   // The renderer's answer to a sound-card PTT edge (cm108-ptt): one log line.
@@ -48837,8 +49747,8 @@ function cloudShackNotice(text, kind) {
   ipcMain.handle('winlink-forms-update', () => winlinkFormsUpdate());
   ipcMain.handle('winlink-form-open', (_e, o = {}) => winlinkFormOpen({ kind: String(o.kind || ''), path: String(o.path || ''), box: String(o.box || ''), mid: String(o.mid || ''), file: String(o.file || '') }));
   ipcMain.handle('winlink-form-info', (_e, o = {}) => winlinkFormInfo({ box: String(o.box || ''), mid: String(o.mid || ''), file: String(o.file || '') }));
+  // Driving a remote shack, the bridge sends this to the shack (#299) and this handler never runs.
   ipcMain.handle('winlink-cmd-connect', (_e, o = {}) => {
-    if (isRemoteMode() && WinlinkModes.isRadioMode(o.mode)) return { ok: false, error: 'Radio sessions key the shack\'s radio — start them on the shack PC' };
     winlinkRetryCancel('connect');
     return winlinkStartSession({ mode: o.mode, gateway: o.gateway, dialKhz: o.dialKhz, url: o.url, origin: 'mail window' });
   });
@@ -48935,12 +49845,12 @@ function cloudShackNotice(text, kind) {
     saveSettings(settings);
   });
   ipcMain.on('winlink-cmd-prompt', (_e, { id, value } = {}) => { winlinkAnswerPrompt(String(id), String(value)); });
-  ipcMain.handle('winlink-cmd-gateways', (_e, { mode, band } = {}) => winlinkGateways(String(mode || 'ardop'), band ? String(band) : ''));
+  ipcMain.handle('winlink-cmd-gateways', (_e, { mode, band, refresh } = {}) => winlinkGateways(String(mode || 'ardop'), band ? String(band) : '', { refresh: refresh === true }));
   ipcMain.handle('winlink-cmd-history', () => winlinkHistoryGet());
   ipcMain.handle('winlink-cmd-contact', (_e, { op, c } = {}) => winlinkContact(String(op || ''), c && typeof c === 'object' ? c : {}));
   ipcMain.handle('winlink-cmd-contact-group', (_e, { op, g } = {}) => winlinkContactGroup(String(op || ''), g && typeof g === 'object' ? g : {}));
   ipcMain.handle('winlink-cmd-template', (_e, { op, t } = {}) => winlinkTemplate(String(op || ''), t && typeof t === 'object' ? t : {}));
-  ipcMain.handle('winlink-cmd-favourite', (_e, { op, call, mode, dialKhz, url } = {}) => winlinkFavourite(String(op || ''), { call: String(call || ''), mode: String(mode || ''), khz: Number(dialKhz), url: String(url || '') }));
+  ipcMain.handle('winlink-cmd-favourite', (_e, { op, call, mode, dialKhz, url, mine, note, via, bw, was } = {}) => winlinkFavourite(String(op || ''), winlinkFavouriteFields({ call, mode, dialKhz, url, mine, note, via, bw, was })));
   ipcMain.on('winlink-cmd-set-mode', (_e, mode) => winlinkSetMode(mode));
   ipcMain.handle('winlink-cmd-accept-notice', () => winlinkAcceptNotice());
   ipcMain.on('winlink-open-settings', () => {
@@ -49045,7 +49955,7 @@ function cloudShackNotice(text, kind) {
       minWidth: 360, minHeight: 300, // never smaller than its own controls (N0KAH 2026-10-24)
       width: 700, height: 500,
       backgroundColor: getThemeWindowBg(),
-      ...(isMac ? { titleBarStyle: 'hiddenInset' } : { frame: false }), // #866: same as the APRS window, the Mac had no way to close it
+      ...windowFrame(), // #866: same as the APRS window, the Mac had no way to close it
       webPreferences: { preload: path.join(__dirname, 'preload-jtcat-popout.js'), contextIsolation: true, nodeIntegration: false },
     });
     rememberWindowPlace(jtcatMapPopoutWin, 'jtcatMapPopoutBounds', { minWidth: 360, minHeight: 300 });
@@ -49092,7 +50002,10 @@ function cloudShackNotice(text, kind) {
       try { handleRemotePtt(false); } catch {}
       sstvSendFailed(SstvSend.failText(err), { log: 'picture not sent, PTT released: ' + ((err && err.stack) || err).toString().split(/\r?\n/).slice(0, 3).join(' | ') });
     };
-    sstvEngine.on('encode-complete', SstvSend.guard((data) => {
+    // #326: every picture (the window's and ECHOCAT's) is held here, before
+    // PTT, until the frequency is quiet when the operator asked for that.
+    sstvEngine.setAudioTap(sstvQuietFeed);
+    const sstvKeyAndSend = SstvSend.guard((data) => {
       // Ensure popout is open for audio playback — open it if needed
       if (!sstvPopoutWin || sstvPopoutWin.isDestroyed()) {
         openSstvPopout();
@@ -49183,6 +50096,7 @@ function cloudShackNotice(text, kind) {
       const _sstvStartAudio = (fn) => pttKeyGate().then((keyed) => {
         if (!keyed) {
           if (useYaesuLanTx) releaseYaesuLanTx('sstv', 'SSTV not keyed');
+          sstvTxPowerEnd('picture not sent');
           sendCatLog('[SSTV] PTT was released before the radio keyed — picture not sent');
           if (remoteServer) remoteServer.broadcastSstvTxStatus({ state: autoSstvActive ? 'auto-rx' : 'rx' });
           return;
@@ -49284,6 +50198,7 @@ function cloudShackNotice(text, kind) {
           sendCatLog(`[SSTV] TX via Yaesu LAN (SCU-LAN10) — ${outDurSec.toFixed(0)}s (${outSamples.length} samples @48k); ${formatDirectTxAudioStats(txAudio)}`);
           const done = (why) => {
             endYaesuLanTx('sstv', why);
+            sstvTxPowerEnd(why);
             if (remoteServer) remoteServer.broadcastSstvTxStatus({ state: autoSstvActive ? 'auto-rx' : 'rx' });
           };
           if (txAudio.outputPeak < 0.01) {
@@ -49315,6 +50230,7 @@ function cloudShackNotice(text, kind) {
         } else {
           // Failsafe: release PTT if popout never opened
           handleRemotePtt(false);
+          sstvTxPowerEnd('picture not sent');
           sstvSendFailed('Picture not sent: the SSTV window closed before the audio started.');
         }
       });
@@ -49322,7 +50238,8 @@ function cloudShackNotice(text, kind) {
       if (remoteServer) {
         remoteServer.broadcastSstvTxStatus({ state: 'tx', durationSec: outDurSec });
       }
-    }, sstvSendThrew));
+    }, sstvSendThrew);
+    sstvEngine.on('encode-complete', (data) => sstvHoldPicture(data, sstvKeyAndSend));
 
     sstvEngine.on('rx-vis', (data) => {
       // data.mode is the mode KEY ('pd160'), never a number — formatting it as
@@ -49551,6 +50468,7 @@ function cloudShackNotice(text, kind) {
   }
 
   function stopSstv() {
+    sstvQuietCancel('closed');
     // SAFETY: always release PTT. If a TX was in progress when the popout/app
     // closed, the Flex would otherwise keep keyed after we stopped feeding it
     // audio — an FCC problem (silent carrier).
@@ -49716,8 +50634,10 @@ function cloudShackNotice(text, kind) {
   });
 
   ipcMain.on('sstv-tx-complete', () => {
+    sstvQuietCancel('halt'); // HALT TX while the picture waits (#326); no-op after a sent picture
     if (settings.audioSource === 'yaesu-lan') endYaesuLanTx('sstv', 'SSTV tx-complete');
     else handleRemotePtt(false);
+    sstvTxPowerEnd('picture sent');
     if (sstvPopoutWin && !sstvPopoutWin.isDestroyed()) {
       sstvPopoutWin.webContents.send('sstv-tx-status', { state: 'rx' });
     }
@@ -49725,6 +50645,10 @@ function cloudShackNotice(text, kind) {
       remoteServer.broadcastSstvTxStatus({ state: 'rx' });
     }
   });
+
+  // #326: the waiting bar's buttons in the SSTV window.
+  ipcMain.on('sstv-wait-cancel', () => sstvQuietCancel('cancel'));
+  ipcMain.on('sstv-wait-send-now', () => sstvQuietSendNow('the SSTV window'));
 
   ipcMain.on('sstv-wf-bins', (_e, bins) => {
     if (remoteServer && remoteServer.hasClient()) {
@@ -49740,6 +50664,7 @@ function cloudShackNotice(text, kind) {
   });
 
   ipcMain.on('sstv-stop', () => {
+    sstvQuietCancel('stop');
     if (sstvEngine) sstvEngine.stop();
     pushSstvDecoderState();
   });
@@ -49961,7 +50886,7 @@ function cloudShackNotice(text, kind) {
       title: 'POTACAT — SSTV',
       backgroundColor: getThemeWindowBg(),
       show: false,
-      ...(isMac ? { titleBarStyle: 'hiddenInset' } : { frame: false }),
+      ...windowFrame(),
       icon: getIconPath(),
       webPreferences: {
         preload: path.join(__dirname, 'preload-sstv-popout.js'),
@@ -50031,7 +50956,7 @@ function cloudShackNotice(text, kind) {
       title: 'POTACAT — Band Scope',
       backgroundColor: getThemeWindowBg(),
       show: false,
-      ...(isMac ? { titleBarStyle: 'hiddenInset' } : { frame: false }),
+      ...windowFrame(),
       icon: getIconPath(),
       webPreferences: {
         preload: path.join(__dirname, 'preload-scope-popout.js'),
@@ -50082,7 +51007,7 @@ function cloudShackNotice(text, kind) {
       title: 'POTACAT — Tuner Memories',
       backgroundColor: getThemeWindowBg(),
       show: false,
-      ...(isMac ? { titleBarStyle: 'hiddenInset' } : { frame: false }),
+      ...windowFrame(),
       icon: getIconPath(),
       webPreferences: {
         preload: path.join(__dirname, 'preload-atu-wizard-popout.js'),
@@ -50167,6 +51092,16 @@ function cloudShackNotice(text, kind) {
   setInterval(reviewAskTick, 5 * 60 * 1000);
   // #147: a forgotten activation ends by itself, even with no new contact.
   activationClockLoad();
+  // #700: a saved clock that ran out while POTACAT was closed ends the
+  // activation now, before a window or phone shows it as live.
+  if (activationRunning()) {
+    const refs = activationParkRefList();
+    const atLaunch = ActivationClock.atLaunch(_activationClock, refs.join(','), Date.now());
+    if (atLaunch.action === 'end') {
+      autoEndActivation(atLaunch.reason);
+      _activationLaunchNotice = { refs, reason: atLaunch.reason, text: ActivationClock.noticeText(refs, atLaunch.reason) };
+    }
+  }
   activationClockFollow(false);
   setInterval(activationClockTick, 30 * 1000);
   setTimeout(reviewAskTick, 2 * 60 * 1000 + 5000);
@@ -51463,65 +52398,37 @@ function cloudShackNotice(text, kind) {
     }
   });
 
-  ipcMain.on('open-external', (_e, url) => {
+  ipcMain.on('open-external', (_e, url) => { openExternalIfAllowed(url); });
+  // The one gate for a link leaving the app: the IPC above, and a link or
+  // window.open in any app window (lib/window-security.js). The allowlist
+  // itself lives in lib/external-url.js.
+  function openExternalIfAllowed(url) {
+    if (typeof url !== 'string') return false;
     const { shell } = require('electron');
-    // Allow opening local log files
-    if (url.startsWith('file://')) {
-      const filePath = url.replace('file://', '');
-      shell.showItemInFolder(filePath);
-      return;
+    // A local file (the QSO log): reveal it in Explorer/Finder, only inside
+    // POTACAT's own folders (lib/external-url.js).
+    if (/^file:/i.test(url)) {
+      const filePath = ExternalUrl.fileRevealPath(url, externalRevealRoots());
+      if (filePath) { shell.showItemInFolder(filePath); return true; }
+      console.log('[open-external] refused to reveal a path outside the app folders');
+      return false;
     }
-    // Only allow known URLs
-    const allowed = [
-      'https://www.qrz.com/', 'https://caseystanton.com/', 'https://github.com/Waffleslop/POTACAT/',
-      'https://hamlib.github.io/', 'https://github.com/Hamlib/', 'https://discord.gg/',
-      // flrig (W1HKJ) downloads: the rig editor's "FLRig (a shared radio)" help.
-      // w1hkj.com no longer hosts them; SourceForge is the project's home.
-      'https://sourceforge.net/projects/fldigi/',
-      // Mercury HF data modem (Rhizomatica) — download + docs links in Settings.
-      'https://github.com/Rhizomatica/', 'https://rhizomatica.github.io/',
-      // Winlink: Pat, ardopcf and the Winlink network (Settings > Station > Winlink).
-      'https://getpat.io/', 'https://github.com/la5nta/', 'https://github.com/pflarue/', 'https://winlink.org/', 'https://www.winlink.org/',
-      // VARA (the operator brings their own copy) and the virtual audio cable it
-      // needs: links in Settings > Station > Winlink. Neither is downloaded by
-      // POTACAT. No apostrophes in this comment: the links test reads the
-      // quoted strings of this block.
-      'https://rosmodem.wordpress.com/', 'https://vb-audio.com/',
-      // JS8Call — download + docs links in Settings. The gate is a prefix
-      // match that fails CLOSED with no error, so the scheme matters: the
-      // project site is http-only.
-      'https://github.com/js8call/', 'http://js8call.com/', 'https://js8call.com/',
-      'https://potacat.com/', 'https://docs.potacat.com/', 'https://buymeacoffee.com/potacat', 'https://docs.google.com/spreadsheets/',
-      'https://pota.app/', 'https://www.sotadata.org.uk/', 'https://wwff.co/', 'https://llota.app/',
-      'https://tailscale.com', 'https://worldradioleague.com',
-      // Tailscale admin DNS page (MagicDNS / HTTPS certs help in Settings);
-      // 'https://tailscale.com' does not cover the login. host.
-      'https://login.tailscale.com/admin/',
-      // TrustedQSL download — the LoTW upload block in Settings > Logging.
-      'https://www.arrl.org/tqsl-download', 'https://lotw.arrl.org/',
-      // Club Log — Application Passwords page link in Settings > Logging.
-      'https://clublog.org/',
-      // FCC Part 97 §97.119 (station identification) — the link in Settings >
-      // Share Rig. Never on this list, so the click was refused in silence.
-      'https://www.ecfr.gov/current/title-47/',
-      'https://api.potacat.com/',
-      'https://login.potacat.com/',
-      'http://rx.linkfanel.net', 'http://kiwisdr.com', 'http://websdr.org',
-      // ECHOCAT mobile app store links (Settings footer promo).
-      'https://apps.apple.com/', 'https://play.google.com/',
-      // Rig editor Setup instructions: "email us your setup".
-      'mailto:k3sbp@potacat.com',
-    ];
+    // Known sites: lib/external-url.js parses the URL and compares host and
+    // path exactly; the OS gets the parsed form it checked.
+    const known = ExternalUrl.checked(url);
+    if (known) { shell.openExternal(known); return true; }
     // Event sponsor sites (13 Colonies, Route 66, ...) come from the event
-    // definition itself — see eventUrlAllowed — rather than this list.
+    // definition itself — see eventUrlAllowed — rather than the list.
     // A DXpedition's own link (DX-World, DXNews, QRZ) is allowed when the
     // current feed names that exact URL — data-driven, like contest links.
-    const dxpLink = typeof url === 'string' && /^https?:///.test(url)
+    const dxpLink = /^https?:\/\//i.test(url)
       && [...expeditionMeta.values()].some((m) => m && m.link === url);
-    if (allowed.some(prefix => url.startsWith(prefix)) || eventUrlAllowed(url) || landmarksFeed.urlAllowed(url) || dxpLink) {
+    if (eventUrlAllowed(url) || landmarksFeed.urlAllowed(url) || dxpLink) {
       shell.openExternal(url);
+      return true;
     }
-  });
+    return false;
+  }
 
   // Open a URL that came from the contests DB. The allow-list above is
   // intentionally tight; contest sponsor sites are spread across 80+
@@ -51865,6 +52772,16 @@ function cloudShackNotice(text, kind) {
   // longer auto-follow the kiwi — acceptable; that path needs a real
   // race-protection design before re-introducing.)
 
+  // A band button (VFO window, main window): where to go on that band. The
+  // radio's last frequency there, or the button's own preset (#680). A remote
+  // client gets the preset; the shack's radio is not this PC's to remember.
+  ipcMain.handle('band-jump-target', (_e, presetKhz) => {
+    const preset = parseFloat(presetKhz);
+    if (!Number.isFinite(preset) || preset <= 0) return presetKhz;
+    if (isRemoteMode()) return preset;
+    return BandLastFreq.jumpTarget(settings.bandLastFreq, settings.activeRigId, preset);
+  });
+
   ipcMain.on('tune', (_e, { frequency, mode, bearing, slicePort, origin, pickSideband }) => {
     // The idle-RX session's own QSY (including WSPR band hops) must not read
     // as the operator returning — see markUserActive().
@@ -52159,6 +53076,8 @@ function cloudShackNotice(text, kind) {
         if (!wsprBeaconArmed()) wsprForgetPreCapPower();
         // ...and while the beacon is armed it is the beacon's level from now on (#268).
         else wsprNoteOperatorPower(value, source);
+        // ...nor an SSTV picture's restore (#279): the level is theirs.
+        if (source !== 'setup' && source !== 'logger-cat') sstvTxPower.operatorSet();
         // ...nor a tuner/test restore (the 1.13.10 knob fight, GitHub #111).
         if (source !== 'setup' && settings.setupTxPowerRestore) {
           delete settings.setupTxPowerRestore;
@@ -52283,6 +53202,40 @@ function cloudShackNotice(text, kind) {
           sendCatLog(`[CAT] TX (other VFO) frequency set to ${(hz / 1e6).toFixed(6)} MHz${_currentSplit ? '' : ' — split is off, so it is not shown until split is on'}`);
         }
         break;
+      }
+      // Split up N from the VFO window and ECHOCAT Web (#689, DA2PK): split on,
+      // then the TX VFO at the dial + N kHz, through the same two paths as
+      // above. Refused while the VFO is locked, where the radio has no
+      // TX-frequency command, and outside the radio's range (never for being
+      // outside a ham band: that is the operator's call). Sets VFOs only; it
+      // never keys the radio. Back to simplex is set-split false.
+      case 'split-up': {
+        const offsetKhz = SplitUp.normalizeOffset(data.offsetKhz);
+        const p = SplitUp.plan({
+          rxHz: _currentFreqHz, offsetKhz, split: _currentSplit,
+          locked: _vfoLocked, available: SplitUp.available(getRigCapabilities(rigType)), reach: rigReachNow(),
+        });
+        if (!p.ok) {
+          sendCatLog(`[CAT] Split ${SplitUp.label(offsetKhz).toLowerCase()} not done: ${p.message}`);
+          return { ok: false, error: p.message };
+        }
+        sendCatLog(`[CAT] Split ${SplitUp.label(offsetKhz).toLowerCase()}: RX ${(_currentFreqHz / 1e6).toFixed(6)} MHz, TX ${(p.txHz / 1e6).toFixed(6)} MHz`);
+        // DXLab Commander sets the TX frequency only once IT reports split on,
+        // so it gets a few tries; every other link takes it on the first.
+        const tries = rigType === 'commander' ? 6 : 0;
+        const sendTx = (left) => {
+          if (!cat || !cat.connected || !_currentSplit) return;
+          if (cat.setFrequencyOther(p.txHz) !== false) return;
+          if (left > 0) setTimeout(() => sendTx(left - 1), 400);
+          else sendCatLog('[CAT] The radio did not take the split TX frequency');
+        };
+        let wait = 0;
+        for (const st of p.steps) {
+          if (st.action === 'set-split') { applyRigControl(st, source, meta); wait = 150; }
+          else if (wait) setTimeout(() => sendTx(tries), wait);
+          else sendTx(tries);
+        }
+        return { ok: true, txHz: p.txHz };
       }
       case 'set-comp': {
         if (flexNeedsApi) { _flexWarnOnce('Compressor requires SmartSDR API — not connected'); break; }
@@ -54726,10 +55679,17 @@ function cloudShackNotice(text, kind) {
     delete newSettings.jtcatRxSource;
     stampSstvTemplatesPatch(newSettings);
     setImmediate(() => afterSstvSettingsSaved(newSettings));
+    // #279 Transmit power for SSTV: watts or null; every device and the SSTV window follow.
+    if (newSettings && 'sstvTxPowerW' in newSettings) {
+      newSettings.sstvTxPowerW = SstvTxPower.parseWatts(newSettings.sstvTxPowerW);
+      setImmediate(pushSstvRigState);
+    }
     // #475: the Deleted folder's days reach every Winlink surface (winlink-state.deletedDays).
     if (newSettings && 'winlinkDeletedDays' in newSettings) setImmediate(() => { try { winlinkPush(); } catch {} });
     // APRS phase 4: the iGate switch and the callsign decide whether the uplink runs, and as whom.
     if (newSettings && 'aprsIgate' in newSettings) newSettings.aprsIgate = newSettings.aprsIgate === true;
+    // Other service codes: saved normalised, so a change of spacing is no change (lib/winlink-pat.js).
+    if (newSettings && 'winlinkServiceCodes' in newSettings) newSettings.winlinkServiceCodes = WinlinkPat.serviceCodesText(newSettings.winlinkServiceCodes);
     if (newSettings && ('aprsIgate' in newSettings || 'myCallsign' in newSettings)) setImmediate(() => { try { aprsUplinkWant(null); aprsIgateSync(); aprsIgatePush(); aprsBeaconPush(); } catch {} });
     if (newSettings && 'jtcatFakeIt' in newSettings) setImmediate(() => { fakeItSyncEngine(); sendCatLog(`[JTCAT] Split operation Fake It: ${fakeItEnabled() ? 'on' : 'off'}`); });
     // An always-on feature has no off: a stale window's false never lands.
@@ -54814,8 +55774,10 @@ function cloudShackNotice(text, kind) {
     // The password is in pat-config.json, so a new one needs a relaunch too.
     if (['enableLoggerCat', 'loggerCatPort'].some((k) => has(k) && newSettings[k] !== settings[k])) setTimeout(startLoggerCat, 0);
     const winlinkChanged = ['enableWinlink', 'winlinkPassword', 'winlinkPatPath', 'winlinkArdopPort', 'winlinkVaraPort', 'winlinkVaraFmPort', 'winlinkVaraHost', 'winlinkVaraFmHost',
-      'winlinkArdopBw', 'winlinkArdopArqTimeout', 'winlinkVaraBw', 'winlinkAgwPort', 'winlinkPrediction', 'winlinkPredictionUrl', 'myCallsign', 'grid']
-      .some((k) => has(k) && JSON.stringify(newSettings[k]) !== JSON.stringify(settings[k]));
+      'winlinkServiceCodes', 'winlinkArdopBw', 'winlinkArdopArqTimeout', 'winlinkVaraBw', 'winlinkAgwPort', 'winlinkPrediction', 'winlinkPredictionUrl', 'myCallsign', 'grid']
+      .some((k) => has(k) && JSON.stringify(newSettings[k]) !== JSON.stringify(settings[k]))
+      // Mercury chosen or not: Pat's service codes change (lib/winlink-pat.js mercuryChosen).
+      || WinlinkPat.mercuryChosen(settings) !== WinlinkPat.mercuryChosen({ ...settings, ...newSettings });
     const winlinkAutoCheckChanged = ['winlinkTelnetAutoCheck', 'winlinkTelnetAutoCheckMin']
       .some((k) => has(k) && newSettings[k] !== settings[k]);
     const mercuryChanged = (has('enableMercury') && newSettings.enableMercury !== settings.enableMercury) ||
@@ -55406,6 +56368,10 @@ function cloudShackNotice(text, kind) {
     }
     // JTCAT's n-fer option (#353): a connected device shows the desktop's change.
     if (has('jtcatNferParks')) updateRemoteSettings();
+    // JTCAT calling time (#161): a connected device shows the desktop's change.
+    if (has('jtcatCallingTimeMin')) updateRemoteSettings();
+    // Transmit power for SSTV (#279): a connected device shows the desktop's change.
+    if (has('sstvTxPowerW')) updateRemoteSettings();
 
     // Start/stop WSJT-X-binary bridge. HamRS, Logger32, MacLoggerDX, RUMlogNG
     // and Log4OM-binary all share this path — they recognize POTACAT as a
@@ -56328,7 +57294,7 @@ function cloudShackNotice(text, kind) {
           reject(new Error(explain(hint ? `Timed out — rigctld: ${hint}` : 'Timed out waiting for rigctld response')));
         }, 5000);
 
-        const sock = net.createConnection({ host: '127.0.0.1', port: 4533 }, () => {
+        const sock = net.createConnection({ host: RIGCTLD_HOST, port: 4533 }, () => {
           sock.write('f\n');
         });
 
@@ -56851,6 +57817,16 @@ function cloudShackNotice(text, kind) {
   // The active rig's bands (null = not restricted) for any window's first paint.
   ipcMain.handle('rig-bands-get', () => ({ bands: activeRigBands(), all: RigBands.ALL_BANDS }));
   // The rig editor's checkboxes: a model's native bands, before the rig is saved.
+  // Settings > Tuning > Antenna, "Turn the rotor only on these bands" (#356):
+  // the bands any configured rig covers, plus bands already ticked.
+  ipcMain.handle('rotor-band-choices', () => {
+    const lists = (settings.rigs || []).filter(Boolean).map((rig) => {
+      let name = rig.model || '';
+      if (!getModel(name, null) && rig.catTarget && rig.catTarget.civModel) name = rig.catTarget.civModel;
+      return RigBands.bandsForRig(rig, name, getModel(name, null));
+    });
+    return { bands: RotorBands.choices(lists, settings.rotorBands) };
+  });
   ipcMain.handle('rig-bands-native', (_e, modelName) => ({ bands: RigBands.nativeBands(String(modelName || ''), getModel(String(modelName || ''), null)), all: RigBands.ALL_BANDS }));
   // TX power from any window's slider — one writer, synced everywhere else
   // (applyJtcatTxGain); the origin is skipped so a dragging slider isn't
@@ -57341,6 +58317,7 @@ function cloudShackNotice(text, kind) {
     // directly — N slices on one PC clock still need exactly one check.
     startJtcatClockMonitor();
     console.log(`[JTCAT] Multi-slice started: ${slices.map(s => s.sliceId + '/' + s.band).join(', ')}`);
+    resumeMobileSpectrum(); // #943: the stopJtcat() above stopped the phone's waterfall feed
   });
 
   ipcMain.on('jtcat-quiet-freq', (_e, hz) => {
@@ -57662,6 +58639,7 @@ function cloudShackNotice(text, kind) {
           sig: q.SIG || '',
           sigInfo: q.SIG_INFO || '',
           myRig: q.MY_RIG || '',
+          myAntenna: q.MY_ANTENNA || '',
           myGridsquare: q.MY_GRIDSQUARE || '',
         });
       }
@@ -57771,13 +58749,13 @@ function cloudShackNotice(text, kind) {
     if (!refs.length) return { success: false, error: 'No park ref given' };
     try {
       if (!fs.existsSync(logPath)) return { success: false, error: 'Log file not found' };
-      const { changes } = mutateQsoLog((qsos) => qsos.filter(q => {
+      // removed counts what left the file; a record with no uuid is removed but not journaled (#988).
+      const { removed } = mutateQsoLog((qsos) => qsos.filter(q => {
         if ((q.QSO_DATE || '') !== date) return true;
         const mySig = (q.MY_SIG || '').toUpperCase();
         const myRef = (q.MY_SIG_INFO || '').toUpperCase();
         return !refs.some(r => r.sig === mySig && r.ref === myRef); // keep unless a ref matches
       }));
-      const removed = changes.length;
       if (removed === 0) return { success: true, removed: 0 };
       loadWorkedQsos();
       return { success: true, removed };
@@ -57840,28 +58818,21 @@ function cloudShackNotice(text, kind) {
     }
   });
 
-  ipcMain.handle('update-qso', async (event, { idx, fields: edit }) => {
+  ipcMain.handle('update-qso', async (event, { idx, fields: edit, identity }) => {
     try {
-      let found = false;
-      let applied = null;
-      mutateQsoLog((qsos) => {
-        if (!qsos[idx]) return false;
-        found = true;
-        // My Park also sets MY_SIG and its mirror, so Past Activations finds
-        // the QSO (lib/qso-edit.js, #509).
-        applied = applyQsoEdit(qsos[idx], edit);
-        if (applied.error) return false;
-      });
-      if (!found) return { success: false, error: 'Invalid index' };
-      if (applied.error) return { success: false, error: applied.error };
-      const fields = applied.fields;
+      // Only the record the operator chose: a stale idx never edits another
+      // QSO (lib/logbook-edit.js, #988). My Park also sets MY_SIG and its
+      // mirror, so Past Activations finds the QSO (lib/qso-edit.js, #509).
+      const r = LogbookEdit.updateOne(mutateQsoLog, idx, identity, edit, applyQsoEdit);
+      if (!r.success) return r;
+      const fields = r.fields;
       loadWorkedQsos();
       // Notify other windows about the change
       const sender = event.sender;
       if (qsoPopoutWin && !qsoPopoutWin.isDestroyed() && qsoPopoutWin.webContents !== sender) {
-        qsoPopoutWin.webContents.send('qso-popout-updated', { idx, fields });
+        qsoPopoutWin.webContents.send('qso-popout-updated', { idx: r.index, fields });
       }
-      return { success: true, fields };
+      return { success: true, fields, idx: r.index };
     } catch (err) {
       return { success: false, error: err.message };
     }
@@ -57924,20 +58895,19 @@ function cloudShackNotice(text, kind) {
     }
   });
 
-  ipcMain.handle('delete-qso', async (event, idx) => {
+  ipcMain.handle('delete-qso', async (event, idx, identity) => {
     try {
-      const { changes } = mutateQsoLog((qsos) => {
-        if (idx < 0 || idx >= qsos.length) return false;
-        qsos.splice(idx, 1);
-      });
-      if (!changes.length) return { success: false, error: 'Invalid index' };
+      // Only the record the operator chose: a stale idx never deletes
+      // another QSO, and a record with no uuid really goes (lib/logbook-edit.js, #988).
+      const r = LogbookEdit.deleteOne(mutateQsoLog, idx, identity);
+      if (!r.success) return r;
       loadWorkedQsos();
       // Notify QSO pop-out about the deletion
       const sender = event.sender;
       if (qsoPopoutWin && !qsoPopoutWin.isDestroyed() && qsoPopoutWin.webContents !== sender) {
-        qsoPopoutWin.webContents.send('qso-popout-deleted', idx);
+        qsoPopoutWin.webContents.send('qso-popout-deleted', r.index);
       }
-      return { success: true };
+      return { success: true, idx: r.index };
     } catch (err) {
       return { success: false, error: err.message };
     }
@@ -57965,7 +58935,7 @@ function cloudShackNotice(text, kind) {
       const targets = Array.isArray(remove) ? remove : [];
       if (!targets.length) return { success: true, removed: 0 };
       let stale = false;
-      const { changes } = mutateQsoLog((qsos) => {
+      const { removed } = mutateQsoLog((qsos) => {
         const drop = new Set();
         for (const { idx, fp } of targets) {
           if (!qsos[idx] || QsoLog.fingerprint(qsos[idx]) !== fp) { stale = true; return false; }
@@ -57979,7 +58949,7 @@ function cloudShackNotice(text, kind) {
       if (qsoPopoutWin && !qsoPopoutWin.isDestroyed() && qsoPopoutWin.webContents !== sender) {
         qsoPopoutWin.webContents.send('qso-popout-refresh');
       }
-      return { success: true, removed: changes.length };
+      return { success: true, removed };
     } catch (err) {
       return { success: false, error: err.message };
     }
@@ -58043,8 +59013,7 @@ function cloudShackNotice(text, kind) {
   ipcMain.handle('delete-qsos-by-match', async (_event, match) => {
     try {
       const matches = qsoMatcher(match);
-      const { changes } = mutateQsoLog((qsos) => qsos.filter((q) => !matches(q)));
-      const removed = changes.length;
+      const { removed } = mutateQsoLog((qsos) => qsos.filter((q) => !matches(q)));
       if (removed > 0) {
         loadWorkedQsos();
         refreshQsoPopoutFromDisk();
@@ -58353,6 +59322,7 @@ function gracefulCleanup() {
   // radio before the SmartSDR/CAT/keyer connections close — otherwise the
   // radio can stay keyed with no audio (a silent-carrier FCC issue).
   try { handleRemotePtt(false); } catch {}
+  try { sstvTxPowerEnd('POTACAT closing'); } catch {} // #279: the radio's own power back while CAT is up
   // A tuner-memory run keys tune carriers: stop it, drop the carrier and put
   // the operator's power back while the SmartSDR socket is still open.
   try { atuWizardAbort('app quit'); if (smartSdr && smartSdr.connected && _atuWizardSaved) smartSdr.setTxTune(false); } catch {}
@@ -58445,6 +59415,13 @@ app.on('before-quit', (e) => {
     e.preventDefault();
     Promise.race([jtcatFlushLogReviews(), new Promise((r) => setTimeout(r, 4000))]).finally(() => app.quit());
     return;
+  }
+  // The last frequency on the band the radio is on now (#680): written once,
+  // since a band change is the only other time it is.
+  if (_bandLastFreqBand && !_bandLastFreqSavedAtQuit) {
+    _bandLastFreqSavedAtQuit = true;
+    clearTimeout(_bandLastFreqSaveTimer);
+    try { saveSettings(settings); } catch {}
   }
   winlinkHoldAwake(false); // never leave the Winlink session's App Nap block behind (#187)
   try { aprsMessagesSaveNow(); } catch { /* APRS A1: the conversations are on disk before the process goes */ }

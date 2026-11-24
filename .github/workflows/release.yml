@@ -14,8 +14,11 @@ on:
         required: true
         type: string
 
+# Read-only by default. Only create-release writes to this repo (it creates the
+# GitHub release and uploads the assets); update-website writes to the website
+# repo with its own token, not this one.
 permissions:
-  contents: write # needed to create the GitHub release and upload assets
+  contents: read
 
 jobs:
   # --------------------------------------------------------------------------
@@ -47,12 +50,19 @@ jobs:
       - name: Install dependencies
         run: npm ci
       - name: Build native addons
+        # No continue-on-error: build-natives exits 1 only when a required
+        # addon (ft8_native, js8_native) fails. Optional ones (FreeDV, RADE)
+        # only warn there and are gated by the FreeDV step below.
         run: npm run build-natives
-        continue-on-error: true # optional addons may fail; ft8/js8 and FreeDV/RADE are gated by their own steps
+      - name: ft8_native and js8_native exist, are x64 (PE machine type), and load
+        # FT8 would fall back to the slower WASM decoder and JS8 has no
+        # fallback at all, so a missing or wrong-arch addon stops the release.
+        shell: bash
+        run: node scripts/check-required-natives.js --expect-arch=x64
       - name: FreeDV and RADE built, load, and decode a loopback over (#642)
-        # build-natives above is continue-on-error for the optional addons;
-        # FreeDV/RADE are not optional any more. Every Mac and Linux release
-        # until 1.14.6 shipped without them because this step did not exist.
+        # build-natives only warns when FreeDV/RADE fail to build; FreeDV/RADE
+        # are not optional any more. Every Mac and Linux release until 1.14.6
+        # shipped without them because this step did not exist.
         shell: bash
         run: node scripts/check-freedv-natives.js --expect-arch=x64
       - name: Set up MSYS2 (for wsprd)
@@ -98,6 +108,10 @@ jobs:
         # tries to auto-publish to GitHub. The create-release job handles
         # uploads explicitly so we disable the implicit behavior here.
         run: npx electron-builder --win --publish never
+      - name: The packaged app carries ft8_native and js8_native, x64, and they load
+        # win-unpacked/resources/app.asar.unpacked/lib: what the installers ship.
+        shell: bash
+        run: node scripts/check-required-natives.js --packaged --expect-arch=x64
       - name: The packaged app carries FreeDV and RADE and they load (#642)
         shell: bash
         run: node scripts/check-freedv-natives.js --packaged --expect-arch=x64
@@ -222,10 +236,10 @@ jobs:
         run: node scripts/fetch-cloudflared.js --platform=mac --arch=arm64
       - name: Build macOS dmg (arm64)
         run: npx electron-builder --mac --arm64 --publish never --config builder-config.js
-        # Signing + notarization are GATED on these secrets. Absent (today) =>
-        # empty strings => electron-builder ad-hoc signs and scripts/notarize.js
-        # skips, i.e. the current unsigned build, unchanged. Present => a
-        # Developer ID signed + notarized build with working auto-update.
+        # Signing + notarization are GATED on these secrets. Present (since
+        # v1.14.7 at the latest) => a Developer ID signed + notarized build with
+        # working auto-update. Absent (forks) => empty strings => electron-builder
+        # ad-hoc signs and scripts/notarize.js skips, i.e. an unsigned build.
         env:
           CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
@@ -416,12 +430,21 @@ jobs:
       - name: Install dependencies
         run: npm ci # lockfile-pinned — see build-windows for why
       - name: Build native addons
+        # No continue-on-error: build-natives exits 1 only when a required
+        # addon (ft8_native, js8_native) fails. Optional ones (FreeDV, RADE,
+        # alsa) only warn there and are gated by their own steps below.
         run: npm run build-natives
-        continue-on-error: true # optional addons may fail; alsa and FreeDV/RADE are gated below
+      - name: ft8_native and js8_native exist, are x86_64 (ELF), and load
+        # FT8 would fall back to the slower WASM decoder and JS8 has no
+        # fallback at all, so a missing or wrong-arch addon stops the release.
+        run: |
+          set -e
+          file lib/ft8_native/build/Release/ft8_native.node lib/js8_native/build/Release/js8_native.node
+          node scripts/check-required-natives.js --expect-arch=x64
       - name: FreeDV and RADE built, load, and decode a loopback over (#642)
-        # build-natives above is continue-on-error for the optional addons;
-        # FreeDV/RADE are not optional any more. Every Mac and Linux release
-        # until 1.14.6 shipped without them because this step did not exist.
+        # build-natives only warns when FreeDV/RADE fail to build; FreeDV/RADE
+        # are not optional any more. Every Mac and Linux release until 1.14.6
+        # shipped without them because this step did not exist.
         shell: bash
         run: node scripts/check-freedv-natives.js --expect-arch=x64
       # Same hard-fail check as the arm64 job — see comments there.
@@ -513,6 +536,10 @@ jobs:
         run: node scripts/fetch-cloudflared.js --platform=linux --arch=x64
       - name: Build Linux packages
         run: npx electron-builder --linux --publish never
+      - name: The packaged app carries ft8_native and js8_native, x86_64, and they load
+        # linux-unpacked/resources/app.asar.unpacked/lib: what the AppImage, deb and rpm ship.
+        shell: bash
+        run: node scripts/check-required-natives.js --packaged --expect-arch=x64
       - name: The packaged app carries FreeDV and RADE and they load (#642)
         shell: bash
         run: node scripts/check-freedv-natives.js --packaged --expect-arch=x64
@@ -568,17 +595,26 @@ jobs:
       - name: Install dependencies
         run: npm ci # lockfile-pinned — see build-windows for why
       - name: Build native addons
+        # No continue-on-error: build-natives exits 1 only when a required
+        # addon (ft8_native, js8_native) fails. Optional ones (FreeDV, RADE,
+        # alsa) only warn there and are gated by their own steps below.
         run: npm run build-natives
-        continue-on-error: true # optional addons may fail; alsa and FreeDV/RADE are gated below
+      - name: ft8_native and js8_native exist, are aarch64 (ELF), and load
+        # FT8 would fall back to the slower WASM decoder and JS8 has no
+        # fallback at all, so a missing or wrong-arch addon stops the release.
+        run: |
+          set -e
+          file lib/ft8_native/build/Release/ft8_native.node lib/js8_native/build/Release/js8_native.node
+          node scripts/check-required-natives.js --expect-arch=arm64
       - name: FreeDV and RADE built, load, and decode a loopback over (#642)
-        # build-natives above is continue-on-error for the optional addons;
-        # FreeDV/RADE are not optional any more. Every Mac and Linux release
-        # until 1.14.6 shipped without them because this step did not exist.
+        # build-natives only warns when FreeDV/RADE fail to build; FreeDV/RADE
+        # are not optional any more. Every Mac and Linux release until 1.14.6
+        # shipped without them because this step did not exist.
         shell: bash
         run: node scripts/check-freedv-natives.js --expect-arch=arm64
       # alsa_native is critical for the arm64 build's primary audience
-      # (Raspberry Pi / sBitx users). build-natives has continue-on-error
-      # for optional addons (FreeDV codec2 etc.), which silently shipped
+      # (Raspberry Pi / sBitx users). build-natives only warns for optional
+      # addons (alsa, FreeDV codec2 etc.); a continue-on-error once silently shipped
       # v1.6.0 without the alsa addon when a binding.gyp parse error
       # broke the build. Explicit hard-fail here means a regression in
       # alsa_native blocks the release instead of slipping through.
@@ -667,6 +703,10 @@ jobs:
         run: node scripts/fetch-cloudflared.js --platform=linux --arch=arm64
       - name: Build Linux packages (arm64)
         run: npx electron-builder --linux --arm64 --publish never
+      - name: The packaged app carries ft8_native and js8_native, aarch64, and they load
+        # linux-arm64-unpacked/resources/app.asar.unpacked/lib: what the AppImage, deb and rpm ship.
+        shell: bash
+        run: node scripts/check-required-natives.js --packaged --expect-arch=arm64
       - name: The packaged app carries FreeDV and RADE and they load (#642)
         shell: bash
         run: node scripts/check-freedv-natives.js --packaged --expect-arch=arm64
@@ -687,6 +727,8 @@ jobs:
   create-release:
     needs: [build-windows, build-macos-arm64, build-macos-x64, build-linux, build-linux-arm64]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write # create the GitHub release and upload assets
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
@@ -767,8 +809,17 @@ jobs:
   # --------------------------------------------------------------------------
 
   update-website:
+    # Pushes potacat-website master (a production deploy) ONLY when the change
+    # to index.html is version strings in the DOWNLOAD block and the hero
+    # intel-mac link (Casey, 2026-11-22). Anything else: master is not touched,
+    # a handoff goes to the website repo on a release-links/<version> branch,
+    # and this job fails. The release itself is already published by then.
     needs: create-release
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      VERSION: ${{ needs.create-release.outputs.version }}
     steps:
       - name: Checkout POTACAT (for the update script)
         uses: actions/checkout@v4
@@ -783,9 +834,24 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Update download links in index.html
-        run: node potacat/scripts/update-website-links.js "${{ needs.create-release.outputs.version }}" website/index.html
+      - name: Update download links and check the change is version strings only
+        id: guard
+        run: |
+          ORIG="$RUNNER_TEMP/index.html.orig"
+          REPORT="$RUNNER_TEMP/website-links-report.md"
+          cp website/index.html "$ORIG"
+          if node potacat/scripts/update-website-links.js "$VERSION" website/index.html > "$RUNNER_TEMP/update.log" 2>&1 \
+             && node potacat/scripts/website-links-guard.js "$ORIG" website/index.html "$VERSION" --report "$REPORT"; then
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          else
+            if [ ! -s "$REPORT" ]; then
+              { echo "- update-website-links.js could not update the page:"; sed 's/^/    /' "$RUNNER_TEMP/update.log"; } > "$REPORT"
+            fi
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+          fi
+          cat "$RUNNER_TEMP/update.log"
       - name: Commit and push
+        if: steps.guard.outputs.ok == 'true'
         working-directory: website
         run: |
           git config user.name "POTACAT Release Bot"
@@ -795,5 +861,69 @@ jobs:
             exit 0
           fi
           git add index.html
-          git commit -m "Update download links to v${{ needs.create-release.outputs.version }}"
-          git push
+          git commit -m "Update download links to v${VERSION}"
+          git push origin HEAD:master
+      - name: Website handoff (guard failed, master not touched)
+        id: handoff
+        if: steps.guard.outputs.ok != 'true'
+        working-directory: website
+        env:
+          REPO_URL: ${{ github.server_url }}/${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          DATE=$(date -u +%Y-%m-%d)
+          BRANCH="release-links/${VERSION}"
+          HANDOFF="docs/handoffs/DESKTOP_TO_WEBSITE_HANDOFF_${DATE}_RELEASE_${VERSION}_LINKS.md"
+          RELEASE_URL="${REPO_URL}/releases/tag/v${VERSION}"
+          RUN_URL="${REPO_URL}/actions/runs/${RUN_ID}"
+          # Drop the rewritten index.html: nothing but the handoff leaves this job.
+          git checkout -- index.html
+          mkdir -p docs/handoffs "$RUNNER_TEMP/handoff"
+          {
+            echo "# Desktop to website: v${VERSION} download links need a person"
+            echo
+            echo "Written by the POTACAT release workflow on ${DATE}."
+            echo
+            echo "- Version: ${VERSION}"
+            echo "- Release: ${RELEASE_URL} (published; the installers are live)"
+            echo "- Workflow run: ${RUN_URL}"
+            echo
+            echo "The update-website job pushes index.html to master only when the change is"
+            echo "version strings inside the DOWNLOAD-START/END block and the hero intel-mac link."
+            echo "This time it was more than that, so master was not touched and potacat.com"
+            echo "still links to the previous release."
+            echo
+            echo "Please point the download block and the intel-mac link at v${VERSION} by hand"
+            echo "(or fix the block so scripts/update-website-links.js in the POTACAT repo can),"
+            echo "then run the usual sync-download.js --live for the other pages."
+            echo
+            echo "## What the checker found"
+            echo
+            cat "$RUNNER_TEMP/website-links-report.md"
+          } > "$HANDOFF"
+          cp "$HANDOFF" "$RUNNER_TEMP/handoff/"
+          cat "$HANDOFF" >> "$GITHUB_STEP_SUMMARY"
+          git config user.name "POTACAT Release Bot"
+          git config user.email "noreply@potacat.com"
+          git checkout -b "$BRANCH"
+          git add "$HANDOFF"
+          git commit -m "Handoff: v${VERSION} download links need a person"
+          if git push origin "$BRANCH"; then
+            echo "pushed=true" >> "$GITHUB_OUTPUT"
+            printf '\nHandoff pushed to the website repo on branch `%s` (%s). master was not touched.\n' "$BRANCH" "$HANDOFF" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "pushed=false" >> "$GITHUB_OUTPUT"
+            printf '\nCould not push branch `%s` to the website repo. The handoff is in this summary and in the website-links-handoff artifact. master was not touched.\n' "$BRANCH" >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Upload the website handoff
+        if: always() && steps.guard.outputs.ok != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: website-links-handoff
+          path: ${{ runner.temp }}/handoff/
+          if-no-files-found: warn
+      - name: Fail the job (website not updated)
+        if: always() && steps.guard.outputs.ok != 'true'
+        run: |
+          echo "::error::potacat.com was NOT updated to v${VERSION}: the index.html change was more than version strings in the download block. The release is published and fine. Handoff: branch release-links/${VERSION} in potacat-website (pushed=${{ steps.handoff.outputs.pushed }}), the job summary, and the website-links-handoff artifact."
+          exit 1

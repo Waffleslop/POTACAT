@@ -71,6 +71,18 @@ test('Large VFO: the WebSDR sits under the knob by default; a saved order is kep
   assert.strictEqual(o[o.indexOf('controls') + 1], 'solar', 'solar, new as a block, lands after the CAT buttons');
 });
 
+test('Large VFO: radio power is a block of its own, last by default; an old saved order gets it last', () => {
+  assert.strictEqual(L.LARGE_KEYS[L.LARGE_KEYS.length - 1], 'power');
+  assert.deepStrictEqual(L.normalizeLarge(null), L.LARGE_KEYS, 'no save: the default order');
+  const old = ['voice', 'knob', 'kiwi', 'band', 'favorites', 'filter', 'filter-slider', 'txpower', 'controls', 'solar', 'profiles', 'cw-controls', 'cw'];
+  const o = L.normalizeLarge(old);
+  assert.strictEqual(o[o.length - 1], 'power', 'where it was fixed before, not after the moved Voice macros');
+  assert.strictEqual(o[0], 'voice', 'the rest of the saved order stays');
+  const moved = L.normalizeLarge(['power'].concat(old));
+  assert.strictEqual(moved[0], 'power', 'an operator who moved it keeps it there');
+  assert.strictEqual(moved.filter((k) => k === 'power').length, 1);
+});
+
 test('every CAT choice is a real rig control with the same caps flag', () => {
   for (const c of L.CAT_CHOICES) {
     const r = RIG_CONTROLS[c.key];

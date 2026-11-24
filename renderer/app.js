@@ -329,6 +329,7 @@ let enableLogging = false;
 let enableBannerLogger = false;
 let n1mmRst = false; // N1MM-style single-field RST inputs
 let defaultPower = 0; // the operator's own Default TX Power (W), 0 = none (#523)
+let fixedLogPower = 0; // "Always log this power" (W), for an amplifier; 0 = off (#837)
 let tuneClick = false;
 let qsoChime = 'off'; // 'off' | 'soft' | 'twotone' | 'bell' | 'morse-r' — see playQsoChime
 let enableSplit = false;
@@ -499,6 +500,13 @@ function refreshVfoCardAge() {
 }
 
 /** Send tuned spot info to VFO popout */
+// The operator picked this station: main shows its call in N3FJP's entry
+// window when that setting is on (#712). Scan and frequency-follow do not call
+// this; only a pick does.
+function n3fjpPick(spot) {
+  try { if (spot && spot.callsign && window.api.n3fjpCallInProgress) window.api.n3fjpCallInProgress(spot.callsign); } catch { /* older preload */ }
+}
+
 function notifyVfoTunedSpot(spot) {
   vfoCardSpot = spot || null;
   if (!spot) { window.api.vfoTunedSpot(null); return; }
@@ -989,6 +997,7 @@ const setTgxlLabel3 = document.getElementById('set-tgxl-label-3');
 const tgxlAntButtons = document.getElementById('tgxl-ant-buttons');
 const setVerboseLog = document.getElementById('set-verbose-log');
 const setLightIcon = document.getElementById('set-light-icon');
+const setLinuxNativeFrame = document.getElementById('set-linux-native-frame'); // #345
 const setEnableBandActivity = document.getElementById('set-enable-band-activity');
 const setEnableSplitView = document.getElementById('set-enable-split-view');
 const splitOrientationConfig = document.getElementById('split-orientation-config');
@@ -1373,6 +1382,7 @@ const adifLogBrowseBtn = document.getElementById('adif-log-browse-btn');
 const adifImportBtn = document.getElementById('adif-import-btn');
 const adifImportResult = document.getElementById('adif-import-result');
 const setDefaultPower = document.getElementById('set-default-power');
+const setLogFixedPower = document.getElementById('set-log-fixed-power');
 const setSendToLogbook = document.getElementById('set-send-to-logbook');
 const setLogCommentTags = document.getElementById('set-log-comment-tags');
 const setJtcatLogComment = document.getElementById('set-jtcat-log-comment');
@@ -1387,6 +1397,7 @@ const logbookWavelogConfig = document.getElementById('logbook-wavelog-config');
 const logbookLog4omConfig = document.getElementById('logbook-log4om-config');
 const setLog4omWsjtxBinary = document.getElementById('set-log4om-wsjtx-binary');
 const setN3fjpPull = document.getElementById('set-n3fjp-pull');
+const setN3fjpCallInProgress = document.getElementById('set-n3fjp-call-in-progress');
 const setWavelogUrl = document.getElementById('set-wavelog-url');
 const setWavelogApiKey = document.getElementById('set-wavelog-api-key');
 const setWavelogStationId = document.getElementById('set-wavelog-station-id');
@@ -1496,10 +1507,12 @@ const setVaraFmPort = document.getElementById('set-vara-fm-port');
 const setVaraHfHost = document.getElementById('set-vara-hf-host');
 const setVaraFmHost = document.getElementById('set-vara-fm-host');
 const setVaraAutoLaunch = document.getElementById('set-vara-autolaunch');
+const setVaraHfMercury = document.getElementById('set-vara-hf-mercury');
 const setVaraCableIn = document.getElementById('set-vara-cable-in');
 const setVaraCableOut = document.getElementById('set-vara-cable-out');
 const setWinlinkCap = document.getElementById('set-winlink-cap');
 const setWinlinkPrediction = document.getElementById('set-winlink-prediction');
+const setWinlinkServiceCodes = document.getElementById('set-winlink-service-codes'); // Other service codes (main.js saves them normalised)
 const setWinlinkDeletedDays = document.getElementById('set-winlink-deleted-days'); // #475: 7 | 30 | 90 | 0 (never)
 const setWinlinkAutoRetry = document.getElementById('set-winlink-auto-retry');
 const setWinlinkRecordAudio = document.getElementById('set-winlink-record-audio');
@@ -1984,6 +1997,7 @@ async function openCatPopover(anchor) {
       });
       activeRigName = rig.name || '';
       activeRigCatLabel = rig.catLabel || '';
+      customCatRigSwitched(rig.id); // #164: this radio's custom buttons
       refreshCatPillLabel();
       closeCatPopover();
     });
@@ -2304,16 +2318,23 @@ async function loadPrefs() {
   qrzFullName = settings.qrzFullName === true;
   enableLogging = true; // always on; cloud sync is the choice
   enableBannerLogger = settings.enableBannerLogger === true;
-  // Sync custom CAT buttons from settings.json (authoritative source for ECHOCAT sync)
+  // Sync custom CAT buttons from settings.json (authoritative source for ECHOCAT sync).
+  // #164: up to 25, never padded; the panel shows the ones for the active rig
+  // and the editor offers the operator's rigs by name.
+  customActiveRigId = settings.activeRigId || null;
+  customRigChoices = (settings.rigs || []).filter((r) => r && r.id).map((r) => ({ id: r.id, name: r.name || r.model || 'Radio' }));
   if (settings.customCatButtons && Array.isArray(settings.customCatButtons)) {
-    customCatButtons = settings.customCatButtons;
-    while (customCatButtons.length < 5) customCatButtons.push({ name: '', command: '' });
+    customCatButtons = CustomCatFollow.capSlots(settings.customCatButtons);
+    // Empty slots (the old pad-to-five) are dropped, except under the
+    // operator's hands in the editor.
+    if (!customCatEditing) customCatButtons = customCatButtons.filter((b) => CustomCatFollow.isProgrammed(b));
     localStorage.setItem('custom-cat-buttons', JSON.stringify(customCatButtons));
     if (typeof loadCustomButtons === 'function') loadCustomButtons();
-  }
+  } else if (typeof loadCustomButtons === 'function') loadCustomButtons();
   n1mmRst = settings.n1mmRst === true;
   applyRstMode();
   defaultPower = LogTxPower.operatorDefaultPower(settings);
+  fixedLogPower = LogTxPower.fixedLogPower(settings);
   updateLoggingVisibility();
   updateBannerLoggerVisibility();
   showBearing = settings.showBearing === true;
@@ -2370,7 +2391,8 @@ async function loadPrefs() {
   updateRbnButton();
   clusterTerminalBtn.classList.toggle('hidden', !settings.enableClusterTerminal);
   var mercuryBtn = document.getElementById('view-mercury-btn');
-  if (mercuryBtn) mercuryBtn.classList.toggle('hidden', !settings.enableMercury);
+  // Hidden until Mercury has been used on the air (Casey 2026-11-22): lib/mercury-offer.js.
+  if (mercuryBtn) mercuryBtn.classList.toggle('hidden', !window.MercuryOffer.chatWindowOffered(settings));
   var winlinkBtn = document.getElementById('view-winlink-btn');
   if (winlinkBtn) winlinkBtn.classList.remove('hidden'); // Winlink is always available
   // Spot by Winlink: offered once the operator has used Winlink (notice accepted).
@@ -2653,6 +2675,14 @@ function updateRadioSubPanels() {
   // Voice in DATA mode runs in the rig controller: serial, Icom, Hamlib and flrig links.
   const voiceAsDataRow = document.getElementById('rig-voice-as-data');
   if (voiceAsDataRow) voiceAsDataRow.classList.toggle('hidden', !['serialcat', 'icom', 'civ-tcp', 'icom-network', 'hamlib', 'rigctldnet', 'flrig', 'dxlab-commander', 'yaesu-lan'].includes(type));
+  // Where the sound card interface plugs in (#153, lib/rig-audio-jack.js): radios that take one.
+  const audioJackRow = document.getElementById('rig-audio-jack');
+  if (audioJackRow) audioJackRow.classList.toggle('hidden', !(window.RigAudioJack && RigAudioJack.appliesToRadioType(type)));
+  syncAudioJackRows();
+  // CW sideband (#753, lib/cw-sideband.js): radios whose link can set both CW modes.
+  const cwSidebandRow = document.getElementById('rig-cw-sideband');
+  if (cwSidebandRow) cwSidebandRow.classList.toggle('hidden', !(window.CwSideband && CwSideband.appliesToRadioType(type)));
+  syncCwSidebandRow();
   // Packet mode on the radio (#128): for every radio, shown once Winlink is on.
   const packetModeRow = document.getElementById('rig-packet-mode');
   if (packetModeRow) packetModeRow.classList.toggle('hidden', !(typeof setWinlinkEnable !== 'undefined' && setWinlinkEnable && setWinlinkEnable.checked));
@@ -3754,17 +3784,92 @@ if (rigModelSelect) rigModelSelect.addEventListener('change', syncYaesuLanMuteMo
 // Transmit audio input (#594): the Kenwoods whose key-down picks the socket
 // (lib/tx-audio-input.js). The TS-480 has no default: blank = ask on the
 // first transmit; the others are blank = Rear, as before.
+// The FT-891 (#602, lib/ft891-tx-audio-input.js): the same rig field sets the
+// radio's MIC SELECT menus while POTACAT is connected; blank = leave them alone.
 function syncTxAudioInputRow() {
   const row = document.getElementById('rig-tx-audio-input');
   const sel = document.getElementById('set-tx-audio-input');
   if (!row || !sel || !window.TxAudioInput) return;
   const model = rigModelSelect ? rigModelSelect.value : '';
-  const ok = window.TxAudioInput.hasChoice(model);
+  const ft891 = !!(window.Ft891TxAudioInput && window.Ft891TxAudioInput.hasChoice(model));
+  const ok = window.TxAudioInput.hasChoice(model) || ft891;
   row.classList.toggle('hidden', !ok);
   const blank = sel.querySelector('option[value=""]');
-  if (blank) blank.textContent = ok && window.TxAudioInput.MODELS[model] == null ? 'Ask on first transmit' : 'Rear (data / ACC2 socket), the default';
+  if (blank) blank.textContent = ft891 ? window.Ft891TxAudioInput.BLANK_LABEL
+    : ok && window.TxAudioInput.MODELS[model] == null ? 'Ask on first transmit' : 'Rear (data / ACC2 socket), the default';
+  const labels = ft891 ? window.Ft891TxAudioInput.LABELS : window.TxAudioInput.LABELS;
+  for (const v of ['rear', 'front']) { const o = sel.querySelector('option[value="' + v + '"]'); if (o) o.textContent = labels[v]; }
+  const help = document.getElementById('tx-audio-input-help');
+  if (help) {
+    if (help.dataset.kenwood == null) help.dataset.kenwood = help.textContent; // the page's own (Kenwood) text
+    help.textContent = ft891 ? window.Ft891TxAudioInput.HELP : help.dataset.kenwood;
+  }
 }
 if (rigModelSelect) rigModelSelect.addEventListener('change', syncTxAudioInputRow);
+// Where the sound card interface plugs in (#153, lib/rig-audio-jack.js).
+// rigVoiceDataSwitchChoice is the operator's own tick-box choice for the rig
+// being edited: true or false once stored or once the box is clicked,
+// undefined while the rig follows the global SSB-over-DATA setting (shown as
+// that setting would act: off for voice on a Yaesu).
+var rigVoiceDataSwitchChoice; // var: the sub-panel refresh can run before this line does
+function rigAudioJackChoice() {
+  const mic = document.getElementById('set-audio-jack-mic');
+  return mic && mic.checked ? 'mic' : 'data';
+}
+function voiceDataSwitchFallback() {
+  const model = rigModelSelect ? rigModelSelect.value : '';
+  let brand = null;
+  for (const group of (typeof rigModelData !== 'undefined' ? rigModelData : [])) {
+    if (group.models && group.models.includes(model)) { brand = group.brand; break; }
+  }
+  return !!(typeof setSsbOverData !== 'undefined' && setSsbOverData && setSsbOverData.checked) && brand !== 'Yaesu';
+}
+function syncAudioJackRows() {
+  const mic = rigAudioJackChoice() === 'mic' && !!(window.RigAudioJack && RigAudioJack.appliesToRadioType(getSelectedRadioType()));
+  const sw = document.getElementById('rig-voice-data-switch-row');
+  if (sw) sw.style.display = mic ? 'none' : '';
+  const box = document.getElementById('set-voice-data-switch');
+  if (box) box.checked = typeof rigVoiceDataSwitchChoice === 'boolean' ? rigVoiceDataSwitchChoice : voiceDataSwitchFallback();
+  // Voice in DATA mode turns the microphone jack off: never on a mic-jack rig.
+  const vad = document.getElementById('rig-voice-as-data');
+  if (vad) vad.style.display = mic ? 'none' : '';
+}
+// CW sideband (#753): the choices in the radio's own words (CW-U / CW-L on a
+// Yaesu, CW / CW-R elsewhere), from lib/cw-sideband.js.
+function syncCwSidebandRow() {
+  const sel = document.getElementById('set-cw-sideband');
+  if (!sel || !window.CwSideband) return;
+  const model = rigModelSelect ? rigModelSelect.value : '';
+  let brand = null;
+  for (const group of (typeof rigModelData !== 'undefined' ? rigModelData : [])) {
+    if (group.models && group.models.includes(model)) { brand = group.brand; break; }
+  }
+  for (const c of CwSideband.choices(brand)) {
+    const opt = sel.querySelector('option[value="' + c.value + '"]');
+    if (opt) opt.textContent = c.label;
+  }
+  const help = document.getElementById('cw-sideband-help');
+  if (help) help.textContent = CwSideband.helpText(brand);
+}
+if (rigModelSelect) rigModelSelect.addEventListener('change', syncCwSidebandRow);
+function loadRigAudioJack(rig) {
+  const mic = !!(rig && rig.audioJack === 'mic');
+  const d = document.getElementById('set-audio-jack-data');
+  const m = document.getElementById('set-audio-jack-mic');
+  if (d) d.checked = !mic;
+  if (m) m.checked = mic;
+  rigVoiceDataSwitchChoice = rig && typeof rig.voiceDataSwitch === 'boolean' ? rig.voiceDataSwitch : undefined;
+  syncAudioJackRows();
+}
+for (const id of ['set-audio-jack-data', 'set-audio-jack-mic']) {
+  const el = document.getElementById(id);
+  if (el) el.addEventListener('change', syncAudioJackRows);
+}
+{
+  const box = document.getElementById('set-voice-data-switch');
+  if (box) box.addEventListener('change', () => { rigVoiceDataSwitchChoice = box.checked; });
+}
+if (rigModelSelect) rigModelSelect.addEventListener('change', syncAudioJackRows);
 // Sweep 1a: the DATA MOD to USB box, only for the Icoms POTACAT can set it on (lib/icom-usb-data-mod.js).
 function syncIcomUsbDataModRow() {
   const row = document.getElementById('rig-icom-usb-data-mod');
@@ -3798,6 +3903,7 @@ async function openRigEditor(mode, rigId) {
       { const t = document.getElementById('set-tx-audio-input'); if (t) t.value = rig.txAudioInput === 'front' || rig.txAudioInput === 'rear' ? rig.txAudioInput : ''; syncTxAudioInputRow(); }
       { const t = document.getElementById('set-tx-channel'); if (t) t.value = rig.txChannel === 'left' ? 'left' : 'both'; } // #654
       { const t = document.getElementById('set-icom-usb-data-mod'); if (t) t.checked = !rig.icomUsbDataModOff; syncIcomUsbDataModRow(); } // sweep 1a: absent = on
+      { const t = document.getElementById('set-cw-sideband'); if (t) t.value = window.CwSideband ? CwSideband.settingOf(rig) : 'band'; syncCwSidebandRow(); } // #753: absent = Automatic
       await populateRadioSection(rig.catTarget);
       // Per-rig audio source — populateRadioSection just rebuilt the options
       // for this rig's radio type, so the stored value (validated) sticks.
@@ -3828,6 +3934,7 @@ async function openRigEditor(mode, rigId) {
       if (atuKeepOnEl) atuKeepOnEl.checked = !!rig.atuKeepOn;
       const voiceAsDataEl = document.getElementById('set-voice-as-data');
       if (voiceAsDataEl) voiceAsDataEl.checked = !!rig.voiceAsData;
+      loadRigAudioJack(rig); // #153
       { // the amplifier drive limit (lib/amp-drive-limit.js)
         const on = document.getElementById('set-amp-drive-on');
         const w = document.getElementById('set-amp-drive-w');
@@ -3861,11 +3968,13 @@ async function openRigEditor(mode, rigId) {
     buildFlexBandAntennaMap({});
     fillSdrScopeForm(null);
     { const v = document.getElementById('set-voice-as-data'); if (v) v.checked = false; }
+    loadRigAudioJack(null); // #153: a new rig starts on the data jack, following the global setting
     { const v = document.getElementById('set-allow-power-off'); if (v) v.checked = false; }
     { const v = document.getElementById('set-icom-usb-data-mod'); if (v) v.checked = true; syncIcomUsbDataModRow(); } // sweep 1a: a new rig starts on
     { const v = document.getElementById('set-amp-drive-on'); if (v) v.checked = false; }
     { const v = document.getElementById('set-amp-drive-w'); if (v) v.value = 10; }
     { const v = document.getElementById('set-packet-mode'); if (v) v.value = 'auto'; }
+    { const v = document.getElementById('set-cw-sideband'); if (v) v.value = 'band'; syncCwSidebandRow(); } // #753: a new rig starts on Automatic
     await populateRigAudioDevices('', '');
   }
 
@@ -4004,7 +4113,11 @@ async function saveRigEditor() {
   const atuKeepOnEl = document.getElementById('set-atu-keep-on');
   const rigAtuKeepOn = !!(atuKeepOnEl && atuKeepOnEl.checked);
   const voiceAsDataEl = document.getElementById('set-voice-as-data');
-  const rigVoiceAsData = !!(voiceAsDataEl && voiceAsDataEl.checked);
+  // #153: the jack is stored only for a radio that shows the question, and
+  // only as 'mic' (absent = data jack); the tick box only once it was set.
+  const rigAudioJack = window.RigAudioJack && RigAudioJack.appliesToRadioType(getSelectedRadioType()) ? rigAudioJackChoice() : 'data';
+  const rigVoiceDataSwitch = rigAudioJack === 'data' ? rigVoiceDataSwitchChoice : undefined;
+  const rigVoiceAsData = !!(voiceAsDataEl && voiceAsDataEl.checked) && rigAudioJack !== 'mic';
   // #293, #768: only a choice the operator made is stored (true or false). A
   // rig with none follows the default for its connection (lib/rig-power.js).
   const rigPowerOffStored = typeof rigPowerOffChoice === 'boolean' ? rigPowerOffChoice : undefined;
@@ -4019,13 +4132,18 @@ async function saveRigEditor() {
   })();
   const txAudioInputEl = document.getElementById('set-tx-audio-input');
   const rigTxAudioInput = txAudioInputEl && (txAudioInputEl.value === 'front' || txAudioInputEl.value === 'rear')
-    && window.TxAudioInput && window.TxAudioInput.hasChoice(model) ? txAudioInputEl.value : ''; // #594
+    && ((window.TxAudioInput && window.TxAudioInput.hasChoice(model))
+      || (window.Ft891TxAudioInput && window.Ft891TxAudioInput.hasChoice(model))) ? txAudioInputEl.value : ''; // #594, FT-891 #602
   const icomUsbDataModEl = document.getElementById('set-icom-usb-data-mod');
   const rigIcomUsbDataModOff = !!(icomUsbDataModEl && !icomUsbDataModEl.checked); // sweep 1a: stored only when off
   const txChannelEl = document.getElementById('set-tx-channel');
   const rigTxLeftOnly = !!(txChannelEl && txChannelEl.value === 'left'); // #654: absent = both channels
   const lanVoiceSsbEl = document.getElementById('set-lan-voice-ssb');
   const rigLanVoiceInSsb = !!(lanVoiceSsbEl && lanVoiceSsbEl.checked);
+  const cwSidebandEl = document.getElementById('set-cw-sideband');
+  // #753: stored only when not Automatic, and only for a radio type that shows the question.
+  const rigCwSideband = cwSidebandEl && window.CwSideband && CwSideband.appliesToRadioType(getSelectedRadioType())
+    && CwSideband.normalizeSetting(cwSidebandEl.value) !== CwSideband.AUTO ? CwSideband.normalizeSetting(cwSidebandEl.value) : '';
   const packetModeEl = document.getElementById('set-packet-mode');
   const rigPacketMode = packetModeEl && (packetModeEl.value === 'fm' || packetModeEl.value === 'fmdata') ? packetModeEl.value : '';
 
@@ -4055,6 +4173,8 @@ async function saveRigEditor() {
       rig.externalAtuSeconds = rigExternalAtuSeconds;
       rig.atuKeepOn = rigAtuKeepOn;
       if (rigVoiceAsData) rig.voiceAsData = true; else delete rig.voiceAsData;
+      if (rigAudioJack === 'mic') rig.audioJack = 'mic'; else delete rig.audioJack;
+      if (typeof rigVoiceDataSwitch === 'boolean') rig.voiceDataSwitch = rigVoiceDataSwitch; else delete rig.voiceDataSwitch;
       if (rigPowerOffStored !== undefined) rig.allowPowerOffNoWake = rigPowerOffStored; else delete rig.allowPowerOffNoWake;
       if (rigAmpDriveW > 0) rig.ampDriveLimitW = rigAmpDriveW; else delete rig.ampDriveLimitW;
       if (rigTxAudioInput) rig.txAudioInput = rigTxAudioInput; else delete rig.txAudioInput;
@@ -4062,6 +4182,7 @@ async function saveRigEditor() {
       if (rigIcomUsbDataModOff) rig.icomUsbDataModOff = true; else delete rig.icomUsbDataModOff;
       if (rigLanVoiceInSsb) rig.lanVoiceInSsb = true; else delete rig.lanVoiceInSsb;
       if (rigPacketMode) rig.packetMode = rigPacketMode; else delete rig.packetMode; // absent = Automatic
+      if (rigCwSideband) rig.cwSideband = rigCwSideband; else delete rig.cwSideband; // absent = Automatic (#753)
       rig.flexBandAntennaMap = flexBandAntennaMap;
       if (rigSdrScope) rig.sdrScope = rigSdrScope;
       rig.setupDone = [...rigSetupDone];
@@ -4089,6 +4210,8 @@ async function saveRigEditor() {
       externalAtuSeconds: rigExternalAtuSeconds,
       atuKeepOn: rigAtuKeepOn,
       ...(rigVoiceAsData ? { voiceAsData: true } : {}),
+      ...(rigAudioJack === 'mic' ? { audioJack: 'mic' } : {}),
+      ...(typeof rigVoiceDataSwitch === 'boolean' ? { voiceDataSwitch: rigVoiceDataSwitch } : {}),
       ...(rigPowerOffStored !== undefined ? { allowPowerOffNoWake: rigPowerOffStored } : {}),
       ...(rigAmpDriveW > 0 ? { ampDriveLimitW: rigAmpDriveW } : {}),
       ...(rigTxAudioInput ? { txAudioInput: rigTxAudioInput } : {}),
@@ -4096,6 +4219,7 @@ async function saveRigEditor() {
       ...(rigIcomUsbDataModOff ? { icomUsbDataModOff: true } : {}),
       ...(rigLanVoiceInSsb ? { lanVoiceInSsb: true } : {}),
       ...(rigPacketMode ? { packetMode: rigPacketMode } : {}),
+      ...(rigCwSideband ? { cwSideband: rigCwSideband } : {}),
       flexBandAntennaMap,
       ...(rigSdrScope ? { sdrScope: rigSdrScope } : {}),
       setupDone: [...rigSetupDone],
@@ -4302,12 +4426,14 @@ function updateBandButtonsVisibility() {
   if (show) updateBandButtonActive();
 }
 
-bandButtonsEl.addEventListener('click', (e) => {
+bandButtonsEl.addEventListener('click', async (e) => {
   const btn = e.target.closest('button');
   if (!btn) return;
   const band = btn.dataset.band;
-  const freq = getBandQsyFreq(band);
+  let freq = getBandQsyFreq(band);
   if (freq) {
+    // Back to where this radio last was on the band, or the preset (#680).
+    try { const t = await window.api.bandJumpTarget(freq); if (Number(t) > 0) freq = Number(t); } catch {}
     const curMode = (radioMode || '').toUpperCase();
     // Voice SSB (or a mode not read yet): main decides, from the radio's own
     // mode and DATA state, whether the band's sideband goes with it (#445,
@@ -5746,6 +5872,43 @@ if (setPskrUpload) {
   setPskrUpload.addEventListener('change', () => {
     pskrUploadConfig.classList.toggle('hidden', !setPskrUpload.checked);
   });
+}
+
+// "Turn the rotor only on these bands" (#356, lib/rotor-bands.js): tick
+// boxes for the bands the operator's rigs cover. Off = every band.
+const setRotorBandsOnly = document.getElementById('set-rotor-bands-only');
+const rotorBandsConfig = document.getElementById('rotor-bands-config');
+const rotorBandsGrid = document.getElementById('rotor-bands-grid');
+let rotorBandsSelected = new Set();
+function renderRotorBandsGrid(bands) {
+  if (!rotorBandsGrid) return;
+  rotorBandsGrid.textContent = '';
+  for (const b of bands) {
+    const lab = document.createElement('label');
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.checked = rotorBandsSelected.has(b);
+    cb.addEventListener('change', () => {
+      if (cb.checked) rotorBandsSelected.add(b); else rotorBandsSelected.delete(b);
+    });
+    lab.appendChild(cb);
+    lab.appendChild(document.createTextNode(b));
+    rotorBandsGrid.appendChild(lab);
+  }
+}
+async function loadRotorBandChoices() {
+  let bands = null;
+  try { const r = await window.api.rotorBandChoices(); bands = r && Array.isArray(r.bands) ? r.bands : null; } catch { /* older main */ }
+  renderRotorBandsGrid(bands || (window.RigBands ? window.RigBands.ALL_BANDS : []));
+}
+function applyRotorBandsVisibility() {
+  if (rotorBandsConfig && setRotorBandsOnly) rotorBandsConfig.classList.toggle('hidden', !setRotorBandsOnly.checked);
+}
+if (setRotorBandsOnly) setRotorBandsOnly.addEventListener('change', applyRotorBandsVisibility);
+/** rotorBands to save, low to high. */
+function rotorBandsToSave() {
+  const order = window.RigBands ? window.RigBands.ALL_BANDS : [...rotorBandsSelected];
+  return order.filter((b) => rotorBandsSelected.has(b));
 }
 
 // Rotor checkbox toggles rotor config visibility
@@ -7777,6 +7940,7 @@ function _shareRigOpen() {
   // Reset to form view, pre-fill callsigns from current settings.
   _shareRigShowFormView();
   _shareRigUpdateClassDetail();
+  _shareRigUpdateSignedOut();
   _shareRigUpdateReachNotice();
   _shareRigResetWhenSection();
   _shareRigRefreshList();
@@ -7838,6 +8002,25 @@ function _shareRigSelectedWhen() {
 // network reach state. Goal: never let an operator generate a pass
 // expecting "share anywhere" when they're actually on LAN-only and
 // the recipient won't be able to reach them.
+// Signed out of POTACAT Cloud (by hand, or because this computer was removed
+// from the account): one line saying passes cannot be created, cancelled or
+// notified from here. Passes already sent keep working; nothing is revoked.
+async function _shareRigUpdateSignedOut() {
+  const box = document.getElementById('share-rig-signed-out');
+  if (!box || !window.api.cloudSessionGet) return;
+  let st = null;
+  try { st = await window.api.cloudSessionGet(); } catch {}
+  const text = st && !st.loggedIn ? (st.guestPassNotice || '') : '';
+  box.textContent = text;
+  box.classList.toggle('hidden', !text);
+}
+if (window.api && window.api.onCloudSignedOut) {
+  window.api.onCloudSignedOut(() => {
+    const dlg = document.getElementById('share-rig-dialog');
+    if (dlg && dlg.open) _shareRigUpdateSignedOut();
+  });
+}
+
 async function _shareRigUpdateReachNotice() {
   const box = document.getElementById('share-rig-reach-notice');
   if (!box) return;
@@ -8244,7 +8427,7 @@ async function _shareRigRefreshList() {
         : (st === 'scheduled' ? 'scheduled'
           : (st === 'expired' ? 'expired' : 'revoked'));
       const sessions = (p.activeSessionCount || p.active_session_count || 0);
-      const sessionLine = sessions > 0 ? '<span class="lst-meta" style="color:var(--accent-green);">· ' + sessions + ' guest connected now</span>' : '';
+      const sessionLine = sessions > 0 ? '<span class="lst-meta" style="color:var(--accent-green);">· ' + _esc(PassWording.guestsUsedText(sessions)) + '</span>' : '';
       // Active and scheduled passes can both be cancelled + their link
       // copied. Expired/cancelled can't.
       const canActOn = (st === 'active' || st === 'scheduled');
@@ -12905,7 +13088,7 @@ function bindPopupClickHandlers(mapInstance) {
         if (!isNaN(lat) && !isNaN(lon)) showTuneArc(lat, lon, btn.dataset.freq, btn.dataset.source);
         // Find matching spot in allSpots for quick respot
         const match = allSpots.find(s => s.frequency === btn.dataset.freq && s.callsign === btn.dataset.call && s.mode === btn.dataset.mode);
-        if (match) { lastTunedSpot = match; prefillDxCommand(match); notifyVfoTunedSpot(match); }
+        if (match) { lastTunedSpot = match; prefillDxCommand(match); notifyVfoTunedSpot(match); n3fjpPick(match); }
         // Activator mode: fill QSO form from spot
         if (appMode === 'activator' && activationActive && match) {
           fillActivatorFromSpot(match);
@@ -13187,6 +13370,7 @@ document.addEventListener('keydown', (e) => {
     if (!spot) return;
     lastTunedSpot = spot;
     notifyVfoTunedSpot(spot);
+    n3fjpPick(spot);
     prefillDxCommand(spot);
     window.api.tune(spot.frequency, spot.mode, spot.bearing);
     if (spot.lat != null && spot.lon != null) showTuneArc(spot.lat, spot.lon, spot.frequency, spot.source);
@@ -14098,6 +14282,7 @@ if (window.api.onBandspreadTunedSpot) {
     if (!match) return;
     lastTunedSpot = match;
     notifyVfoTunedSpot(match);
+    n3fjpPick(match);
     if (typeof prefillDxCommand === 'function') prefillDxCommand(match);
     render();
     const onFreqRow = tbody && (tbody.querySelector('.tuned-spot') || tbody.querySelector('.on-freq'));
@@ -15675,6 +15860,7 @@ function render() {
         }
         lastTunedSpot = s;
         notifyVfoTunedSpot(s);
+        n3fjpPick(s);
         cwSpotWpm = s.wpm || null;
         updateCwSpotWpm();
         prefillDxCommand(s);
@@ -15949,6 +16135,11 @@ function render() {
 
       for (const cell of cells) {
         const td = document.createElement('td');
+        // Only a reference cell that can overflow wraps (#999): several program
+        // refs only. A single ref (pills or not) keeps the old nowrap cell, so row
+        // height is unchanged (like source-multi-program on the Source cell).
+        const multiRef = cell.col === 'reference' && String(cell.val || '').indexOf(' / ') !== -1;
+        const refWraps = multiRef;
         // Make park ref and name clickable links to park/summit pages
         if ((cell.col === 'reference' || cell.col === 'parkName') && s.reference && s.source !== 'net') {
           let url;
@@ -15960,7 +16151,19 @@ function render() {
           else if (s.source === 'gma') url = `https://www.cqgma.org/`; // was falling through to a bogus POTA link
           else url = `https://pota.app/#/park/${s.reference}`;
           const a = document.createElement('a');
-          a.textContent = cell.val;
+          if (multiRef) {
+            // Each ref is its own nowrap unit so a long cell wraps between
+            // refs, never inside "US-1234" (#999).
+            String(cell.val || '').split(' / ').forEach((ref, i) => {
+              if (i > 0) a.appendChild(document.createTextNode(' / '));
+              const part = document.createElement('span');
+              part.className = 'ref-part';
+              part.textContent = ref;
+              a.appendChild(part);
+            });
+          } else {
+            a.textContent = cell.val;
+          }
           a.href = '#';
           a.className = 'park-link';
           a.addEventListener('click', (e) => {
@@ -15969,9 +16172,18 @@ function render() {
             window.api.openExternal(url);
           });
           td.appendChild(a);
+        } else if (multiRef) {
+          String(cell.val || '').split(' / ').forEach((ref, i) => {
+            if (i > 0) td.appendChild(document.createTextNode(' / '));
+            const part = document.createElement('span');
+            part.className = 'ref-part';
+            part.textContent = ref;
+            td.appendChild(part);
+          });
         } else {
           td.textContent = cell.val;
         }
+        if (refWraps) td.classList.add('ref-wrap');
         if (cell.col) td.setAttribute('data-col', cell.col);
         if (cell.cls) td.className = cell.cls;
         // Bearing column: clickable in manual rotor mode
@@ -16010,6 +16222,7 @@ function render() {
         if (cell.wwff) {
           const badge = document.createElement('span');
           badge.textContent = 'WWFF';
+          badge.className = 'ref-wwff-pill';
           badge.style.cssText = `background:${SOURCE_COLORS_ACTIVE.wwff};color:#000;font-size:9px;font-weight:bold;padding:1px 3px;border-radius:3px;margin-left:4px;`;
           td.appendChild(badge);
         }
@@ -16352,6 +16565,7 @@ window.api.onCatFrequency((hz) => { logFreqFollowRadio(hz); });
 
 function openLogPopup(spot) {
   currentLogSpot = spot;
+  n3fjpPick(spot);
   logFreqFollow.typed = false;
   logFreqFollow.pinnedKhz = parseFloat(spot.frequency) || 0;
   const nowKhz = radioFreqKhzExact || radioFreqKhz;
@@ -18397,6 +18611,10 @@ async function openSettingsDialog(tab) {
   if (s.enableRotor) rotorConfigured = true;
   if (setRotorType) setRotorType.value = s.rotorType || 'pstrotator';
   if (setRotorMode) setRotorMode.value = s.rotorMode || 'auto';
+  if (setRotorBandsOnly) setRotorBandsOnly.checked = s.rotorBandsOnly === true; // default off: every band
+  rotorBandsSelected = new Set(Array.isArray(s.rotorBands) ? s.rotorBands : []);
+  applyRotorBandsVisibility();
+  loadRotorBandChoices();
   setRotorHost.value = s.rotorHost || '127.0.0.1';
   setRotorPort.value = s.rotorPort || 12040;
   if (setRotorEzPort) setRotorEzPort.dataset.saved = s.rotorSerialPath || '';
@@ -18449,6 +18667,9 @@ async function openSettingsDialog(tab) {
   setEnableAtu.checked = s.enableAtu === true;
   setVerboseLog.checked = s.verboseLog === true;
   setLightIcon.checked = s.lightIcon === true;
+  // #345: the system title bar is a Linux choice; Windows and macOS keep POTACAT's own.
+  document.getElementById('linux-native-frame-row').classList.toggle('hidden', window.api.platform !== 'linux');
+  setLinuxNativeFrame.checked = s.linuxNativeFrame === true;
   setEnablePota.checked = s.enablePota !== false;
   setEnableSota.checked = s.enableSota === true;
   setEnableWwff.checked = s.enableWwff === true;
@@ -18564,12 +18785,15 @@ async function openSettingsDialog(tab) {
   }
   // Blank = no default: an unknown power is logged empty (#523).
   { const dp = LogTxPower.operatorDefaultPower(s); setDefaultPower.value = dp ? String(dp) : ''; }
+  // Blank = off: the radio's power is logged as before (#837).
+  { const fx = LogTxPower.fixedLogPower(s); setLogFixedPower.value = fx ? String(fx) : ''; }
   setSendToLogbook.checked = s.sendToLogbook === true;
   setLogbookType.value = s.logbookType || '';
   setLogbookHost.value = s.logbookHost || '127.0.0.1';
   setLogbookPort.value = s.logbookPort || '';
   setLog4omWsjtxBinary.checked = s.log4omWsjtxBinary === true;
   if (setN3fjpPull) setN3fjpPull.checked = s.n3fjpPull === true;
+  if (setN3fjpCallInProgress) setN3fjpCallInProgress.checked = s.n3fjpCallInProgress === true;
   setWavelogUrl.value = s.wavelogUrl || '';
   setWavelogApiKey.value = s.wavelogApiKey || '';
   setWavelogStationId.value = s.wavelogStationId || '';
@@ -18725,6 +18949,8 @@ async function openSettingsDialog(tab) {
       winlinkVaraSection.classList.remove('hidden');
       winlinkVaraSection.querySelectorAll('.vara-win-only').forEach((el) => el.classList.toggle('hidden', !onWindows));
       winlinkVaraSection.querySelectorAll('.vara-other-only').forEach((el) => el.classList.toggle('hidden', onWindows));
+      // macOS: a link to the website's VARA-on-a-Mac guide beside Use VARA HF.
+      winlinkVaraSection.querySelectorAll('.vara-mac-only').forEach((el) => el.classList.toggle('hidden', window.api.platform !== 'darwin'));
       const varaDetails = document.getElementById('vara-details');
       if (varaDetails && !onWindows) varaDetails.open = true;
       if (setVaraHfHost) setVaraHfHost.value = s.winlinkVaraHost || '';
@@ -18735,11 +18961,13 @@ async function openSettingsDialog(tab) {
       setVaraFmPath.value = s.winlinkVaraFmPath || '';
       setVaraFmPort.value = s.winlinkVaraFmPort || 8310;
       setVaraAutoLaunch.checked = s.winlinkVaraAutoLaunch !== false;
+      if (setVaraHfMercury) setVaraHfMercury.checked = s.winlinkVaraIsMercury === true;
       const cab = ((s.rigs || []).find((x) => x.id === s.activeRigId) || {}).modemCable || {};
       if (window.fillVaraCableDevices) window.fillVaraCableDevices(cab.inputId || '', cab.outputId || '');
     }
     setWinlinkCap.value = s.winlinkSessionCapMin || 30;
     if (setWinlinkPrediction) setWinlinkPrediction.checked = s.winlinkPrediction !== false;
+    if (setWinlinkServiceCodes) setWinlinkServiceCodes.value = s.winlinkServiceCodes || '';
     if (setWinlinkDeletedDays) setWinlinkDeletedDays.value = String([7, 30, 90, 0].includes(Number(s.winlinkDeletedDays)) && s.winlinkDeletedDays !== '' && s.winlinkDeletedDays != null ? Number(s.winlinkDeletedDays) : 30);
     if (setWinlinkAutoRetry) setWinlinkAutoRetry.checked = s.winlinkAutoRetry !== false;
     if (setWinlinkRecordAudio) setWinlinkRecordAudio.checked = !!s.winlinkRecordModemAudio;
@@ -18758,7 +18986,7 @@ async function openSettingsDialog(tab) {
     setMercurySound.value = s.mercurySoundSystem || 'auto';
     setMercuryIn.value = s.mercuryInputDevice || '';
     setMercuryOut.value = s.mercuryOutputDevice || '';
-    setMercuryBw.value = String(s.mercuryBw || 2300);
+    setMercuryBw.value = String(window.MercuryOffer.bandwidthChoice(s.mercuryBw));
     setMercuryTxGain.value = (s.mercuryTxGainDb != null ? s.mercuryTxGainDb : 0);
     setMercuryListen.checked = s.mercuryListen === true;
     mercuryConfig.classList.toggle('hidden', !s.enableMercury);
@@ -19397,6 +19625,7 @@ settingsSave.addEventListener('click', async () => {
   const n1mmRstEnabled = setN1mmRst.checked;
   const adifLogPath = setAdifLogPath.value.trim() || '';
   const defaultPowerVal = LogTxPower.positiveWatts(setDefaultPower.value.trim()); // 0 = none (#523)
+  const logFixedPowerVal = LogTxPower.positiveWatts(setLogFixedPower.value.trim()); // 0 = off (#837)
   const sendToLogbook = setSendToLogbook.checked;
   const logCommentTagsEnabled = setLogCommentTags ? setLogCommentTags.checked : true;
   const logbookTypeVal = setLogbookType.value;
@@ -19542,6 +19771,8 @@ settingsSave.addEventListener('click', async () => {
     enableRotor: rotorEnabledVal,
     rotorType: rotorTypeVal,
     rotorMode: rotorModeVal,
+    rotorBandsOnly: setRotorBandsOnly ? setRotorBandsOnly.checked : false,
+    rotorBands: rotorBandsToSave(),
     rotorHost: rotorHostVal,
     rotorPort: rotorPortVal,
     rotorSerialPath: rotorSerialPathVal,
@@ -19567,6 +19798,7 @@ settingsSave.addEventListener('click', async () => {
     enableAtu: atuEnabled,
     verboseLog: verboseLogEnabled,
     lightIcon: lightIconEnabled,
+    linuxNativeFrame: setLinuxNativeFrame.checked,
     potaParksPath: potaParksPath,
     potaActivationsPath: setPotaActivationsPath ? (setPotaActivationsPath.value.trim() || '') : '',
     hideWorkedParks: hideWorkedParksEnabled,
@@ -19578,12 +19810,14 @@ settingsSave.addEventListener('click', async () => {
     adifLogPath: adifLogPath,
     defaultPower: defaultPowerVal || null,
     defaultPowerSet: defaultPowerVal > 0, // a typed 100 is the operator's, not the old untouched default
+    logFixedPower: logFixedPowerVal || null,
     sendToLogbook: sendToLogbook,
     logbookType: logbookTypeVal,
     logbookHost: logbookHostVal,
     logbookPort: logbookPortVal,
     log4omWsjtxBinary: setLog4omWsjtxBinary.checked,
     n3fjpPull: !!(setN3fjpPull && setN3fjpPull.checked),
+    n3fjpCallInProgress: !!(setN3fjpCallInProgress && setN3fjpCallInProgress.checked),
     wavelogUrl: setWavelogUrl.value.trim(),
     wavelogApiKey: setWavelogApiKey.value.trim(),
     wavelogStationId: setWavelogStationId.value.trim(),
@@ -19638,9 +19872,11 @@ settingsSave.addEventListener('click', async () => {
         ...(setVaraHfHost ? { winlinkVaraHost: setVaraHfHost.value.trim() } : {}),
         ...(setVaraFmHost ? { winlinkVaraFmHost: setVaraFmHost.value.trim() } : {}),
         winlinkVaraAutoLaunch: setVaraAutoLaunch.checked,
+        ...(setVaraHfMercury ? { winlinkVaraIsMercury: setVaraHfMercury.checked } : {}),
       } : {}),
       winlinkSessionCapMin: Math.max(10, Math.min(60, parseInt(setWinlinkCap.value, 10) || 30)),
       winlinkPrediction: setWinlinkPrediction ? setWinlinkPrediction.checked : true,
+      ...(setWinlinkServiceCodes ? { winlinkServiceCodes: setWinlinkServiceCodes.value } : {}),
       ...(setWinlinkDeletedDays ? { winlinkDeletedDays: Number(setWinlinkDeletedDays.value) } : {}),
       winlinkAutoRetry: setWinlinkAutoRetry ? setWinlinkAutoRetry.checked : true,
       winlinkRecordModemAudio: setWinlinkRecordAudio ? setWinlinkRecordAudio.checked : false,
@@ -19652,7 +19888,7 @@ settingsSave.addEventListener('click', async () => {
       mercurySoundSystem: setMercurySound.value,
       mercuryInputDevice: setMercuryIn.value.trim(),
       mercuryOutputDevice: setMercuryOut.value.trim(),
-      mercuryBw: parseInt(setMercuryBw.value, 10) || 2300,
+      mercuryBw: window.MercuryOffer.bandwidthChoice(setMercuryBw.value),
       mercuryTxGainDb: parseFloat(setMercuryTxGain.value) || 0,
       mercuryListen: setMercuryListen.checked,
     } : {}),
@@ -19699,7 +19935,8 @@ settingsSave.addEventListener('click', async () => {
   });
   // Reflect the Mercury enable state in the More ▾ menu without a reload.
   var mercuryViewBtn = document.getElementById('view-mercury-btn');
-  if (mercuryViewBtn && setMercuryEnable) mercuryViewBtn.classList.toggle('hidden', !setMercuryEnable.checked);
+  // mercuryChatWindow has no switch in Settings: read it back from main.
+  if (mercuryViewBtn && setMercuryEnable) mercuryViewBtn.classList.toggle('hidden', !window.MercuryOffer.chatWindowOffered(await window.api.getSettings()));
   var winlinkViewBtn = document.getElementById('view-winlink-btn');
   if (winlinkViewBtn) winlinkViewBtn.classList.remove('hidden');
   grid = setGrid.value.trim();
@@ -19785,6 +20022,7 @@ settingsSave.addEventListener('click', async () => {
   n1mmRst = n1mmRstEnabled;
   applyRstMode();
   defaultPower = defaultPowerVal;
+  fixedLogPower = logFixedPowerVal;
   updateLoggingVisibility();
   updateBannerLoggerVisibility();
   applyTheme();
@@ -22970,8 +23208,9 @@ let lastLogPower = 0; // last power value entered by user in log dialog (sticky)
 // guessed 100 W (#523, lib/log-tx-power.js).
 function logFormPower() {
   // A TCI rig's level is a drive percent: never offered as watts.
-  if (rigCurrentCaps.powerUnit === '%') return lastLogPower > 0 ? lastLogPower : null;
+  if (rigCurrentCaps.powerUnit === '%') return LogTxPower.txPowerForLog({ fixedW: fixedLogPower, enteredW: lastLogPower });
   return LogTxPower.txPowerForLog({
+    fixedW: fixedLogPower, // the amplifier's power, when the operator set one (#837)
     knownW: rigKnownPower > 0 ? rigKnownPower : radioPower, // main's level is the newer (a set lands there first)
     enteredW: lastLogPower,
     defaultW: defaultPower,
@@ -26438,6 +26677,7 @@ window.api.onRigState((state) => {
   if (!state) return;
   // Custom toggles that follow a radio state (lib/custom-cat-follow.js) relight.
   customRigState = state;
+  if (state.activeRigId !== undefined) customCatRigSwitched(state.activeRigId); // #164
   for (const reflect of customToggleReflectors) reflect();
   // Apply model capabilities before syncing values so Field-specific power
   // decimals/limits and target-specific preamp labels are already in place.
@@ -26882,15 +27122,22 @@ rigPresetsMount(document.getElementById('settings-preset-root'));
 rigPresetsLoad(); // both surfaces start from main's payload; every change is pushed after that
 
 // --- Custom CAT Buttons ---
+// #164: up to 25 (CustomCatFollow.MAX_SLOTS), never padded. The panel shows
+// the programmed buttons for the active rig; "Edit" opens the editing rows,
+// where each button may be tied to some of the operator's radios (slot.rigs,
+// absent = all radios).
 const rigCustomSlotsContainer = document.getElementById('rig-custom-slots');
 const rigCustomAddBtn = document.getElementById('rig-custom-add');
-let customCatButtons = JSON.parse(localStorage.getItem('custom-cat-buttons') || '[]');
-// Start with at least 1 blank slot
-if (customCatButtons.length === 0) customCatButtons.push({ name: '', command: '' });
-// Clean up legacy: remove trailing empty slots beyond the last non-empty one
-while (customCatButtons.length > 1 && !customCatButtons[customCatButtons.length - 1].name && !customCatButtons[customCatButtons.length - 1].command) {
-  customCatButtons.pop();
-}
+const rigCustomView = document.getElementById('rig-custom-view');
+const rigCustomEditor = document.getElementById('rig-custom-editor');
+const rigCustomEditLink = document.getElementById('rig-custom-edit');
+const rigCustomCount = document.getElementById('rig-custom-count');
+let customCatButtons = [];
+try { customCatButtons = CustomCatFollow.capSlots(JSON.parse(localStorage.getItem('custom-cat-buttons') || '[]')); } catch { customCatButtons = []; }
+customCatButtons = customCatButtons.filter((b) => CustomCatFollow.isProgrammed(b));
+let customCatEditing = false;   // the editing rows are open ("Edit" reads "Done")
+let customActiveRigId = null;   // settings.activeRigId, kept current by loadPrefs and rig-state
+let customRigChoices = [];      // [{ id, name }] from settings.rigs, for the Radios choice
 
 // Session-only last-sent state for custom TOGGLE controls. Deliberately not
 // persisted: POTACAT cannot parse arbitrary rigs' replies for user-typed raw
@@ -26957,7 +27204,7 @@ function createCustomSlot(i) {
     customCatButtons[i].type = typeSel.value;
     customToggleState = {};
     saveCustomButtons();
-    renderCustomSlots();
+    renderCustomCat();
   });
 
   const cmdInput = document.createElement('input');
@@ -26983,10 +27230,9 @@ function createCustomSlot(i) {
   removeBtn.addEventListener('click', (e) => {
     e.stopPropagation();
     customCatButtons.splice(i, 1);
-    if (customCatButtons.length === 0) customCatButtons.push({ name: '', command: '' });
     customToggleState = {};
     saveCustomButtons();
-    renderCustomSlots();
+    renderCustomCat();
   });
 
   slot.appendChild(nameInput);
@@ -27154,20 +27400,194 @@ function createCustomSlot(i) {
     slot.appendChild(sendBtn);
   }
 
+  slot.appendChild(createRigsChoice(i));
   slot.appendChild(removeBtn);
   return slot;
 }
 
+// The per-button "Radios" choice (#164): All (the default, no `rigs` field)
+// or one or more of the operator's rigs by name. A button tied to radios
+// shows only while one of them is the active rig.
+function createRigsChoice(i) {
+  const wrap = document.createElement('details');
+  wrap.className = 'rig-custom-rigs';
+  const sum = document.createElement('summary');
+  wrap.appendChild(sum);
+  const list = document.createElement('div');
+  list.className = 'rig-custom-rigs-list';
+  const mkBox = (value, text) => {
+    const lbl = document.createElement('label');
+    const box = document.createElement('input');
+    box.type = 'checkbox';
+    box.value = value;
+    lbl.appendChild(box);
+    lbl.appendChild(document.createTextNode(' ' + text));
+    list.appendChild(lbl);
+    return box;
+  };
+  const allBox = mkBox('', 'All');
+  const rigBoxes = customRigChoices.map((r) => mkBox(r.id, r.name));
+  if (!customRigChoices.length) {
+    const none = document.createElement('div');
+    none.className = 'rig-custom-rigs-none';
+    none.textContent = 'Add a radio in Settings to pick one here.';
+    list.appendChild(none);
+  }
+  wrap.appendChild(list);
+  const nameOf = (id) => (customRigChoices.find((r) => r.id === id) || {}).name || 'a removed radio';
+  const sync = () => {
+    const ids = CustomCatFollow.slotRigs(customCatButtons[i]);
+    allBox.checked = !ids.length;
+    for (const box of rigBoxes) box.checked = ids.includes(box.value);
+    sum.textContent = !ids.length ? 'Radios: All' : ids.length === 1 ? 'Radios: ' + nameOf(ids[0]) : 'Radios: ' + ids.length;
+    sum.title = !ids.length ? 'Shown for every radio.' : 'Shown only while one of these is the active radio: ' + ids.map(nameOf).join(', ') + '.';
+  };
+  allBox.addEventListener('change', () => {
+    if (!customCatButtons[i]) return;
+    // All cannot be unticked into "no radio": tick a radio instead.
+    if (allBox.checked) { delete customCatButtons[i].rigs; saveCustomButtons(); }
+    sync();
+  });
+  for (const box of rigBoxes) {
+    box.addEventListener('change', () => {
+      if (!customCatButtons[i]) return;
+      const ids = rigBoxes.filter((b) => b.checked).map((b) => b.value);
+      if (ids.length) customCatButtons[i].rigs = ids;
+      else delete customCatButtons[i].rigs;
+      saveCustomButtons();
+      sync();
+    });
+  }
+  wrap.addEventListener('click', (e) => e.stopPropagation());
+  sync();
+  return wrap;
+}
+
 function renderCustomSlots() {
-  customToggleReflectors = [];
   rigCustomSlotsContainer.innerHTML = '';
   for (let i = 0; i < customCatButtons.length; i++) {
     rigCustomSlotsContainer.appendChild(createCustomSlot(i));
   }
 }
 
+// View mode: the programmed buttons for the active rig, wrapping about five
+// to a row; a slider takes a row of its own. A press sends exactly what the
+// editing row's Send / toggle / slider would.
+function renderCustomView() {
+  rigCustomView.innerHTML = '';
+  const shown = CustomCatFollow.visibleSlots(customCatButtons, customActiveRigId);
+  if (!shown.length) {
+    const empty = document.createElement('div');
+    empty.className = 'rig-custom-empty';
+    empty.textContent = customCatButtons.some((b) => CustomCatFollow.isProgrammed(b))
+      ? 'No buttons for this radio. Click Edit to choose the radios for each button.'
+      : 'No buttons yet. Click Edit to add one.';
+    rigCustomView.appendChild(empty);
+    return;
+  }
+  for (const { slot: b, index: i } of shown) {
+    const type = (b.type === 'toggle' || b.type === 'slider') ? b.type : 'button';
+    const label = b.name || ('CAT ' + (i + 1));
+    if (type === 'slider') {
+      const row = document.createElement('div');
+      row.className = 'rig-custom-vslider';
+      const lbl = document.createElement('span');
+      lbl.className = 'rig-custom-vslider-label';
+      lbl.textContent = label;
+      const lo = Number.isFinite(b.min) ? b.min : 0;
+      const hi = Number.isFinite(b.max) ? b.max : 255;
+      const range = document.createElement('input');
+      range.type = 'range';
+      range.className = 'rig-custom-range';
+      range.min = lo;
+      range.max = hi;
+      range.value = Number.isFinite(b.value) ? b.value : lo;
+      range.title = b.command || '';
+      const valOut = document.createElement('span');
+      valOut.className = 'rig-custom-val';
+      valOut.textContent = range.value;
+      range.addEventListener('input', () => {
+        valOut.textContent = range.value;
+        // Same 150 ms debounce as the editing row's slider.
+        clearTimeout(_customSliderTimers['v' + i]);
+        _customSliderTimers['v' + i] = setTimeout(() => {
+          const tpl = String(b.command || '').trim();
+          if (!tpl) return;
+          window.api.rigControl({ action: 'send-custom-cat', command: customSliderCommand(tpl, +range.value) });
+          if (customCatButtons[i]) { customCatButtons[i].value = +range.value; saveCustomButtons(); }
+        }, 150);
+      });
+      row.appendChild(lbl);
+      row.appendChild(range);
+      row.appendChild(valOut);
+      rigCustomView.appendChild(row);
+      continue;
+    }
+    const btn = document.createElement('button');
+    btn.className = 'rig-btn rig-custom-vbtn';
+    if (type === 'toggle') {
+      const reflect = () => {
+        const v = CustomCatFollow.toggleView(customCatButtons[i] || {}, customRigState, customToggleState[i]);
+        btn.textContent = label + ' ' + (v.on === null ? '?' : (v.on ? 'On' : 'Off'));
+        btn.classList.toggle('rig-custom-toggle-on', v.on === true);
+        btn.classList.toggle('rig-custom-toggle-unknown', v.on === null);
+        btn.title = v.fromRadio ? 'Shows what the radio reports.'
+          : v.on === null ? 'State unknown: not read from the radio. A click sends the On command.'
+            : 'Shows the last command sent, not the radio state.';
+      };
+      reflect();
+      customToggleReflectors.push(reflect);
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const goingOn = CustomCatFollow.toggleView(customCatButtons[i] || {}, customRigState, customToggleState[i]).nextCommand === 'on';
+        const cmd = String((goingOn ? b.command : b.commandOff) || '').trim();
+        if (!cmd) return;
+        window.api.rigControl({ action: 'send-custom-cat', command: cmd });
+        customToggleState[i] = goingOn;
+        reflect();
+      });
+    } else {
+      btn.textContent = label;
+      btn.title = b.command || '';
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const cmd = String(b.command || '').trim();
+        if (!cmd) return;
+        window.api.rigControl({ action: 'send-custom-cat', command: cmd });
+        btn.classList.add('rig-custom-sent');
+        setTimeout(() => { btn.classList.remove('rig-custom-sent'); }, 300);
+      });
+    }
+    rigCustomView.appendChild(btn);
+  }
+}
+
+// Header ("Custom CAT  12 / 25  Edit"), + Add, and whichever mode is open.
+function renderCustomCat() {
+  customToggleReflectors = [];
+  if (rigCustomCount) rigCustomCount.textContent = customCatButtons.length + ' / ' + CustomCatFollow.MAX_SLOTS;
+  if (rigCustomEditLink) rigCustomEditLink.textContent = customCatEditing ? 'Done' : 'Edit';
+  if (rigCustomAddBtn) {
+    rigCustomAddBtn.textContent = '+ Add (' + customCatButtons.length + ' of ' + CustomCatFollow.MAX_SLOTS + ')';
+    rigCustomAddBtn.disabled = customCatButtons.length >= CustomCatFollow.MAX_SLOTS;
+    rigCustomAddBtn.title = rigCustomAddBtn.disabled ? CustomCatFollow.MAX_SLOTS + ' buttons is the most.' : 'Add a button';
+  }
+  if (rigCustomView) rigCustomView.classList.toggle('hidden', customCatEditing);
+  if (rigCustomEditor) rigCustomEditor.classList.toggle('hidden', !customCatEditing);
+  if (customCatEditing) renderCustomSlots();
+  else renderCustomView();
+}
+
+/** The active rig changed: show its buttons. */
+function customCatRigSwitched(id) {
+  const v = id || null;
+  if (v === customActiveRigId) return;
+  customActiveRigId = v;
+  if (!customCatEditing) renderCustomCat();
+}
+
 function loadCustomButtons() {
-  renderCustomSlots();
+  renderCustomCat();
 }
 
 function saveCustomButtons() {
@@ -27175,18 +27595,40 @@ function saveCustomButtons() {
   window.api.saveSettings({ customCatButtons });
 }
 
-renderCustomSlots();
+renderCustomCat();
 // Migrate localStorage buttons to settings.json if not already synced
 if (customCatButtons.some(b => b.name || b.command)) {
   window.api.saveSettings({ customCatButtons });
 }
 
+if (rigCustomEditLink) {
+  rigCustomEditLink.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    customCatEditing = !customCatEditing;
+    if (customCatEditing) {
+      // An empty list opens with one row to type into.
+      if (!customCatButtons.length) customCatButtons.push({ name: '', command: '' });
+    } else {
+      // Done: rows left empty are dropped.
+      const kept = customCatButtons.filter((b) => CustomCatFollow.isProgrammed(b));
+      if (kept.length !== customCatButtons.length) {
+        customCatButtons = kept;
+        customToggleState = {};
+        saveCustomButtons();
+      }
+    }
+    renderCustomCat();
+  });
+}
+
 if (rigCustomAddBtn) {
   rigCustomAddBtn.addEventListener('click', (e) => {
     e.stopPropagation();
+    if (customCatButtons.length >= CustomCatFollow.MAX_SLOTS) return;
     customCatButtons.push({ name: '', command: '' });
     saveCustomButtons();
-    renderCustomSlots();
+    renderCustomCat();
     // Focus the new slot's label input
     const slots = rigCustomSlotsContainer.querySelectorAll('.rig-custom-name');
     if (slots.length > 0) slots[slots.length - 1].focus();
@@ -28510,6 +28952,8 @@ function updateTitleBar() {
   } else {
     ttEl.textContent = `POTACAT - Hunter Mode${v ? ` - v${v}` : ''}`;
   }
+  // #345: under the system frame our title bar is hidden; the window manager shows this instead.
+  if (document.documentElement.classList.contains('native-frame')) document.title = ttEl.textContent;
 }
 
 /**
@@ -29425,6 +29869,7 @@ function buildActivationAdifQsos(act) {
     sig: c.sig || '',
     sigInfo: c.sigInfo || '',
     myRig: c.myRig || '',
+    myAntenna: c.myAntenna || '',
     myGridsquare: c.myGridsquare || '',
   })));
 }

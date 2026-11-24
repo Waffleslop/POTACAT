@@ -94,13 +94,13 @@ test('the gateway list is filtered before it is stored and sent', () => {
 
 test('a pick the radio cannot call is refused before anything tunes', () => {
   const f = fnBody('function winlinkPreviewQsy(');
-  const g = f.indexOf('WinlinkReach.gatewayReach(khz, winlinkReachOpts())');
+  const g = f.indexOf('WinlinkReach.gatewayReach(khz, { ...winlinkReachOpts(), typed: !!mine })');
   assert.ok(g > 0 && g < f.indexOf('tuneRadio('));
 });
 
 test('a session the radio cannot call is refused before it takes the radio', () => {
   const f = fnBody('async function winlinkStartSession(');
-  const g = f.indexOf('WinlinkReach.gatewayReach(dialKhz, winlinkReachOpts())');
+  const g = f.indexOf('WinlinkReach.gatewayReach(dialKhz, { ...winlinkReachOpts(), typed: !!mine })');
   assert.ok(g > 0 && g < f.indexOf("acquireRadio('winlink')") && g < f.indexOf('spawnDirewolf()') && g < f.indexOf('tuneRadio('));
   assert.ok(/reason: 'out-of-reach'/.test(f));
 });
@@ -129,6 +129,28 @@ test('the modem must be on POTACAT\'s audio before anything tunes or keys', () =
 
 test('this test is in the list CI runs', () => {
   assert.ok(readSrc(path.join(__dirname, '..', 'scripts', 'run-tests.js')).includes("'test/winlink-reach-test.js'"));
+});
+
+// #585 (plan 3.2): a gateway the operator typed in skips the band checks
+// (Casey 2026-11-12: never refuse TX by band) and keeps the radio-range check.
+test('#585: a typed 2 m gateway on an HF-only rig is refused by range only', () => {
+  const r = R.gatewayReach(145050, { typed: true, bands: ['40m', '20m'], reach: [[1800000, 54000000]], rigName: 'IC-7300' });
+  assert.strictEqual(r.ok, false);
+  assert.ok(/^IC-7300 cannot transmit on 145/.test(r.why), r.why);
+});
+test('#585: a typed gateway outside the amateur bands on a rig that covers it is allowed', () => {
+  const r = R.gatewayReach(149090, { typed: true, bands: ['2m'], reach: [[144000000, 150000000]], rigName: 'FT-991A' });
+  assert.strictEqual(r.ok, true, r.why);
+  assert.strictEqual(r.band, '');
+});
+test('#585: a typed gateway on a band not ticked for the rig is allowed', () => {
+  const r = R.gatewayReach(3591, { typed: true, bands: ['40m'], reach: null });
+  assert.strictEqual(r.ok, true, r.why);
+  assert.strictEqual(r.band, '80m');
+});
+test('#585: the listed-gateway rule is unchanged (open question 1)', () => {
+  assert.strictEqual(R.gatewayReach(149090, { bands: ['2m'], reach: [[144000000, 150000000]] }).ok, false);
+  assert.strictEqual(R.gatewayReach(3591, { bands: ['40m'] }).ok, false);
 });
 
 console.log(`\n${pass} passed, ${fail} failed`);

@@ -91,7 +91,16 @@
   // only when signed in, hidden (with the login form) otherwise.
   const signOutFieldset = document.getElementById('cloud-signout-fieldset');
 
-  function showLogin(hasStaleTokens) {
+  // Cloud signed this computer out because it was removed from the account
+  // (device_revoked): the server's words above the sign-in form.
+  const signedOutNotice = document.getElementById('cloud-signed-out-notice');
+
+  function showLogin(hasStaleTokens, notice) {
+    // undefined = leave the notice as it is; '' = clear it (Sign Out).
+    if (signedOutNotice && notice !== undefined) {
+      signedOutNotice.textContent = notice || '';
+      signedOutNotice.classList.toggle('hidden', !notice);
+    }
     loginSection.classList.remove('hidden');
     accountSection.classList.add('hidden');
     if (signOutFieldset) signOutFieldset.classList.add('hidden');
@@ -438,7 +447,7 @@
     try {
       const status = await window.api.cloudGetStatus();
       if (!status.loggedIn) {
-        showLogin(!!status.error);
+        showLogin(!!status.error, status.signedOutNotice || '');
         return;
       }
 
@@ -698,7 +707,7 @@
   if (signOutBtn) {
     signOutBtn.addEventListener('click', async () => {
       await window.api.cloudLogout();
-      showLogin();
+      showLogin(false, '');
     });
   }
 
@@ -739,7 +748,7 @@
     loginSignoutLink.addEventListener('click', async (e) => {
       e.preventDefault();
       await window.api.cloudLogout();
-      showLogin(false);
+      showLogin(false, '');
     });
   }
 
@@ -804,7 +813,7 @@
   if (clearTokensBtn) {
     clearTokensBtn.addEventListener('click', async () => {
       await window.api.cloudLogout();
-      showLogin(false);
+      showLogin(false, '');
     });
   }
 
@@ -1104,6 +1113,14 @@
         updateCloudPill('error');
         console.error('Cloud sync error:', data.detail);
       }
+    });
+  }
+
+  // Removed from the account while POTACAT runs: the card flips to signed
+  // out with the reason, whether or not Settings is open.
+  if (window.api.onCloudSignedOut) {
+    window.api.onCloudSignedOut((data) => {
+      showLogin(false, (data && data.message) || '');
     });
   }
 

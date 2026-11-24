@@ -133,6 +133,11 @@
     .chip.tx { background: var(--ptt-on); color: var(--on-ptt); font-weight: 600; }
     select.chip { appearance: none; -webkit-appearance: none; font-family: inherit; outline: none; }
     select.chip option { background: var(--s); color: var(--t); }
+    /* #256: Step down / Step up beside the step chip (they move with it into the Small VFO). */
+    .step-group { display: inline-flex; align-items: center; gap: 3px; }
+    .chip.step-btn { font-size: 12px; min-width: 28px; padding: 5px 0; text-align: center; color: var(--t); touch-action: manipulation; user-select: none; }
+    .chip.step-btn:hover { background: var(--s3); }
+    .chip.step-btn:active, .chip.step-btn.held { background: var(--green-tint); color: var(--green); }
     .lbl { font-size: 10px; font-weight: 600; line-height: 1; letter-spacing: .12em; color: var(--t3); text-transform: uppercase; }
     .section { display: flex; flex-direction: column; gap: 8px; }
     .section-head { display: flex; align-items: center; }
@@ -164,6 +169,16 @@
     .freq-other { font-size: 18px; font-weight: 600; color: var(--amber); }
     .freq-other-tag { font-size: 11px; color: var(--amber); font-weight: 700; }
     .freq-unit { font-size: 12px; color: var(--t3); }
+    /* Split up N (#689): beside the TX line. While split is on it reads in
+       the TX line's amber, on an amber tint (amber text keeps its contrast in
+       the light themes, where a dark amber fill under #111 did not). */
+    .split-up-row { display: none; align-items: center; gap: 6px; }
+    .split-up-row.show { display: flex; }
+    .chip.split-up-btn { color: var(--t); font-weight: 600; }
+    .chip.split-up-btn.on, .chip.split-up-btn.on:hover {
+      background: color-mix(in srgb, var(--amber) 18%, transparent); color: var(--amber);
+      box-shadow: inset 0 0 0 1px var(--amber);
+    }
     /* Audio on / Audio off in words: green while you can hear the radio, red
        (slashed speaker) while you cannot, whether muted or not started. */
     .audio-btn { width: auto; padding: 0 10px 0 8px; gap: 6px; font-size: 12px; font-weight: 600; white-space: nowrap; }
@@ -348,6 +363,7 @@
     .mini-strip .freq-display .fq-unit { display: none; }
     .mini-strip .freq-other-row { margin-top: 0; }
     .mini-strip .freq-other { font-size: 14px; }
+    .mini-strip .split-up-row { gap: 4px; }
     .mini-strip .chip { padding: 5px 7px; }
     .mini-strip .band-chip:not(:empty) { display: inline-block; }
     .mini-strip .audio-btn { width: 36px; height: 36px; padding: 0; justify-content: center; border-radius: 9px; }
@@ -544,7 +560,7 @@
         <span class="chip vfoab" id="vfo-badge" style="display:none" title="Active VFO (from the radio)">VFO A</span>
         <button class="chip mode" id="mode-badge" title="Click to change mode">---</button>
         <span class="chip" id="filter-badge" title="Receive filter width"></span>
-        <span class="vfo-section" id="sec-step"><select class="chip" id="step-select" title="Tuning step for the knob and mouse wheel" aria-label="Tuning step"></select></span>
+        <span class="vfo-section step-group" id="sec-step"><button class="chip step-btn" id="step-down-btn" title="Step down (Down arrow key; hold to keep tuning)" aria-label="Step down">&#x25BC;</button><select class="chip" id="step-select" title="Tuning step for the knob, the mouse wheel and the arrow keys (Left and Right arrow keys change it)" aria-label="Tuning step"></select><button class="chip step-btn" id="step-up-btn" title="Step up (Up arrow key; hold to keep tuning)" aria-label="Step up">&#x25B2;</button></span>
         <span class="chip split" id="split-badge" style="display:none" title="Split operation: transmitting on the other VFO">SPLIT</span>
         <span class="chip sdr" id="kiwi-rx-badge" style="display:none">SDR RX</span>
         <span class="chip tx hidden" id="tx-chip">TX</span>
@@ -559,6 +575,12 @@
         <span class="freq-other-tag">TX</span>
         <span class="freq-other mono" id="freq-other">---.---.---</span>
         <span class="freq-unit">kHz</span>
+      </div>
+      <!-- Split up N (#689): split on and the TX VFO at RX + N in one click;
+           again for simplex. Only where the radio can set its TX VFO. -->
+      <div class="split-up-row" id="split-up-row">
+        <button class="chip split-up-btn" id="split-up-btn">Split up 1</button>
+        <select class="chip" id="split-up-n" title="How far from the receive frequency to transmit" aria-label="Split offset"></select>
       </div>
       <div class="widget-section" id="widget-smeter">
         <div class="meter-row">
@@ -682,8 +704,8 @@
       <div class="card tool-card widget-section" id="widget-voice">
         <div class="macro-row"><span class="macro-label">Voice</span><div id="voice-macro-row" style="display:contents"></div></div>
       </div>
-      <!-- Radio power: always the last block, below the ordered ones, for a
-           radio whose model can be switched over CAT (vfo-radio-state.power). -->
+      <!-- Radio power: an ordered block (VfoLayout.LARGE_BLOCKS, last by default),
+           shown for a radio whose model can be switched over CAT (vfo-radio-state.power). -->
       <div class="card tool-card" id="sec-power" style="display:none">
         <div class="ptt-log-row">
           <span class="macro-label">Radio</span>
@@ -922,10 +944,13 @@
 <script src="../lib/custom-cat-slider.js"></script>
 <script src="../lib/rig-power-view.js"></script>
 <script src="../lib/rig-bands.js"></script>
+<script src="../lib/rig-gain-steps.js"></script>
 <script src="../lib/vfo-layout.js"></script>
+<script src="../lib/split-up.js"></script>
 <script src="../lib/freq-paste.js"></script>
 <script src="../lib/vfo-freq-entry.js"></script>
 <script src="../lib/wheel-tune.js"></script>
+<script src="../lib/vfo-step-keys.js"></script>
 <script src="../lib/mono-upmix.js"></script>
 <script src="../lib/audio-device-heal.js"></script>
 <script src="../lib/vfo-audio-reattach.js"></script>
@@ -1154,6 +1179,11 @@ window.api.onRadioState((s) => {
   }
   if (s && s.meters) { radioMeters = s.meters; applyMeterRows(); }
   if (s) {
+    // #164: a button tied to some radios shows only while one of them is active.
+    if (s.activeRigId !== undefined && (s.activeRigId || null) !== customActiveRigId) {
+      customActiveRigId = s.activeRigId || null;
+      customCatSig = null; // the next push rebuilds the row for this radio
+    }
     // Custom toggles that follow a radio state relight.
     customRadioState = s;
     document.querySelectorAll('.custom-cat-injected').forEach((el) => { if (el._paint) el._paint(); });
@@ -1195,10 +1225,20 @@ window.api.onRadioState((s) => {
   for (const c of VfoLayout.CAT_CHOICES) {
     if (s[c.state] != null && catState[c.state] !== !!s[c.state]) { catState[c.state] = !!s[c.state]; catChanged = true; }
   }
+  // Preamp / Att ladder and position (#997): the buttons step through it.
+  for (const g of ['preamp', 'att']) {
+    const steps = RigGainSteps.normalizeSteps(s[g + 'Steps'] !== undefined ? s[g + 'Steps'] : catGain[g].steps);
+    const step = s[g + 'Step'] != null ? Number(s[g + 'Step']) : catGain[g].step;
+    if (JSON.stringify(steps) !== JSON.stringify(catGain[g].steps) || step !== catGain[g].step) {
+      catGain[g] = { steps, step };
+      catChanged = true;
+    }
+  }
   if (catChanged) paintCatButtons();
   if (s.catCaps !== undefined && JSON.stringify(s.catCaps) !== JSON.stringify(vfoCatCaps)) {
     vfoCatCaps = s.catCaps;
     buildRigToggles();
+    paintSplitUp();
     if (sheetOpen()) renderLayoutLists();
   }
   // A .tool-card shows only with the "visible" class (vfo-popout.css): an
@@ -1238,6 +1278,7 @@ window.api.onRadioState((s) => {
   if (s.split != null) {
     const sb = document.getElementById('split-badge');
     if (sb) sb.style.display = s.split ? '' : 'none';
+    if (splitOn !== !!s.split) { splitOn = !!s.split; paintSplitUp(); }
   }
   if (s.customCatButtons) applyCustomCatPush(s.customCatButtons);
   updateDisplay();
@@ -1313,9 +1354,12 @@ function buildBandGrid(container) {
     btn.className = 'tog band-btn';
     btn.textContent = b.label;
     btn.dataset.freq = b.freq;
-    btn.addEventListener('click', () => {
+    btn.addEventListener('click', async () => {
       if (vfoLocked) return;
-      tuneJumpFromPopout(b.freq);
+      // Back to where this radio last was on the band, or the preset (#680).
+      let khz = b.freq;
+      try { const t = await window.api.bandJumpTarget(b.freq); if (Number(t) > 0) khz = Number(t); } catch {}
+      tuneJumpFromPopout(khz);
     });
     container.appendChild(btn);
   }
@@ -1613,10 +1657,24 @@ let vfoCatLarge = VfoLayout.CAT_DEFAULT_LARGE.slice();
 let vfoSmall = VfoLayout.normalizeSmall(null);   // settings.vfoSmall: { order, on, cat }
 let vfoCatCaps = null;       // null until the radio is known: offer them all
 const catState = {};         // vfo-radio-state field -> on, e.g. { nb: true }
+// Preamp / Att: the radio's ladder and where it is on it (#997). steps [] = a
+// plain on/off radio, which keeps sending true / false.
+const catGain = { preamp: { steps: [], step: 0 }, att: { steps: [], step: 0 } };
+const CAT_GAIN_NAME = { 'set-preamp': 'preamp', 'set-att': 'att' };
+function catGainLabel(c) {
+  const g = catGain[CAT_GAIN_NAME[c.action]];
+  return g && g.steps.length ? RigGainSteps.buttonLabel(c.label, g.step, g.steps) : c.label;
+}
 function catPicksFor(row) { return row.id === 'mini-cat' ? vfoSmall.cat : vfoCatLarge; }
 function paintCatButtons() {
   document.querySelectorAll('.cat-builtin').forEach(b => {
     if (b.dataset.state) b.classList.toggle('on', !!catState[b.dataset.state]);
+    const g = catGain[b.dataset.gain];
+    if (g) {
+      const base = b.dataset.base;
+      b.textContent = g.steps.length ? RigGainSteps.buttonLabel(base, g.step, g.steps) : base;
+      if (g.steps.length) b.title = base + ': ' + (RigGainSteps.stepLabel(g.step, g.steps) || 'Off') + ', click to cycle';
+    }
   });
 }
 function buildRigToggles() {
@@ -1626,8 +1684,9 @@ function buildRigToggles() {
     for (const c of VfoLayout.catButtons(catPicksFor(row), vfoCatCaps, null)) {
       const btn = document.createElement('button');
       btn.className = 'tog toggle-btn cat-builtin' + (catState[c.state] ? ' on' : '');
-      btn.textContent = c.label;
+      btn.textContent = catGainLabel(c);
       btn.dataset.state = c.state || '';
+      if (CAT_GAIN_NAME[c.action]) { btn.dataset.gain = CAT_GAIN_NAME[c.action]; btn.dataset.base = c.label; }
       const ch = VfoLayout.CAT_CHOICES.find(x => x.key === c.action);
       btn.title = c.momentary ? 'Start an ATU tune cycle' : (ch ? ch.label + ': on or off' : c.label);
       btn.addEventListener('click', () => {
@@ -1635,6 +1694,16 @@ function buildRigToggles() {
         // see the rig-controls registry). Its light is the radio's ATU state.
         if (c.momentary) { window.api.rigControl({ action: c.action }); return; }
         // The handlers read data.value (main.js): the field name must match.
+        const gain = catGain[CAT_GAIN_NAME[c.action]];
+        if (gain) {
+          // Preamp / Att: the next step of the radio's ladder (a boolean on a radio with none).
+          const value = RigGainSteps.clickValue(gain.step, gain.steps);
+          gain.step = Number(value) || 0;
+          catState[c.state] = gain.step > 0;
+          window.api.rigControl({ action: c.action, value });
+          paintCatButtons();
+          return;
+        }
         const on = !catState[c.state];
         catState[c.state] = on;
         window.api.rigControl({ action: c.action, value: on });
@@ -1647,8 +1716,64 @@ function buildRigToggles() {
 buildRigToggles();
 // Custom CAT buttons injected after rig toggles since they share the same row
 
+// --- Split up N (#689, DA2PK) ---
+// One click: split on and the TX VFO at the receive frequency + N kHz (main's
+// split-up action, lib/split-up.js). Pressed again: split off, simplex. A new
+// N while split is on moves the TX VFO. It sets VFOs only; it never keys the
+// radio. The TX line above shows what the radio took (readback), never this.
+const splitUpRow = document.getElementById('split-up-row');
+const splitUpBtn = document.getElementById('split-up-btn');
+const splitUpN = document.getElementById('split-up-n');
+let splitOn = false;             // from vfo-radio-state (the radio's readback)
+let splitUpKhz = SplitUp.DEFAULT_KHZ;
+try { splitUpKhz = SplitUp.normalizeOffset(localStorage.getItem('vfoSplitUpKhz') || SplitUp.DEFAULT_KHZ); } catch {}
+for (const n of SplitUp.OFFSETS_KHZ) {
+  const o = document.createElement('option');
+  o.value = String(n);
+  o.textContent = SplitUp.optionText(n);
+  splitUpN.appendChild(o);
+}
+splitUpN.value = String(splitUpKhz);
+function paintSplitUp() {
+  splitUpRow.classList.toggle('show', SplitUp.available(vfoCatCaps));
+  const f = SplitUp.buttonFace(splitOn, splitUpKhz);
+  splitUpBtn.textContent = f.text;
+  splitUpBtn.title = f.title;
+  splitUpBtn.classList.toggle('on', f.on);
+}
+function showSplitUpRefusal(p) {
+  if (p.reason === 'locked') { showLockedToast(); return; }
+  vfoLockToast.textContent = p.message;
+  vfoLockToast.classList.add('show');
+  clearTimeout(_lockToastTimer);
+  _lockToastTimer = setTimeout(() => vfoLockToast.classList.remove('show'), 3000);
+}
+// Off -> split up N; on -> simplex (set-split false). Main checks the lock and
+// the radio's range again: this window may not know the range.
+function splitUpSend(p) {
+  if (!p.ok) { showSplitUpRefusal(p); return; }
+  const req = p.steps.length === 1 && p.steps[0].action === 'set-split' && p.steps[0].value === false
+    ? { action: 'set-split', value: false }
+    : { action: 'split-up', offsetKhz: splitUpKhz };
+  Promise.resolve(window.api.rigControl(req)).then((r) => {
+    if (r && r.ok === false && r.error) showSplitUpRefusal({ reason: '', message: r.error });
+  }).catch(() => {});
+}
+splitUpBtn.addEventListener('click', () => {
+  splitUpSend(SplitUp.press({ rxHz: currentFreqHz, offsetKhz: splitUpKhz, split: splitOn, locked: vfoLocked, available: SplitUp.available(vfoCatCaps) }));
+});
+splitUpN.addEventListener('change', () => {
+  splitUpKhz = SplitUp.normalizeOffset(splitUpN.value);
+  try { localStorage.setItem('vfoSplitUpKhz', String(splitUpKhz)); } catch {}
+  paintSplitUp();
+  // Already in split: the new N moves the TX VFO now.
+  if (splitOn) splitUpSend(SplitUp.plan({ rxHz: currentFreqHz, offsetKhz: splitUpKhz, split: true, locked: vfoLocked, available: SplitUp.available(vfoCatCaps) }));
+});
+paintSplitUp();
+
 // --- Custom CAT buttons ---
 let customCatButtons = [];
+let customActiveRigId = null; // settings.activeRigId from vfo-radio-state (#164)
 
 // Substitute a slider value into a command template — SAME contract as the
 // main window's customSliderCommand() and the web client's copy, pinned
@@ -1732,7 +1857,8 @@ function buildCustomCatBtns() {
   // that only ever sent its On command (LZ3AW #7), and a slider was left out
   // of this window altogether — the operator had to go back to the main
   // window to move it ("not visible in VFO pane", LZ3AW 2026-09-19).
-  const btns = customCatButtons.filter(b => b.name && b.command);
+  // #164: the programmed buttons for the active radio (lib/custom-cat-follow.js).
+  const btns = CustomCatFollow.visibleSlots(customCatButtons, customActiveRigId).map(v => v.slot).filter(b => b.name && b.command);
   if (btns.length === 0) return;
   // Append custom CAT controls into each rig-toggles-shared row. The Large
   // VFO shows every custom button, as it always has; the Small VFO only the
@@ -2005,19 +2131,82 @@ window.addEventListener('mouseup', () => {
 // Mouse wheel — works on both VFO knob and frequency display
 function handleFreqWheel(e) {
   e.preventDefault();
-  if (vfoLocked || !currentFreqHz) return; // no dial known yet: never step from 0
   // Wheel up = frequency up, like a radio's dial and every logger (#192).
   const dir = window.WheelTune.wheelDir(e.deltaY);
   if (!dir) return;
-  const stepHz = STEPS[stepIdx].hz * dir;
-  currentFreqHz = Math.max(0, currentFreqHz + stepHz);
+  stepTune(dir);
+}
+
+// One step up (dir 1) or down (dir -1) by the chosen step: the mouse wheel,
+// the Step down / Step up buttons and the arrow keys all tune through here
+// (#256). Returns false when nothing tuned (locked, or no dial known yet).
+function stepTune(dir) {
+  if (vfoLocked || !currentFreqHz) return false; // no dial known yet: never step from 0
+  const next = window.VfoStepKeys.stepFreqHz(currentFreqHz, STEPS[stepIdx].hz, dir);
+  if (!next) return false;
+  currentFreqHz = next;
   vfoAngle += dir * STEP_ANGLE;
   tuneFromPopout(currentFreqHz / 1000);
   updateDisplay();
   drawVfoDial();
+  return true;
 }
+
 canvas.addEventListener('wheel', handleFreqWheel, { passive: false });
 freqDisplay.addEventListener('wheel', handleFreqWheel, { passive: false });
+
+// Step down / Step up buttons and the arrow keys (#256). A press tunes one
+// step; holding repeats (lib/vfo-step-keys.js). Locked: say so, tune nothing.
+function showLockedToast() {
+  vfoLockToast.textContent = 'VFO locked. Unlock the VFO to change frequency.';
+  vfoLockToast.classList.add('show');
+  clearTimeout(_lockToastTimer);
+  _lockToastTimer = setTimeout(() => vfoLockToast.classList.remove('show'), 3000);
+}
+function stepPress(dir) {
+  if (vfoLocked) { showLockedToast(); return false; }
+  return stepTune(dir);
+}
+const stepHold = window.VfoStepKeys.createHoldRepeat(stepPress);
+// Left / Right: a smaller / bigger step, saved and shared as the chip's is.
+function moveStep(delta) {
+  const i = window.VfoStepKeys.stepIndexMove(stepIdx, delta, STEPS.length);
+  if (i === stepIdx) return;
+  stepIdx = i;
+  stepSelect.value = String(i);
+  if (window.api.setTuneStep) window.api.setTuneStep(STEPS[stepIdx].hz);
+}
+for (const [id, dir] of [['step-down-btn', -1], ['step-up-btn', 1]]) {
+  const btn = document.getElementById(id);
+  const release = () => { btn.classList.remove('held'); stepHold.stop(); };
+  btn.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0) return;
+    e.preventDefault(); // keep the focus where it was, so the arrow keys keep working
+    try { btn.setPointerCapture(e.pointerId); } catch { /* not capturable */ }
+    btn.classList.add('held');
+    stepHold.start(dir);
+  });
+  btn.addEventListener('pointerup', release);
+  btn.addEventListener('pointercancel', release);
+  btn.addEventListener('lostpointercapture', release);
+  // Enter or Space on a focused button: one step (a pointer press already tuned).
+  btn.addEventListener('click', (e) => { if (e.detail === 0) stepPress(dir); });
+}
+// Arrow keys: only in this window, never while a text box, list or slider has
+// the focus, never with the settings sheet or a typed frequency open.
+window.addEventListener('keydown', (e) => {
+  if (sheetOpen() || stripEntry) return;
+  const t = e.target;
+  const act = window.VfoStepKeys.keyAction(e, { typing: t !== kpInput && window.VfoStepKeys.isTypingTarget(t) });
+  if (!act) return;
+  e.preventDefault();
+  if (act === 'up' || act === 'down') stepHold.start(act === 'up' ? 1 : -1);
+  else moveStep(act === 'step-bigger' ? 1 : -1);
+});
+document.addEventListener('keyup', (e) => {
+  if (e.key === 'ArrowUp' || e.key === 'ArrowDown') stepHold.stop();
+});
+window.addEventListener('blur', () => stepHold.stop());
 
 // --- Keypad ---
 const kpInput = document.getElementById('kp-input');
@@ -2545,12 +2734,13 @@ const LARGE_EL = {
   knob: 'blk-knob', kiwi: 'widget-kiwi', band: 'sec-band', favorites: 'sec-favorites', filter: 'sec-filter',
   'filter-slider': 'sec-filter-slider', txpower: 'sec-txpower', controls: 'blk-controls', solar: 'blk-solar',
   profiles: 'sec-profiles-inline', 'cw-controls': 'widget-cw-controls', cw: 'widget-cw', voice: 'widget-voice',
+  power: 'sec-power',
 };
 // The switch each block's row drives (null: shown when the radio supports it).
 const LARGE_SWITCH = {
   knob: 's-dial', kiwi: 'w-kiwi', band: 's-band', favorites: 's-favorites', filter: 's-filter',
   'filter-slider': 's-filter-slider', txpower: null, controls: 's-controls', solar: 's-solar',
-  profiles: 's-profiles-inline', 'cw-controls': 'w-cw-controls', cw: 'w-cw', voice: 'w-voice',
+  profiles: 's-profiles-inline', 'cw-controls': 'w-cw-controls', cw: 'w-cw', voice: 'w-voice', power: null,
 };
 const ORDER_BLOCKS = VfoLayout.LARGE_BLOCKS.map(b => ({ key: b.key, el: LARGE_EL[b.key], name: b.name }));
 const DEFAULT_ORDER = VfoLayout.LARGE_KEYS.slice();
@@ -2566,7 +2756,7 @@ const LARGE_BOTTOM = [
   { name: 'Log', sw: 'w-log' },
 ];
 
-function normalizeOrder(saved) { return VfoLayout.normalizeOrder(saved, DEFAULT_ORDER); }
+function normalizeOrder(saved) { return VfoLayout.normalizeLarge(saved); }
 
 function applyOrder() {
   const pane = document.getElementById('tab-dial');
@@ -2575,9 +2765,6 @@ function applyOrder() {
     const el = b && document.getElementById(b.el);
     if (el) pane.appendChild(el);
   }
-  // Radio power stays below every ordered block.
-  const power = document.getElementById('sec-power');
-  if (power) pane.appendChild(power);
 }
 
 function moveOrder(key, toIndex) {
@@ -3048,6 +3235,7 @@ function miniParts(key) {
     mode: ['mode-badge', 'vfo-badge', 'split-badge', 'kiwi-rx-badge', 'tx-chip'],
     band: ['band-chip'], scan: ['mini-scan-btn'], audio: ['audio-btn'], ptt: ['ptt-btn'],
     log: ['log-btn-vfo'], cat: ['mini-cat'], filter: ['filter-badge'], step: ['sec-step'], lock: ['vfo-lock-btn'],
+    splitup: ['split-up-row'],
   }[key];
   if (ids) return ids.map($).filter(Boolean);
   if (key === 'smeter') { const b = $('smeter-bar'); return b ? [b.parentElement] : []; }

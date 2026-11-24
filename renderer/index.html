@@ -467,9 +467,18 @@
           </div>
         </div>
         <div id="rig-tab-custom" class="rig-tab-panel hidden">
-          <div id="rig-custom-slots"></div>
-          <button class="rig-btn" id="rig-custom-add" style="margin-top:4px;font-size:11px;padding:2px 8px;">+ Add</button>
-          <span class="help-text" style="display:block;margin-top:6px;font-size:11px;">Commands go to the radio as your manual prints them (FA014074000;), or Icom hex (FE FE 94 E0 1C 00 01 FD). With Hamlib (rigctld), start with <code>+</code> or <code>\</code> to send a rigctld command instead, e.g. <code>+V VFOB</code> or <code>\set_vfo VFOB</code>.</span>
+          <!-- #164: buttons by default; Edit opens the editing rows. Up to 25. -->
+          <div class="rig-custom-head">
+            <span class="rig-custom-title">Custom CAT</span>
+            <span id="rig-custom-count" class="rig-custom-count">0 / 25</span>
+            <button type="button" id="rig-custom-edit" class="rig-custom-edit-link">Edit</button>
+          </div>
+          <div id="rig-custom-view" class="rig-custom-view"></div>
+          <div id="rig-custom-editor" class="hidden">
+            <div id="rig-custom-slots"></div>
+            <button class="rig-btn" id="rig-custom-add" style="margin-top:4px;font-size:11px;padding:2px 8px;">+ Add (0 of 25)</button>
+            <span class="help-text" style="display:block;margin-top:6px;font-size:11px;">Commands go to the radio as your manual prints them (FA014074000;), or Icom hex (FE FE 94 E0 1C 00 01 FD). With Hamlib (rigctld), start with <code>+</code> or <code>\</code> to send a rigctld command instead, e.g. <code>+V VFOB</code> or <code>\set_vfo VFOB</code>.</span>
+          </div>
         </div>
         <div id="rig-tab-presets" class="rig-tab-panel hidden">
           <!-- Rig presets (lib/rig-presets.js): list (tap = apply), the editor,
@@ -2437,11 +2446,32 @@
               <option value="front">Front (microphone jack)</option>
             </select>
           </label>
-          <span class="help-text" style="display:block;margin:2px 0 0 0;">The socket your sound card interface is plugged into. POTACAT tells the radio which one to send each time it transmits; the wrong one puts a carrier on the air with no audio.</span>
+          <span id="tx-audio-input-help" class="help-text" style="display:block;margin:2px 0 0 0;">The socket your sound card interface is plugged into. POTACAT tells the radio which one to send each time it transmits; the wrong one puts a carrier on the air with no audio.</span>
         </div>
         <div id="rig-icom-usb-data-mod" class="hidden" style="margin-top:8px;">
           <label class="checkbox-label"><input type="checkbox" id="set-icom-usb-data-mod" checked> Set DATA MOD to USB while POTACAT sends data</label>
           <span class="help-text" style="display:block;margin:2px 0 0 24px;">For FT8, Winlink and SSTV over the USB cable. When POTACAT puts the radio in a data mode it sets the radio's DATA MOD to USB, says so, and puts your setting back afterwards. Untick this if your sound card interface is on the ACC socket (a SignaLink, for example).</span>
+        </div>
+        <div id="rig-audio-jack" class="hidden" style="margin-top:8px;">
+          <div>Where is your sound card interface plugged in?</div>
+          <label class="radio-label" style="margin-top:4px;"><input type="radio" name="rig-audio-jack" id="set-audio-jack-data" value="data" checked> Data, ACC or USB jack</label>
+          <span class="help-text" style="display:block;margin:2px 0 0 24px;">Most interfaces, and a radio's own USB audio. POTACAT switches the radio to its DATA mode for FT8, WSPR, PSK, SSTV and Winlink, and puts the mode back afterwards.</span>
+          <div id="rig-voice-data-switch-row" style="margin:4px 0 0 24px;">
+            <label class="checkbox-label"><input type="checkbox" id="set-voice-data-switch"> Voice macros and ECHOCAT voice switch to DATA while transmitting</label>
+            <span class="help-text" style="display:block;margin:2px 0 0 24px;">The radio goes to DATA for the transmission and back to USB or LSB when it ends, so the radio's own microphone stays quiet. Works on a Yaesu too.</span>
+          </div>
+          <label class="radio-label" style="margin-top:6px;"><input type="radio" name="rig-audio-jack" id="set-audio-jack-mic" value="mic"> Microphone jack</label>
+          <span class="help-text" style="display:block;margin:2px 0 0 24px;">POTACAT never switches this radio to a DATA mode: FT8, WSPR, PSK, FreeDV, SSTV, Winlink and voice all go out in USB, LSB or FM. Warning for Icom owners: an Icom takes USB or rear-socket audio only in a DATA mode unless its menus are changed, so picking the microphone jack by mistake sends SSTV and Winlink as a silent carrier. Pick this only if the audio cable really goes into the microphone socket.</span>
+        </div>
+        <div id="rig-cw-sideband" class="hidden" style="margin-top:8px;">
+          <label>CW sideband:
+            <select id="set-cw-sideband" style="margin-top:2px;">
+              <option value="band">Automatic (default)</option>
+              <option value="upper">Always CW</option>
+              <option value="lower">Always CW-R (reverse)</option>
+            </select>
+          </label>
+          <span class="help-text" id="cw-sideband-help" style="display:block;margin:2px 0 0 0;">Automatic: a CW spot tunes the radio to CW on every band, and if you put the radio in CW-R yourself it stays there. Always: every CW tune, on every band, uses that one, also after a restart.</span>
         </div>
         <div id="rig-voice-as-data" style="margin-top:8px;">
           <label class="checkbox-label"><input type="checkbox" id="set-voice-as-data"> Voice in DATA mode (USB-D / LSB-D)</label>
@@ -2809,6 +2839,11 @@
           </select>
         </label>
         <span class="help-text" style="font-size:12px;">In Manual mode, click the bearing value in the spot table to turn the antenna.</span>
+        <label class="checkbox-label"><input type="checkbox" id="set-rotor-bands-only"> Turn the rotor only on these bands</label>
+        <div id="rotor-bands-config" class="hidden">
+          <div id="rotor-bands-grid" class="rig-bands-grid"></div>
+          <span class="help-text" style="display:block;font-size:12px;">On the other bands, tuning leaves the antenna where it is (for a beam on the high bands and a dipole on the low ones). Clicking a bearing still turns it on any band.</span>
+        </div>
         <div id="rotor-pst-config">
           <span class="help-text" style="font-size:12px;">Sends beam heading to PstRotator via UDP.</span>
           <label>Host:
@@ -2966,6 +3001,10 @@
           <input type="number" id="set-default-power" min="1" max="5000" placeholder="none">
         </label>
         <span class="help-text" style="margin-left:12px;margin-bottom:6px;display:block;">Logged only when the radio's power cannot be read and POTACAT has not set it. Blank: the contact is logged with no power.</span>
+        <label>Always log this power, for an amplifier (W):
+          <input type="number" id="set-log-fixed-power" min="1" max="10000" placeholder="off">
+        </label>
+        <span class="help-text" style="margin-left:12px;margin-bottom:6px;display:block;">Logged instead of the power the radio reports. A power you type for one contact still wins. Blank: off. New contacts only.</span>
         <label class="checkbox-label"><input type="checkbox" id="set-n1mm-rst"> N1MM-style RST logging</label>
         <span class="help-text" style="margin-left:12px;margin-bottom:6px;display:block;">On: one box per digit of each report. Off: one field per report; a full report moves the cursor to RST Rcvd by itself, and a Tab pressed straight after stays there.</span>
         <label class="checkbox-label"><input type="checkbox" id="set-log-comment-tags" checked> Auto park/club tags in comment</label>
@@ -3002,6 +3041,8 @@
           <div id="logbook-n3fjp-config" class="hidden" style="margin-top:6px;">
             <label class="checkbox-label"><input type="checkbox" id="set-n3fjp-pull"> Also bring in contacts I log in N3FJP on its own</label>
             <div class="help-text" style="margin-top:4px;line-height:1.5;">While N3FJP is open, POTACAT reads its log through the same API every 5 minutes and adds any contact it doesn't have, so it reaches your POTACAT log and POTACAT Cloud. The first time it reads the whole N3FJP log. Contacts already in your log are skipped, the same as Import Log.</div>
+            <label class="checkbox-label" style="margin-top:8px;"><input type="checkbox" id="set-n3fjp-call-in-progress"> Send the call in progress to N3FJP</label>
+            <div class="help-text" style="margin-top:4px;line-height:1.5;">When you click a spot, type a call in a log form, or JTCAT starts a QSO, the call goes into N3FJP's Call box so N3FJP shows its lookup, past contacts and dupe check. Nothing is logged until you log the contact. Once POTACAT logs it, N3FJP's entry boxes are cleared.</div>
           </div>
           <div id="logbook-log4om-config" class="hidden" style="margin-top:6px;">
             <label class="checkbox-label"><input type="checkbox" id="set-log4om-wsjtx-binary"> Use WSJT-X binary protocol (required for QRZ/Clublog propagation)</label>
@@ -3296,6 +3337,11 @@
           </select>
         </label>
       </div>
+      <!-- #345: Linux only (app.js shows the row there). -->
+      <div id="linux-native-frame-row" class="hidden">
+        <label class="checkbox-label"><input type="checkbox" id="set-linux-native-frame"> Use the system title bar (window manager menu and buttons)</label>
+        <span class="help-text" style="margin-left:12px;margin-bottom:6px;display:block;">Every POTACAT window gets your desktop's own title bar, with its window menu (move to another workspace, always on top) and buttons, in place of POTACAT's. Takes effect when POTACAT restarts.</span>
+      </div>
     </fieldset>
     <!-- Panadapter Spots -->
     <fieldset class="source-toggles" data-settings-tab="spots">
@@ -3352,7 +3398,7 @@
         <input type="checkbox" id="set-mercury-enable"> Enable Mercury HF data modem
       </label>
       <div id="mercury-config" class="radio-sub hidden">
-        <span class="help-text" style="display:block;margin-bottom:6px;">Keyboard-to-keyboard chat + file transfer over HF via the external Mercury modem (a separate GPL program POTACAT launches and keeps PTT for). Open it from More &rarr; Mercury HF Data. Needs the Mercury binary installed.</span>
+        <span class="help-text" style="display:block;margin-bottom:6px;">Experimental. Keyboard-to-keyboard chat + file transfer over HF via the external Mercury modem (a separate GPL program POTACAT launches and keeps PTT for). The chat window stays out of the More menu until Mercury has been used on the air. Needs the Mercury binary installed.</span>
         <label>Mercury binary:
           <input type="text" id="set-mercury-path" placeholder="auto-detect / leave blank" style="width:230px;">
           <button type="button" id="mercury-path-browse">Browse&hellip;</button>
@@ -3401,7 +3447,6 @@
           <select id="set-mercury-bw" style="width:80px;">
             <option value="500">500</option>
             <option value="2300" selected>2300</option>
-            <option value="2750">2750</option>
           </select>
         </label>
         <label style="margin-left:8px;">TX gain (dB):
@@ -3514,6 +3559,7 @@
           <span class="vara-win-only help-text" style="display:block;margin:4px 0;">If you set VARA by hand instead: Settings &gt; SoundCard = the cable ends named below, Settings &gt; PTT = <b>VOX</b> (VARA has no "None"; VOX means VARA keys nothing and POTACAT keys the radio through Pat).</span>
           <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
             <label class="checkbox-label"><input type="checkbox" id="set-vara-hf-enable"> Use VARA HF</label>
+            <a class="vara-mac-only hidden" id="vara-mac-guide" href="https://potacat.com/guides/vara-on-mac/" data-external style="color:var(--accent-blue,#4fc3f7);font-size:12px;">Running VARA on a Mac?</a>
             <label class="vara-win-only">Program: <input type="text" id="set-vara-hf-path" placeholder="C:\VARA\VARA.exe (found for you)" style="width:210px;"> <button type="button" id="vara-hf-browse">Browse&hellip;</button> <button type="button" id="vara-hf-find">Find / test</button></label>
             <label title="Blank = this computer. Another computer: its name or address; VARA's audio then runs there.">Host: <input type="text" id="set-vara-hf-host" placeholder="this computer" spellcheck="false" style="width:120px;"></label>
             <label>Port: <input type="number" id="set-winlink-vara-port" min="1" max="65535" value="8300" style="width:70px;"></label>
@@ -3521,6 +3567,8 @@
             <label>Bandwidth: <select id="set-winlink-vara-bw" style="width:80px;"><option value="500">500</option><option value="2300" selected>2300</option><option value="2750">2750</option></select></label>
             <span class="help-text" id="vara-hf-status"></span>
           </div>
+          <!-- In a div: .checkbox-label forces display:flex !important. Mercury phase 0 (docs/mercury-phase0-tester-guide.md). -->
+          <div><label class="checkbox-label" style="margin-top:4px;" title="For a Mercury modem you run yourself on this port in VARA HF's place. Mercury cannot call a VARA gateway."><input type="checkbox" id="set-vara-hf-mercury"> The modem on this port is Mercury (experimental): the VARA HF gateway list shows Mercury gateways only</label></div>
           <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:4px;">
             <label class="checkbox-label"><input type="checkbox" id="set-vara-fm-enable"> Use VARA FM</label>
             <label class="vara-win-only">Program: <input type="text" id="set-vara-fm-path" placeholder="C:\VARA FM\VARAFM.exe (found for you)" style="width:210px;"> <button type="button" id="vara-fm-browse">Browse&hellip;</button> <button type="button" id="vara-fm-find">Find / test</button></label>
@@ -3545,6 +3593,11 @@
         </div>
         <label class="checkbox-label" style="margin-top:6px;"><input type="checkbox" id="set-winlink-prediction" checked> Rank gateways by predicted propagation</label>
         <span class="help-text" style="display:block;">The gateway list is ordered by the path VOACAP expects to be open right now, not by distance. Your grid square and each gateway's are sent to POTACAT's VOACAP service at api.potacat.com; a VOACAP you installed yourself is used instead. Off = nearest first, nothing sent.</span>
+        <!-- Other service codes (docs/winlink-custom-gateways-plan.md 2.2): Pat asks Winlink for these too. -->
+        <label style="margin-top:6px;display:block;">Other service codes:
+          <input type="text" id="set-winlink-service-codes" autocomplete="off" spellcheck="false" style="width:200px;text-transform:uppercase;" maxlength="200" placeholder="none">
+        </label>
+        <span class="help-text" style="display:block;">A club or group that keeps its gateways off the public list gives its members a code. Type yours here and those gateways join the list. More than one: separate them with spaces or commas. PUBLIC gateways are always listed. Ask your club or group for its code; Winlink does not give them out.</span>
         <label style="margin-top:6px;display:block;">Empty the Deleted mail folder after
           <select id="set-winlink-deleted-days"><option value="7">7 days</option><option value="30" selected>30 days</option><option value="90">90 days</option><option value="0">Never</option></select>
         </label>
@@ -3946,6 +3999,10 @@
     <fieldset class="source-toggles" data-settings-tab="cloud">
       <legend>POTACAT Cloud</legend>
       <div id="cloud-login-section">
+        <!-- Cloud signed this computer out: it was removed from the account
+             (device_revoked, lib/cloud-revoked.js). The server's words, or
+             ours. Cleared by the next sign-in or Sign Out. -->
+        <div id="cloud-signed-out-notice" class="share-rig-notice warn hidden" role="status"></div>
         <div style="margin-bottom:12px;">
           <p style="font-size:13px;color:var(--text-primary);margin-bottom:8px;">Your log, always backed up and available on every shack computer.</p>
           <ul style="font-size:12px;color:var(--text-secondary);margin:0 0 8px 16px;padding:0;line-height:1.8;">
@@ -4467,6 +4524,9 @@
          controls (#200): Take the radio (Now / In 5 minutes, with an optional
          message), Give it back, Cancel pass (confirmed here, no browser
          dialog). Filled by _shareRigLiveRender() from pass-owner-get. -->
+    <!-- Signed out of POTACAT Cloud: passes already sent keep validating,
+         but this computer cannot create, cancel or notify passes. -->
+    <div id="share-rig-signed-out" class="share-rig-notice warn hidden" role="status"></div>
     <div id="share-rig-live" class="share-rig-live hidden" role="region" aria-label="Your guest">
       <div class="share-rig-live-status" id="share-rig-live-status" role="status" aria-live="polite"></div>
       <div class="share-rig-live-sub" id="share-rig-live-sub"></div>
@@ -5492,6 +5552,9 @@
   <script src="../lib/rig-family.js"></script>
   <script src="../lib/tci-target.js"></script>
   <script src="../lib/tx-audio-input.js"></script>
+  <script src="../lib/ft891-tx-audio-input.js"></script>
+  <script src="../lib/rig-audio-jack.js"></script>
+  <script src="../lib/cw-sideband.js"></script>
   <script src="../lib/icom-usb-data-mod.js"></script>
   <script src="../lib/tx-channel.js"></script>
   <script src="../lib/ptt-flow-conflict.js"></script>
@@ -5514,6 +5577,7 @@
   <script src="../lib/spot-programs.js"></script>
   <script src="../lib/cm108-ptt.js"></script>
   <script src="../lib/remote-features.js"></script>
+  <script src="../lib/mercury-offer.js"></script>
   <script src="../lib/wsjtx-mode-notice.js"></script>
   <script src="../lib/cloud-billing-ui.js"></script>
   <script src="../lib/custom-cat-follow.js"></script>

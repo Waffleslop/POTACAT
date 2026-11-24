@@ -202,5 +202,13 @@ test('web: status maps draw the same tints without a roster; ECHOCAT wiring', ()
   assert.ok(on > cr, 'wired inside connectRemote (the server is rebuilt on reconnect)');
 });
 
+test('an Update from LoTW / QRZ result clears itself after 10 s, success or not', () => {
+  const ov = rd('lib/worked-overlay.js').replace(/\r\n/g, '\n');
+  assert.ok(/var SYNC_NOTE_MS = 10000;/.test(ov), 'ten seconds');
+  const run = ov.slice(ov.indexOf('var run = function (kind)'), ov.indexOf("addEventListener('click', function () { run('lotw'); })"));
+  assert.strictEqual((run.match(/clearTimer = setTimeout\(function \(\) \{ textEl\.style\.display = 'none'; \}, SYNC_NOTE_MS\);/g) || []).length, 2, 'both a result and an error clear');
+  assert.ok(!/20000/.test(run), 'not the old 20 s, success only');
+});
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

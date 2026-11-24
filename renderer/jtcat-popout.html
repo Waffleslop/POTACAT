@@ -46,10 +46,7 @@
     /* The switch made the Band Activity header wider than a half-width pane: it
        wraps onto a second line rather than push Clear out of sight. */
     .jp-decode-header { flex-wrap: wrap; row-gap: 6px; }
-    .jp-view-switch { display: flex; gap: 0; }
-    .jp-view-switch .jtcat-filter-btn { border-radius: 0; }
-    .jp-view-switch .jtcat-filter-btn:first-child { border-radius: 8px 0 0 8px; }
-    .jp-view-switch .jtcat-filter-btn:last-child { border-radius: 0 8px 8px 0; margin-left: -1px; }
+    .jp-decode-header .jp-view-select { height: 34px; font-size: 14px; font-weight: 700; padding: 0 8px; border-radius: 8px; border: 1px solid var(--border-primary); background: var(--bg-primary); color: var(--text-primary); letter-spacing: 0; text-transform: none; cursor: pointer; }
     #jp-band-activity[hidden], #jp-stations[hidden] { display: none; }
     .jp-stations { padding: 0; overflow-x: auto; container: jp-stations / inline-size; }
     /* Call, Need, Calling, Park, Grid, Country, State, dB, Hz, Age (#557). */
@@ -504,6 +501,8 @@
 
     /* QSO Logged notification */
     .jp-qso-toast { position: fixed; bottom: 60px; left: 50%; transform: translateX(-50%); background: #d4edda; color: #1a1a1a; padding: 10px 20px; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; z-index: 9999; box-shadow: 0 4px 16px rgba(0,0,0,0.4); opacity: 0; pointer-events: none; transition: opacity 0.3s ease; }
+    #jp-tx-error { bottom: 105px; z-index: 10000; cursor: default; width: max-content; max-width: min(38em, calc(100vw - 64px)); }
+    #jp-tx-error [hidden] { display: none; }
     .jp-qso-toast.visible { opacity: 1; pointer-events: auto; }
     .jp-qso-toast .jp-toast-sub { font-weight: normal; font-size: 11px; opacity: 0.8; margin-top: 2px; }
     .jp-qso-toast .jp-toast-action { display: block; margin: 6px auto 0; padding: 3px 10px; font: inherit; font-size: 12px; cursor: pointer; border-radius: 4px; border: 1px solid currentColor; background: transparent; color: inherit; }
@@ -545,6 +544,11 @@
     /* A Flex's own waterfall replaces the audio waterfall (jtcat-popout.js bsRadioWf):
        no header, no trace, the frequency scale over a taller waterfall. */
     #jp-wf-single.jp-wf-replaced { display: none !important; }
+    /* #391 "Show the audio waterfall" off: the picture goes, the decoder does not.
+       A warning (RX gain at 0, silent DAX, audio stalled) stays as a strip. */
+    #jp-wf-single.jp-wf-off > canvas, #jp-wf-single.jp-wf-off > #jp-wf-tx-marker { display: none; }
+    #jp-wf-single.jp-wf-off #jp-wf-silent.show { position: static; padding: 6px 10px; border-top: 1px solid var(--border-primary); }
+    #jp-wf-multi.jp-wf-off { display: none !important; }
     #jp-bandscope.jp-bs-radio-wf > div:first-child, #jp-bandscope.jp-bs-radio-wf #jp-bs-trace { display: none !important; }
     #jp-bandscope.jp-bs-radio-wf #jp-bs-wf { height: 120px !important; }
 
@@ -630,6 +634,38 @@
     .jp-pk-hint { font-size: 14px; line-height: 1.4; color: var(--text-dim, #888); text-align: center; }
     .jp-pk-keys { font-size: 13px; color: var(--text-dim, #888); text-align: center; }
     .jp-pk-mode:focus-visible, .jp-pk-band:focus-visible, .jp-pk-apply:focus-visible { outline: 2px solid var(--accent-blue, #4fc3f7); outline-offset: 2px; }
+    /* #857 Compact layout: lib/jtcat-layout.js picks it on a short screen
+       (work area under 840 CSS px), or the operator does in
+       Options > The picture > Layout. The chrome gets shorter; the text keeps
+       its size (13 px and up). Nothing here moves or resizes the window. */
+    body.jp-compact .jtcat-toolbar { padding: 2px 8px; }
+    body.jp-compact .jp-bandmode { height: 34px; }
+    body.jp-compact .jp-bandmode .jp-bm-band, body.jp-compact .jp-bandmode .jp-bm-mode { font-size: 16px; }
+    body.jp-compact .jtcat-toolbar .jtcat-filter-btn { height: 30px; padding: 0 10px; font-size: 14px; }
+    body.jp-compact .jp-decode-header { padding: 2px 10px; row-gap: 2px; }
+    body.jp-compact .jp-decode-header .jtcat-filter-btn, body.jp-compact .jp-decode-header #jp-search, body.jp-compact .jp-decode-header .jp-view-select { height: 28px; }
+    body.jp-compact .jp-mini-btn { height: 26px; }
+    body.jp-compact .jp-decode-list { line-height: 1.35; padding: 2px 0; }
+    body.jp-compact .jp-row { padding: 1px 10px; }
+    body.jp-compact .jp-row.jp-directed { padding-left: 5px; }
+    body.jp-compact .jp-audio-row { padding: 3px 12px; gap: 4px 10px; }
+    body.jp-compact .jp-waterfall { height: 48px; }
+    body.jp-compact .jp-controls { gap: 6px; padding: 5px 10px; }
+    body.jp-compact .jp-btn.jp-big { height: 34px; }
+    body.jp-compact .jp-btn.jp-mid, body.jp-compact .jp-ctl-row .jp-select, body.jp-compact .jp-ctl-row .jp-mode-chip { height: 32px; }
+    body.jp-compact #jp-chase-custom, body.jp-compact #jp-fd-exch { height: 32px !important; }
+    body.jp-compact .jp-hunt-box { padding: 2px; }
+    body.jp-compact .jp-hunt-box .jp-btn, body.jp-compact .jp-hunt-box .jp-select { height: 30px; }
+    body.jp-compact .jp-qso-tracker { padding: 5px 12px; }
+    body.jp-compact .jp-qso-header { margin-bottom: 4px; }
+    body.jp-compact .jp-qso-step, body.jp-compact .jp-qso-skip { height: 28px; }
+    body.jp-compact .jp-qso-cancel { width: 30px; height: 30px; }
+    body.jp-compact .jp-hunt-status { padding: 3px 12px; }
+    body.jp-compact .jp-status-strip { padding: 3px 12px; }
+    body.jp-compact .jp-countdown-big { font-size: 16px; }
+    /* The one-time "compact layout" note (#857): theme colours, readable sub-line. */
+    .jp-qso-toast.info { background: var(--bg-secondary); color: var(--text-primary); border: 1px solid var(--border-primary); font-size: 14px; }
+    .jp-qso-toast.info .jp-toast-sub { font-size: 13px; opacity: 0.9; }
   </style>
 </head>
 <body>
@@ -762,7 +798,7 @@
   <div class="jp-main">
     <div class="jp-decode-pane">
       <div class="jp-decode-section">
-        <div class="jp-decode-header"><span>Band Activity<span id="jp-hidden-note" class="jp-hidden-note" hidden></span></span> <div class="jp-view-switch" role="group" aria-label="Show Band Activity as"><button type="button" id="jp-view-stream" class="jtcat-filter-btn active" title="Every decode as it arrives, newest at the bottom">Stream</button><button type="button" id="jp-view-stations" class="jtcat-filter-btn" title="One line per station heard, kept up to date">Stations</button></div> <div style="display:flex;gap:4px;align-items:center;"><input type="text" id="jp-search" placeholder="Filter by call or word" title="One or more callsigns or words, separated by commas or spaces: a line shows if it contains any of them" spellcheck="false"><button id="jp-cq-filter" class="jtcat-filter-btn" title="Only CQs, 73s and calls to me">CQ &amp; 73</button><button id="jp-wanted-filter" class="jtcat-filter-btn" title="Show only needed DXCC/grid/call">Wanted</button><button id="jp-sort-signal" class="jtcat-filter-btn" title="Sort by signal strength (strongest first)">dB</button><button id="jp-event-filter" class="jtcat-filter-btn" title="Show only tracked-event stations you still need (13 Colonies etc.)">Event</button><button id="jp-clear" class="jtcat-filter-btn" title="Clear all decodes">Clear</button></div></div>
+        <div class="jp-decode-header"><span>Band Activity<span id="jp-hidden-note" class="jp-hidden-note" hidden></span></span> <div style="display:flex;gap:4px;align-items:center;"><input type="text" id="jp-search" placeholder="Filter by call or word" title="One or more callsigns or words, separated by commas or spaces: a line shows if it contains any of them" spellcheck="false"><button id="jp-cq-filter" class="jtcat-filter-btn" title="Only CQs, 73s and calls to me">CQ &amp; 73</button><button id="jp-wanted-filter" class="jtcat-filter-btn" title="Show only needed DXCC/grid/call">Wanted</button><button id="jp-sort-signal" class="jtcat-filter-btn" title="Sort by signal strength (strongest first)">dB</button><button id="jp-event-filter" class="jtcat-filter-btn" title="Show only tracked-event stations you still need (13 Colonies etc.)">Event</button><button id="jp-clear" class="jtcat-filter-btn" title="Clear all decodes">Clear</button><select id="jp-view" class="jp-view-select" aria-label="Show Band Activity as" title="Stream: every decode as it arrives, newest at the bottom. Stations: one line per station heard, kept up to date."><option value="stream" selected>Stream</option><option value="stations">Stations</option></select></div></div>
         <div id="jp-band-activity" class="jp-decode-list">
           <div class="jp-empty">Waiting for decodes...</div>
         </div>
@@ -985,7 +1021,7 @@
   </div>
 
   <!-- Audio controls -->
-  <div style="display:flex;align-items:center;flex-wrap:wrap;gap:8px 10px;padding:6px 12px;font-size:14px;color:var(--text-secondary);background:var(--bg-secondary);border-top:1px solid var(--border-primary);flex-shrink:0;">
+  <div class="jp-audio-row" style="display:flex;align-items:center;flex-wrap:wrap;gap:8px 10px;padding:6px 12px;font-size:14px;color:var(--text-secondary);background:var(--bg-secondary);border-top:1px solid var(--border-primary);flex-shrink:0;">
     <span style="flex-shrink:0;">RX</span>
     <input type="range" id="jp-rx-gain" min="0" max="300" value="100" style="width:110px;" title="RX Gain % — remembered per band, so changing band restores the level you last used there">
     <span id="jp-rx-gain-val" style="min-width:32px;text-align:right;">100%</span>
@@ -1244,11 +1280,15 @@
     </button>
     <button id="jp-fake-it" class="jp-opt-row">
       <span class="jp-opt-label">Keep my transmit tone in the middle of the radio's filter (split, "Fake It")</span>
-      <span class="jp-opt-help">For each transmission POTACAT moves the radio's dial in 500 Hz steps so your tone goes out between 1500 and 2000 Hz, then puts the dial back. Your signal lands on the same frequency, and an offset near the edge of the passband (below 500 Hz or above 2500 Hz) is no longer cut by the radio's filter. Same as WSJT-X Split Operation "Fake It". FT8, FT4 and FT2 on one band; the radio needs CAT control.</span>
+      <span class="jp-opt-help">For each transmission POTACAT moves the radio's dial in 500 Hz steps so your tone goes out between 1500 and 2000 Hz, then puts the dial back. Your signal lands on the same frequency, and an offset near the edge of the passband (below 500 Hz or above 2500 Hz) is no longer cut by the radio's filter. Same as WSJT-X Split Operation "Fake It". FT8, FT4 and FT2 on one band, with CAT control of the radio (not TCI, not in split). Without that the tone stays where it is.</span>
     </button>
     <label class="jp-opt-row jp-opt-num-row">
       <span class="jp-opt-label">Stop repeating a message after <input id="jp-max-attempts" type="number" min="1" max="60" value="12"> tries</span>
       <span class="jp-opt-help">Stop repeating an unanswered message after this many transmissions. A contact is logged only when a 73 is sent or received; if it stops before that, it is not logged and you can press Send 73 to log it.</span>
+    </label>
+    <label class="jp-opt-row jp-opt-num-row">
+      <span class="jp-opt-label">Stop calling after <input id="jp-calling-time" type="number" min="1" max="30" value="6"> minutes with no answer</span>
+      <span class="jp-opt-help">If nobody answers in a way that moves a contact on, and you have not pressed anything, JTCAT stops transmitting after this many minutes. Pressing CQ, turning TX on, replying to a station, or an answer that moves the contact on starts the count again. 1 to 30 minutes; 6 is the same as WSJT-X.</span>
     </label>
     <label class="jp-opt-row jp-opt-num-row">
       <span class="jp-opt-label">Call a station again after <input id="jp-rework-days" type="number" min="0" max="3650" value="0"> days</span>
@@ -1303,6 +1343,10 @@
       <span class="jp-opt-help">The Stations view of Band Activity shows one line per station heard. A station not heard again within this time leaves the list. Changing band or mode, or pressing Clear, empties it.</span>
     </label>
     <div class="jp-opt-section">The picture</div>
+    <button id="jp-wf-show" class="jp-opt-row active">
+      <span class="jp-opt-label">Show the audio waterfall</span>
+      <span class="jp-opt-help">The waterfall across the middle of this window. Turn it off if your radio's own band scope already shows you the band; the decodes get the room. Decoding, transmitting and the phone's waterfall carry on as before. To set your TX frequency without it, click the red TX frequency at the top and type it.</span>
+    </button>
     <label class="jp-opt-row jp-opt-num-row">
       <span class="jp-opt-label">Waterfall speed <input id="jp-wf-speed" type="number" min="1" max="60" step="1" value="60"> lines/sec</span>
       <span class="jp-opt-help" id="jp-wf-speed-help">How fast the waterfall scrolls.</span>
@@ -1318,6 +1362,14 @@
     <label class="jp-opt-row hidden" id="jp-bandscope-row">
       <span class="jp-opt-label"><input type="checkbox" id="jp-bandscope-toggle"> Band scope strip</span>
       <span class="jp-opt-help">The radio's own spectrum above the audio waterfall — the FT-710 streams it over USB. Click it to tune. The floor above applies to it too.</span>
+    </label>
+    <label class="jp-opt-row jp-opt-num-row">
+      <span class="jp-opt-label">Layout <select id="jp-layout">
+        <option value="auto" selected>Automatic</option>
+        <option value="full">Full</option>
+        <option value="compact">Compact</option>
+      </select></span>
+      <span class="jp-opt-help">Compact makes the bars, buttons and waterfall shorter so Band Activity has more lines; the text stays the same size. Automatic picks Compact when this window is under 800 pixels tall (a 1366 x 768 laptop) and Full again from 840. Full or Compact keeps that layout at any size. Ctrl and minus zooms the window out for still more room.</span>
     </label>
     <div class="jp-opt-section">Special events only</div>
     <div class="jp-opt-warn">Leave these off for normal FT8 and POTA. Each one changes what goes on the air.</div>
@@ -1341,6 +1393,11 @@
     <span id="jp-rx-tx" class="jp-status">RX</span>
   </div>
 
+  <div id="jp-tx-error" class="jp-qso-toast visible error" hidden>
+    <div id="jp-tx-error-message" role="alert"></div>
+    <button type="button" id="jp-tx-error-follow" class="jp-toast-action" hidden>Follow the radio</button>
+    <button type="button" id="jp-tx-error-dismiss" class="jp-toast-action">Dismiss</button>
+  </div>
   <div id="jp-qso-toast" class="jp-qso-toast"></div>
   <div id="jp-qso-card" class="jp-qso-card" role="status" aria-live="polite">
     <div class="jp-qso-card-title">QSO logged</div>
@@ -1360,6 +1417,7 @@
   <script src="../lib/rig-family.js"></script>
   <script src="../lib/rig-bands.js"></script>
   <script src="../lib/jtcat-snr-floor.js"></script>
+  <script src="../lib/jtcat-calling-time.js"></script>
   <script src="../lib/watchlist-groups.js"></script>
   <script src="jtcat-parser.js"></script>
   <script src="cq-target.js"></script>
@@ -1377,9 +1435,11 @@
   <script src="../lib/prior-contacts.js"></script>
   <script src="../lib/jtty-chats.js"></script>
   <script src="../lib/capture-stall.js"></script>
+  <script src="../lib/rx-direct-source.js"></script>
   <script src="../lib/mac-mic-access.js"></script>
   <script src="../lib/waterfall-palettes.js"></script>
   <script src="waterfall.js"></script>
+  <script src="../lib/jtcat-layout.js"></script>
   <script src="jtcat-popout.js"></script>
 </body>
 </html>

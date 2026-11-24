@@ -8,7 +8,7 @@ and websocket — it is never linked into POTACAT.
 - License: MIT (`LICENSE`, copied from the pinned tag)
 - Pinned: see `VERSION.txt`
 - Built by `scripts/build-winlink-helpers.sh` in every release job, with
-  one POTACAT source patch (next section)
+  one POTACAT source patch (next two sections)
   (`CGO_ENABLED=0 go build`, `CGO_ENABLED=1` on macOS, Go >= 1.26), staged to `assets/pat/`, packaged
   to `resources/bin/pat[.exe]` by `package.json` → `build.extraResources`.
 - In dev, `lib/winlink-pat.js` → `patPathCandidates()` looks in
@@ -60,6 +60,21 @@ to Pat's authors.
   built ardopcf with a recording relay between them and no radio. It checks
   what Pat sent, what the modem answered and what the modem's log shows, for
   the variable unset, valid, at both ends of the range, and invalid.
+- **Second change in the same patch: the service code on each gateway row.**
+  Winlink lists Mercury gateways as VARA channels with the service code
+  `MERCURY` (Mercury's docs/WINLINK.md). Pat v1.0.1 reads each channel's
+  `ServiceCode` from Winlink's gateway status (`internal/cmsapi/api.go`,
+  `GatewayChannel`) but drops it when it builds its `RMS` rows
+  (`app/rmslist.go`). The patch adds one field to `RMS`,
+  ``ServiceCode string `json:"service_code"` ``, and fills it from the channel:
+  two lines in `app/rmslist.go`, nothing else. Which codes Pat downloads is
+  still its `service_codes` setting. Upstream's direction is la5nta/pat#564
+  (open on 2026-11-22: rows with service code `MERCURY` relabelled as mode
+  `Mercury`); when that lands, move the pin and drop this half. A patch that
+  does not put the field in the tree, or a binary without
+  `json:"service_code"` in it, fails the build. POTACAT reads it in
+  `lib/winlink-pat.js` `normalizeRmslist` (`serviceCode`, `serviceTag`), and
+  the mail window shows a code other than `PUBLIC` after the gateway's call.
 - **Licence.** Pat is MIT (`LICENSE`, Copyright (c) 2020 Martin Hebnes
   Pedersen LA5NTA); wl2k-go is MIT (Copyright (c) 2014-2017 the same
   author) and is used unmodified. MIT allows modified copies provided the
@@ -70,7 +85,8 @@ to Pat's authors.
   patch and this README ship inside every POTACAT package beside those
   files (`package.json` `build.files`), and are public in this repo. The patch is offered under the same MIT terms.
 - **To make the patch again** after moving the pin: check out the new tag,
-  make the same two edits, and write `git diff` (with the new file added by
+  make the same edits (the ARQ timeout call and file, the two service code
+  lines in `app/rmslist.go`), and write `git diff` (with the new file added by
   `git add -N`) to `potacat-arq-timeout.patch` with LF line endings.
 
 To move to a new Pat release: update `PAT_TAG`/`PAT_SHA` (and

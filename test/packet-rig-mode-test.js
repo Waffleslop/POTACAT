@@ -194,7 +194,7 @@ test('main.js: the shim keys with those options, and handleRemotePtt honours noD
   const shim = main.slice(main.indexOf('setPtt: (on) => {'), main.indexOf('function winlinkUnkeyNow('));
   assert.ok(/const pttMode = PacketRigMode\.keyDownOpts\(\{ icom, resolved: winlinkPacketRigMode\(winlinkState\.session\.mode\) \}\);/.test(shim));
   assert.ok(/handleRemotePtt\(true, \{ audio: true, \.\.\.pttMode, emission: 'DATA', txKind: 'winlink' \}\)/.test(shim));
-  assert.ok(/\(settings\.ssbOverData \|\| forceData\) && !opts\.noDataSwap/.test(fnSrc(main, 'handleRemotePtt')));
+  assert.ok(/_dataPlanJack\.want && !opts\.noDataSwap/.test(fnSrc(main, 'handleRemotePtt')));
 });
 
 console.log('session start: tune, then the mode, once');
@@ -264,7 +264,8 @@ test('main.js: the session tunes FM first, then asks for the mode, then Pat dial
 test('main.js: one resolver call, fed the active rig\'s choice, family and model', () => {
   const f = fnSrc(main, 'winlinkPacketRigMode');
   assert.ok(/if \(!WinlinkModes\.isFmMode\(mode\)\) return null;/.test(f), 'packet and VARA FM only');
-  assert.ok(/PacketRigMode\.resolvePacketRigMode\(\{ choice: rig && rig\.packetMode, family, brand: model && model\.brand, protocol: model && model\.protocol \}\)/.test(f));
+  // The choice passes through lib/rig-audio-jack.js (#153): plain FM on a microphone-jack rig.
+  assert.ok(/PacketRigMode\.resolvePacketRigMode\(\{ choice: RigAudioJack\.packetChoice\(rig && rig\.packetMode, jack\), family, brand: model && model\.brand, protocol: model && model\.protocol \}\)/.test(f));
   assert.strictEqual((main.match(/resolvePacketRigMode\(/g) || []).length, 2, 'the session and the rig editor; nothing else decides a packet mode');
 });
 

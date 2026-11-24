@@ -157,8 +157,12 @@ test('source selection: with the WebSDR chosen, both windows draw the 12 kHz fra
   assert.ok(APP.includes("if (jtcatFromSdr || jtcatFromTci || s.audioSource === 'smartsdr' || s.audioSource === 'icom-network' || s.audioSource === 'yaesu-lan') {"));
   assert.ok(/const vita49SourceOptions = (jtcatFromSdr|\(jtcatFromSdr \|\| jtcatFromTci\))\s*\? \{ sourceRate: 12000 \}/.test(APP));
   assert.ok(POP.includes("return s && s.jtcatRxSource === 'websdr' ? 'websdr' : (s && s.audioSource);"));
-  assert.ok(POP.includes("if (audioSource === 'smartsdr' || audioSource === 'yaesu-lan' || audioSource === 'websdr' || audioSource === 'tci') {"));
-  assert.ok(/processorOptions: (audioSource === 'websdr'|\(audioSource === 'websdr' \|\| audioSource === 'tci'\))\s*\? \{ sourceRate: 12000 \}/.test(POP));
+  // The pop-out's branch and worklet options live in lib/rx-direct-source.js (#936).
+  const RDS = require('../lib/rx-direct-source');
+  assert.ok(POP.includes('if (window.RxDirectSource.jtcatPopoutUsesMainFeed(audioSource)) {'));
+  assert.strictEqual(RDS.jtcatPopoutUsesMainFeed('websdr'), true);
+  assert.ok(POP.includes('processorOptions: window.RxDirectSource.jtcatPopoutFeedOptions(audioSource),'));
+  assert.deepStrictEqual(RDS.jtcatPopoutFeedOptions('websdr'), { sourceRate: 12000 });
   assert.strictEqual((POP.match(/startPopoutAudio\(s\.remoteAudioInput \|\| '', jpCaptureSource\(s\)\)/g) || []).length, 2, 'both pop-out start paths');
   // The window's capture is the SDR audio coming back: main does not feed it twice.
   const ipc = MAIN.slice(MAIN.indexOf("ipcMain.on('jtcat-audio'"), MAIN.indexOf("ipcMain.on('jtcat-slice-audio'"));

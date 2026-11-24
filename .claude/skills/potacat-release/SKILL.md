@@ -57,14 +57,25 @@ reported what, what was verified, and what is owed. A commit whose feature is be
 default-off setting, or whose other half (cloud route, mobile app) is not live, is described
 as such or left out; never announce something a user cannot reach.
 
-**Privacy gate:** if anything in the range sends new data off the machine (telemetry,
-uploads, a new cloud sync), the privacy policy on potacat.com must already say so. If it does
-not, stop and tell Casey (the website session owns that page; 1.11.0 waited for it).
+**Privacy gate (never stops the release; Casey, 2026-11-21):** if anything in the range sends
+new data off the machine (telemetry, uploads, a new cloud sync), check whether the privacy
+policy on potacat.com already says so. If it does not, ship anyway: write
+`DESKTOP_TO_WEBSITE_HANDOFF_<date>_PRIVACY_<version>.md` in the website repo's docs/handoffs/
+with the exact text the policy needs, tell the `potacat website` session (and triage), carry on
+with the release, and mention it in the report to Casey. Publishing the policy page itself
+still needs Casey's word (a website push deploys).
 
 ### 3. Release notes: `release-notes/v<next>.md`
 
 The workflow publishes this file verbatim as the GitHub release body, and the in-app What's
 New dialog shows it (fetched from GitHub, rendered by `lib/release-notes-format.js`).
+
+**Queued lines first.** Read `D:\Projects\potacat\docs\next-release-notes.md` (workspace file,
+readable from any folder). Every line queued there goes into these notes, in the operator's terms,
+in the right section (or a short section of its own near the end, before the `---` review line).
+Once the notes file is written, empty that file's list and keep the file and its heading. If the
+file is missing or its list is empty, carry on.
+
 Match the shape of the last few files (`release-notes/v1.12.0.md`, `v1.13.0.md`):
 
 - First line: `**Headline:** ` + two or three sentences on what matters most to a user.
@@ -179,11 +190,25 @@ Verify all of these, and report any that fail:
   `POTACAT-<v>.dmg`, the Linux AppImage/deb/rpm for x64 and arm64, and `latest.yml`,
   `latest-mac.yml`, `latest-linux.yml`, `latest-linux-arm64.yml` (auto-update reads these;
   a missing one strands that platform on the old version).
-- The `update-website` job succeeded and potacat-website master has the new links:
-  `git -C ../potacat-website fetch -q && git -C ../potacat-website show origin/master:index.html | grep -c "v<next>"`.
-  The script rewrites the DOWNLOAD block and, since 2026-10-21, the hero "Intel build" link
-  (`class="intel-mac"`). Grep the same file for the PREVIOUS version too: any leftover is a
-  handoff to the `potacat website` session, never an edit by this session.
+- The `update-website` job. Since 2026-11-22 it pushes potacat-website master ONLY when the
+  change to index.html is version strings: scripts/update-website-links.js changes version
+  strings in place in the DOWNLOAD block and the hero "Intel build" link (`class="intel-mac"`),
+  then scripts/website-links-guard.js compares the result with the original file and fails on
+  anything else (a changed line outside those places, a changed line or an added/removed line
+  inside the block, a different number of links, a version other than `<next>`).
+  - **Passed:** potacat-website master has the new links. Check with the usual grep:
+    `git -C ../potacat-website fetch -q && git -C ../potacat-website show origin/master:index.html | grep -c "v<next>"`,
+    and grep the same file for the PREVIOUS version too.
+  - **Failed:** the release itself is published and fine; do not rebuild or re-tag for it.
+    potacat.com still points at the previous version. The job wrote
+    `docs/handoffs/DESKTOP_TO_WEBSITE_HANDOFF_<date>_RELEASE_<next>_LINKS.md` with the
+    checker's list of offending lines and pushed it to the website repo on the branch
+    `release-links/<next>` (never master). If that push failed, the same handoff is in the
+    job summary and in the run's `website-links-handoff` artifact
+    (`gh run download <id> -n website-links-handoff`). Tell the `potacat website` session the
+    branch and file name (step 7), and report it to Casey.
+  Either way, any previous-version link left on the page is a handoff to the `potacat website`
+  session, never an edit by this session.
 - Every build job ran its Winlink helper step to success (Windows/Linux: Pat + ardopcf +
   Dire Wolf; macOS: Pat) and both macOS jobs passed "Check the macOS bundle carries the
   files the app reads at run time":
@@ -196,12 +221,18 @@ Verify all of these, and report any that fail:
 - **Docs** (potacat-docs): a `DESKTOP_TO_DOCS_HANDOFF_<date>_<topic>.md` for every
   user-visible feature that needs a page or a line, pointing at the release notes as the
   wording source, then message the `potacat docs` session. Docs publish when Casey says.
-- **Website** (potacat-website): the release workflow updates `index.html` only. About two
-  dozen content and rig pages carry their own download links, and the website's own sync
-  script moves them (`sync-download.js --live`, run by the website session; on 1.13.0 it
-  moved ~24 pages off 1.12.0). After every release, message the `potacat website` session
-  to run that sync and confirm no previous-version links remain. Feature pages and the
-  privacy policy are handoffs to the same session.
+- **Website** (potacat-website): the release workflow updates `index.html` only, and only
+  its version strings (step 6). About two dozen content and rig pages carry their own
+  download links, and the website's own sync script moves them (`sync-download.js --live`,
+  run by the website session; on 1.13.0 it moved ~24 pages off 1.12.0). After every release,
+  message the `potacat website` session to run that sync and confirm no previous-version links
+  remain. If `update-website` failed, the same message names the handoff: branch
+  `release-links/<next>` and file
+  `docs/handoffs/DESKTOP_TO_WEBSITE_HANDOFF_<date>_RELEASE_<next>_LINKS.md` (or the job
+  summary / `website-links-handoff` artifact when the branch push failed); the website session
+  moves index.html to `<next>` by hand. When it says done, check the download links with the
+  step 6 grep. Feature pages and the privacy policy (including any privacy handoff from the
+  step 2 gate) are handoffs to the same session.
 - **Mobile** (potacat-app/docs/desktop-handoffs/): if the release unblocks an app OTA or
   changes the wire, tell the `echocat` session which capabilities are now live. Casey decides
   OTAs. The store "What's New" ends with the same review line.

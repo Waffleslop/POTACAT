@@ -88,6 +88,10 @@ if [[ " $want " == *" pat "* ]]; then
   git -C "$WORK/pat" apply --ignore-whitespace "$ROOT/third_party/pat/potacat-arq-timeout.patch" || { echo "::error::potacat-arq-timeout.patch did not apply to pat $PAT_TAG"; exit 1; }
   grep -q 'a.potacatApplyARQTimeout()' "$WORK/pat/app/connect.go" && test -f "$WORK/pat/app/potacat_arq_timeout.go" \
     || { echo "::error::the ARQ timeout hook is missing from Pat after the patch"; exit 1; }
+  # The same patch puts each gateway channel's Winlink service code (PUBLIC,
+  # MERCURY, ...) on Pat's rmslist rows (app/rmslist.go), so POTACAT can tell a
+  # Mercury gateway, listed by Winlink as VARA, from a VARA one (la5nta/pat#564).
+  grep -q 'ServiceCode: channel.ServiceCode,' "$WORK/pat/app/rmslist.go" || { echo "::error::the service code field is missing from Pat's rmslist after the patch"; exit 1; }
   (
     cd "$WORK/pat"
     WL2K_VER="$(go list -m -f '{{.Version}}' github.com/la5nta/wl2k-go)"
@@ -107,6 +111,7 @@ if [[ " $want " == *" pat "* ]]; then
   test -f "$ROOT/assets/pat/pat$EXE"
   # The patched code must be in the binary that ships, not only in the tree.
   grep -a -q 'POTACAT_ARDOP_ARQ_TIMEOUT' "$ROOT/assets/pat/pat$EXE" || { echo "::error::the built Pat does not carry the ARQ timeout patch"; exit 1; }
+  grep -a -q 'json:"service_code"' "$ROOT/assets/pat/pat$EXE" || { echo "::error::the built Pat does not carry the service code field"; exit 1; }
   "$ROOT/assets/pat/pat$EXE" version || true
   cp "$WORK/pat/LICENSE" "$ROOT/third_party/pat/LICENSE"
   echo "pat $PAT_TAG ($PAT_SHA) → assets/pat/pat$EXE"

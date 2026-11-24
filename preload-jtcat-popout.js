@@ -13,6 +13,8 @@ contextBridge.exposeInMainWorld('api', {
   // Mode hopping (the window called these without the preload having them).
   jtcatModeHop: (opts) => ipcRenderer.send('jtcat-mode-hop', opts),
   onJtcatModeHopped: (cb) => ipcRenderer.on('jtcat-mode-hopped', (_e, d) => cb(d)),
+  // #857: the work-area height of the display the window is on (layout pick).
+  onJtcatWorkArea: (cb) => ipcRenderer.on('jtcat-work-area', (_e, h) => cb(h)),
   platform: process.platform,
   // Prior contacts card (#154): the log index and the worked grid for one call, no QRZ.
   priorContacts: (call) => ipcRenderer.invoke('prior-contacts', call),
