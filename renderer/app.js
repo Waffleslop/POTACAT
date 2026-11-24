@@ -5155,31 +5155,22 @@ blMode.addEventListener('keydown', (e) => {
 // Synthesized, so there is nothing to ship or find; four flavours, off by
 // default. Fired by main's 'qso-logged', the one event every log path
 // (dialog, pop-out, quick log, JTCAT auto-log, phone, WSJT-X) passes through.
+// The tones themselves are lib/chime-sounds.js, shared with the JTCAT chimes.
 function playQsoChime(kind) {
   if (!kind || kind === 'off') return;
   if (!audioCtx) audioCtx = new AudioContext();
-  const t0 = audioCtx.currentTime;
-  const tone = (freq, at, dur, peak, type) => {
-    const o = audioCtx.createOscillator();
-    const g = audioCtx.createGain();
-    o.type = type || 'sine';
-    o.frequency.value = freq;
-    g.gain.setValueAtTime(0.0001, t0 + at);
-    g.gain.exponentialRampToValueAtTime(peak, t0 + at + 0.012);
-    g.gain.exponentialRampToValueAtTime(0.0001, t0 + at + dur);
-    o.connect(g).connect(audioCtx.destination);
-    o.start(t0 + at);
-    o.stop(t0 + at + dur + 0.05);
-  };
-  switch (kind) {
-    case 'soft': tone(880, 0, 0.35, 0.18); break;
-    case 'twotone': tone(660, 0, 0.18, 0.18); tone(990, 0.16, 0.32, 0.18); break;
-    case 'bell': tone(1320, 0, 0.9, 0.16); tone(1980, 0, 0.45, 0.05); tone(2640, 0, 0.25, 0.03); break;
-    case 'morse-r': { const u = 0.06; for (const [at, d] of [[0, u], [2 * u, 3 * u], [6 * u, u]]) tone(700, at, d, 0.2); break; } // R = .-.
-    default: tone(880, 0, 0.35, 0.18);
-  }
+  // A value this build does not know plays the soft ding, as it always has.
+  ChimeSounds.play(audioCtx, ChimeSounds.notesOf(kind).length ? kind : 'soft');
 }
 if (window.api.onQsoLogged) window.api.onQsoLogged(() => { try { playQsoChime(qsoChime); } catch {} });
+// JTCAT chimes (the JTCAT window's Options > Sounds): a station calls me, or
+// transmitting stopped by itself. main decides (lib/jtcat-chimes.js) and names
+// the sound; it plays here, on the same default-output context as the QSO
+// chime. That context is never given a sink, so it is never the device the
+// transmit audio goes to (jtcatTxAudioCtx has its own).
+if (window.api.onJtcatChime) window.api.onJtcatChime((d) => {
+  try { if (!audioCtx) audioCtx = new AudioContext(); ChimeSounds.play(audioCtx, d && d.sound); } catch {}
+});
 
 // --- Tune confirmation click ---
 let audioCtx = null;
