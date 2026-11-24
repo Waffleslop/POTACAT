@@ -89,6 +89,25 @@ test('FTDX10: PC KEYING follows the CW keying line dropdown', () => {
   assert.ok(/PC KEYING → RTS/.test(rts.steps[0]), 'rts override: ' + rts.steps[0]);
   assert.strictEqual(auto.level, 'required');
 });
+test('FT-710: PC KEYING item and the Standard COM port line (#1001)', () => {
+  const n = note(resolve({ model: 'FT-710', radioType: 'serialcat' }), 'ft710-pc-keying');
+  assert.ok(n, 'FT-710 PC KEYING note missing');
+  assert.strictEqual(n.level, 'required');
+  assert.ok(/CW SETTING → MODE CW → PC KEYING → DTR/.test(n.steps[0]), n.steps[0]);
+  assert.ok(n.steps.some((x) => /Standard COM Port/.test(x) && /CW Key Port/.test(x)), 'Standard-port line missing');
+  assert.ok(n.steps.some((x) => /CW Key Port \(Settings → ECHOCAT\)/.test(x)), 'CW Key Port must point at Settings → ECHOCAT');
+  assert.ok(n.steps.every((x) => !/\(below\)/.test(x)), 'no "(below)" for a field that lives in Settings');
+  const ham = note(resolve({ model: 'FT-710', radioType: 'hamlib' }), 'ft710-pc-keying');
+  assert.ok(ham && ham.steps.some((x) => /Transmit \(PTT\) "Over CAT"/.test(x) && /PTT Port "-- none \(PTT via CAT\) --"/.test(x)), 'wording must hold on the serial and Hamlib forms');
+  for (const id of ['ftx1-pc-keying', 'ftdx10-pc-keying', 'ft891-pc-keying']) {
+    const m = { 'ftx1-pc-keying': 'FTX-1 Field', 'ftdx10-pc-keying': 'FTDX10', 'ft891-pc-keying': 'FT-891' }[id];
+    assert.ok(note(resolve({ model: m, radioType: 'serialcat' }), id).steps.some((x) => /Settings → ECHOCAT/.test(x)), id);
+  }
+  const hasLabels = /PTT Port \(optional\)/.test(HTML) && /-- none \(PTT via CAT\) --/.test(HTML) && /Transmit \(PTT\):/.test(HTML) && />Over CAT</.test(HTML);
+  assert.ok(hasLabels, 'the PTT labels the note quotes must exist in renderer/index.html');
+  const rts = note(resolve({ model: 'FT-710', radioType: 'serialcat', cwKeyLine: 'rts' }), 'ft710-pc-keying');
+  assert.ok(/PC KEYING → RTS/.test(rts.steps[0]), rts.steps[0]);
+});
 test('IC-7300: USB Keying (CW) uses the model main-port line, and the override', () => {
   const auto = note(resolve({ model: 'IC-7300', radioType: 'icom' }), 'icom-usb-keying-cw');
   assert.ok(/USB Keying \(CW\) → RTS/.test(auto.steps[0]), auto.steps[0]);

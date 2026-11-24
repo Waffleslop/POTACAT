@@ -1,8 +1,19 @@
 #!/usr/bin/env node
 /**
- * Postinstall script — attempts to build native addons (FT8, FreeDV, RADE).
- * Failures are non-fatal: features that need native addons simply won't
- * be available at runtime.
+ * Builds the native addons (`npm run build-natives`; not a postinstall).
+ *
+ * ft8_native and js8_native are REQUIRED: if either fails, every addon is
+ * still attempted, then the script exits 1. FT8's WASM fallback is slower and
+ * cannot encode some calls, and JS8 has no fallback at all. The release jobs
+ * rely on this exit code, and scripts/check-required-natives.js gates the
+ * result again (exists, arch, loads) before and after packaging.
+ *
+ * The rest (FreeDV, RADE, alsa) are optional here: a failure warns and the
+ * exit code stays 0. Release CI gates them with their own steps
+ * (check-freedv-natives.js, the alsa_native step on Linux).
+ *
+ * POTACAT_SKIP_NATIVE_CHECK=1 turns a required failure into a warning too
+ * (same escape hatch as scripts/verify-natives.js).
  */
 
 const { execSync } = require('child_process');
@@ -20,10 +31,10 @@ const gypArch = archArg ? ` --arch=${archArg}` : '';
 if (archArg) console.log(`[postinstall] Target arch override: ${archArg}`);
 
 const addons = [
-  { name: 'ft8_native',    dir: 'lib/ft8_native',    cmd: 'npx node-gyp rebuild' + gypArch },
+  { name: 'ft8_native',    dir: 'lib/ft8_native',    cmd: 'npx node-gyp rebuild' + gypArch, required: true },
   // The JS8 modem (vendored JS8Call decoder — the GPL component that makes
   // the combined work GPLv3; see NOTICE and third_party/js8call/NOTES.md).
-  { name: 'js8_native',    dir: 'lib/js8_native',    cmd: 'npx node-gyp rebuild' + gypArch },
+  { name: 'js8_native',    dir: 'lib/js8_native',    cmd: 'npx node-gyp rebuild' + gypArch, required: true },
   { name: 'freedv_native',  dir: 'lib/freedv_native',  cmd: 'npx node-gyp rebuild' + gypArch },
   { name: 'rade_native',    dir: null,                  cmd: 'node scripts/build-rade.js' + gypArch },
   // alsa_native gives Linux users access to raw hw:/plughw: ALSA devices
@@ -38,6 +49,7 @@ const addons = [
 ];
 
 let built = 0, skipped = 0;
+const requiredFailed = [];
 
 for (const addon of addons) {
   console.log(`\n[postinstall] Building ${addon.name}...`);
@@ -51,7 +63,21 @@ for (const addon of addons) {
   } catch (err) {
     console.warn(`[postinstall] ✗ ${addon.name} build failed (feature will be unavailable)`);
     skipped++;
+    if (addon.required) requiredFailed.push(addon.name);
   }
 }
 
 console.log(`\n[postinstall] Done: ${built} built, ${skipped} skipped`);
+
+if (requiredFailed.length) {
+  const list = requiredFailed.join(', ');
+  if (process.env.POTACAT_SKIP_NATIVE_CHECK === '1') {
+    console.warn(`[postinstall] WARNING: required addon(s) failed: ${list} (POTACAT_SKIP_NATIVE_CHECK=1, continuing)`);
+  } else {
+    console.error(`[postinstall] FAILED: required addon(s) did not build: ${list}`);
+    console.error('FT8 would fall back to the slower WASM decoder and JS8 would have no modem.');
+    console.error('Needs a C/C++ toolchain: Visual Studio Build Tools (Windows), Xcode Command Line');
+    console.error('Tools (macOS) or build-essential (Linux). POTACAT_SKIP_NATIVE_CHECK=1 to carry on anyway.');
+    process.exit(1);
+  }
+}

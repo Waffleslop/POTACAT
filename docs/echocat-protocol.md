@@ -135,6 +135,32 @@ Application close codes (mirrored in `CLOSE_CODES` in
 | `4003` | `AUTH_FAILED_TERMINAL` | Auth rejected and retrying won't help — stop reconnecting. |
 | `4004` | `AUTH_REVOKED` | Operator revoked this device's pairing mid-session. Preceded by a `revoked` message. Don't reconnect. Older clients that don't know `4004` ignore the `revoked` message, treat the close as generic, reconnect once, and land on a terminal `auth-fail` — degraded but safe. |
 
+The shack also uses the standard RFC 6455 code `1009` (Message Too Big); see
+"Frame size limits" below.
+
+#### Frame size limits
+
+Since 2026-11-23 the shack's WebSocket server limits what a client may send
+it (lib/ws-limits.js). These apply to frames the server RECEIVES; what the
+server sends is unchanged.
+
+| Limit | Value | What happens |
+|---|---|---|
+| Any frame, any socket | 16 MiB (16,777,216 bytes, after permessage-deflate inflation) | ws closes the socket with `1009` and an empty reason. Before 2026-11-23 the limit was ws's default, 100 MiB. |
+| Any frame before sign-in | 64 KiB (65,536 bytes) | The socket is closed with `1009`, reason `Frame too large before sign-in`, before the frame is parsed. "Signed in" means the shack sent `auth-ok` (or auto-authenticated the socket: a LAN shack with no token is signed in from its first frame). Before sign-in the shack reads only `hello` and `auth`, which are under 1 kB. |
+| `sstv-photo` `image` | 4 MiB (4,194,304 characters of the data URL or base64 string) | Not sent and never decoded: the sender gets `sstv-tx-status {state: 'rx' (or 'auto-rx' while Idle Mode SSTV runs), error: "Picture not sent: the picture is too large to send (4 MB at most)."}`. An `image` that is not a non-empty string gets the same message with error "Picture not sent: the picture could not be read.". The socket stays open. |
+| `voice-macro-play-audio` `audio` | 4 MiB of base64 (unchanged) | `tune-blocked` "That recording is too long to send (two minutes at most)." |
+
+The largest legitimate client frames measured on 2026-11-23: an `sstv-photo`
+at the largest SSTV size (640x496, PD-120/160/180/240) as a lossless RGBA PNG
+of noise is 1.69 MB as a data URL (the phone's 320x256 JPEG at quality 0.9 is
+40-90 kB); a 30 s phone voice recording at 128 kbit/s AAC is 0.64 MB of
+base64; `save-settings` with every SSTV template at the template sync limits
+(24 templates, 150 KiB background, 32 KiB thumbnail) is about 4.3 MiB;
+`winlink-compose` attachments are refused over 2 MiB, 2.7 MiB as base64.
+A client should cap its own sends at these limits and show the reason rather
+than send a frame that closes its socket.
+
 ### Spots and sources
 
 | Message | Dir | Purpose |
@@ -422,7 +448,7 @@ and non-private respectively. The predicate is the thread store's own
 | Message | Dir | Purpose |
 |---|---|---|
 | `sstv-open` | C→S | Open SSTV view (starts decoder). |
-| `sstv-photo` | C→S | TX a photo (mode chosen client-side). `{image, mode, freqKhz?}`. `freqKhz` (#357, capability `sstv-send-tune`): the SSTV frequency chosen on the client, a number in kHz. The desktop tunes the radio there BEFORE the picture keys, unless the radio is already within 10 kHz of it. Without `freqKhz` it tunes to the SSTV channel of the radio's band (14.230, 7.171 LSB, 3.845 LSB, 18.161, 21.340, 24.975, 28.680, 50.680) unless the radio is within 10 kHz of an SSTV channel, and to 20 m (day) or 40 m (night) from a band with none. Never to a band the radio is not set up for, never with split on, and never for a Guest Pass picture (the pass is checked where the radio is). Rules: lib/sstv-send.js `sendChannel`. `waitQuiet` (#326, optional boolean, capability `sstv-wait-quiet`): `true` asks the shack to wait for a quiet frequency before this picture keys (see `sstv-tx-status` `waiting`). It can only ask for the wait: absent or `false` leaves the shack's own setting (SSTV window, Sending, "Wait for the frequency to be quiet before sending", off by default) in force, so a Guest Pass client cannot turn the owner's wait off. |
+| `sstv-photo` | C→S | TX a photo (mode chosen client-side). `{image, mode, freqKhz?}`. `image` is a JPEG or PNG data URL (or bare base64) of at most 4 MiB (4,194,304 characters, 2026-11-23); a larger one is refused with `sstv-tx-status` `error` and never decoded (see "Frame size limits"). `freqKhz` (#357, capability `sstv-send-tune`): the SSTV frequency chosen on the client, a number in kHz. The desktop tunes the radio there BEFORE the picture keys, unless the radio is already within 10 kHz of it. Without `freqKhz` it tunes to the SSTV channel of the radio's band (14.230, 7.171 LSB, 3.845 LSB, 18.161, 21.340, 24.975, 28.680, 50.680) unless the radio is within 10 kHz of an SSTV channel, and to 20 m (day) or 40 m (night) from a band with none. Never to a band the radio is not set up for, never with split on, and never for a Guest Pass picture (the pass is checked where the radio is). Rules: lib/sstv-send.js `sendChannel`. `waitQuiet` (#326, optional boolean, capability `sstv-wait-quiet`): `true` asks the shack to wait for a quiet frequency before this picture keys (see `sstv-tx-status` `waiting`). It can only ask for the wait: absent or `false` leaves the shack's own setting (SSTV window, Sending, "Wait for the frequency to be quiet before sending", off by default) in force, so a Guest Pass client cannot turn the owner's wait off. |
 | `sstv-stop` | C→S | Close SSTV. |
 | `sstv-halt-tx` | C→S | Cancel an in-progress TX. Since `sstv-wait-quiet` (#326) it also drops a picture that is still waiting for a quiet frequency; nothing is sent. A Guest Pass client cancels only a waiting picture it queued; on anyone else's it gets the same `refused` (`of: 'sstv-halt-tx'`) and the picture keeps waiting. A guest's HALT during a real transmission still stops it. |
 | `sstv-send-now` | C→S | #326, capability `sstv-wait-quiet`. `{}`. The picture waiting for a quiet frequency is sent now, busy or not (the operator's own decision; the Send now button). With nothing waiting it does nothing. A Guest Pass client may send it only for a picture that same pass queued; otherwise it is answered with `refused` (`of: 'sstv-send-now'`, text "Not sent or cancelled: that picture was queued by someone else. Only they or the station owner can send it now or cancel it.") and nothing changes. The owner may send any waiting picture. |

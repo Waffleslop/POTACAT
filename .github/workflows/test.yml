@@ -88,11 +88,14 @@ jobs:
   # float. This job installs Electron (npm ci), renders the real row builders
   # with the real stylesheets on a virtual display, and measures every cell;
   # LAYOUT_REQUIRED=1 makes "could not render" a failure, never a skip. The
-  # decode contract drives the real decoder worker (WASM here; the native
-  # addon is not built in this job) and checks every result is screen-ready.
+  # decode contract drives the real decoder worker on the native addon built
+  # here (NATIVE_REQUIRED=1) and checks every result is screen-ready. The job
+  # also builds js8_native and runs the release gate scripts/check-required-natives.js
+  # on both, so a compile break in either shows on the PR, not at tag time.
   layout-tests:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # 10 -> 15 (2026-11-23): js8_native is built here too.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -106,6 +109,14 @@ jobs:
         run: node test/web-row-alignment-test.js
       - name: Build the native FT8/FT4/FT2 decoder (what users run)
         run: cd lib/ft8_native && ../../node_modules/.bin/node-gyp rebuild
+      # js8_native is required in every release build (JS8 has no fallback);
+      # building it on every PR shows a compile break before a tag does.
+      - name: Build the native JS8 modem (what users run)
+        run: cd lib/js8_native && ../../node_modules/.bin/node-gyp rebuild
+      - name: ft8_native and js8_native are x86_64 and load (the release gate, run on this build)
+        run: node scripts/check-required-natives.js --expect-arch=x64
+      - name: JS8 modem round trip, all submodes (encode -> audio -> decode)
+        run: node test/js8-native-test.js
       - name: Decoder output contract (FT8 / FT4 / FT2)
         env:
           NATIVE_REQUIRED: '1'

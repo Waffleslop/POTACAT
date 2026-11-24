@@ -91,6 +91,23 @@ check('nothing asked: the live dial, or nothing', () => {
   assert.strictEqual(V.panOffsetFromStatus({ reportedCentreHz: DIAL + 5 }), null);
   assert.strictEqual(V.panOffsetFromStatus({ reportedCentreHz: 0, ask: ASK, nowMs: 5000 }), null);
 });
+check('issue 1002: a centre reported BEFORE the ask, seen after the settle time, is not taken for the answer', () => {
+  // The pan was at the dial when we asked for +1600; no newer status has arrived.
+  const off = V.panOffsetFromStatus({ reportedCentreHz: DIAL, reportedAtMs: 500, ask: ASK, nowMs: 1000 + V.SETTLE_MS + 50 });
+  assert.notStrictEqual(off, 0);
+  assert.strictEqual(off, 1600, 'the asked offset stands until the radio answers');
+});
+check('issue 1002: a status that arrived after the ask and matches gives +1600', () => {
+  assert.strictEqual(V.panOffsetFromStatus({ reportedCentreHz: DIAL + 1600, reportedAtMs: 1300, ask: ASK, nowMs: 1000 + V.SETTLE_MS + 50 }), 1600);
+});
+check('issue 1002: a status arriving late is picked up (rounded centre, after a long wait)', () => {
+  assert.strictEqual(V.panOffsetFromStatus({ reportedCentreHz: DIAL, reportedAtMs: 500, ask: ASK, nowMs: 3000 }), 1600);
+  assert.strictEqual(V.panOffsetFromStatus({ reportedCentreHz: DIAL + 1620, reportedAtMs: 3100, ask: ASK, nowMs: 3200 }), 1620);
+});
+check('issue 1002: a post-ask status that matches immediately is unchanged; no timestamp keeps the old rules', () => {
+  assert.strictEqual(V.panOffsetFromStatus({ reportedCentreHz: DIAL + 1600, reportedAtMs: 1010, ask: ASK, nowMs: 1050 }), 1600);
+  assert.strictEqual(V.panOffsetFromStatus({ reportedCentreHz: DIAL + 1300, reportedAtMs: 1200, ask: ASK, nowMs: 1000 + V.SETTLE_MS }), 1300);
+});
 check('a clamped centre cuts the window: the width to ask for shows it all with the margin', () => {
   const v = V.digitalView({ mode: 'FT8', rigMode: 'USB' });
   const fit = V.viewFit(v, { offsetHz: 1300, spanHz: 3100 });   // 1300 +- 1550 = -250..2850: the top is cut

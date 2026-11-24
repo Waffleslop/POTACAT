@@ -26144,8 +26144,9 @@ function connectSmartSdr() {
   // (every center-freq drag) and must not become a broadcast storm.
   // The Flex panadapter scope source: frames, and the pan's own axis.
   smartSdr.on('pan-frame', (f) => { if (flexScopeOn) { flexDigitalViewSync(); yaesuScopeOnFrame(f); } });
+  // centerAt: when a status last carried a centre, so a pre-ask centre is not taken for the answer (issue 1002)
   smartSdr.on('pan-geometry', (g) => {
-    flexPanGeometry[g.panId] = { ...(flexPanGeometry[g.panId] || {}), ...g };
+    flexPanGeometry[g.panId] = { ...(flexPanGeometry[g.panId] || {}), ...g, ...(g.centerHz > 0 ? { centerAt: Date.now() } : {}) };
     if (flexScopeOn && flexScopeApplyGeometry()) yaesuScopeBroadcastState();
   });
   smartSdr.on('pan-status', ({ panId, wnb, wnbLevel, rfgain }) => {
@@ -34969,6 +34970,13 @@ function sendVfoState() {
     // The radio states a custom CAT toggle can FOLLOW (lib/custom-cat-follow.js).
     preamp: _currentPreampState,
     att: _currentAttState,
+    // The ladder position and the ladder (#997): the window cycles IPO / AMP1 /
+    // AMP2 and 6 / 12 / 18 dB like the Rig panel; [] = plain on/off. The preamp
+    // ladder is cut to off/on on bands where the radio has only that.
+    preampStep: _currentPreampStep,
+    attStep: _currentAttStep,
+    preampSteps: vfoGainLadder('preampSteps', true),
+    attSteps: vfoGainLadder('attSteps', false),
     comp: _currentCompState,
     vox: _currentVoxState,
     nr: _currentNrState,
@@ -35013,6 +35021,15 @@ function vfoWfmAvailable() {
     const m = RIG_MODELS[rig.model] || RIG_MODELS[ct.civModel] || null;
     return !!(m && m.wfm);
   } catch { return false; }
+}
+/** Preamp / Att ladder for the VFO window (#997), [] when the radio has none.
+ *  Band from the RADIO's own frequency (the codec's rule), not the display: an SDR
+ *  holding the dial at 100 MHz+ must not cut an HF radio's ladder. */
+function vfoGainLadder(key, perBand) {
+  try {
+    const caps = getRigCapabilities(detectRigType()) || {};
+    return _rigGainSteps.ladderForFreq(caps[key], perBand ? caps.preampTargets : undefined, _currentFreqHz || 0);
+  } catch { return []; }
 }
 // The caps flags the VFO's CAT buttons check (VfoLayout.CAT_CHOICES), or null
 // when the radio is not known yet (the VFO then offers them all).
@@ -39485,7 +39502,7 @@ function flexScopeFollowPan() {
   const now = Date.now();
   let changed = false;
   // No ask yet (the scope is starting): a centre left from an earlier session says nothing; hold.
-  const off = ScopeDigitalView.panOffsetFromStatus({ reportedCentreHz: g.centerHz, ask: flexPanCenterAsk, nowMs: now });
+  const off = ScopeDigitalView.panOffsetFromStatus({ reportedCentreHz: g.centerHz, reportedAtMs: g.centerAt, ask: flexPanCenterAsk, nowMs: now });
   if (off != null && off !== (yaesuScopeState.centerOffsetHz || 0)) { yaesuScopeState.centerOffsetHz = off; changed = true; }
   const ask = flexDigitalSpanAsk;
   const spanSettled = ask && g.spanHz && (Math.abs(g.spanHz - ask.hz) <= ask.hz * 0.05 || now - ask.at >= ScopeDigitalView.SETTLE_MS);
