@@ -26,8 +26,8 @@ test('the link sits right after Use VARA HF, hidden by default, opening in the b
 test('shown only on macOS', () => {
   assert.ok(/querySelectorAll\('\.vara-mac-only'\)\.forEach\(\(el\) => el\.classList\.toggle\('hidden', window\.api\.platform !== 'darwin'\)\)/.test(app));
 });
-test('potacat.com is on the open-external allowlist', () => {
-  assert.ok(main.includes("'https://potacat.com/'"));
+test('the guide link passes the open-external allowlist', () => {
+  assert.ok(require('../lib/external-url').allowed('https://potacat.com/guides/vara-on-mac/'));
 });
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
