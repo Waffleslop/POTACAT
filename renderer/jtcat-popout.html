@@ -831,7 +831,7 @@
           <span style="color:var(--text-dim);">You can change this later next to Beacon TX.</span>
         </div>
         <div class="jp-wspr-beacon-row">
-          <label class="jp-wspr-tx" title="Beacon: transmit a low-power WSPR signal so distant stations spot you on wsprnet.org. Power is HARD-CAPPED at 1 W (QRPp). Attended only — verify actual output on a meter / dummy load.">
+          <label class="jp-wspr-tx" title="Beacon: transmit a low-power WSPR signal so distant stations spot you on wsprnet.org. It transmits at the radio's own power setting; to beacon at another level, change TX Pwr while it is armed (used for the frames only, your level comes back after each one). Attended only — verify actual output on a meter / dummy load.">
             <input type="checkbox" id="jp-wspr-tx-enable"> <b>Beacon TX</b>
           </label>
           <span id="jp-wspr-beacon-status" class="jp-wspr-beacon-status" title="Slots are drawn at random per the TX % — listening slots are normal and expected"></span>
@@ -840,7 +840,7 @@
             <input type="range" id="jp-wspr-txpct" min="0" max="100" step="5" value="20" style="width:70px;vertical-align:middle;">
             <span id="jp-wspr-txpct-val" class="jp-wspr-num">20%</span>
           </label>
-          <label title="Power the beacon reports to WSPRnet. Auto follows the RF power the beacon runs at: 1 W, or the level you set with TX Pwr while it is armed. Pick a value to report a fixed power instead. WSPR decodes far below the noise, so a watt or less carries a long way.">Reported
+          <label title="Power the beacon reports to WSPRnet. Auto follows the RF power the beacon runs at: the radio's own setting, or the level you set with TX Pwr while it is armed. Pick a value to report a fixed power instead. WSPR decodes far below the noise, so a watt or less carries a long way.">Reported
             <select id="jp-wspr-dbm" class="jp-wspr-select">
               <option value="auto" selected>Auto</option>
             </select>

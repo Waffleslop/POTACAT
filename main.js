@@ -419,6 +419,7 @@ const FakeIt = require('./lib/jtcat-fake-it'); // split operation "Fake It" (fak
 const JtcatCaptureGate = require('./lib/jtcat-capture-gate'); // #746: ECHOCAT off releases a phone-driven capture
 const { WsprScheduler } = require('./lib/wspr/scheduler');
 const WsprPowerMemory = require('./lib/wspr-power-memory'); // pre-beacon RF power remember/restore decisions
+const WsprBeaconPower = require('./lib/wspr-beacon-power'); // the beacon's per-frame RF power, on this rig's scale (#521)
 const WsprDbm = require('./lib/wspr/dbm'); // the dBm the beacon reports: follows its RF power, or the operator's fixed pick (#268)
 const Privileges = require('./lib/privileges');
 const SwrGuard = require('./lib/swr-guard'); // SWR-guard auto-tune + ATU result policy (pure)
@@ -20645,8 +20646,10 @@ const JtcatQuietFreq = require('./lib/jtcat-quiet-freq');
 const jtcatQuietTracker = JtcatQuietFreq.createQuietFreqTracker();
 function jtcatQuietPick() { return jtcatQuietTracker.current(Date.now()); }
 // WSPR beacon state — driven by the IPC handler + a 1 s scheduler tick.
-// The beacon's default RF power, 1 W. Since #268 it runs at the level the
-// operator sets while it is armed, and reports that power (lib/wspr/dbm.js).
+// The beacon's old 1 W cap, kept for the low-power warning in other modes (a
+// radio a beacon session from an older build left there). Since #268 the
+// beacon runs at the level the operator sets while it is armed, and since
+// #521 at the radio's own setting when none is set (lib/wspr-beacon-power.js).
 const JTCAT_WSPR_MAX_WATTS = 1;
 // The TX audio routes prepend a ~500 ms PTT-settle lead before the waveform.
 const JTCAT_TX_AUDIO_LEAD_MS = 500;
@@ -22443,7 +22446,9 @@ function wsprDbmAuto() {
   return WsprDbm.isAuto(settings.wsprDbmAuto);
 }
 function wsprReportedDbm() {
-  return WsprDbm.reportedDbm({ auto: wsprDbmAuto(), manualDbm: settings.wsprDbm, beaconWatts: wsprBeaconWatts() });
+  // A radio whose power POTACAT cannot read, with no level entered: report
+  // 1 W (30 dBm), the value the beacon has always reported by default.
+  return WsprDbm.reportedDbm({ auto: wsprDbmAuto(), manualDbm: settings.wsprDbm, beaconWatts: wsprBeaconWatts() || 1 });
 }
 
 // Random TX audio offset within the 200 Hz WSPR sub-band. Tone-0 base is kept
@@ -22455,42 +22460,83 @@ function wsprRandomTxAudioHz() {
   return Math.round(lo + Math.random() * (hi - lo));
 }
 
-// Command the rig to the 1 W ceiling. Returns true if SOME power-control path
-// took the command. CRITICAL on Flex Direct: CAT (PC command) is bypassed there
-// — power MUST go through the SmartSDR API, where rfpower is a PERCENT (1% ≈
-// 1 W on a 100 W Flex). We hit every path that's live so the cap can't be
-// silently skipped the way it was on the first on-air test (cat connected=false).
-function wsprForcePowerCap() {
-  let capped = false;
-  // 1 W unless the operator set the beacon a level of its own (#268).
-  const beaconW = wsprBeaconWatts();
-  // Flex Direct / SmartSDR API — rfpower percent. 1% ≈ 1 W (≤1 W on lower-power
-  // models). This is the real cap for Flex; the Flex stage limits output
-  // regardless of DAX drive level.
-  try {
-    if (smartSdr && smartSdr.connected && typeof smartSdr.setTxPower === 'function') {
-      smartSdr.setTxPower(beaconW); capped = true;
-    }
-  } catch {}
-  // CAT rigs, through the same converter as every other power set: rigctld
-  // takes a 0..1 FRACTION, so the bare 1 this used to send was "L RFPOWER
-  // 1.000" = full power — a KX3 + KXPA100 set to 20 W beaconed at 110 W, a
-  // G90 at 5 W went to 20 W (WZ1H, Frank, 2026-10-24).
-  try {
-    if (cat && cat.connected && typeof cat.setTxPower === 'function') {
-      if (gatedSetTxPower(beaconW, { rigType: detectRigType() })) capped = true;
-    }
-  } catch {}
-  // Say the level we set: every surface's TX Pwr and the "TX start ... RF
-  // power set to" line read this, and it said 100 W while the radio sat at
-  // the cap (#268, a rigctld link that never reported power back).
-  if (capped) { _currentTxPower = beaconW; broadcastRigState(); }
-  return capped;
+// The beacon's RF power for one frame (#521). It used to force 1 W at arm and
+// before every frame, on every live path: rigctld took that bare 1 as
+// "L RFPOWER 1.000" = full power (a KX3 + KXPA100 set to 20 W beaconed at
+// 110 W, a G90 at 5 W went to 20 W; WZ1H, Frank, 2026-10-24), and a level the
+// operator entered above the radio's setting was never put back. Now: the
+// level the operator entered (TX Pwr while armed), clamped to this rig and
+// rounded DOWN to the link's step (lib/wspr-beacon-power.js); with none
+// entered, the radio's power is left alone. A frame that changes the power
+// remembers the radio's level first and puts it back at tx-end.
+function wsprPowerLink() {
+  if (smartSdr && smartSdr.connected) return { link: 'flex' };
+  const rigType = detectRigType();
+  if (rigType === 'icom') return { link: 'civ' };
+  if (rigType === 'kenwood' || rigType === 'yaesu') return { link: 'kenwood' };
+  if (rigType === 'flrig') return { link: 'flrig' };
+  if (rigType === 'rigctld') {
+    const codec = cat && cat._codec;
+    if (codec && (codec._yaesuRaw || codec._kenwoodPc)) return { link: 'rigctld-raw' };
+    return { link: 'rigctld', fullScaleW: codec && Number(codec._fullScaleW) > 0 ? Number(codec._fullScaleW) : 0 };
+  }
+  return { link: rigType };
+}
+function wsprPowerRange() {
+  let model = null;
+  try { model = getActiveRigModel(); } catch { model = null; }
+  const l = wsprPowerLink();
+  return WsprBeaconPower.powerRange({
+    link: l.link, fullScaleW: l.fullScaleW,
+    // SmartSDR's rfpower is a percent and every POTACAT caller passes it
+    // watts (a 100 W Flex: 1 % = 1 W), so the beacon does the same.
+    maxW: l.link === 'flex' ? 100 : (model && Number(model.maxPower) > 0 ? Number(model.maxPower) : 0),
+    minW: model && Number(model.minPower) > 0 ? Number(model.minPower) : 0,
+    powerScale: model && model.powerScale,
+  });
+}
+function wsprEnteredBeaconWatts() {
+  return WsprPowerMemory.beaconWatts(settings.wsprBeaconWatts, settings.activeRigId || null);
+}
+function wsprFramePlan() {
+  return WsprBeaconPower.planFrame({
+    enteredW: wsprEnteredBeaconWatts(), radioW: _currentTxPower, range: wsprPowerRange(),
+  });
+}
+function wsprHasPowerControl() {
+  return !!((smartSdr && smartSdr.connected) || (cat && cat.connected));
 }
 
-// The beacon's RF power: 1 W, or the level the operator set while it was armed.
+// Called by wsprBeaconTransmit just before the frame keys. Returns the plan
+// (with `commanded`: a power command went out).
+function wsprSetFramePower() {
+  const plan = wsprFramePlan();
+  if (plan.action !== 'set') return { ...plan, commanded: false };
+  const prior = _currentTxPower;
+  const restoreW = wsprRememberPreCapPower(plan.watts);
+  const commanded = wsprCommandTxPower(plan.watts);
+  const W = WsprBeaconPower.fmtW;
+  if (!commanded) {
+    sendCatLog(`[JTCAT] WSPR: could NOT set the radio to the beacon's ${W(plan.watts)} W (no live CAT/SmartSDR power control); it transmits at the radio's own setting.`);
+    return { ...plan, commanded: false };
+  }
+  const notes = [];
+  if (plan.clamped) notes.push(`the ${W(wsprEnteredBeaconWatts())} W you set is more than this radio can be set to here`);
+  if (plan.belowMin) notes.push(`this radio cannot be set below ${W(plan.watts)} W here (you set ${W(wsprEnteredBeaconWatts())} W)`);
+  sendCatLog(`[JTCAT] WSPR frame: RF power ${prior > 0 ? W(prior) + ' W -> ' : ''}${W(plan.watts)} W` +
+    (notes.length ? ` (${notes.join('; ')})` : '') +
+    (restoreW > 0 ? `; ${W(restoreW)} W comes back when the frame ends.` : '; the radio\'s level before the beacon is unknown, so it stays at this level.'));
+  // Say the level we set: every surface's TX Pwr and the "TX start ... RF
+  // power set to" line read this (#268).
+  _currentTxPower = plan.watts;
+  broadcastRigState();
+  return { ...plan, commanded: true };
+}
+
+// The RF power the beacon runs at: the level entered (as this rig can be set
+// to it), or the radio's own setting when none is entered; 0 = unknown.
 function wsprBeaconWatts() {
-  return WsprPowerMemory.beaconWatts(settings.wsprBeaconWatts, settings.activeRigId || null);
+  return wsprFramePlan().watts || 0;
 }
 
 // A power set from any surface while the beacon is armed is the operator
@@ -22502,6 +22548,9 @@ function wsprNoteOperatorPower(watts, source) {
     armed: wsprBeaconArmed(), source, watts, rigId: settings.activeRigId || null,
   });
   if (!lvl) return;
+  // Between frames the radio is at the operator's own level, and this set is
+  // that level now: a remembered one would put the old level back over it.
+  if (!_wsprFrameRf) wsprForgetPreCapPower();
   const prev = settings.wsprBeaconWatts;
   if (prev && prev.watts === lvl.watts && (prev.rigId || null) === lvl.rigId) return;
   settings.wsprBeaconWatts = lvl;
@@ -22515,7 +22564,7 @@ function wsprNoteOperatorPower(watts, source) {
     _wsprBeaconLevelLogTimer = null;
     const m = settings.wsprPreCapPower;
     sendCatLog(`[JTCAT] WSPR beacon: TX power ${wsprBeaconWatts()} W set by you — the beacon keeps this level for its frames from now on` +
-      (m && m.watts > 0 ? `; ${m.watts} W still comes back when it stands down.` : '.'));
+      (m && m.watts > 0 ? `; ${m.watts} W comes back after each frame.` : '.'));
   }, 1500);
 }
 let _wsprBeaconLevelLogTimer = null;
@@ -22549,22 +22598,29 @@ function wsprForgetPreCapPower() {
   try { saveSettings(settings); } catch {}
 }
 
-// Called at arm, BEFORE wsprForcePowerCap(). Returns the watts that will be
-// restored, or 0 when no pre-beacon level is known.
-function wsprRememberPreCapPower() {
-  const r = WsprPowerMemory.rememberPreCapPower({
+// Called by wsprSetFramePower BEFORE it commands the frame's level. Returns
+// the watts that will be restored, or 0 when no pre-beacon level is known.
+function wsprRememberPreCapPower(beaconW) {
+  const r = WsprPowerMemory.rememberPreBeaconPower({
     current: _currentTxPower, prior: settings.wsprPreCapPower,
-    rigId: settings.activeRigId || null, cap: wsprBeaconWatts(), now: Date.now(),
+    rigId: settings.activeRigId || null, beaconW, now: Date.now(),
   });
   if (r.changed) {
-    settings.wsprPreCapPower = r.marker;
+    if (r.marker) settings.wsprPreCapPower = r.marker;
+    else delete settings.wsprPreCapPower;
     _wsprRestoreAttempts = 0;
     try { saveSettings(settings); } catch {}
   }
   return r.restoreWatts;
 }
 
+// One path for the beacon's power commands, the frame's level and every
+// restore: SmartSDR on a Flex, else CAT through gatedSetTxPower (watts to the
+// codec, which converts on its own scale). Stamped so a readback that was
+// already on its way is not taken for the radio's answer.
+let _wsprPowerCmdAt = 0;
 function wsprCommandTxPower(watts) {
+  _wsprPowerCmdAt = Date.now();
   try {
     if (smartSdr && smartSdr.connected) return gatedSmartSdrTxPower(watts);
     if (cat && cat.connected) return gatedSetTxPower(watts, { rigType: detectRigType() });
@@ -22586,7 +22642,7 @@ const WSPR_RESTORE_MAX_ATTEMPTS = 3;
 function wsprRestorePreCapPower(why, opts = {}) {
   const m = settings.wsprPreCapPower;
   const d = WsprPowerMemory.decideRestore({
-    marker: m, rigId: settings.activeRigId || null, cap: wsprBeaconWatts(),
+    marker: m, rigId: settings.activeRigId || null,
     txActiveWspr: !!(ft8Engine && ft8Engine._txActive && ft8Engine._mode === 'WSPR'),
     immediate: !!opts.immediate, attempts: _wsprRestoreAttempts, maxAttempts: WSPR_RESTORE_MAX_ATTEMPTS,
   });
@@ -22615,10 +22671,10 @@ function wsprRestorePreCapPower(why, opts = {}) {
   }
   _wsprRestoreAttempts++;
   if (!wsprCommandTxPower(m.watts)) {
-    sendCatLog(`[JTCAT] WSPR beacon ${why}: could not restore TX power to ${m.watts} W (no live CAT/SmartSDR power control). The radio is still at the beacon's ~${wsprBeaconWatts()} W — raise it by hand, or it will be restored on the next power readback.`);
+    sendCatLog(`[JTCAT] WSPR beacon ${why}: could not restore TX power to ${m.watts} W (no live CAT/SmartSDR power control). The radio is still at the beacon's ~${WsprPowerMemory.markerBeaconW(m)} W — set it by hand, or it will be restored on the next power readback.`);
     return 'failed';
   }
-  sendCatLog(`[JTCAT] WSPR beacon ${why}: TX power restored to ${m.watts} W (the beacon had set it to ${wsprBeaconWatts()} W).`);
+  sendCatLog(`[JTCAT] WSPR beacon ${why}: TX power restored to ${m.watts} W (the beacon had set it to ${WsprPowerMemory.markerBeaconW(m)} W).`);
   // Optimistic local echo so every surface shows the restored level now; the
   // radio's readback confirms it and clears the marker (or retries).
   _currentTxPower = m.watts;
@@ -22634,14 +22690,17 @@ function wsprRestorePreCapPower(why, opts = {}) {
 // flushed, a previous build that never restored at all) and is retried here.
 function wsprReconcilePreCapPower(watts) {
   const d = WsprPowerMemory.decideReconcile({
-    marker: settings.wsprPreCapPower, armed: wsprBeaconArmed(),
-    retryPending: !!_wsprRestoreRetryTimer, watts, cap: wsprBeaconWatts(),
+    marker: settings.wsprPreCapPower,
+    frameActive: !!(_wsprFrameRf || (ft8Engine && ft8Engine._txActive && ft8Engine._mode === 'WSPR')),
+    retryPending: !!_wsprRestoreRetryTimer,
+    recentCommand: Date.now() - _wsprPowerCmdAt < 3000,
+    watts, tolW: wsprPowerRange().stepW,
   });
   if (d === 'forget') wsprForgetPreCapPower();
-  else if (d === 'restore') wsprRestorePreCapPower('left the radio at the beacon cap', { immediate: true });
+  else if (d === 'restore') wsprRestorePreCapPower('left the radio at the beacon\'s level', { immediate: true });
 }
 
-let _wsprFrameRf = null; // {meterFrames, peakW, setW} while a beacon frame is out
+let _wsprFrameRf = null; // {meterFrames, peakW, setW, commanded} while a beacon frame is out (commanded: it set the power, tx-end puts it back)
 function wsprFrameRfEnd() {
   const f = _wsprFrameRf;
   _wsprFrameRf = null;
@@ -22650,15 +22709,15 @@ function wsprFrameRfEnd() {
   if (line) sendCatLog(line);
 }
 
-// Transmit one WSPR frame. The radio is commanded to the beacon's level (1 W
-// or the operator's), the message reports `dbm` (wsprReportedDbm), and a fixed
+// Transmit one WSPR frame. The radio is set to the level the operator entered
+// for the beacon (none entered: its power is left alone), and put back at
+// tx-end (#521); the message reports `dbm` (wsprReportedDbm), and a fixed
 // report below the radio's level turns the audio drive down toward it.
 // Reuses the standard tx-start audio dispatch (now failsafe-correct for the
 // 110.6 s waveform); txComplete()/the failsafe release PTT.
 function wsprBeaconTransmit(call, grid, dbm) {
   if (!ft8Engine || ft8Engine._mode !== 'WSPR' || ft8Engine._txActive) return;
   if (!WsprDbm.isValid(dbm)) dbm = WsprDbm.normalizeManual(dbm);
-  wsprForcePowerCap(); // re-assert the beacon's RF power immediately before key-up
   // Pick a fresh random spot in the 200 Hz WSPR sub-band every transmission.
   // Unlike FT8 you can't FFT a quiet slot here — WSPR signals are below the
   // noise floor (invisible), so everyone randomizes within 1400–1600 Hz and
@@ -22668,15 +22727,23 @@ function wsprBeaconTransmit(call, grid, dbm) {
   try {
     samples = encodeWspr(call, grid, dbm, { baseFreqHz: baseHz });
   } catch (e) { sendCatLog('[JTCAT] WSPR beacon encode error: ' + (e && e.message || e)); return; }
+  ft8Engine._txActive = true;
+  // The frame's RF power, only now that nothing above can return early: a
+  // power change with no frame to end would never be put back (#521).
+  // _wsprFrameRf is set first so a readback in between is not reconciled.
+  _wsprFrameRf = { meterFrames: 0, peakW: 0, setW: 0, commanded: false };
+  const framePower = wsprSetFramePower();
+  _wsprFrameRf.commanded = framePower.commanded;
+  // The level the radio is at for this frame: the one just set, else its own.
+  const setW = framePower.commanded ? framePower.watts : (_currentTxPower > 0 ? _currentTxPower : 0);
   // A fixed report below the radio's level scales the drive toward it (power
   // ~ amplitude^2); Auto reports what the radio is set to and keeps full drive.
-  const amp = WsprDbm.driveScale({ auto: wsprDbmAuto(), reportedDbm: dbm, beaconWatts: wsprBeaconWatts() });
+  const amp = WsprDbm.driveScale({ auto: wsprDbmAuto(), reportedDbm: dbm, beaconWatts: setW });
   if (amp < 0.999) { for (let i = 0; i < samples.length; i++) samples[i] *= amp; }
-  ft8Engine._txActive = true;
-  sendCatLog(`[JTCAT] WSPR beacon TX: ${call} ${grid} reporting ${WsprDbm.label(dbm)}${wsprDbmAuto() ? ' (Auto)' : ''}, rig set to ${wsprBeaconWatts()} W, drive ${Math.round(amp * 100)}% @ ${baseHz} Hz`);
+  sendCatLog(`[JTCAT] WSPR beacon TX: ${call} ${grid} reporting ${WsprDbm.label(dbm)}${wsprDbmAuto() ? ' (Auto)' : ''}, rig ${setW > 0 ? 'set to ' + WsprBeaconPower.fmtW(setW) + ' W' : 'at its own power setting'}, drive ${Math.round(amp * 100)}% @ ${baseHz} Hz`);
   // What the radio's own wattmeter says during this frame, for one line at
   // tx-end (#268: three frames at 0 W measured, and nothing said so).
-  _wsprFrameRf = { meterFrames: 0, peakW: 0, setW: wsprBeaconWatts() };
+  _wsprFrameRf.setW = setW;
   ft8Engine.emit('tx-start', { samples, message: `${call} ${grid} ${dbm}`, freq: baseHz, slot: 'wspr', offsetMs: 0 });
   // Backstop tx-end after the waveform in case an audio route doesn't call
   // txComplete itself; the armed failsafe is the hard PTT-off backstop.
@@ -22786,9 +22853,7 @@ function setWsprBeacon(on, opts = {}) {
     // restore only ever returns to a level the operator had set themselves.
     const why = opts.why || 'disarmed';
     const r = wsprRestorePreCapPower(why, { immediate: !!opts.immediate });
-    if (r === 'none') {
-      sendCatLog(`[JTCAT] WSPR beacon ${why}. TX power is still at the beacon's ~${wsprBeaconWatts()} W (no pre-beacon level was known) — raise it in the Rig panel or with the TX Pwr slider in the JTCAT window before other modes.`);
-    }
+    if (r === 'none') sendCatLog(`[JTCAT] WSPR beacon ${why}.`);
     tellPopout(false);
     return;
   }
@@ -22820,12 +22885,9 @@ function setWsprBeacon(on, opts = {}) {
     tellPopout(false);
     return;
   }
-  // Remember the level we are about to override, THEN command the beacon's
-  // level. If no power-control path is live, the operator MUST set it by hand —
-  // say so unmistakably.
+  // Arming changes nothing on the radio: each frame sets the beacon's level
+  // (if the operator entered one) and puts the radio's back at tx-end (#521).
   if (_wsprRestoreRetryTimer) { clearInterval(_wsprRestoreRetryTimer); _wsprRestoreRetryTimer = null; }
-  const restoreWatts = wsprRememberPreCapPower();
-  const capped = wsprForcePowerCap();
   if (!jtcatWsprScheduler) jtcatWsprScheduler = new WsprScheduler({});
   jtcatWsprScheduler.setTxPct(settings.wsprTxPct != null ? settings.wsprTxPct : 20);
   jtcatWsprScheduler.setDbm(wsprReportedDbm());
@@ -22843,14 +22905,17 @@ function setWsprBeacon(on, opts = {}) {
         (avgMin > 2 ? `; after that slots are drawn at random — roughly one TX every ${avgMin} minutes, listening slots in between are normal` : '')
       : ' TX 0% = listen only.') +
     (wsprBeaconRunMin() > 0 ? ` It runs for ${wsprRunLabel(wsprBeaconRunMin())}, then stands down.` : ' It runs until you stop it.'));
-  const beaconW = wsprBeaconWatts();
-  sendCatLog(capped
-    ? `[JTCAT] WSPR: radio commanded to ~${beaconW} W${beaconW === JTCAT_WSPR_MAX_WATTS ? '' : ' (the level you set for the beacon)'}. Still verify actual output on a meter;` +
-      ' some radios make almost nothing at their lowest settings, more so on VHF/UHF — raise TX Pwr in the JTCAT window and the beacon keeps that level.' +
-      (restoreWatts > 0
-        ? ` ${restoreWatts} W will be restored when the beacon stands down.`
-        : ` No pre-beacon power level was known, so it stays at ${beaconW} W until you raise it.`)
-    : `[JTCAT] WSPR: could NOT set radio power automatically (no live CAT/SmartSDR power control) — set your radio to ${beaconW} W or less BY HAND before it transmits.`);
+  const plan = wsprFramePlan();
+  const W = WsprBeaconPower.fmtW;
+  if (wsprEnteredBeaconWatts() > 0) {
+    sendCatLog(wsprHasPowerControl()
+      ? `[JTCAT] WSPR: each frame sets the radio to ${W(plan.watts)} W (the level you set for the beacon) and puts its own level back when the frame ends.` +
+        ' Verify actual output on a meter; some radios make almost nothing at their lowest settings, more so on VHF/UHF.'
+      : `[JTCAT] WSPR: could NOT set radio power automatically (no live CAT/SmartSDR power control) — the beacon transmits at the radio's own setting; set it to ${W(plan.watts)} W BY HAND if that is what you want.`);
+  } else {
+    sendCatLog(`[JTCAT] WSPR: the beacon transmits at the radio's own power setting${plan.watts > 0 ? ` (${W(plan.watts)} W now)` : ''} and does not change it.` +
+      ' To beacon at another level, change TX Pwr in the JTCAT window while the beacon is armed; it is used for the frames only and your level comes back after each one.');
+  }
   wsprRunOwedAtuTune();
   tellPopout(true);
 }
@@ -24824,6 +24889,7 @@ function startJtcat(mode) {
 	    _jtcatLastTxEndMs = Date.now();
 	    clearJtcatTxFailsafe();
 	    clearJtcatIcomHardRelease();
+	    const wsprFrameSetPower = !!(_wsprFrameRf && _wsprFrameRf.commanded);
 	    wsprFrameRfEnd();
 	    // If Mercury owns the radio, this tx-end is unwinding a JTCAT TX the
 	    // arbiter blocked at tx-start — do NOT drop Mercury's PTT. Otherwise
@@ -24840,6 +24906,9 @@ function startJtcat(mode) {
 	      else handleRemotePtt(false);
 	      releaseRadio('jtcat');
 	    }
+	    // A beacon frame that changed the radio's power puts it back now, after
+	    // the PTT release above went out on the same link (#521).
+	    if (wsprFrameSetPower && settings.wsprPreCapPower) wsprRestorePreCapPower('frame done', { immediate: true });
 	    fakeItRestoreDial('end of transmission');
     // Stop the paced UDP pump if SmartSDR Direct TX was driving this cycle —
     // otherwise packets keep flowing after PTT release (harmless once the

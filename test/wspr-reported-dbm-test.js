@@ -157,7 +157,8 @@ t('main.js has no 30 dBm cap left', () => {
   assert.ok(!/Math\.min\(30, /.test(main.slice(main.indexOf('function wsprBeaconTick()'), main.indexOf('function remoteJtcatMyCall()'))));
 });
 t('every beacon frame, arm and identity check reports wsprReportedDbm()', () => {
-  assert.ok(main.includes('return WsprDbm.reportedDbm({ auto: wsprDbmAuto(), manualDbm: settings.wsprDbm, beaconWatts: wsprBeaconWatts() });'));
+  // #521: a radio whose power cannot be read, with no level entered, reports 1 W (30 dBm) as before.
+  assert.ok(main.includes('return WsprDbm.reportedDbm({ auto: wsprDbmAuto(), manualDbm: settings.wsprDbm, beaconWatts: wsprBeaconWatts() || 1 });'));
   const tick = main.slice(main.indexOf('function wsprBeaconTick()'), main.indexOf('function setWsprBeacon('));
   assert.ok(tick.includes('const dbm = wsprReportedDbm();'));
   assert.ok(main.includes('encodeWspr(call, grid, wsprReportedDbm(), { baseFreqHz: 1500 });'));
