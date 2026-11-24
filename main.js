@@ -544,6 +544,7 @@ const AprsMap = require('./lib/aprs-map');                 // APRS window: the m
 const AprsEchocat = require('./lib/aprs-echocat');         // APRS phase 6: APRS on ECHOCAT devices through this desktop
 const VaraProcess = require('./lib/vara-process');
 const VaraSetup = require('./lib/vara-setup');
+const VaraDial = require('./lib/vara-dial'); // the first VARA call after a start is placed again when VARA refused Pat's connection; what counts as a virtual cable
 const WinlinkModes = require('./lib/winlink-modes');
 const WinlinkReturn = require('./lib/winlink-return');
 const WinlinkMailViews = require('./lib/winlink-mail-views');
@@ -2170,6 +2171,11 @@ let _winlinkOutMidsAtStart = null;   // #442: their ids, so the ones the session
 let _winlinkModemAudioClosed = false; // the modem closed its audio connection while the session ran
 let _winlinkTxCutMs = 0;             // transmit audio the sound card would not take, this session
 let _winlinkPatLastLine = '';        // Pat's own last word on a failure ("Exchange failed: ...")
+let _winlinkKeyDowns = 0;            // key-downs in this attempt: a call that keyed the radio is never placed again by itself
+const _winlinkVaraRefusals = new VaraDial.RefusalNotes(); // Pat said VARA refused its TCP connection (lib/vara-dial.js)
+let _winlinkVaraCheckedAt = 0;       // when POTACAT's own last connection to VARA's port closed (0 = Pat already holds the port)
+let _winlinkVaraRoute = '';          // this session's VARA audio: 'direct' | 'cable' | 'remote'
+let _winlinkDialAt = 0;              // when Pat was last asked to call
 let _winlinkPatReply = '';           // Pat's raw /api/connect reply: for the log, never for the status
 let _winlinkReceived = null;         // messages Pat took into the Inbox, when a session did not finish
 let _patArqTimeoutAskedS = 0;        // #425: the ARDOP link timeout the running Pat was started with (seconds)
@@ -12013,6 +12019,7 @@ async function winlinkVaraReady(mode, { configured } = {}) {
   const host = _winlinkVaraHost(kind);
   const where = VaraProcess.varaWhere(host, port);
   let probe = await VaraProcess.probeVaraPort(port, { host });
+  _winlinkVaraCheckedAt = 0;
   if (!probe.ok && patProc && _patHoldsVara[kind] === patProc && (!_winlinkVaraLaunches(kind) || await varaProcessRunning(kind))) {
     winlinkLog(`${name} on ${where} is held by Pat from the last session — reusing it`);
     return;
@@ -12119,6 +12126,7 @@ async function winlinkVaraReady(mode, { configured } = {}) {
     throw new Error(`${name} did not accept a new connection; is another program using it?`);
   }
   if (accept.tries > 1) winlinkLog(`${name}: took ${accept.waitedMs} ms to accept a new connection after the check`);
+  _winlinkVaraCheckedAt = Date.now() - (accept.settleMs || 0); // when POTACAT's last connection to the port closed
   // A desktop session that uses a VARA POTACAT opened for the phone makes it the desktop's: it then stays open (#697).
   if (_varaLaunch[kind] && !_winlinkSessionFromEchocat) _varaLaunch[kind].forEchocat = false;
   _patVaraKind = kind;
@@ -12138,11 +12146,14 @@ async function winlinkVaraAudioReady(mode) {
   const kind = VaraProcess.kindOfMode(mode) || 'hf';
   if (!VaraProcess.isLocalVaraHost(_winlinkVaraHost(kind))) {
     winlinkLog(`vara: ${VaraProcess.varaName(kind)} runs on ${_winlinkVaraHost(kind)} — its audio is that computer's; POTACAT keys this radio through Pat as usual`);
+    _winlinkVaraRoute = 'remote';
     return 'remote';
   }
   if (!winlinkCableConfigured()) {
     if (winlinkIpAudioRoute()) throw new Error(`VARA cannot open this radio's audio (${winlinkAudioRouteName()}) — set up the virtual audio cable in Settings > Station > Winlink`);
-    winlinkLog('vara: no virtual cable set — VARA opens the radio\'s sound card itself (choose the radio\'s devices in VARA)');
+    // A box that is set but is no cable (only one of the two, or the radio's own sound card) is said, not passed over.
+    winlinkLog(VaraDial.cableRouteText(winlinkCableRoute()) || 'vara: no virtual cable set — VARA opens the radio\'s sound card itself (choose the radio\'s devices in VARA)');
+    _winlinkVaraRoute = 'direct';
     return 'direct';
   }
   if (settings.audioSource === 'smartsdr' && !(smartSdrAudio && smartSdrAudio.connected)) throw new Error('Flex Direct audio is not connected — the radio must be on for VARA');
@@ -12159,6 +12170,7 @@ async function winlinkVaraAudioReady(mode) {
   if (!ok) throw new Error(modemBridge.cable.error || 'The virtual audio cable did not open in time — check the two cable devices in Settings > Station > Winlink');
   const c = modemBridge.cable;
   winlinkLog(`vara: audio via the virtual cable (${c.captureLabel || 'from VARA'} → radio, radio → ${c.playbackLabel || 'to VARA'}) and ${winlinkAudioRouteName()}`);
+  _winlinkVaraRoute = 'cable';
   return 'cable';
 }
 function _winlinkArdopPort() {
@@ -12416,6 +12428,7 @@ function spawnPat() {
         winlinkLog(`pat: ${line}`);
         if (DirewolfProcess.patLineSaysConnected(line)) _winlinkPatConnected = true;
         if (VaraProcess.patLineSaysVaraRefused(line) && _patVaraKind && _patHoldsVara[_patVaraKind] === proc) _patHoldsVara[_patVaraKind] = null;
+        if (winlinkSessionActive()) _winlinkVaraRefusals.note('output', VaraDial.patVaraPortRefusal(line));
       }
     };
     proc.stdout.on('data', relay);
@@ -12499,7 +12512,16 @@ function winlinkOnPatEvent(ev) {
     if (/Exchange failed:|Unable to establish connection to remote:/i.test(ev.text)) _winlinkPatLastLine = ev.text.slice(0, 200);
     // Pat's log is the session transcript; it stays in pat.log. Only the lines
     // an operator can act on are said, once each, in POTACAT's words.
-    if (ev.class === 'login-failed') { _winlinkSessionError = `Winlink refused the password for ${String(settings.myCallsign || '').toUpperCase()} — check it in Settings > Station > Winlink (a password made before 2018 must be typed in CAPITALS)`; _winlinkSessionErrorKind = 'login-failed'; }
+    // VARA refused Pat's TCP connection: no call was made. Pat's words ("connection
+    // refused") are the no-answer rule's too; this is never a gateway that did not
+    // answer. The dial decides what happens next (lib/vara-dial.js).
+    const refused = VaraDial.patVaraPortRefusal(ev.text);
+    if (refused) {
+      _winlinkVaraRefusals.note('log', refused);
+      // Pat does not hold a port it could not open, whatever was recorded before the dial.
+      if (_patVaraKind && _patHoldsVara[_patVaraKind] === patProc) _patHoldsVara[_patVaraKind] = null;
+    }
+    else if (ev.class === 'login-failed') { _winlinkSessionError = `Winlink refused the password for ${String(settings.myCallsign || '').toUpperCase()} — check it in Settings > Station > Winlink (a password made before 2018 must be typed in CAPITALS)`; _winlinkSessionErrorKind = 'login-failed'; }
     else if (ev.class === 'no-answer') { _winlinkSessionError = `${winlinkState.session.gateway || 'The gateway'} did not answer — try another gateway or band`; _winlinkSessionErrorKind = 'no-answer'; }
     else if (ev.class === 'transport-down') { _winlinkSessionError = winlinkTransportDownText(winlinkState.session.mode); _winlinkSessionErrorKind = 'transport-down'; }
     else if (ev.class === 'rig-refused') { _winlinkSessionError = 'POTACAT refused Pat\'s tune or PTT — see the [Winlink] lines above'; _winlinkSessionErrorKind = 'rig-refused'; }
@@ -12740,6 +12762,7 @@ async function startWinlinkShim() {
       winlinkTxActive = true;
       _winlinkTxBurst.keyDown();
       modemBridgeOver(true);
+      _winlinkKeyDowns++; // a call that keyed the radio is never placed again by itself (lib/vara-dial.js)
       const icom = detectRigType() === 'icom' || (getActiveRigModel()?.brand === 'Icom');
       // Packet and VARA FM: the session start put the radio in the rig's packet mode (#128); a frame never changes it.
       const pttMode = PacketRigMode.keyDownOpts({ icom, resolved: winlinkPacketRigMode(winlinkState.session.mode) });
@@ -13164,9 +13187,21 @@ function winlinkCableDevices() {
   const c = (rig && rig.modemCable) || {};
   return { inputId: c.inputId || '', outputId: c.outputId || '' };
 }
+/**
+ * Are the two boxes a pair of virtual cables to carry (lib/vara-dial.js)? Both
+ * set, and neither the radio's own sound card: that one is no cable, and
+ * carrying it would play the radio's receive audio into its own transmit input.
+ */
+function winlinkCableRoute() {
+  return VaraDial.cableRoute({ cable: winlinkCableDevices(), radio: modemBridgeDevices(), ipAudio: winlinkIpAudioRoute() });
+}
 function winlinkCableConfigured() {
-  const c = winlinkCableDevices();
-  return !!(c.inputId && c.outputId);
+  return winlinkCableRoute().use;
+}
+/** "127.0.0.1:8300" for the session's VARA. */
+function winlinkVaraWhere(mode) {
+  const kind = VaraProcess.kindOfMode(mode) || 'hf';
+  return VaraProcess.varaWhere(_winlinkVaraHost(kind), kind === 'fm' ? _winlinkVaraFmPort() : _winlinkVaraPort());
 }
 function modemBridgeWanted() {
   if (winlinkIpAudioRoute() || isRemoteMode()) return false;
@@ -15902,6 +15937,10 @@ async function winlinkStartSession({ mode, gateway, dialKhz, url: rowUrl, origin
   });
   winlinkOutcomeReset(mode);
   winlinkPacketReset(mode);
+  // This attempt's own VARA dial facts (lib/vara-dial.js): nothing keyed yet, no refusal noted.
+  _winlinkKeyDowns = 0;
+  _winlinkVaraRefusals.reset();
+  _winlinkVaraCheckedAt = 0; _winlinkVaraRoute = ''; _winlinkDialAt = 0;
   _winlinkSessionError = '';
   _winlinkSessionErrorKind = '';
   _winlinkPatConnected = false;
@@ -15992,8 +16031,30 @@ async function winlinkStartSession({ mode, gateway, dialKhz, url: rowUrl, origin
       if (mode === 'packet') winlinkPacketTimerStart(); // #300: a call that opens on a link the gateway still holds
       winlinkState.setSession({ state: 'connecting', text: radio ? `Calling ${String(gateway).toUpperCase()}` : 'Connecting to the CMS' });
       winlinkSessionPush();
+      // The first VARA call after POTACAT starts is the one where Pat has to open
+      // VARA's port, and VARA may not be listening again yet after POTACAT's own
+      // checks of it. A dial VARA refused never reached it: placed again, a few
+      // times, while nothing has been keyed (lib/vara-dial.js).
+      if (VaraDial.isVaraMode(mode)) {
+        winlinkLog(`vara: Pat is asked to call ${_winlinkVaraCheckedAt ? (Date.now() - _winlinkVaraCheckedAt) + ' ms after POTACAT\'s own check of ' + winlinkVaraWhere(mode) : 'on the connection to VARA it already holds'} (audio: ${_winlinkVaraRoute || 'not known'})`);
+      }
       _winlinkDialed = true; dialed = true;
-      const received = await patClient.connect(url);
+      const received = await VaraDial.dialWithRedial({
+        mode,
+        connect: async () => { _winlinkDialAt = Date.now(); return await patClient.connect(url); },
+        takeRefusal: () => _winlinkVaraRefusals.take(),
+        live,
+        keyed: () => _winlinkKeyDowns > 0,
+        connected: () => _winlinkPatConnected,
+        onRedial: (info) => {
+          // What the refused dial left behind is not this attempt's ending.
+          _winlinkSessionError = ''; _winlinkSessionErrorKind = '';
+          winlinkLog(VaraDial.redialLogText({ mode, where: winlinkVaraWhere(mode), ...info, sinceCheckMs: _winlinkVaraCheckedAt ? _winlinkDialAt - _winlinkVaraCheckedAt : NaN }));
+          winlinkSessionTouch();
+          winlinkState.setSession({ text: `${VaraProcess.varaName(VaraProcess.kindOfMode(mode))} was not ready for the call: calling ${String(gateway).toUpperCase()} again` });
+          winlinkSessionPush();
+        },
+      });
       if (!live()) throw cancelled();
       winlinkEndSession('done', winlinkSessionSummary(mode, winlinkState.session.sent, received, gateway), received);
     } catch (e) {
@@ -16031,6 +16092,21 @@ async function winlinkStartSession({ mode, gateway, dialKhz, url: rowUrl, origin
       _winlinkPatReply = dialed ? String((e && e.message) || e) : '';
       if (dialed && e && e.body != null) { const n = WinlinkOutcome.receivedFromPatBody(e.body); if (n != null) _winlinkReceived = n; }
       if (dialed && e && !e.status) winlinkNoteCause('pat-lost', e.message);
+      // VARA refused every connection: no call was made. Said as that, never as "did not answer".
+      if (e && e.varaRefused) {
+        _winlinkSessionError = VaraDial.refusedText({ mode, where: winlinkVaraWhere(mode), refusal: e.varaRefused, dials: e.varaDials });
+        _winlinkSessionErrorKind = 'transport-down';
+      }
+      // One line for a bug report when a VARA call ends at once with nothing keyed.
+      if (dialed) {
+        const fast = VaraDial.fastFailText({
+          mode, where: VaraDial.isVaraMode(mode) ? winlinkVaraWhere(mode) : '', msSinceDial: Date.now() - _winlinkDialAt,
+          msSinceCheck: _winlinkVaraCheckedAt ? _winlinkDialAt - _winlinkVaraCheckedAt : NaN,
+          keyed: _winlinkKeyDowns > 0, connected: _winlinkPatConnected,
+          patLine: (e && e.varaRefused) ? `VARA refused the connection to its ${e.varaRefused.port} port (${e.varaRefused.why || 'no reason given'})` : _winlinkPatLastLine, route: _winlinkVaraRoute,
+        });
+        if (fast) winlinkLog(fast);
+      }
       winlinkEndSession('error', _winlinkSessionError || e.message || String(e));
     }
   })();

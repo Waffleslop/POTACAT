@@ -435,6 +435,7 @@ const TESTS = [
   'test/winlink-wf-audio-test.js', // the Winlink waterfall says why it is black (no radio audio reaching POTACAT)
   'test/winlink-main-wiring-test.js',
   'test/winlink-vara-test.js',
+  'test/vara-dial-test.js', // the first VARA call after a start: a dial VARA refused is placed again while nothing was keyed, never read as 'did not answer'; a box set to the radio's own sound card is not a virtual cable
   'test/winlink-vara-anywhere-test.js', // #287: VARA HF and VARA FM on Linux, macOS and Windows, at a host and port; a fake VARA TNC (real Pat when its binary is present)
   'test/winlink-connect-test.js', // #128: /api/connect over http.request with no headers timeout; VARA and ARDOP send the same request
   'test/direwolf-skipped-path-log-test.js', // #1031: a configured winlinkDirewolfPath that is missing or not executable is named in the log
