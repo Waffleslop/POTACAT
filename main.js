@@ -48595,38 +48595,13 @@ function cloudShackNotice(text, kind) {
         nodeIntegration: false,
       },
     });
-    const saved = settings.bandspreadPopoutBounds;
-    if (saved && saved.width > 300 && saved.height > 120 && isOnScreen(saved)) {
-      bandspreadPopoutWin.setBounds(clampToWorkArea(saved));
-    }
+    // #252: the same rule as the Band Scope. Its own code never saved while
+    // maximized, so the monitor it was maximized on was forgotten.
+    rememberWindowPlace(bandspreadPopoutWin, 'bandspreadPopoutBounds', { minWidth: 480, minHeight: 240 });
     bandspreadPopoutWin.show();
     bandspreadPopoutWin.setMenuBarVisibility(false);
     bandspreadPopoutWin.loadFile(path.join(__dirname, 'renderer', 'bandspread-popout.html'), { query: themeQuery() });
 
-    // Persist bounds on resize/move as well as close, so the last known position
-    // survives unclean exits (task-manager kill, power loss, etc.).
-    let bandspreadBoundsSaveTimer = null;
-    const saveBandspreadBounds = () => {
-      if (!bandspreadPopoutWin || bandspreadPopoutWin.isDestroyed()) return;
-      if (bandspreadPopoutWin.isMaximized() || bandspreadPopoutWin.isMinimized()) return;
-      if (bandspreadBoundsSaveTimer) clearTimeout(bandspreadBoundsSaveTimer);
-      bandspreadBoundsSaveTimer = setTimeout(() => {
-        if (!bandspreadPopoutWin || bandspreadPopoutWin.isDestroyed()) return;
-        settings.bandspreadPopoutBounds = bandspreadPopoutWin.getBounds();
-        saveSettings(settings);
-      }, 400);
-    };
-    bandspreadPopoutWin.on('resize', saveBandspreadBounds);
-    bandspreadPopoutWin.on('move', saveBandspreadBounds);
-    bandspreadPopoutWin.on('close', () => {
-      if (bandspreadBoundsSaveTimer) clearTimeout(bandspreadBoundsSaveTimer);
-      if (bandspreadPopoutWin && !bandspreadPopoutWin.isDestroyed()) {
-        if (!bandspreadPopoutWin.isMaximized() && !bandspreadPopoutWin.isMinimized()) {
-          settings.bandspreadPopoutBounds = bandspreadPopoutWin.getBounds();
-          saveSettings(settings);
-        }
-      }
-    });
     bandspreadPopoutWin.on('closed', () => {
       bandspreadPopoutWin = null;
       if (yaesuScopeBandspreadWants) {
@@ -51360,19 +51335,13 @@ function cloudShackNotice(text, kind) {
         nodeIntegration: false,
       },
     });
-    const saved = settings.scopePopoutBounds;
-    if (saved && saved.width > 400 && saved.height > 300 && isOnScreen(saved)) {
-      scopePopoutWin.setBounds(clampToWorkArea(saved));
-    }
+    // #252: opens where it was, on the monitor it was on, and saves on move and
+    // resize. Its own code saved only at close and never while maximized, so a
+    // scope kept maximized on a second or third monitor came back on the first.
+    rememberWindowPlace(scopePopoutWin, 'scopePopoutBounds', { minWidth: 480, minHeight: 300 });
     scopePopoutWin.show();
     scopePopoutWin.setMenuBarVisibility(false);
     scopePopoutWin.loadFile(path.join(__dirname, 'renderer', 'scope-popout.html'), { query: themeQuery() });
-    scopePopoutWin.on('close', () => {
-      if (scopePopoutWin && !scopePopoutWin.isDestroyed() && !scopePopoutWin.isMaximized() && !scopePopoutWin.isMinimized()) {
-        settings.scopePopoutBounds = scopePopoutWin.getBounds();
-        saveSettings(settings);
-      }
-    });
     scopePopoutWin.on('closed', () => {
       scopePopoutWin = null;
       if (!yaesuScopeWanted()) stopYaesuScope('scope window closed');
