@@ -200,6 +200,7 @@ const TESTS = [
   'test/jtcat-replace-log-test.js',
   'test/jtcat-second-caller-test.js',
   'test/jtcat-quiet-freq-test.js', // CQ quiet frequency: main measures the engine audio while no waterfall draws (one rule, lib/jtcat-quiet-freq.js)
+  'test/jtcat-auto-tone-passband-test.js', // #1032: the automatic CQ tone stays in 500..2400 Hz (inside every common DATA-mode TX filter); an operator's tone is never bounded
   'test/port-picker-test.js',
   'test/pota-parks-db-test.js',
   'test/elecraft-data-mode-test.js',
