@@ -16135,6 +16135,11 @@ function render() {
 
       for (const cell of cells) {
         const td = document.createElement('td');
+        // Only a reference cell that can overflow wraps (#999): several program
+        // refs or pills. A single plain ref keeps the old nowrap cell, so row
+        // height is unchanged (like source-multi-program on the Source cell).
+        const multiRef = cell.col === 'reference' && String(cell.val || '').indexOf(' / ') !== -1;
+        const refWraps = multiRef || (cell.col === 'reference' && !!(cell.newPark || cell.wwff || (cell.wantedStates && cell.wantedStates.length)));
         // Make park ref and name clickable links to park/summit pages
         if ((cell.col === 'reference' || cell.col === 'parkName') && s.reference && s.source !== 'net') {
           let url;
@@ -16146,7 +16151,7 @@ function render() {
           else if (s.source === 'gma') url = `https://www.cqgma.org/`; // was falling through to a bogus POTA link
           else url = `https://pota.app/#/park/${s.reference}`;
           const a = document.createElement('a');
-          if (cell.col === 'reference') {
+          if (multiRef) {
             // Each ref is its own nowrap unit so a long cell wraps between
             // refs, never inside "US-1234" (#999).
             String(cell.val || '').split(' / ').forEach((ref, i) => {
@@ -16167,7 +16172,7 @@ function render() {
             window.api.openExternal(url);
           });
           td.appendChild(a);
-        } else if (cell.col === 'reference') {
+        } else if (multiRef) {
           String(cell.val || '').split(' / ').forEach((ref, i) => {
             if (i > 0) td.appendChild(document.createTextNode(' / '));
             const part = document.createElement('span');
@@ -16178,7 +16183,7 @@ function render() {
         } else {
           td.textContent = cell.val;
         }
-        if (cell.col === 'reference') td.classList.add('ref-wrap');
+        if (refWraps) td.classList.add('ref-wrap');
         if (cell.col) td.setAttribute('data-col', cell.col);
         if (cell.cls) td.className = cell.cls;
         // Bearing column: clickable in manual rotor mode
