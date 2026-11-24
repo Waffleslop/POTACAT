@@ -353,6 +353,8 @@ test('formatSize: bytes, then whole KB of 1000 bytes', () => {
   assert.strictEqual(C.isLarge({ size: 60000 }), true);
   assert.strictEqual(C.isLarge({ size: 59999 }), false);
   assert.strictEqual(C.isLarge({ size: null }), false);
+  assert.strictEqual(C.showLargeTag({ id: 'X', name: '', subject: 'Big thing', size: 70000 }), true);
+  assert.strictEqual(C.showLargeTag({ id: 'PUB_PACKET', name: 'Packet gateways and frequencies (large)', subject: '', size: 219867 }), false, 'the name says it already');
 });
 const it = (size) => ({ id: 'X' + size, size });
 test('the running total', () => {
