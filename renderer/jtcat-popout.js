@@ -126,6 +126,9 @@ function _applyPopoutTheme(payload) {
     if (maxAttemptsInput && typeof s.jtcatMaxQsoAttempts === 'number') {
       maxAttemptsInput.value = s.jtcatMaxQsoAttempts;
     }
+    if (callingTimeInput && window.JtcatCallingTime) {
+      callingTimeInput.value = window.JtcatCallingTime.clampMinutes(s.jtcatCallingTimeMin);
+    }
     logPrompt = s.jtcatLogPrompt === true;
     if (logPromptToggle) logPromptToggle.classList.toggle('active', logPrompt);
     autoRespot = s.jtcatAutoRespot === true;
@@ -159,12 +162,14 @@ function _applyPopoutTheme(payload) {
     }
     if (typeof s.jtcatWaterfallSpeed === 'number') setWfSpeed(s.jtcatWaterfallSpeed, false);
     if (typeof s.jtcatWaterfallFloor === 'number') setWfFloor(s.jtcatWaterfallFloor, false);
+    wfSetShown(s.jtcatShowWaterfall !== false, false); // #391, default on
     if (s.jtcatStationsExpiryMin != null && typeof applyStationsExpiry === 'function') applyStationsExpiry(s.jtcatStationsExpiryMin, false);
     if (typeof s.jtcatShowBandScope === 'boolean') bsSetOn(s.jtcatShowBandScope, false);
     else updateWfSpeedHelp();
     fdMode = !!s.jtcatFdMode;
     if (fdExchInput) fdExchInput.value = s.jtcatFdExch || '';
     reflectFd();
+    setJpLayoutChoice(s.jtcatLayout, false); // #857: Automatic unless the operator chose Full or Compact
     skipTx1 = !!s.jtcatSkipTx1;
     reflectSkipTx1();
     huntCqFallback = !!s.jtcatHuntCqFallback;
@@ -269,6 +274,7 @@ function _applyPopoutTheme(payload) {
   var cqBtn = document.getElementById('jp-cq');
   var fullAutoCqBtn = document.getElementById('jp-full-auto-cq');
   var maxAttemptsInput = document.getElementById('jp-max-attempts');
+  var callingTimeInput = document.getElementById('jp-calling-time');  // #161 TX watchdog minutes
   var openWatchlistBtn = document.getElementById('jp-open-watchlist');
   if (openWatchlistBtn) openWatchlistBtn.addEventListener('click', function () {
     if (window.api.openWatchlistSettings) window.api.openWatchlistSettings();
@@ -1274,8 +1280,9 @@ function _applyPopoutTheme(payload) {
   // are a property of this screen (localStorage, like the filters); how long
   // a station stays is the jtcatStationsExpiryMin setting.
   var stationsEl = document.getElementById('jp-stations');
-  var viewStreamBtn = document.getElementById('jp-view-stream');
-  var viewStationsBtn = document.getElementById('jp-view-stations');
+  // Stream / Stations: one dropdown in the filter row (Stream by default; the
+  // choice is remembered across restarts).
+  var viewSelect = document.getElementById('jp-view');
   var stationsExpirySelect = document.getElementById('jp-stations-expiry');
   var VIEW_LS_KEY = 'jtcat-band-view';
   var STATIONS_SORT_LS_KEY = 'jtcat-stations-sort';
@@ -1403,14 +1410,12 @@ function _applyPopoutTheme(payload) {
     stationsView = !!toStations;
     bandActivity.hidden = stationsView;
     if (stationsEl) stationsEl.hidden = !stationsView;
-    if (viewStreamBtn) viewStreamBtn.classList.toggle('active', !stationsView);
-    if (viewStationsBtn) viewStationsBtn.classList.toggle('active', stationsView);
+    if (viewSelect) viewSelect.value = stationsView ? 'stations' : 'stream';
     if (save) { try { localStorage.setItem(VIEW_LS_KEY, stationsView ? 'stations' : 'stream'); } catch (e) {} }
     if (stationsView) renderStations();
     else bandActivity.scrollTop = bandActivity.scrollHeight;
   }
-  if (viewStreamBtn) viewStreamBtn.addEventListener('click', function() { setBandView(false, true); });
-  if (viewStationsBtn) viewStationsBtn.addEventListener('click', function() { setBandView(true, true); });
+  if (viewSelect) viewSelect.addEventListener('change', function() { setBandView(viewSelect.value === 'stations', true); });
   function applyStationsExpiry(v, persist) {
     var n = JtcatStations.setExpiryMin(jpStations, v);
     if (stationsExpirySelect) stationsExpirySelect.value = String(n);
@@ -1855,23 +1860,12 @@ function _applyPopoutTheme(payload) {
       setTxOnState(false);
       cqBtn.classList.remove('active');
       setTxMsgDisplay(data.error || 'Error');
-      // Raise the same toast slot used for QSO-Logged success so the
-      // "TX stopped" event is visible without DevTools. Red variant
-      // distinguishes it from the green success toast. (K3SBP 2026-05-05:
-      // the retry-limit was previously only logged to console.)
-      showJtcatErrorToast(data.error || 'TX stopped');
-      // The wrong-band refusal: one press moves JTCAT to where the radio is.
-      if (data.followRadio && window.api.jtcatFollowRadio) {
-        var fb = document.createElement('button');
-        fb.className = 'jp-toast-action';
-        fb.textContent = 'Follow the radio';
-        fb.addEventListener('click', function(e) {
-          e.stopPropagation();
-          window.api.jtcatFollowRadio();
-          qsoToast.classList.remove('visible');
-          qsoToast.classList.remove('error');
-        });
-        qsoToast.appendChild(fb);
+      if (data.txRefused || data.followRadio) {
+        txErrorMessage.textContent = data.error || 'TX stopped';
+        txErrorFollow.hidden = !data.followRadio || !window.api.jtcatFollowRadio;
+        txError.hidden = false;
+      } else {
+        showJtcatErrorToast(data.error || 'TX stopped');
       }
       // The retry cap stopped a QSO whose RR73 never came: not logged (#807).
       // Send 73 puts the 73 on the air, which logs it. Stays up for a minute.
@@ -1924,6 +1918,14 @@ function _applyPopoutTheme(payload) {
   });
 
   // --- QSO Logged notification ---
+  var txError = document.getElementById('jp-tx-error');
+  var txErrorMessage = document.getElementById('jp-tx-error-message');
+  var txErrorFollow = document.getElementById('jp-tx-error-follow');
+  txErrorFollow.addEventListener('click', function() { window.api.jtcatFollowRadio(); });
+  document.getElementById('jp-tx-error-dismiss').addEventListener('click', function() {
+    txError.hidden = true;
+  });
+
   var qsoToast = document.getElementById('jp-qso-toast');
   var qsoToastTimer = null;
 
@@ -1959,6 +1961,7 @@ function _applyPopoutTheme(payload) {
     if (qsoToastTimer) clearTimeout(qsoToastTimer);
     qsoToast.classList.remove('visible');
     qsoToast.classList.remove('error');
+    qsoToast.classList.remove('info');
     // Focus main POTACAT window — QSO log is there (only meaningful for
     // the success toast; clicking an error toast just dismisses it).
     if (!qsoToast.dataset.errorToast) window.api.focusMain();
@@ -1973,6 +1976,7 @@ function _applyPopoutTheme(payload) {
     if (qsoToastTimer) clearTimeout(qsoToastTimer);
     qsoToast.innerHTML = esc(message) +
       (sub ? '<div class="jp-toast-sub">' + esc(sub) + '</div>' : '');
+    qsoToast.classList.remove('info'); // #857's one-time note
     qsoToast.classList.add('visible');
     qsoToast.classList.add('error');
     qsoToast.dataset.errorToast = '1';
@@ -1989,6 +1993,7 @@ function _applyPopoutTheme(payload) {
     if (qsoToastTimer) clearTimeout(qsoToastTimer);
     qsoToast.innerHTML = esc(message) +
       (sub ? '<div class="jp-toast-sub">' + esc(sub) + '</div>' : '');
+    qsoToast.classList.remove('info'); // #857's one-time note
     qsoToast.classList.add('visible');
     qsoToast.classList.add('warn');
     qsoToast.dataset.errorToast = '1'; // suppress the click-focuses-main behavior
@@ -2802,6 +2807,8 @@ function _applyPopoutTheme(payload) {
       multiWfPanes.push({ sliceId: cfg.sliceId, canvas: canvas, ctx: canvas.getContext('2d'), analyser: analyser, sampleRate: entry ? entry.ctx.sampleRate : 48000, txLine: txLine, txHz: txHz });
     });
 
+    // "Show the audio waterfall" off (#391): the panes exist, hidden, and are never drawn.
+    if (!wfShown) return;
     // Start waterfall animation loop
     function drawMultiWf() {
       for (var p of multiWfPanes) {
@@ -3099,6 +3106,15 @@ function _applyPopoutTheme(payload) {
       window.api.saveSettings({ jtcatMaxQsoAttempts: n });
     });
   }
+  // Calling time (#161): the transmit watchdog's minutes, clamped by the same
+  // rule main.js applies (lib/jtcat-calling-time.js, 1-30, default 6).
+  if (callingTimeInput && window.JtcatCallingTime) {
+    callingTimeInput.addEventListener('change', function() {
+      var n = window.JtcatCallingTime.clampMinutes(callingTimeInput.value);
+      callingTimeInput.value = n;
+      window.api.saveSettings({ jtcatCallingTimeMin: n });
+    });
+  }
   // Hunt's signal floor (lib/jtcat-snr-floor.js): normalised on change, and
   // the by-band line says which pieces it could not read.
   if (huntMinDbInput && window.JtcatSnrFloor) {
@@ -3201,6 +3217,39 @@ function _applyPopoutTheme(payload) {
   if (wfSpeedInput) {
     wfSpeedInput.addEventListener('change', function() { setWfSpeed(wfSpeedInput.value, true); });
   }
+  // "Show the audio waterfall" (#391): an operator whose radio's own band scope
+  // already shows the band can switch this one off. Off hides the pane and
+  // stops drawing it: the loop leaves at its first line and no frame is asked
+  // for. The decoder is fed by the capture worklet (startPopoutAudio), never by
+  // the waterfall, so decoding and TX carry on; main measures the quiet TX
+  // frequency itself when no window reports, and phones get main's own
+  // spectrum. The warnings the loop raised (RX gain at 0, silent DAX) and the
+  // JTTY Clear-spot levels keep running on a slow tick (wfOffTick).
+  var wfShowToggle = document.getElementById('jp-wf-show');
+  var wfShown = true;
+  function wfApplyShown() {
+    if (wfShowToggle) wfShowToggle.classList.toggle('active', wfShown);
+    var single = document.getElementById('jp-wf-single');
+    if (single) single.classList.toggle('jp-wf-off', !wfShown);
+    var multi = document.getElementById('jp-wf-multi');
+    if (multi) multi.classList.toggle('jp-wf-off', !wfShown);
+  }
+  function wfSetShown(on, persist) {
+    var was = wfShown;
+    wfShown = on !== false;
+    wfApplyShown();
+    if (!wfShown) {
+      if (popoutWaterfallAnim) { cancelAnimationFrame(popoutWaterfallAnim); popoutWaterfallAnim = null; }
+      if (multiWfAnim) { cancelAnimationFrame(multiWfAnim); multiWfAnim = null; }
+    } else if (!was) {
+      resizeWaterfall();   // the canvas measured 0x0 while hidden
+      wfResetAccum();
+      if (popoutAnalyser && !popoutWaterfallAnim) popoutWaterfallAnim = requestAnimationFrame(popoutWaterfallLoop);
+      if (multiActive) buildMultiWaterfalls();
+    }
+    if (persist) window.api.saveSettings({ jtcatShowWaterfall: wfShown });
+  }
+  if (wfShowToggle) wfShowToggle.addEventListener('click', function() { wfSetShown(!wfShown, true); });
   // Display floor — the FT-710 scope's Floor slider, on this waterfall too
   // (Casey 2026-09-21). Applied AFTER the silence watchdog reads the raw
   // bins, so a high floor can never fake an 'RX audio silent' verdict.
@@ -5748,9 +5797,10 @@ function _applyPopoutTheme(payload) {
       bandBtn = bestBtn;
     }
     if (!bandBtn) bandBtn = document.querySelector('.jp-band-opt[data-band="20m"]');
-    if (bandBtn) selectBand(bandBtn, false);
     if (s.remoteShack) enterRemoteShackMode();
     window.api.jtcatStart(modeSelect.value);
+    // Starting the engine clears the TX dial anchor, so tune after starting.
+    if (bandBtn) selectBand(bandBtn, false);
     // IPC is ordered: lands after jtcat-start built the PSK/JTTY slice, so the
     // restored audio frequency survives the fresh engine's 1500 Hz default.
     if (modeSelect.value === 'PSK31') pskSyncFreq();
@@ -6358,7 +6408,10 @@ function _applyPopoutTheme(payload) {
     try {
       // Yaesu SCU-LAN10 audio arrives the same way: main forwards it as
       // 'jtcat-vita49-audio' frames at 24 kHz (handleYaesuLanAudioFrame).
-      if (audioSource === 'smartsdr' || audioSource === 'yaesu-lan' || audioSource === 'websdr' || audioSource === 'tci') {
+      // So does Icom network audio (sendIcomNetworkJtcatUiAudio), once this
+      // window declares itself ready below; without it the pop-out opened the
+      // default input, a Mac's webcam microphone (#936).
+      if (window.RxDirectSource.jtcatPopoutUsesMainFeed(audioSource)) {
         _audioStartStage = 'ctx-create';
         // SmartSDR Direct: audio is the VITA-49 dax_rx stream that main
         // forwards as 'jtcat-vita49-audio' frames. A single AudioWorkletNode
@@ -6383,9 +6436,7 @@ function _applyPopoutTheme(payload) {
           numberOfInputs: 0,
           numberOfOutputs: 1,
           outputChannelCount: [1],
-          processorOptions: (audioSource === 'websdr' || audioSource === 'tci')
-            ? { sourceRate: 12000 }
-            : { sourceRate: 24000 },
+          processorOptions: window.RxDirectSource.jtcatPopoutFeedOptions(audioSource),
         });
         popoutVita49Dest = popoutVita49Ctx.createMediaStreamDestination();
         popoutVita49Node.connect(popoutVita49Dest);
@@ -6399,7 +6450,7 @@ function _applyPopoutTheme(payload) {
         // SmartSDR path sends to both windows and was unaffected, which is
         // why this hid for so long. (K3SBP 2026-08-05.)
         if (window.api.setJtcatIpAudioReady) window.api.setJtcatIpAudioReady(true);
-        console.log('[JTCAT popout] Audio source: ' + (audioSource === 'websdr' ? 'WebSDR' : audioSource === 'tci' ? 'TCI (Zeus / Thetis)' : 'SmartSDR Direct (VITA-49 dax_rx)') + ' via AudioWorklet');
+        console.log('[JTCAT popout] Audio source: ' + (audioSource === 'websdr' ? 'WebSDR' : audioSource === 'tci' ? 'TCI (Zeus / Thetis)' : audioSource === 'icom-network' ? 'Icom network' : 'SmartSDR Direct (VITA-49 dax_rx)') + ' via AudioWorklet');
       } else {
         var constraints = {
           channelCount: 1,
@@ -6565,7 +6616,7 @@ function _applyPopoutTheme(payload) {
         // and the label is the only way a bug report shows which one fed the
         // decoder. KB2UXB 2026-08-03.
         var capLabel = '';
-        if (audioSource !== 'smartsdr' && audioSource !== 'yaesu-lan' && audioSource !== 'tci') {
+        if (audioSource !== 'smartsdr' && audioSource !== 'yaesu-lan' && audioSource !== 'tci' && audioSource !== 'icom-network') {
           try {
             var capTrack = popoutAudioStream && popoutAudioStream.getAudioTracks()[0];
             if (capTrack && capTrack.label) capLabel = ' [' + capTrack.label + ']';
@@ -6826,8 +6877,69 @@ function _applyPopoutTheme(payload) {
     if (jpWfSilentEl) jpWfSilentEl.classList.toggle('show', !!on);
   }
 
+  // Everything the loop does besides drawing: the RX-gain-at-0 notice, the
+  // Flex silent-DAX watchdog and the JTTY Clear-spot levels. The loop runs
+  // it every frame; with the waterfall off (#391) wfOffTick runs it twice a second.
+  function wfWatchFrame(freqData, passbandBins) {
+    // RX gain at 0 — the analyser (and, on device-audio paths, the capture
+    // worklet feeding the decoder) sits DOWNSTREAM of popoutRxGainNode, so
+    // a zeroed slider makes the waterfall deterministically black no matter
+    // what the radio sends. This exact case used to be EXCUSED by the
+    // watchdog below ("user muted on purpose") and cost a full night of
+    // DAX-routing archaeology while the fault was the slider (K3SBP
+    // 2026-07-18). Name the slider instead of staying quiet. Any source,
+    // any TX state — the message is statically true.
+    if (popoutRxGainLevel <= 0.001) {
+      if (!wfSilentShown || wfSilentCause !== 'gain') {
+        if (jpWfSilentEl) jpWfSilentEl.innerHTML = '<strong>Waterfall muted — RX gain is at 0</strong><span>drag the RX slider up to bring it back</span>';
+        wfSilentCause = 'gain';
+        setWfSilentOverlay(true); wfSilentShown = true;
+      }
+      wfLastSignalTs = Date.now(); // fresh window once the slider comes back up
+    } else if (popoutIsFlex && !transmitting) {
+      // RX-silent watchdog (Flex only) — see notes above popoutWaterfallLoop.
+      var wfMax = 0;
+      for (var pb = 0; pb < passbandBins; pb++) { if (freqData[pb] > wfMax) wfMax = freqData[pb]; }
+      var wfNow = Date.now();
+      if (wfMax > WF_SILENCE_FLOOR) {
+        wfLastSignalTs = wfNow;
+        if (wfSilentShown) { setWfSilentOverlay(false); wfSilentShown = false; }
+      } else if ((!wfSilentShown || wfSilentCause !== 'silent') && (wfNow - wfLastSignalTs) > WF_SILENCE_MS) {
+        // Restore the default DAX text — the overlay may carry gain/stall
+        // wording from an earlier cause.
+        if (jpWfSilentEl) jpWfSilentEl.innerHTML = '<strong>RX audio silent — check DAX routing</strong><span>slice may not be on POTACAT\'s DAX RX channel</span>';
+        wfSilentCause = 'silent';
+        setWfSilentOverlay(true); wfSilentShown = true;
+      }
+    } else {
+      // Not applicable (non-Flex or transmitting): no verdict. Clear any
+      // warning and reset the clock so a fresh window is measured when we
+      // requalify (e.g. the moment TX ends).
+      wfLastSignalTs = Date.now();
+      if (wfSilentShown) { setWfSilentOverlay(false); wfSilentShown = false; }
+    }
+
+    // JTTY "Clear spot" listens to the raw levels too (never our own TX).
+    if (modeSelect.value === 'JTTY' && !transmitting) jttyFeedLevels(freqData, passbandBins);
+  }
+  function wfOffTick() {
+    if (wfShown || !popoutAnalyser) return;
+    try {
+      var freqData = new Uint8Array(popoutAnalyser.frequencyBinCount);
+      popoutAnalyser.getByteFrequencyData(freqData);
+      var nyquist = (popoutAudioCtx ? popoutAudioCtx.sampleRate : 12000) / 2;
+      wfWatchFrame(freqData, Math.floor(3000 / nyquist * freqData.length));
+    } catch (err) {
+      console.error('[JTCAT popout] Waterfall-off watchdog error:', err.message || err);
+    }
+  }
+  setInterval(wfOffTick, 500);
+
   // Waterfall rendering loop — driven by local AnalyserNode (no IPC)
   function popoutWaterfallLoop() {
+    // "Show the audio waterfall" off (#391): no drawing and no next frame.
+    // wfSetShown starts the loop again when it is turned back on.
+    if (!wfShown) { popoutWaterfallAnim = null; return; }
     if (!popoutAnalyser) {
       // A transiently-null analyser (mid device-change stop/start) used to
       // RETURN here, skipping the re-arm at the bottom — the loop died
@@ -6844,46 +6956,8 @@ function _applyPopoutTheme(payload) {
       var nyquist = (popoutAudioCtx ? popoutAudioCtx.sampleRate : 12000) / 2;
       var passbandBins = Math.floor(3000 / nyquist * freqData.length);
 
-      // RX gain at 0 — the analyser (and, on device-audio paths, the capture
-      // worklet feeding the decoder) sits DOWNSTREAM of popoutRxGainNode, so
-      // a zeroed slider makes the waterfall deterministically black no matter
-      // what the radio sends. This exact case used to be EXCUSED by the
-      // watchdog below ("user muted on purpose") and cost a full night of
-      // DAX-routing archaeology while the fault was the slider (K3SBP
-      // 2026-07-18). Name the slider instead of staying quiet. Any source,
-      // any TX state — the message is statically true.
-      if (popoutRxGainLevel <= 0.001) {
-        if (!wfSilentShown || wfSilentCause !== 'gain') {
-          if (jpWfSilentEl) jpWfSilentEl.innerHTML = '<strong>Waterfall muted — RX gain is at 0</strong><span>drag the RX slider up to bring it back</span>';
-          wfSilentCause = 'gain';
-          setWfSilentOverlay(true); wfSilentShown = true;
-        }
-        wfLastSignalTs = Date.now(); // fresh window once the slider comes back up
-      } else if (popoutIsFlex && !transmitting) {
-        // RX-silent watchdog (Flex only) — see notes above popoutWaterfallLoop.
-        var wfMax = 0;
-        for (var pb = 0; pb < passbandBins; pb++) { if (freqData[pb] > wfMax) wfMax = freqData[pb]; }
-        var wfNow = Date.now();
-        if (wfMax > WF_SILENCE_FLOOR) {
-          wfLastSignalTs = wfNow;
-          if (wfSilentShown) { setWfSilentOverlay(false); wfSilentShown = false; }
-        } else if ((!wfSilentShown || wfSilentCause !== 'silent') && (wfNow - wfLastSignalTs) > WF_SILENCE_MS) {
-          // Restore the default DAX text — the overlay may carry gain/stall
-          // wording from an earlier cause.
-          if (jpWfSilentEl) jpWfSilentEl.innerHTML = '<strong>RX audio silent — check DAX routing</strong><span>slice may not be on POTACAT\'s DAX RX channel</span>';
-          wfSilentCause = 'silent';
-          setWfSilentOverlay(true); wfSilentShown = true;
-        }
-      } else {
-        // Not applicable (non-Flex or transmitting): no verdict. Clear any
-        // warning and reset the clock so a fresh window is measured when we
-        // requalify (e.g. the moment TX ends).
-        wfLastSignalTs = Date.now();
-        if (wfSilentShown) { setWfSilentOverlay(false); wfSilentShown = false; }
-      }
-
-      // JTTY "Clear spot" listens to the raw levels too (never our own TX).
-      if (modeSelect.value === 'JTTY' && !transmitting) jttyFeedLevels(freqData, passbandBins);
+      // The warnings and JTTY levels, from the raw bins (before the floor).
+      wfWatchFrame(freqData, passbandBins);
 
       // Display floor, after the watchdog has seen the raw levels.
       if (wfFloor > 0 && window.ScopeAxis) freqData = window.ScopeAxis.applyFloor(freqData, wfFloor);
@@ -7102,6 +7176,81 @@ function _applyPopoutTheme(payload) {
     }
   });
 
+  // #857 Layout: Full or Compact. lib/jtcat-layout.js picks Compact by
+  // itself on a short screen (a 1366x768 laptop): by the work area of the
+  // display the window is on, in CSS px (over the zoom), never by the window's
+  // own height, so a resize alone never switches it. An explicit Full or
+  // Compact in Options always wins. Only the operator's
+  // choice is saved (the select); the automatic pick never is, so it never
+  // becomes a choice. This only toggles body.jp-compact: the window is never
+  // moved or resized, and the zoom keys below stay the operator's own.
+  var layoutSelect = document.getElementById('jp-layout');
+  var layoutChoice = 'auto'; // the operator's choice: auto | full | compact
+  var layoutNow = 'full';    // what the window shows
+  var layoutReady = false;   // settings loaded (no pick before the saved choice is known)
+  var layoutWorkArea = 0;    // the work-area height main.js last sent (0: none yet)
+  // The work area of the display the window is on (device-independent px).
+  // main.js sends it when the window moves or a display changes; until then
+  // the page's own screen.availHeight, which is the same number.
+  function layoutScreenHeight() {
+    return layoutWorkArea > 0 ? layoutWorkArea : (window.screen && window.screen.availHeight) || 0;
+  }
+  function layoutZoom() {
+    try { return window.api.getZoom(); } catch (e) { return 1; }
+  }
+  function applyJpLayout() {
+    if (layoutSelect) layoutSelect.value = layoutChoice;
+    var next = JtcatLayout.pick({ choice: layoutChoice, screenHeight: layoutScreenHeight(), zoom: layoutZoom(), current: layoutNow });
+    if (next === layoutNow) return;
+    layoutNow = next;
+    document.body.classList.toggle('jp-compact', next === 'compact');
+    resizeWaterfall(); // the canvas follows its new CSS height
+    if (bandActivity && !stationsView) bandActivity.scrollTop = bandActivity.scrollHeight;
+    if (next === 'compact' && layoutChoice === 'auto') tellCompactOnce();
+  }
+  function setJpLayoutChoice(v, persist) {
+    layoutChoice = JtcatLayout.normalizeChoice(v);
+    layoutReady = true;
+    applyJpLayout();
+    if (persist) window.api.saveSettings({ jtcatLayout: layoutChoice });
+  }
+  // Said once per computer, the first time Automatic goes compact.
+  function tellCompactOnce() {
+    try {
+      if (localStorage.getItem('jtcat-compact-told')) return;
+      localStorage.setItem('jtcat-compact-told', '1');
+    } catch (e) { return; }
+    if (qsoToastTimer) clearTimeout(qsoToastTimer);
+    qsoToast.innerHTML = esc('Compact layout: this screen is short, so Band Activity gets more lines.') +
+      '<div class="jp-toast-sub">' + esc('Options > Layout changes it. Ctrl and minus zooms out.') + '</div>';
+    qsoToast.classList.add('visible');
+    qsoToast.classList.add('info');
+    qsoToast.dataset.errorToast = '1'; // a click only dismisses it
+    qsoToastTimer = setTimeout(function() {
+      qsoToast.classList.remove('visible');
+      qsoToast.classList.remove('info');
+      delete qsoToast.dataset.errorToast;
+    }, 8000);
+  }
+  if (layoutSelect) layoutSelect.addEventListener('change', function() { setJpLayoutChoice(layoutSelect.value, true); });
+  // Moved to another display, or a display's work area changed.
+  window.api.onJtcatWorkArea(function(h) {
+    var n = Number(h);
+    if (!(n > 0) || n === layoutWorkArea) return;
+    layoutWorkArea = n;
+    if (layoutReady) applyJpLayout();
+  });
+  // Re-pick after a zoom key (a zoom change fires no resize, measured in
+  // Electron 39) and on resize, which only matters when the window lands on a
+  // display with another scale. A plain resize changes neither the screen nor
+  // the zoom, so it never switches the layout. applyJpLayout is cheap and
+  // returns at once when nothing changes, so no frame throttling is needed.
+  function scheduleJpLayout() {
+    if (layoutReady) applyJpLayout();
+  }
+  window.addEventListener('resize', scheduleJpLayout);
+  // end #857
+
   // --- Zoom (Ctrl+/Ctrl-) ---
   document.addEventListener('keydown', function(e) {
     if (e.ctrlKey && (e.key === '=' || e.key === '+')) {
@@ -7115,7 +7264,8 @@ function _applyPopoutTheme(payload) {
     } else if (e.ctrlKey && e.key === '0') {
       e.preventDefault();
       window.api.setZoom(1.0);
-    }
+    } else return;
+    scheduleJpLayout(); // #857: the work area in CSS px changed with the zoom
   });
 
   // --- VFO Lock: tune-blocked toast ---

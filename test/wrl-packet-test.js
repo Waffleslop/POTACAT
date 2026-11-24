@@ -245,8 +245,11 @@ check('no second escXml has grown back in main.js', () => {
 });
 
 check('saveQsoRecord normalizes a supplied txPower to a String', () => {
-  assert.ok(mainSrc.includes('qsoData.txPower = String(qsoData.txPower);'),
+  // #837: the coercion lives in lib/log-tx-power.js txPowerForContact.
+  assert.ok(/LogTxPower\.txPowerForContact\(\{\s*typed: qsoData\.txPower,/.test(mainSrc) && mainSrc.includes('if (tp) qsoData.txPower = tp;'),
     'a caller-supplied txPower is no longer coerced in saveQsoRecord');
+  const LTP = require('../lib/log-tx-power');
+  assert.strictEqual(LTP.txPowerForContact({ typed: 5, fixedW: 1000 }), '5');
 });
 
 const popoutSrc = readSrc(path.join(__dirname, '..', 'renderer', 'log-popout.js'));

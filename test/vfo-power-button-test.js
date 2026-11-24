@@ -22,8 +22,12 @@ test('the section exists with both buttons', () => {
   assert.ok(/id="sec-power"/.test(html));
   assert.ok(/id="vfo-power-on"/.test(html) && /id="vfo-power-off"/.test(html));
 });
-test('it stays below every ordered block', () => {
-  assert.ok(/function applyOrder\(\)[\s\S]{0,500}getElementById\('sec-power'\)[\s\S]{0,80}pane\.appendChild\(power\)/.test(html));
+test('it moves like the other blocks (last by default)', () => {
+  assert.ok(/const LARGE_EL = \{[\s\S]{0,600}power: 'sec-power',/.test(html), 'the block element');
+  assert.ok(/const LARGE_SWITCH = \{[\s\S]{0,400}power: null,/.test(html), 'no switch: shown when the radio supports it');
+  assert.ok(/function normalizeOrder\(saved\) \{ return VfoLayout\.normalizeLarge\(saved\); \}/.test(html));
+  const apply = html.slice(html.indexOf('function applyOrder()'), html.indexOf('function moveOrder('));
+  assert.ok(!/sec-power/.test(apply), 'applyOrder no longer pins it to the bottom');
 });
 test('shown from the model caps, never from the CAT link', () => {
   assert.ok(/power: vfoPowerAvailable\(\)/.test(main), 'vfo-radio-state carries power');

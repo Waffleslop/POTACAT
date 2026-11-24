@@ -429,7 +429,7 @@ test('the gateway reply says how it is ordered, on every surface', () => {
   const fn = fnBody(main, 'winlinkGateways');
   assert.ok(/const predicted = list\.some\(\(g\) => g\.quality != null\);/.test(fn));
   assert.ok(/WinlinkPat\.rankingNote\(\{ predicted, count: list\.length, hf \}\)/.test(fn));
-  assert.ok(/return \{ ok: true, mode, band: band \|\| '', list, predicted, note, leftOut \};/.test(fn));
+  assert.ok(/return \{ ok: true, mode, band: band \|\| '', list, predicted, note, leftOut(, \.\.\.\(listNote \? \{ listNote \} : \{\}\))? \};/.test(fn));
   assert.ok(/type: 'winlink-gateways', mode: r\.mode, band: r\.band, list: r\.list, predicted: !!r\.predicted, note: r\.note \|\| '', leftOut: r\.leftOut \|\| 0/.test(main), 'ECHOCAT gets predicted, note and leftOut');
   const proto = read('lib/echocat-protocol.js');
   assert.ok(/'winlink-gateways': \{[^}]*predicted: f\.optBoolean, note: f\.optString/.test(proto), 'declared on the wire');
@@ -461,5 +461,47 @@ test('the recovery email of an existing account is shown and changed in Settings
 // The summary LAST. Until 2026-10-23 it sat above the later sections, so a
 // failure down here never reached the exit code — two stale assertions rode
 // through CI that way.
+console.log('#585 Add a gateway');
+test('#585: the typed-gateway rule reads mine from settings.winlinkFavourites, never from the request', () => {
+  const look = fnBody(main, 'winlinkMineGateway');
+  assert.ok(/WinlinkFav\.findMine\(settings\.winlinkFavourites,/.test(look), look);
+  for (const fn of ['winlinkPreviewQsy', 'winlinkStartSession']) {
+    const body = fnBody(main, fn);
+    assert.ok(/const mine = (radio \? )?winlinkMineGateway\(\{/.test(body), fn + ' looks the gateway up');
+    assert.ok(/WinlinkReach\.gatewayReach\([^)]*\{ \.\.\.winlinkReachOpts\(\), typed: !!mine \}\)/.test(body), fn + ' passes typed from the lookup');
+    const sig = body.slice(0, body.indexOf(') {'));
+    assert.ok(!/\bmine\b|\btyped\b/.test(sig), fn + ' takes no mine or typed argument');
+  }
+});
+test('#585: a session to a typed gateway dials its via path and its ARDOP bandwidth from the saved entry', () => {
+  const body = fnBody(main, 'winlinkStartSession');
+  assert.ok(/WinlinkPat\.sessionUrl\(\{[^}]*via: mine \? mine\.via : undefined,[^}]*mineBw: mine \? mine\.bw : undefined/.test(body), 'sessionUrl gets the saved via and bw');
+});
+test('#585: the mail window sends the picked gateway\'s call with a QSY, so main can find a typed one', () => {
+  const pop = read('renderer/winlink-popout.js');
+  assert.ok(/window\.api\.qsy\(\{ dialKhz: khz, mode: currentMode\(\)\.id, gateway: /.test(pop));
+});
+test('#585: the favourite invoke carries mine, note, via, bw and was; main handles add, remove and edit', () => {
+  const pre = read('preload-winlink-popout.js');
+  const line = pre.split('\n').find((l) => l.includes("ipcRenderer.invoke('winlink-cmd-favourite'"));
+  for (const k of ['mine', 'note', 'via', 'bw', 'was']) assert.ok(new RegExp(`\\b${k}: g && g\\.${k}\\b`).test(line), 'preload: ' + k);
+  const ipc = main.split('\n').find((l) => l.includes("ipcMain.handle('winlink-cmd-favourite'"));
+  for (const k of ['mine', 'note', 'via', 'bw', 'was']) assert.ok(new RegExp(`\\b${k}\\b`).test(ipc), 'ipc: ' + k);
+  const fav = fnBody(main, 'winlinkFavourite');
+  assert.ok(/op === 'edit'/.test(fav) && /WinlinkFav\.edit\(/.test(fav));
+});
+test('#585: the mail window has Add a gateway, Edit and Remove, and the page loads the shared form module', () => {
+  const html = read('renderer/winlink-popout.html');
+  assert.ok(/id="wl-gw-add"[^>]*>Add a gateway</.test(html));
+  assert.ok(/id="wl-mine-edit"[^>]*>Edit</.test(html));
+  assert.ok(/id="wl-mine-remove"[^>]*>Remove</.test(html));
+  const at = html.indexOf('../lib/winlink-my-gateways.js');
+  assert.ok(at > 0 && at < html.indexOf('src="winlink-popout.js"') && at > html.indexOf('../lib/freq-dots.js'));
+  const pop = read('renderer/winlink-popout.js');
+  assert.ok(/WinlinkMine\.validate\(/.test(pop), 'the form checks with the shared rules');
+  assert.ok(/WinlinkMine\.pickerGroups\(/.test(pop), 'the list groups with the shared rules');
+  assert.ok(/WinlinkMine\.MINE_GROUP/.test(pop));
+});
+
 console.log(`\n${pass} passed, ${fail} failed`);
 if (fail) process.exit(1);

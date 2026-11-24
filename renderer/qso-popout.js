@@ -79,14 +79,8 @@ function gridToLatLonLocal(grid) {
 //   off    — true to start hidden (the operator opts in from the picker)
 /** The mode a record is: MFSK/JS8 reads JS8, MODE=FT4 reads FT4 (lib/adif-mode.js, #381). */
 function qsoMode(q) { return AdifMode.recordMode(q); }
-/** Does a record pass the Mode filter? PSK31/63 are filed under PSK (the
- *  option's title says so); otherwise the record's mode, or its raw MODE
- *  for an option that names one (DIGI). */
-function qsoModeMatches(q, want) {
-  const m = qsoMode(q);
-  if (m === want || String(q.MODE || '').toUpperCase() === want) return true;
-  return want === 'PSK' && /^PSK/.test(m);
-}
+// The Mode filter (and every other Logbook filter rule) is in
+// lib/logbook-filter.js, shared with the Logbook map and ECHOCAT Web (#702).
 
 const ALL_COLUMNS = [
   { key: 'QSO_DATE', label: 'Date', sort: 'QSO_DATE', field: 'QSO_DATE', w: 82,
@@ -242,6 +236,19 @@ const mapContainer = document.getElementById('qso-map-container');
 const mapSplitter = document.getElementById('qso-map-splitter');
 
 // --- Toast ---
+/** Main refused because the log changed under this window (#988): reload it. */
+async function reloadIfRefused(result) {
+  if (!result || !result.reason) return;
+  allQsos = await window.api.getAllQsos();
+  clearSelection();
+  render();
+}
+/** A refusal already says "Nothing was changed: ..."; other failures get the prefix. */
+function refusalText(prefix, result) {
+  if (result && result.reason && result.error) return result.error;
+  return prefix + ': ' + ((result && result.error) || 'unknown error');
+}
+
 function toast(msg) {
   const el = document.getElementById('qso-toast');
   el.textContent = msg;
@@ -270,8 +277,15 @@ function updateStats(list) {
 }
 
 // --- Check if any filter is active ---
+function currentFilter() {
+  return { query: searchText, band: filterBand, mode: filterMode, region: filterRegion, from: filterFrom, to: filterTo };
+}
 function hasActiveFilters() {
-  return searchText || filterBand || filterMode || filterRegion || filterFrom || filterTo;
+  return LogbookFilter.isActive(currentFilter());
+}
+function continentOf(call) {
+  const info = callsignInfo[call];
+  return info ? info.continent : '';
 }
 
 function updateResendLabel() {
@@ -292,44 +306,8 @@ function clearSelection() {
 
 // --- Render ---
 function render() {
-  const search = searchText.toLowerCase();
-  filtered = allQsos;
-
-  // Text search
-  if (search) {
-    filtered = filtered.filter(q => {
-      const hay = [q.CALL, q.SIG_INFO || q.POTA_REF, q.COMMENT, qsoMode(q), q.MODE, q.BAND].join(' ').toLowerCase();
-      return hay.includes(search);
-    });
-  }
-
-  // Band filter
-  if (filterBand) {
-    filtered = filtered.filter(q => (q.BAND || '') === filterBand);
-  }
-
-  // Mode filter
-  if (filterMode) {
-    filtered = filtered.filter(q => qsoModeMatches(q, filterMode));
-  }
-
-  // Region filter (continent from cty.dat)
-  if (filterRegion) {
-    filtered = filtered.filter(q => {
-      const info = callsignInfo[(q.CALL || '').toUpperCase()];
-      return info && info.continent === filterRegion;
-    });
-  }
-
-  // Date range (YYYYMMDD string compare)
-  if (filterFrom) {
-    const from = filterFrom.replace(/-/g, '');
-    filtered = filtered.filter(q => (q.QSO_DATE || '') >= from);
-  }
-  if (filterTo) {
-    const to = filterTo.replace(/-/g, '');
-    filtered = filtered.filter(q => (q.QSO_DATE || '') <= to);
-  }
+  // One filter for the list and the map (lib/logbook-filter.js, #702).
+  filtered = LogbookFilter.filterQsos(allQsos, currentFilter(), { continentOf });
 
   // Sort
   const dir = sortAsc ? 1 : -1;
@@ -360,7 +338,7 @@ function render() {
   if (allQsos.length === 0) {
     table.classList.add('hidden');
     emptyMsg.classList.remove('hidden');
-    updateMap();
+    mapFollower.filterChanged();
     return;
   }
   table.classList.remove('hidden');
@@ -385,7 +363,7 @@ function render() {
   }
   updateResendLabel();
 
-  updateMap();
+  mapFollower.filterChanged();
 }
 
 // --- Virtual scroll engine ---
@@ -776,10 +754,10 @@ function getQsoOrigin(q) {
   return null;
 }
 
-// Show arcs on hover — from origin(s) to the hovered callsign's location
-function showArcsForCall(call, toLat, toLon) {
+// Show arcs on hover — from origin(s) to the hovered station's location.
+// qsos are that station's filtered contacts, so the arcs follow the filter too.
+function showArcsForStation(qsos, toLat, toLon) {
   clearHoverArcs();
-  const qsos = filtered.filter(q => (q.CALL || '').toUpperCase() === call);
   // Collect unique origins
   const origins = new Map(); // key -> {lat,lon}
   for (const q of qsos) {
@@ -796,7 +774,8 @@ function showArcsForCall(call, toLat, toLon) {
 
 // --- Map initialization ---
 function initMap() {
-  map = L.map('qso-map', { zoomControl: true, attributionControl: false }).setView([20, 0], 2);
+  // Canvas, not one SVG node per dot: a big log stays quick to pan and filter.
+  map = L.map('qso-map', { zoomControl: true, attributionControl: false, preferCanvas: true }).setView([20, 0], 2);
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
     className: 'dark-tiles',
     maxZoom: 18,
@@ -814,39 +793,38 @@ function initMap() {
 }
 
 // --- Map marker update ---
+// The map plots exactly the rows the list shows: the filtered rows, grouped
+// per station by lib/logbook-filter.js. It re-plots from those rows in memory
+// (never re-reading the log), debounced while the operator types (#702).
+function locateQso(q) {
+  if (q.GRIDSQUARE) {
+    const pos = gridToLatLonLocal(q.GRIDSQUARE);
+    if (pos) return pos;
+  }
+  const info = callsignInfo[(q.CALL || '').toUpperCase()];
+  return info && info.lat != null ? { lat: info.lat, lon: info.lon } : null;
+}
+
+const mapFollower = LogbookFilter.mapFollower({
+  rows: () => filtered,
+  locate: locateQso,
+  draw: drawMap,
+  visible: () => !!(map && mapVisible),
+});
+
 function updateMap() {
   if (!map || !mapVisible) return;
+  mapFollower.refreshNow();
+}
 
+function drawMap(summary) {
   // Clear old markers and arcs
   clearHoverArcs();
   for (const m of mapMarkers) map.removeLayer(m);
   mapMarkers = [];
 
-  // Group filtered QSOs by callsign for popup aggregation
-  const byCall = {};
-  for (const q of filtered) {
-    const call = (q.CALL || '').toUpperCase();
-    if (!call) continue;
-
-    // Determine lat/lon: prefer GRIDSQUARE from QSO, then cty.dat
-    let lat = null, lon = null;
-    if (q.GRIDSQUARE) {
-      const pos = gridToLatLonLocal(q.GRIDSQUARE);
-      if (pos) { lat = pos.lat; lon = pos.lon; }
-    }
-    if (lat == null) {
-      const info = callsignInfo[call];
-      if (info && info.lat != null) { lat = info.lat; lon = info.lon; }
-    }
-    if (lat == null) continue;
-
-    if (!byCall[call]) byCall[call] = { lat, lon, qsos: [] };
-    byCall[call].qsos.push(q);
-  }
-
-  // Create markers
-  for (const [call, data] of Object.entries(byCall)) {
-    const { lat, lon, qsos } = data;
+  for (const st of summary.stations) {
+    const { call, lat, lon, qsos } = st;
 
     // Build popup content
     const lines = qsos.slice(0, 8).map(q => {
@@ -862,11 +840,18 @@ function updateMap() {
       const marker = L.circleMarker([lat, lon + offset], {
         radius: 5, fillColor: accentGreen, color: accentGreen, fillOpacity: 0.8, weight: 1,
       }).bindPopup(popup);
-      marker.on('mouseover', () => showArcsForCall(call, lat, lon));
+      marker.on('mouseover', () => showArcsForStation(qsos, lat, lon));
       marker.on('mouseout', () => clearHoverArcs());
       marker.addTo(map);
       mapMarkers.push(marker);
     }
+  }
+
+  // What the map shows, and the cap when a very large log reaches it.
+  const note = document.getElementById('qso-map-note');
+  if (note) {
+    note.textContent = LogbookFilter.mapNote(summary);
+    note.classList.toggle('capped', !!summary.capped);
   }
 }
 
@@ -882,13 +867,15 @@ tbody.addEventListener('dblclick', async (e) => {
   const fields = { QSL_RCVD: nowReceived ? 'Y' : '' };
   // QSLRDATE rides along like LOTW_QSLSDATE does — blanked when untoggled.
   fields.QSLRDATE = nowReceived ? new Date().toISOString().slice(0, 10).replace(/-/g, '') : '';
-  const result = await window.api.updateQso({ idx, fields });
+  // The identity rides along: main edits only this QSO (lib/qso-identity.js, #988).
+  const result = await window.api.updateQso({ idx, fields, identity: QsoIdentity.of(qso) });
   if (result.success) {
     Object.assign(qso, fields);
     render();
     toast(nowReceived ? `Paper QSL received from ${qso.CALL}` : `Paper QSL cleared for ${qso.CALL}`);
   } else {
-    toast('Update failed: ' + (result.error || 'unknown error'));
+    await reloadIfRefused(result);
+    toast(refusalText('Update failed', result));
   }
 });
 
@@ -961,17 +948,20 @@ tbody.addEventListener('dblclick', (e) => {
     const fields = { [field]: newVal };
     if (field === 'FREQ') fields.BAND = freqMhzToBandLocal(newVal);
 
-    const result = await window.api.updateQso({ idx, fields });
+    const qso = allQsos.find(q => q.idx === idx);
+    if (!qso) { cancel(); return; }
+    // The identity rides along: main edits only this QSO (lib/qso-identity.js, #988).
+    const result = await window.api.updateQso({ idx, fields, identity: QsoIdentity.of(qso) });
     if (result.success) {
-      const qso = allQsos.find(q => q.idx === idx);
       // Main's fields: a My Park edit also writes MY_SIG (#509); a Park edit
       // writes SIG and POTA_REF (or its program's REF), which POTA.app reads.
-      if (qso) Object.assign(qso, result.fields || fields);
+      Object.assign(qso, result.fields || fields);
       render();
-      toast(`Updated ${qso ? qso.CALL : 'QSO'}`);
+      toast(`Updated ${qso.CALL}`);
     } else {
       cancel();
-      toast('Update failed: ' + (result.error || 'unknown error'));
+      await reloadIfRefused(result);
+      toast(refusalText('Update failed', result));
     }
   }
 
@@ -1029,17 +1019,22 @@ tbody.addEventListener('click', async (e) => {
     const tr = btn.closest('tr');
     const idx = parseInt(tr.dataset.idx, 10);
     const qso = allQsos.find(q => q.idx === idx);
-    const call = qso ? qso.CALL : '?';
+    if (!qso) return;
+    const call = qso.CALL || '?';
 
-    const result = await window.api.deleteQso(idx);
+    // The identity rides along: main deletes only this QSO (lib/qso-identity.js, #988).
+    const result = await window.api.deleteQso(idx, QsoIdentity.of(qso));
     if (result.success) {
-      allQsos = allQsos.filter(q => q.idx !== idx);
-      // Re-index to match the rewritten file
-      allQsos.forEach((q, i) => { q.idx = i; });
+      // Reload: every later record moved up one in the file, and idx must
+      // stay the file position (#988: renumbering in display order made the
+      // next delete or edit hit another QSO).
+      allQsos = await window.api.getAllQsos();
+      clearSelection();
       render();
       toast(`Deleted QSO with ${call}`);
     } else {
-      toast('Delete failed: ' + (result.error || 'unknown error'));
+      await reloadIfRefused(result);
+      toast(refusalText('Delete failed', result));
     }
   } else {
     btn.classList.add('confirming');
@@ -1530,6 +1525,7 @@ window.api.onTheme((theme) => {
 
 window.api.onColorblindMode((enabled) => {
   accentGreen = enabled ? '#4fc3f7' : '#4ecca3';
+  updateMap();
 });
 
 // --- Log path ---

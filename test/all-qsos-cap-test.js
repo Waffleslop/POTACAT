@@ -21,6 +21,9 @@ function makeHarness(capabilities) {
   const ws = { readyState: 1 /* WebSocket.OPEN */, _clientCapabilities: capabilities };
   const self = {
     _client: ws,
+    _clients: new Set(),
+    _requestWs: null,
+    _replyWs: RemoteServer.prototype._replyWs, // no request in flight: the reply goes to _client
     _sendTo(target, msg) { if (target === ws) sent.push(msg); },
     emit(ev, msg) { if (ev === 'log') logs.push(msg); },
   };

@@ -8,7 +8,7 @@
 
 ## If the Installer Won't Run
 
-POTACAT is not yet code-signed, so Windows may block it. Here's how to fix that:
+The Windows builds are not code-signed yet (Windows signing through the SignPath Foundation is planned; see [CODE_SIGNING.md](CODE_SIGNING.md)), so Windows may block the installer. Here's how to fix that:
 
 ### Step 1: Unblock the file
 

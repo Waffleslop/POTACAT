@@ -581,6 +581,12 @@ html, body {
 }
 .so-toggles { display: flex; gap: 8px; flex-wrap: wrap; }
 .so-toggle-group { display: flex; gap: 4px; align-items: center; }
+/* Split up N (#689): the offset beside its button, the same size and border. */
+.rc-split-up-n {
+  height: 32px; padding: 0 6px; font-size: 13px; font-weight: 600;
+  background: var(--bg-card); color: var(--text);
+  border: 1px solid #444; border-radius: 6px; cursor: pointer;
+}
 .so-slider-wrap { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; }
 .so-slider { flex: 1; height: 32px; accent-color: var(--pota); }
 .so-slider-val { font-size: 13px; font-family: monospace; color: var(--text); min-width: 28px; text-align: right; }
@@ -4896,11 +4902,37 @@ body.popout-mode .popout-only { display: flex; }
 }
 .mail-chip[aria-pressed="true"] { border-color: var(--m-tint); background: var(--m-tint-subtle); color: var(--m-tint); }
 .mail-gw-msg { padding: 12px 0; font-size: 16px; color: var(--m-muted); }
+/* "Needs its own modem (service code X)": the heading over gateways that run a community modem. */
+.mail-gw-group { padding: 10px 0 2px; font-size: 16px; font-weight: 700; color: var(--m-muted); overflow-wrap: anywhere; }
 .mail-note { display: flex; flex-direction: column; gap: 6px; font-size: 16px; line-height: 1.4; color: var(--m-ink); overflow-wrap: anywhere; }
 .mail-note.hidden { display: none; }
 .mail-gw-status { display: flex; flex-direction: column; gap: 8px; }
 .mail-gw-status.hidden { display: none; }
 .mail-note-text { font-size: 16px; line-height: 1.4; color: var(--m-ink); overflow-wrap: anywhere; }
+/* My own gateways (#585 phase 4): the Mine tag, the links under the list and
+   the Add a gateway form, the desktop mail window's fields in the Mail look. */
+.mail-tag-mine { background: var(--m-tint-subtle); color: var(--m-tint); }
+.mail-gw-links { display: flex; flex-wrap: wrap; gap: 4px 18px; align-items: center; }
+.mail-link {
+  min-height: 44px; padding: 0 2px; border: 0; background: transparent; color: var(--m-tint);
+  font-family: inherit; font-size: 16px; font-weight: 700; text-decoration: underline; text-underline-offset: 3px; cursor: pointer;
+}
+.mail-link:focus-visible { outline: 2px solid var(--m-tint); outline-offset: 2px; border-radius: 4px; }
+.mail-link-danger { color: var(--m-danger); }
+.mail-add-card { display: flex; flex-direction: column; gap: 12px; padding: 12px; }
+.mail-add-card.hidden { display: none; }
+.mail-add-title { font-size: 18px; font-weight: 800; }
+.mail-add-f { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.mail-add-f.hidden { display: none; }
+.mail-add-label { font-size: 16px; font-weight: 700; color: var(--m-muted); }
+.mail-add-mono { font-family: Consolas, 'Courier New', monospace; text-transform: uppercase; }
+.mail-add-mono::placeholder { text-transform: none; }
+.mail-add-hint { font-size: 16px; line-height: 1.4; color: var(--m-muted); overflow-wrap: anywhere; }
+.mail-add-hint:empty { display: none; }
+.mail-add-err { font-size: 16px; line-height: 1.4; font-weight: 700; color: var(--m-danger); overflow-wrap: anywhere; }
+.mail-add-err:empty { display: none; }
+.mail-add-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.mail-add-actions .mail-btn { width: auto; flex: 1; min-width: 120px; }
 .mail-session { flex-shrink: 0; font-weight: 700; }
 .mail-prompt { display: flex; flex-direction: column; gap: 10px; border-color: var(--m-warn); flex-shrink: 0; }
 .mail-prompt.hidden { display: none; }
@@ -4965,4 +4997,8 @@ body.popout-mode .popout-only { display: flex; }
   .mail-end-actions, .mail-prompt-actions, .mail-notice-actions { flex-direction: row; }
   .mail-end-actions .mail-btn, .mail-prompt-actions .mail-btn, .mail-notice-actions .mail-btn { width: auto; flex: 1; }
   .mail-acct .mail-btn, .mail-gw-status .mail-btn { width: auto; min-width: 160px; align-self: flex-start; }
+  /* Add a gateway: two fields a row once there is room. */
+  .mail-add-card { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .mail-add-title, #mail-add-older, .mail-add-actions, #mail-add-msg { grid-column: 1 / -1; }
+  .mail-add-actions .mail-btn { flex: 0 1 auto; min-width: 140px; }
 }

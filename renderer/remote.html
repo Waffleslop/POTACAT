@@ -13,15 +13,18 @@
   <!-- freq-dots-js -->
   <!-- log-freq-field-js -->
   <!-- adif-mode-js -->
+  <!-- logbook-filter-js -->
   <!-- worked-entry-js -->
   <!-- cq-target-js -->
   <!-- jtcat-parser-js -->
+  <!-- qso-identity-js -->
   <!-- scope-axis-js -->
   <!-- scope-view-js -->
   <!-- waterfall-palettes-js -->
   <!-- sstv-templates-js -->
   <!-- favorites-js -->
   <!-- winlink-mail-view-js -->
+  <!-- winlink-my-gateways-js -->
   <!-- winlink-mail-actions-js -->
   <!-- wspr-dbm-js -->
   <!-- cloud-billing-ui-js -->
@@ -32,9 +35,17 @@
   <!-- pass-wording-js -->
   <!-- wsjtx-mode-notice-js -->
   <!-- freedv-display-mode-js -->
+  <!-- data-mode-picker-js -->
   <!-- vfo-ptt-row-js -->
   <!-- ws-liveness-js -->
+  <!-- ptt-release-js -->
+  <!-- ptt-client-id-js -->
   <!-- error-banner-text-js -->
+  <!-- wheel-tune-js -->
+  <!-- vfo-step-keys-js -->
+  <!-- Directory cards: sheet fields escaped (lib/directory-cards.js) -->
+  <!-- directory-cards-js -->
+  <!-- sstv-quiet-wait-js -->
   <!-- APRS phase 6: the APRS window's icons and station helpers, one copy each -->
   <!-- aprs-symbols-js -->
   <!-- aprs-stations-js -->
@@ -45,6 +56,7 @@
   <!-- worked-matrix-js -->
   <!-- worked-overlay-js -->
   <!-- rig-bands-js -->
+  <!-- split-up-js -->
   <!-- landmarks-js -->
   <!-- app-theme-js -->
   <!-- look-picker-js -->
@@ -134,6 +146,9 @@
     <div id="mode-picker" class="hidden">
       <button class="mp-btn" data-mode="USB">USB</button>
       <button class="mp-btn" data-mode="LSB">LSB</button>
+      <!-- Data sub-modes (USB-D / LSB-D), shown when capabilities.dataModes lists them (lib/data-mode-picker.js) -->
+      <button class="mp-btn hidden" data-mode="DIGU" data-data-mode>DIGU</button>
+      <button class="mp-btn hidden" data-mode="DIGL" data-data-mode>DIGL</button>
       <button class="mp-btn" data-mode="CW">CW</button>
       <button class="mp-btn" data-mode="FT8">FT8</button>
       <button class="mp-btn" data-mode="FT4">FT4</button>
@@ -401,6 +416,11 @@
             <button type="button" class="rc-btn rc-vfo" id="rc-vfo-b">B</button>
             <button type="button" class="rc-btn" id="rc-vfo-swap">A&#x21C4;B</button>
             <button type="button" class="rc-btn rc-toggle hidden" id="rc-split" title="Split operation — transmit on the other VFO">Split</button>
+          </div>
+          <!-- Split up N (#689): split on and TX at RX + N in one tap; again for simplex. -->
+          <div id="rc-split-up-group" class="so-toggle-group hidden">
+            <button type="button" class="rc-btn rc-toggle" id="rc-split-up">Split up 1</button>
+            <select id="rc-split-up-n" class="rc-split-up-n" aria-label="Split offset" title="How far from the receive frequency to transmit"></select>
           </div>
           <div id="rc-power" class="so-toggle-group">
             <button type="button" class="rc-btn" id="rc-power-on" style="color:#4ecca3;">On</button>
@@ -1722,6 +1742,17 @@
         <span id="sstv-phone-status" style="font-size:12px;color:var(--text-dim)">Ready</span>
       </div>
 
+      <!-- #326: a picture waiting for the frequency to clear -->
+      <div id="sstv-phone-wait-bar" style="display:none;padding:6px 10px;background:var(--bg-header);border-bottom:1px solid var(--border);flex-shrink:0;">
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+          <span id="sstv-phone-wait-title" style="font-size:13px;font-weight:700;color:var(--accent-blue, #4fc3f7);">Waiting for the frequency to clear...</span>
+          <span style="flex:1"></span>
+          <button type="button" id="sstv-phone-send-now" style="padding:4px 10px;font-size:12px;font-weight:700;border:1px solid var(--accent-blue, #4fc3f7);background:var(--accent-blue, #4fc3f7);color:#06202c;border-radius:4px;">Send now</button>
+          <button type="button" id="sstv-phone-wait-cancel" style="padding:4px 10px;font-size:12px;font-weight:700;border:1px solid var(--border);background:transparent;color:var(--text);border-radius:4px;">Cancel</button>
+        </div>
+        <div id="sstv-phone-wait-detail" style="font-size:12px;color:var(--text-dim);margin-top:3px;"></div>
+      </div>
+
       <!-- TX progress bar -->
       <div id="sstv-phone-tx-bar" style="display:none;padding:6px 10px;background:var(--bg-header);border-bottom:1px solid var(--border);flex-shrink:0;">
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:3px;">
@@ -1967,6 +1998,61 @@
                   <div id="mail-gw-status" class="mail-gw-status hidden">
                     <span id="mail-gw-note" class="mail-note-text"></span>
                     <button type="button" id="mail-gw-retry" class="mail-btn mail-btn-main hidden">Try again</button>
+                  </div>
+                  <!-- My own gateways (#585 phase 4): Add a gateway; Edit and Remove for a picked Mine row -->
+                  <div id="mail-gw-links" class="mail-gw-links">
+                    <button type="button" id="mail-gw-add" class="mail-link" aria-controls="mail-add-card">Add a gateway</button>
+                    <button type="button" id="mail-mine-edit" class="mail-link hidden">Edit</button>
+                    <button type="button" id="mail-mine-remove" class="mail-link hidden">Remove</button>
+                  </div>
+                  <!-- The desktop mail window's form: same fields, labels and words (lib/winlink-my-gateways.js) -->
+                  <div id="mail-add-card" class="mail-card mail-add-card hidden" role="group" aria-labelledby="mail-add-title">
+                    <div id="mail-add-title" class="mail-add-title">Add a gateway</div>
+                    <div id="mail-add-older" class="mail-add-hint hidden"></div>
+                    <div class="mail-add-f">
+                      <label for="mail-add-call" class="mail-add-label">Call</label>
+                      <input id="mail-add-call" class="mail-input mail-add-mono" maxlength="12" placeholder="W2XYZ-10" autocomplete="off" autocapitalize="characters" spellcheck="false">
+                      <div id="mail-add-call-err" class="mail-add-err" role="alert"></div>
+                    </div>
+                    <div class="mail-add-f">
+                      <label for="mail-add-mode" class="mail-add-label">Mode</label>
+                      <select id="mail-add-mode" class="mail-input"></select>
+                      <div id="mail-add-mode-err" class="mail-add-err" role="alert"></div>
+                    </div>
+                    <div class="mail-add-f">
+                      <label for="mail-add-freq" id="mail-add-freq-label" class="mail-add-label">Center frequency</label>
+                      <input id="mail-add-freq" class="mail-input mail-add-mono" inputmode="decimal" autocomplete="off" spellcheck="false">
+                      <div id="mail-add-dial" class="mail-add-hint" aria-live="polite"></div>
+                      <div id="mail-add-freq-err" class="mail-add-err" role="alert"></div>
+                    </div>
+                    <div id="mail-add-bw-row" class="mail-add-f">
+                      <label for="mail-add-bw" class="mail-add-label">ARDOP bandwidth</label>
+                      <select id="mail-add-bw" class="mail-input">
+                        <option value="0">My own setting</option>
+                        <option value="200">200 Hz</option>
+                        <option value="500">500 Hz</option>
+                        <option value="1000">1000 Hz</option>
+                        <option value="2000">2000 Hz</option>
+                      </select>
+                      <div class="mail-add-hint">The widest this gateway takes. POTACAT never goes wider than your own setting.</div>
+                      <div id="mail-add-bw-err" class="mail-add-err" role="alert"></div>
+                    </div>
+                    <div id="mail-add-via-row" class="mail-add-f hidden">
+                      <label for="mail-add-via" class="mail-add-label">Via (optional)</label>
+                      <input id="mail-add-via" class="mail-input mail-add-mono" placeholder="W2ABC-1" autocomplete="off" autocapitalize="characters" spellcheck="false">
+                      <div class="mail-add-hint">Up to two digipeaters, in order.</div>
+                      <div id="mail-add-via-err" class="mail-add-err" role="alert"></div>
+                    </div>
+                    <div class="mail-add-f">
+                      <label for="mail-add-note" class="mail-add-label">Note (optional)</label>
+                      <input id="mail-add-note" class="mail-input" maxlength="60" placeholder="club net Tuesdays" autocomplete="off">
+                      <div id="mail-add-note-err" class="mail-add-err" role="alert"></div>
+                    </div>
+                    <div class="mail-add-actions">
+                      <button type="button" id="mail-add-save" class="mail-btn mail-btn-main">Save</button>
+                      <button type="button" id="mail-add-cancel" class="mail-btn">Cancel</button>
+                    </div>
+                    <div id="mail-add-msg" class="mail-add-err" role="alert"></div>
                   </div>
                 </div>
               </div>

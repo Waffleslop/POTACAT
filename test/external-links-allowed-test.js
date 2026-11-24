@@ -8,11 +8,10 @@ const fs = require('fs');
 const path = require('path');
 const assert = require('assert');
 const root = path.join(__dirname, '..');
-const main = readSrc(path.join(root, 'main.js')).replace(/\r\n/g, '\n');
-const at = main.indexOf("ipcMain.on('open-external'");
-const block = main.slice(main.indexOf('const allowed = [', at), main.indexOf('];', main.indexOf('const allowed = [', at)));
-const allowed = [...block.matchAll(/'([^']+)'/g)].map((m) => m[1]);
-assert.ok(allowed.length > 10, 'allowlist parsed');
+// The rule lives in lib/external-url.js (host compared exactly, not a prefix).
+const ExternalUrl = require('../lib/external-url');
+const allowed = ExternalUrl.ALLOWED;
+assert.ok(allowed.length > 10, 'allowlist loaded');
 
 const bad = [];
 for (const f of fs.readdirSync(path.join(root, 'renderer')).filter((n) => n.endsWith('.html'))) {
@@ -22,9 +21,9 @@ for (const f of fs.readdirSync(path.join(root, 'renderer')).filter((n) => n.ends
     if (!/\bdata-external\b/.test(tag)) continue;
     const href = (tag.match(/href="([^"]+)"/) || [])[1];
     if (!href || !/^https?:|^mailto:/.test(href)) continue;
-    if (!allowed.some((p) => href.startsWith(p))) bad.push(f + ': ' + href);
+    if (!ExternalUrl.allowed(href.replace(/&amp;/g, '&'))) bad.push(f + ': ' + href);
   }
 }
 assert.deepStrictEqual(bad, [], 'links the allowlist refuses:\n  ' + bad.join('\n  '));
-console.log('  ok  every data-external link passes the open-external allowlist (' + allowed.length + ' prefixes)');
+console.log('  ok  every data-external link passes the open-external allowlist (' + allowed.length + ' entries)');
 console.log('\nExternal links: 1 passed, 0 failed');

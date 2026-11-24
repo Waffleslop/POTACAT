@@ -110,7 +110,9 @@ test('RX audio feeds ECHOCAT, both JTCAT windows, the decoder and SSTV; the soun
   assert.ok(/if \(yaesuLanAudioActive\(\) && Date\.now\(\) - _lastYaesuLanFeedMs < 3000\) return;/.test(main), 'renderer JTCAT capture yields while fresh');
   assert.ok(/yaesuLanConnected: !!\(settings\.catTarget && settings\.catTarget\.type === 'yaesu-lan'/.test(main), 'SSTV renderer gate knows the stream');
   // #243: either branch may also take the WebSDR feed.
-  assert.ok(/audioSource === 'smartsdr' \|\| audioSource === 'yaesu-lan'( \|\| audioSource === 'websdr')?( \|\| audioSource === 'tci')?\) \{/.test(popout), 'the JTCAT pop-out takes the frames');
+  // The pop-out's branch lives in lib/rx-direct-source.js (#936).
+  assert.ok(/if \(window\.RxDirectSource\.jtcatPopoutUsesMainFeed\(audioSource\)\) \{/.test(popout)
+    && require('../lib/rx-direct-source').jtcatPopoutUsesMainFeed('yaesu-lan'), 'the JTCAT pop-out takes the frames');
   assert.ok(/s\.audioSource === 'smartsdr' \|\| s\.audioSource === 'icom-network' \|\| s\.audioSource === 'yaesu-lan'\) \{/.test(app), 'so does the main window');
 });
 
@@ -277,14 +279,14 @@ test('#227: Tune plays its tone over the LAN, refused with no LAN session or a b
 });
 
 test('#227: SSTV sends its picture over the LAN; HALT and tx-complete stop it on the wire', () => {
-  const enc = bodyOf(main, "sstvEngine.on('encode-complete', SstvSend.guard((data) => {", "sstvEngine.on('rx-vis'");
+  const enc = bodyOf(main, 'const sstvKeyAndSend = SstvSend.guard((data) => {', "sstvEngine.on('rx-vis'");
   assert.ok(/const useYaesuLanTx = settings\.audioSource === 'yaesu-lan' && yaesuLanBufferTxReady\(\);/.test(enc));
   const claim = enc.indexOf("claimYaesuLanTx('sstv', 'SSTV picture', ['sstv', 'echocat'])");
   assert.ok(enc.indexOf('Yaesu LAN TX blocked before PTT') < claim && claim < enc.indexOf('handleRemotePtt(true,'));
   assert.ok(/if \(useYaesuLanTx\) releaseYaesuLanTx\('sstv', 'SSTV refused'\);/.test(enc) && /if \(useYaesuLanTx\) releaseYaesuLanTx\('sstv', 'SSTV not keyed'\);/.test(enc));
   assert.ok(/const t = yaesuLanTransport\(\);\n\s*if \(!t\) \{/.test(enc), 'null-checked');
   assert.ok(/t\.sendTxAudio\(txAudio\.samples, \{ offsetMs: 0, inputSampleRate: SSTV_SAMPLE_RATE, startDelayMs: 100, tailSilenceMs: 200 \}\)/.test(enc));
-  const halt = bodyOf(main, 'function sstvHaltTxNow() {', '\n}');
+  const halt = bodyOf(main, 'function sstvHaltTxNow({ keepWait = false } = {}) {', '\n}');
   assert.ok(/if \(settings\.audioSource === 'yaesu-lan'\) \{ try \{ endYaesuLanTx\('sstv', 'SSTV halt'\);/.test(halt));
   const done = bodyOf(main, "ipcMain.on('sstv-tx-complete', () => {", '\n  });');
   assert.ok(/if \(settings\.audioSource === 'yaesu-lan'\) endYaesuLanTx\('sstv', 'SSTV tx-complete'\);/.test(done));

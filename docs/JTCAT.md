@@ -27,12 +27,26 @@ lib/ft8_native, renderer/jtcat-popout.* or the ECHOCAT jtcat-* messages.
 - The pop-out to shack bridge is lib/remote-bridge.js (a row per channel; the test fails otherwise).
 
 ## Operating rules that are settings (names only; semantics in each module's header)
-Per profile: jtcatMaxQsoAttempts, jtcatReworkDays, jtcatHuntSpotted, jtcatNferParks, jtcatLogPrompt,
+Per profile: jtcatMaxQsoAttempts, jtcatCallingTimeMin, jtcatReworkDays, jtcatHuntSpotted, jtcatNferParks, jtcatLogPrompt,
 jtcatRelogCooldownMin, jtcatRunPauseAfter, jtcatModeHop*, jtcatFdMode/jtcatFdExch, jtcatHoundMode,
 jtcatSkipTx1, jtcatApDecode, jtcatLateStartTx, jttyMacroStyle, jttyMacros, pskMacros.
 Machine-wide (GLOBAL_KEY): ultracat, jtcatRxGain, jtcatTxGain (desktop-authoritative, one writer
-`applyJtcatTxGain`), jtcatWaterfallSpeed, jtcatWaterfallFloor, jtcatShowBandScope, jtcatStationsExpiryMin.
+`applyJtcatTxGain`), jtcatWaterfallSpeed, jtcatWaterfallFloor, jtcatShowBandScope, jtcatShowWaterfall, jtcatStationsExpiryMin.
 Rule: a setting that is operating policy is per profile; a setting about this machine or its display is GLOBAL.
+
+### Split "Fake It" (jtcatFakeIt, per profile)
+- lib/jtcat-fake-it.js: for each FT8/FT4/FT2 transmission the tone goes out at 1500-1999 Hz and the dial
+  moves by the difference (WSJT-X's rule), then comes back after the key-up. Glue: main.js fakeItSyncEngine,
+  fakeItShiftForTx, fakeItRestoreDial, fakeItIsEcho.
+- Default (Casey 2026-11-23, after N4RLW's IC-7300/IC-7100 report): ON for a new install. A settings file
+  that existed before 2026-11-23 and never had the key is written `jtcatFakeIt: false` once at startup
+  (seedSetting), so nobody's existing setup changes. A saved true or false is never touched. A new operator
+  profile on an existing station has no key and reads off. A missing key always reads off.
+- Where it shifts (engineCanShift): a CAT radio on this PC (serial CI-V, Kenwood, Yaesu, Hamlib, flrig,
+  DXLab Commander, Flex, RS-BA1, SCU-LAN10), one band, radio not in split, not driving a remote shack.
+  Anywhere else (no radio picked, CAT None, a no-CAT radio, TCI, the radio in split, multi-band, a remote
+  laptop) the tone goes out at the plain audio offset, exactly as with Fake It off. A CAT link that is down
+  at the moment of transmit still skips that one transmission (the audio was rendered for the shifted dial).
 
 ## When a QSO is logged (#807, Casey 2026-11-20)
 A QSO is logged when WE start transmitting a 73-family message (RR73, RRR or 73) to that station,
@@ -55,6 +69,9 @@ Departures from WSJT-X (do not "fix"):
    `jtcat-qso-state` `phase: 'error'`, `send73: true`) shows "Not logged: W1ABC never sent RR73.
    Press Send 73 to log it." Send 73 (or Skip) sends the 73, which logs it. In Run the QSO is
    dropped and CQ resumes. (Until #807 the cap logged and sent a 73 by itself.)
+   The Tx watchdog exists too: `jtcatCallingTimeMin` (#161, lib/jtcat-calling-time.js), minutes of
+   FT8/FT4/FT2 transmitting with no QSO progress and no operator action before TX stops, default 6
+   (WSJT-X's figure), 1-30. The ceiling is the 30-minute attended limit on Run and Hunt, which stays.
 3. Field Day, CQ side: the ARRL FD sequence ends on their RR73 and we send no 73; it still logs at
    our R+exchange. The S&P side follows the rule (logs when our RR73 goes out).
 
@@ -78,11 +95,26 @@ Departures from WSJT-X (do not "fix"):
   A link never starts the band-change ATU tune ("Auto-tune ATU on band change" keys a carrier):
   bandChangeAtuTune asks tuneLinkAutoAtu, logs the skip to the CAT log, and the link's notice adds
   one clause when it is shown anyway.
+- A mode that needs the radio's audio takes it from JTCAT by one tear-down (main.js releaseJtcatFor:
+  windows closed, engine stopped whoever started it, the main window's capture released, ECHOCAT told
+  running:false). Opening SSTV does it; so does the operator's APRS Start (2026-11-22), which halts
+  JTCAT TX first (jtcatHaltTxNow) and says "Stopped FT8 so APRS can listen." (lib/aprs-listen.js
+  startPlan). Automatic starts and Guest Pass guests never take it. Nothing restarts FT8 afterwards.
 - Wrong-band and out-of-privilege TX guards trust only a LIVE dial reading.
 - ULTRACAT (hidden, `settings.ultracat`): Run mode and unattended Hunt are the operator's
   responsibility; without it Hunt stops after 30 min idle (test/jtcat-hunt-off-test.js).
 - The pop-out captures no audio while driving a remote shack; the shack's engines run, the laptop displays.
 - Never copy GridTracker or WSJT-X copy or colours; parity with WSJT-X behaviour is fine and often the goal.
+- The window's layout (#857, lib/jtcat-layout.js): Options > The picture > Layout, Automatic (default),
+  Full or Compact, saved as jtcatLayout (GLOBAL_KEY, display). Automatic decides by the screen, not the
+  window (2026-11-23): Full when the work area of the display the window is on is at least 840 CSS px,
+  Compact below that (one edge, no hysteresis). The 840 is measured: Full needs about 790 px of window
+  for four Band Activity lines, plus the title bar. So 1366x768 is Compact, 1920x1080 at 100% is Full
+  even in the default 700 px window, 1920x1080 at 125% (824 px) is Compact. CSS px = work area / zoom,
+  so Ctrl and minus can bring Full back. main.js sends the work area when the window moves to another
+  display or a display changes ('jtcat-work-area'); a resize alone never switches. An explicit Full or
+  Compact always wins and only that choice is saved. Compact is body.jp-compact: shorter chrome, same text sizes. The layout
+  never moves or resizes the window (test/jtcat-auto-compact-test.js).
 
 ## Tests
 lib/ft8-engine-test.js, lib/psk-engine-test.js, test/jtty-*.js, test/jtcat-*.js,

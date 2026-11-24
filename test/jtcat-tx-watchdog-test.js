@@ -31,7 +31,10 @@ function extract(header) {
   }
   throw new Error('unbalanced');
 }
-const MS = Number(/const JTCAT_TX_WATCHDOG_MS = (\d+) \* 60 \* 1000;/.exec(MAIN)[1]) * 60000;
+// The span is the calling-time setting since #161 (default 6); its own test is
+// test/jtcat-calling-time-test.js. Here the setting is unset, so it is the default.
+const CT = require('../lib/jtcat-calling-time');
+const MS = CT.callingTimeMs({});
 
 function harness() {
   const ctx = {
@@ -39,11 +42,11 @@ function harness() {
     settings: { ultracat: false },
     jtcatFullAutoCq: false, jtcatAutoCqMode: 'off',
     jtcatFullAutoCqLastActivity: 0, _jtcatTxWatchArmedAt: 0,
-    JTCAT_TX_WATCHDOG_MS: MS,
+    JtcatCallingTime: CT,
   };
   ctx.Date = { now: () => ctx.now };
   vm.createContext(ctx);
-  vm.runInContext(extract('function jtcatTxWatchdogTripped(') + '\n' + extract('function jtcatNoteOperatorAtRadio('), ctx);
+  vm.runInContext(extract('function jtcatTxWatchdogMs(') + '\n' + extract('function jtcatTxWatchdogTripped(') + '\n' + extract('function jtcatNoteOperatorAtRadio('), ctx);
   return ctx;
 }
 const min = 60000;

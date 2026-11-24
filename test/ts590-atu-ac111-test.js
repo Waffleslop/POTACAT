@@ -41,6 +41,24 @@ test('TS-590S/SG stop is still AC000;', () => {
   assert.strictEqual(c.getAtuStopCmd(), 'AC000;');
 });
 
+test('TS-890S and TS-990S declare ac111 and startTune writes exactly AC111; (guides: AC, p. 3; #1000)', () => {
+  for (const k of ['TS-890S', 'TS-990S']) {
+    assert.strictEqual(RIG_MODELS[k].atuCmd, 'ac111', k);
+    const { c, out } = codecFor(k);
+    c.startTune();
+    assert.deepStrictEqual(out, ['AC111;'], k);
+    assert.strictEqual(c.getAtuStopCmd(), 'AC000;', k);
+  }
+});
+
+test('TS-480 stays on the standard variant and sends AC011;', () => {
+  assert.ok(RIG_MODELS['TS-480']);
+  assert.strictEqual(RIG_MODELS['TS-480'].atuCmd, 'standard');
+  const { c, out } = codecFor('TS-480');
+  c.startTune();
+  assert.deepStrictEqual(out, ['AC011;']);
+});
+
 test('every other row on the standard variant still sends AC011; (no shared-codec change)', () => {
   const others = Object.keys(RIG_MODELS).filter(k => RIG_MODELS[k].protocol === 'kenwood' && RIG_MODELS[k].atuCmd === 'standard');
   assert.ok(others.length > 0, 'some rows remain on standard');

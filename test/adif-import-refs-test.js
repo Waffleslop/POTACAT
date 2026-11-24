@@ -45,7 +45,8 @@ check('every import goes through it, and the Logbook falls back to POTA_REF', ()
   assert.ok(/records = records\.map\(fillSigFromProgramRefs\);[\s\S]*planImportWithConfirmations\(existing, records\)/.test(fn));
   const pop = readSrc(path.join(ROOT, 'renderer/qso-popout.js'));
   assert.ok(/label: 'Park'[^\n]*get: \(q\) => q\.SIG_INFO \|\| q\.POTA_REF \|\| ''/.test(pop));
-  assert.ok(/q\.SIG_INFO \|\| q\.POTA_REF, q\.COMMENT/.test(pop), 'search finds it too');
+  // The search rule is lib/logbook-filter.js since #702 (list, map and ECHOCAT Web share it).
+  assert.ok(/q\.SIG_INFO \|\| q\.POTA_REF, q\.COMMENT/.test(readSrc(path.join(ROOT, 'lib/logbook-filter.js'))), 'search finds it too');
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);

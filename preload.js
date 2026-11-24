@@ -19,6 +19,7 @@ contextBridge.exposeInMainWorld('api', {
   // receive) — the Landmarks tab shows stations the SDR can hear (lib/listen-source.js).
   onKiwiStatus: (cb) => ipcRenderer.on('kiwi-status', (_e, s) => cb(s)),
   rigBandsNative: (model) => ipcRenderer.invoke('rig-bands-native', model),
+  rotorBandChoices: () => ipcRenderer.invoke('rotor-band-choices'),
   platform: process.platform,
   openExternal: (url) => ipcRenderer.send('open-external', url),
   pairRedeemUrl: (url) => ipcRenderer.invoke('pair-redeem-url', url),
@@ -434,7 +435,7 @@ contextBridge.exposeInMainWorld('api', {
   getRecentQsos: () => ipcRenderer.invoke('get-recent-qsos'),
   getAllQsos: () => ipcRenderer.invoke('get-all-qsos'),
   updateQso: (data) => ipcRenderer.invoke('update-qso', data),
-  deleteQso: (idx) => ipcRenderer.invoke('delete-qso', idx),
+  deleteQso: (idx, identity) => ipcRenderer.invoke('delete-qso', idx, identity), // identity: lib/qso-identity.js (#988)
   deleteQsosByMatch: (match) => ipcRenderer.invoke('delete-qsos-by-match', match),
   updateQsosByMatch: (data) => ipcRenderer.invoke('update-qsos-by-match', data),
   getDefaultLogPath: () => ipcRenderer.invoke('get-default-log-path'),
@@ -533,6 +534,8 @@ contextBridge.exposeInMainWorld('api', {
   vfoPopoutOpen: () => ipcRenderer.send('vfo-popout-open'),
   vfoPopoutTheme: (theme) => ipcRenderer.send('vfo-popout-theme', theme),
   vfoTunedSpot: (spot) => ipcRenderer.send('vfo-tuned-spot', spot),
+  // A station the operator picked: its call to N3FJP's entry window (#712; main decides if and when).
+  n3fjpCallInProgress: (call) => ipcRenderer.send('n3fjp-call-in-progress', call),
   onVfoPopoutStatus: (cb) => ipcRenderer.on('vfo-popout-status', (_e, open) => cb(open)),
   // JTCAT pop-out
   // Optional mode ('PSK31' | 'JTTY' | ...): an already-open window switches to it.
@@ -788,6 +791,10 @@ contextBridge.exposeInMainWorld('api', {
   cloudSetCallsign: (callsign) => ipcRenderer.invoke('cloud-set-callsign', callsign),
   cloudLogout: () => ipcRenderer.invoke('cloud-logout'),
   cloudGetStatus: () => ipcRenderer.invoke('cloud-get-status'),
+  // Signed in or not (no network), and the reason when Cloud signed this
+  // computer out (removed from the account, lib/cloud-revoked.js).
+  cloudSessionGet: () => ipcRenderer.invoke('cloud-session-get'),
+  onCloudSignedOut: (cb) => ipcRenderer.on('cloud-signed-out', (_e, data) => cb(data)),
   cloudSyncNow: () => ipcRenderer.invoke('cloud-sync-now'),
   cloudBulkPrepare: () => ipcRenderer.invoke('cloud-bulk-prepare'),
   cloudBulkUpload: () => ipcRenderer.invoke('cloud-bulk-upload'),
@@ -812,8 +819,6 @@ contextBridge.exposeInMainWorld('api', {
   cloudPromptNever: () => ipcRenderer.invoke('cloud-prompt-never'),
   cloudUploadCardGet: () => ipcRenderer.invoke('cloud-upload-card-get'),
   cloudUploadCardSnooze: () => ipcRenderer.invoke('cloud-upload-card-snooze'),
-  cloudGetSettings: () => ipcRenderer.invoke('cloud-get-settings'),
-  cloudPutSettings: (data) => ipcRenderer.invoke('cloud-put-settings', data),
   onCloudSyncStatus: (cb) => ipcRenderer.on('cloud-sync-status', (_e, data) => cb(data)),
   // Main -> JTCAT popout: push currently-visible spot calls for decode-row
   // highlighting (Tyler K0OTC feature request, 2026-04-22).

@@ -57,7 +57,8 @@ or in the LICENSES/ directory of the distribution where applicable.
     Modified by POTACAT: built from the pinned tag with one source patch
     (third_party/pat/potacat-arq-timeout.patch, described in
     third_party/pat/README.md) that lets the ARDOP link timeout be set from
-    the environment. The patch is offered under the same MIT license and is
+    the environment and puts each gateway channel's service code on Pat's
+    gateway list. The patch is offered under the same MIT license and is
     shipped with POTACAT beside this file; it is also public at
     https://github.com/Waffleslop/POTACAT/tree/master/third_party/pat
 

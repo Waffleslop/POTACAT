@@ -25,7 +25,8 @@ const main = R('main.js');
 // Every pop-out page a hiddenInset window loads (the main window, index.html,
 // has its own titlebar handling in app.js).
 const pages = new Set();
-for (const m of main.matchAll(/titleBarStyle: 'hiddenInset'/g)) {
+// #345: windows take their frame from windowFrame() (lib/window-frame.js), hiddenInset on a Mac.
+for (const m of main.matchAll(/titleBarStyle: 'hiddenInset'|...windowFrame()/g)) {
   const after = main.slice(m.index, m.index + 4000);
   const page = (after.match(/([a-z0-9-]+-popout)\.html/) || [])[1];
   if (page) pages.add(page);

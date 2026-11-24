@@ -16,6 +16,12 @@ function t(name, fn) {
 const silent = { keyedMs: 4000, fwdEvents: 8, peakW: 0, alcEvents: 8, peakAlc: 0, mode: 'USB' };
 
 console.log('voice TX check:');
+t('#946 the transmit-audio step names the device as Windows and a Mac show it', () => {
+  for (const brand of ['Yaesu', 'Icom']) {
+    const h = decideVoiceTxHint({ ...silent, brand, model: brand === 'Yaesu' ? 'FT-710' : 'IC-7300' }).hint;
+    assert.ok(/USB Audio CODEC on Windows/.test(h) && /USB Audio Device on a Mac/.test(h), h);
+  }
+});
 t('FTDX10, 0 W and no ALC: SSB MOD SOURCE = REAR, REAR SELECT = USB (OM EH076H202 p.87), and the sound device', () => {
   const d = decideVoiceTxHint({ ...silent, brand: 'Yaesu', model: 'FTDX10' });
   assert.ok(d && /RADIO SETTING > MODE SSB > SSB MOD SOURCE = REAR, then REAR SELECT = USB/.test(d.hint) && /USB Audio CODEC/.test(d.hint), d && d.hint);

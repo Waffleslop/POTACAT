@@ -125,5 +125,18 @@ test('the channels the shack feeds while one is driven', () => {
   assert.deepStrictEqual(W.SHACK_CHANNELS.slice().sort(), ['winlink-mailbox', 'winlink-remote-watch', 'winlink-session', 'winlink-state']);
 });
 
+test('#585: the favourite invoke carries a typed gateway\'s mine, note, via, bw and was to the shack', () => {
+  const m = W.INVOKES['winlink-cmd-favourite']([{ op: 'edit', call: 'W2XYZ-10', mode: 'packet', dialKhz: 145050, mine: true, note: 'club net', via: ['W2ABC-1'], bw: 0, was: { call: 'W2XYZ-10', mode: 'packet', dialKhz: 145030 } }]).send;
+  assert.deepStrictEqual(m, { type: 'winlink-favourite', op: 'edit', call: 'W2XYZ-10', mode: 'packet', dialKhz: 145050, mine: true, note: 'club net', via: ['W2ABC-1'], was: { call: 'W2XYZ-10', mode: 'packet', dialKhz: 145030 } });
+  for (const k of ['mine', 'note', 'via', 'bw', 'was']) assert.ok(k in MESSAGES['winlink-favourite'].fields, k + ' is declared');
+  const star = W.INVOKES['winlink-cmd-favourite']([{ op: 'add', call: 'W5ABC', mode: 'ardop', dialKhz: 7102, url: '' }]).send;
+  assert.strictEqual(star.mine, undefined, 'the star never sends mine');
+});
+test('#585: a QSY names the picked gateway, so the shack can find a typed one', () => {
+  const m = W.INVOKES['winlink-cmd-qsy']([{ dialKhz: 145050, mode: 'packet', gateway: 'W2XYZ-10' }]).send;
+  assert.strictEqual(m.gateway, 'W2XYZ-10');
+  assert.ok('gateway' in MESSAGES['winlink-qsy'].fields);
+});
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

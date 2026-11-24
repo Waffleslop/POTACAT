@@ -141,6 +141,99 @@ test('rows keep Pat\'s order and carry the dial', () => {
 test('band filter is by the dial\'s band', () => {
   assert.deepStrictEqual(W.normalizeRmslist(RMS, { band: '20m' }).map((x) => x.call), ['N0XYZ-10']);
 });
+// Our Pat patch puts the channel's Winlink service code on each row
+// (third_party/pat/potacat-arq-timeout.patch, app/rmslist.go; la5nta/pat#564).
+// Winlink lists Mercury gateways as VARA with service code MERCURY.
+test('each row carries Pat\'s service code; only a code other than PUBLIC is a tag', () => {
+  const rows = W.normalizeRmslist([
+    { callsign: 'KU0HN-10', modes: 'VARA', freq: { hz: 7102800 }, dial: { hz: 7101300 }, service_code: 'MERCURY' },
+    { callsign: 'W1AW-10', modes: 'VARA', freq: { hz: 7103000 }, dial: { hz: 7101500 }, service_code: 'PUBLIC' },
+    { callsign: 'N0XYZ-10', modes: 'VARA', freq: { hz: 7104000 }, dial: { hz: 7102500 }, service_code: ' emcomm ' },
+    { callsign: 'K1ABC-10', modes: 'VARA', freq: { hz: 7105000 }, dial: { hz: 7103500 } }, // an unpatched Pat
+    { callsign: 'K2ABC-10', modes: 'VARA', freq: { hz: 7106000 }, dial: { hz: 7104500 }, service_code: '<b>X</b>' },
+  ]);
+  assert.deepStrictEqual(rows.map((r) => r.serviceCode), ['MERCURY', 'PUBLIC', 'EMCOMM', '', '']);
+  assert.deepStrictEqual(rows.map((r) => r.serviceTag), ['MERCURY', '', 'EMCOMM', '', '']);
+});
+// Mercury phase 0 (docs/mercury-phase0-tester-guide.md): a tester runs
+// Mercury in VARA HF's place. MERCURY gateways show only when the operator has
+// chosen Mercury (Casey 2026-11-22): Use VARA HF on and "The modem on this
+// port is Mercury (experimental)" ticked. Not chosen, Pat is not even asked for
+// MERCURY and every list is as it was before.
+const MIXED = [
+  { call: 'KU0HN-10', serviceCode: 'MERCURY', serviceTag: 'MERCURY' },
+  { call: 'W1AW-10', serviceCode: 'PUBLIC', serviceTag: '' },
+  { call: 'K1ABC-10', serviceCode: '', serviceTag: '' }, // an unpatched Pat
+];
+test('Mercury is chosen only by the Mercury box with Use VARA HF on', () => {
+  assert.strictEqual(W.mercuryChosen({}), false);
+  assert.strictEqual(W.mercuryChosen({ enableVaraHf: true }), false);
+  assert.strictEqual(W.mercuryChosen({ winlinkVaraIsMercury: true }), false, 'VARA HF off: nothing is chosen');
+  assert.strictEqual(W.mercuryChosen({ enableVaraHf: false, winlinkVaraIsMercury: true }), false);
+  assert.strictEqual(W.mercuryChosen({ enableVaraHf: true, winlinkVaraIsMercury: true }), true);
+  assert.strictEqual(W.mercuryChosen({ winlinkShowVara: true, winlinkVaraIsMercury: true }), true, 'the old VARA switch counts as Use VARA HF');
+  assert.strictEqual(W.mercuryChosen({ enableVaraHf: true, winlinkVaraIsMercury: 'yes' }), false, 'only true');
+});
+test('not chosen: Pat is asked for PUBLIC only, as before', () => {
+  assert.deepStrictEqual(W.patServiceCodes({ mercury: false }), ['PUBLIC']);
+  assert.deepStrictEqual(W.buildPatConfig({ mycall: 'N0CALL', httpPort: 8591 }).service_codes, ['PUBLIC']);
+  assert.deepStrictEqual(W.buildPatConfig({ mycall: 'N0CALL', httpPort: 8591, shimPort: 4532 }).service_codes, ['PUBLIC']);
+  assert.deepStrictEqual(W.buildPatConfig({ mycall: 'N0CALL', httpPort: 8591, shimPort: 4532, mercury: false }).service_codes, ['PUBLIC']);
+});
+test('chosen: Pat is asked for PUBLIC and MERCURY (the other modes keep their PUBLIC lists)', () => {
+  assert.deepStrictEqual(W.patServiceCodes({ mercury: true }), ['PUBLIC', 'MERCURY']);
+  assert.deepStrictEqual(W.buildPatConfig({ mycall: 'N0CALL', httpPort: 8591, shimPort: 4532, mercury: true }).service_codes, ['PUBLIC', 'MERCURY']);
+});
+test('not chosen: no MERCURY row in any list, even from a list Pat kept from before', () => {
+  for (const mode of ['vara', 'ardop', 'packet', 'varafm', 'mercury']) {
+    assert.deepStrictEqual(W.gatewaysForChoice(MIXED, { mode, mercury: false }).map((g) => g.call), ['W1AW-10', 'K1ABC-10'], mode);
+  }
+});
+test('chosen: the VARA HF list is the MERCURY gateways only, with the tag; other modes have none', () => {
+  const v = W.gatewaysForChoice(MIXED, { mode: 'vara', mercury: true });
+  assert.deepStrictEqual(v.map((g) => g.call), ['KU0HN-10']);
+  assert.strictEqual(v[0].serviceTag, 'MERCURY');
+  assert.deepStrictEqual(W.gatewaysForChoice(MIXED, { mode: 'ardop', mercury: true }).map((g) => g.call), ['W1AW-10', 'K1ABC-10']);
+  assert.deepStrictEqual(W.gatewaysForChoice(MIXED, { mode: 'varafm', mercury: true }).map((g) => g.call), ['W1AW-10', 'K1ABC-10']);
+  assert.deepStrictEqual(W.gatewaysForChoice(null, { mode: 'vara', mercury: true }), []);
+});
+test('Pat downloads the list again when its service codes changed (its cache is one file it never refreshes)', () => {
+  assert.strictEqual(W.listNeedsDownload({ codes: ['PUBLIC'], lastCodes: undefined }), false, 'never recorded: Pat had PUBLIC');
+  assert.strictEqual(W.listNeedsDownload({ codes: ['PUBLIC', 'MERCURY'], lastCodes: undefined }), true);
+  assert.strictEqual(W.listNeedsDownload({ codes: ['PUBLIC', 'MERCURY'], lastCodes: 'PUBLIC,MERCURY' }), false);
+  assert.strictEqual(W.listNeedsDownload({ codes: ['PUBLIC'], lastCodes: 'PUBLIC,MERCURY' }), true);
+});
+test('wiring: Pat config, every gateway list and Settings follow the choice', () => {
+  const path = require('path');
+  const main = readSrc(path.join(__dirname, '..', 'main.js'));
+  const wpc = main.slice(main.indexOf('function writePatConfig('), main.indexOf('function killPat()'));
+  assert.ok(wpc.includes('mercury: WinlinkPat.mercuryChosen(settings)'), 'writePatConfig passes the choice to buildPatConfig');
+  const gw = main.slice(main.indexOf('async function winlinkGateways('), main.indexOf('let _winlinkGatewaysLogged'));
+  const filt = gw.indexOf('WinlinkPat.gatewaysForChoice(');
+  assert.ok(filt > 0, 'winlinkGateways filters by the choice');
+  assert.ok(filt < gw.indexOf('winlinkState.setGateways('), 'before the list reaches ECHOCAT (winlinkState) and the mail window');
+  // listDownloadReason (the code change, plus Refresh and the daily rule; test/winlink-list-refresh-test.js).
+  assert.ok(gw.includes('WinlinkPat.listDownloadReason('), 'a changed choice downloads the list again');
+  const save = main.slice(main.indexOf('const winlinkChanged ='), main.indexOf('const winlinkAutoCheckChanged'));
+  assert.ok(save.includes('WinlinkPat.mercuryChosen('), 'changing the choice relaunches Pat with its new config');
+  const ready = main.slice(main.indexOf('async function winlinkVaraReady('), main.indexOf('const bin = findVara(kind);', main.indexOf('async function winlinkVaraReady(')));
+  assert.ok(ready.includes("kind === 'hf' && WinlinkPat.mercuryChosen(settings)"), 'chosen: POTACAT never starts or sets up VARA for the port');
+  const html = readSrc(path.join(__dirname, '..', 'renderer', 'index.html'));
+  assert.ok(html.includes('id="set-vara-hf-mercury"'), 'the Settings box');
+  assert.ok(html.slice(html.indexOf('id="set-vara-hf-mercury"'), html.indexOf('id="set-vara-hf-mercury"') + 300).includes('Mercury (experimental)'), 'labelled experimental');
+  const app = readSrc(path.join(__dirname, '..', 'renderer', 'app.js'));
+  assert.ok(app.includes('winlinkVaraIsMercury: setVaraHfMercury.checked'), 'saved');
+  assert.ok(app.includes('setVaraHfMercury.checked = s.winlinkVaraIsMercury === true'), 'loaded, off by default');
+});
+test('the mail window shows the tag after the call', () => {
+  const src = readSrc(require('path').join(__dirname, '..', 'renderer', 'winlink-popout.js'));
+  const at = src.indexOf('function gatewayLabel(g)');
+  const fn = src.slice(at, src.indexOf('\n  }\n', at));
+  assert.ok(fn.includes('if (g.serviceTag) parts.push(g.serviceTag);'), 'gatewayLabel pushes g.serviceTag');
+  const web = readSrc(require('path').join(__dirname, '..', 'renderer', 'remote.js'));
+  const wat = web.indexOf('function mailGatewayLabel(g)');
+  assert.ok(web.slice(wat, web.indexOf('\n  }\n', wat)).includes('if (g.serviceTag) parts.push(g.serviceTag);'), 'ECHOCAT Web shows it too');
+});
 
 console.log('password rule');
 test('Winlink\'s rule: 6 to 12 of letters, digits and . ! @ # $ % ^ & * ( ) _ — a dash is named, not just "6 to 12" (N0KAH)', () => {
@@ -255,7 +348,7 @@ test('a gateway list Pat cannot parse is recognised; other failures are not (Mer
   assert.ok(W.isCorruptCacheError('json: cannot unmarshal string into Go value of type cmsapi.GatewayStatus'));
   for (const m of ['Pat is not running', 'gateway list: 502 Bad Gateway', 'gateway list: Pat did not answer within 30 s', '']) assert.ok(!W.isCorruptCacheError(m), m);
   const main = readSrc(require('path').join(__dirname, '..', 'main.js')).replace(/\r\n/g, '\n');
-  assert.ok(/let list = await winlinkRmslistSafe\(\{ mode: patMode, band, timeoutMs \}\);/.test(main), 'every gateway list goes through the safe path');
+  assert.ok(/let list = await winlinkRmslistSafe\(\{ mode: patMode, band, timeoutMs[ ,]/.test(main), 'every gateway list goes through the safe path');
   // i5ekx (VARA HF list never arrived, ARDOP's did): Pat ranks every gateway
   // before it answers, so an HF list with prediction waits 120 s, and a
   // failed list is in the log.
@@ -275,8 +368,41 @@ test('a gateway list Pat cannot parse is recognised; other failures are not (Mer
 test('#254: the gateway reply carries how many were left out', () => {
   const main = readSrc(require('path').join(__dirname, '..', 'main.js'));
   const fn = main.slice(main.indexOf('async function winlinkGateways('), main.indexOf('let _winlinkGatewaysLogged'));
-  assert.ok(fn.includes('const leftOut = onBands.dropped || 0;') && fn.includes('list, predicted, note, leftOut };'));
+  assert.ok(fn.includes('const leftOut = onBands.dropped || 0;') && fn.includes('list, predicted, note, leftOut, ...(listNote ? { listNote } : {}) };'));
   assert.ok(!fn.slice(fn.indexOf('const note ='), fn.indexOf('const tell =')).includes('left out ('), 'the note is the ranking only');
+});
+
+// #585 Add a gateway (plan 3.3): packet goes through digipeaters typed in Via.
+test('#585: connectUrl puts the via calls before the target for packet', () => {
+  const { connectUrl } = require('../lib/winlink-pat');
+  assert.strictEqual(connectUrl({ mode: 'packet', gateway: 'w2xyz-10', dialKhz: 145050, via: ['W2ABC-1'] }), 'ax25:///W2ABC-1/W2XYZ-10?freq=145050');
+  assert.strictEqual(connectUrl({ mode: 'packet', gateway: 'W2XYZ-10', dialKhz: 145050, via: ['w2abc-1', 'K2DEF-3'] }), 'ax25:///W2ABC-1/K2DEF-3/W2XYZ-10?freq=145050');
+  assert.strictEqual(connectUrl({ mode: 'packet', gateway: 'W2XYZ-10', dialKhz: 145050, via: [] }), 'ax25:///W2XYZ-10?freq=145050');
+});
+test('#585: via is ignored for ARDOP, VARA HF, VARA FM and Mercury', () => {
+  const { connectUrl } = require('../lib/winlink-pat');
+  assert.strictEqual(connectUrl({ mode: 'ardop', gateway: 'K4SPB', dialKhz: 7099.9, via: ['W2ABC-1'] }), 'ardop:///K4SPB?freq=7099.9');
+  assert.strictEqual(connectUrl({ mode: 'vara', gateway: 'K4SPB', dialKhz: 7099.9, bw: 2300, via: ['W2ABC-1'] }), 'varahf:///K4SPB?bw=2300&freq=7099.9');
+  assert.strictEqual(connectUrl({ mode: 'varafm', gateway: 'W2XYZ-10', dialKhz: 145070, via: ['W2ABC-1'] }), 'varafm:///W2XYZ-10?freq=145070');
+  assert.strictEqual(connectUrl({ mode: 'mercury', gateway: 'K4SPB', dialKhz: 7099.9, via: ['W2ABC-1'] }), 'varahf:///K4SPB?freq=7099.9');
+});
+test('#585: a bad via call, or more than two, gives no URL', () => {
+  const { connectUrl } = require('../lib/winlink-pat');
+  assert.strictEqual(connectUrl({ mode: 'packet', gateway: 'W2XYZ-10', dialKhz: 145050, via: ['RELAY*'] }), null);
+  assert.strictEqual(connectUrl({ mode: 'packet', gateway: 'W2XYZ-10', dialKhz: 145050, via: ['W2ABC-1', 'K2DEF-3', 'N2GHI'] }), null);
+  assert.strictEqual(connectUrl({ mode: 'packet', gateway: 'W2XYZ-10', dialKhz: 145050, via: ['W2ABC-1/X'] }), null);
+});
+test('#585: sessionUrl for a typed gateway: the path for packet, its ARDOP bandwidth capped by the operator\'s', () => {
+  const { sessionUrl } = require('../lib/winlink-pat');
+  assert.strictEqual(sessionUrl({ mode: 'packet', gateway: 'W2XYZ-10', dialKhz: 145050, via: ['W2ABC-1'], rowUrl: 'ax25:///W2XYZ-10?freq=145050' }), 'ax25:///W2ABC-1/W2XYZ-10?freq=145050');
+  assert.strictEqual(sessionUrl({ mode: 'ardop', gateway: 'K4SPB', dialKhz: 7099.9, mineBw: 2000, ardopBw: 500 }), 'ardop:///K4SPB?bw=500MAX&freq=7099.9');
+  assert.strictEqual(sessionUrl({ mode: 'ardop', gateway: 'K4SPB', dialKhz: 7099.9, mineBw: 500, ardopBw: 2000 }), 'ardop:///K4SPB?bw=500MAX&freq=7099.9');
+  assert.strictEqual(sessionUrl({ mode: 'ardop', gateway: 'K4SPB', dialKhz: 7099.9, mineBw: 0, ardopBw: 500 }), 'ardop:///K4SPB?freq=7099.9', 'no bandwidth of its own: the modem keeps the operator\'s setting');
+});
+test('#585: a row URL with a digipeater path still names its gateway by the last segment', () => {
+  const { sessionUrl } = require('../lib/winlink-pat');
+  assert.strictEqual(sessionUrl({ mode: 'packet', gateway: 'W2XYZ-10', dialKhz: 145050, rowUrl: 'ax25:///N0PE-1/W2XYZ-10?freq=145050' }), 'ax25:///W2XYZ-10?freq=145050', 'the path never comes from a row URL, only from the saved entry');
+  assert.strictEqual(sessionUrl({ mode: 'packet', gateway: 'W2XYZ-10', dialKhz: 145050, rowUrl: 'ax25:///W2XYZ-10/OTHER-1?freq=1' }), 'ax25:///W2XYZ-10?freq=145050');
 });
 
 console.log(`\n${pass} passed, ${fail} failed`);

@@ -70,12 +70,13 @@ contextBridge.exposeInMainWorld('api', {
     setInterval(flush, 100);
   },
   answerPrompt: (id, value) => ipcRenderer.send('winlink-cmd-prompt', { id, value }),
-  gateways: (mode, band) => ipcRenderer.invoke('winlink-cmd-gateways', { mode, band }),
+  // refresh: the round-arrow button, a fresh download from Winlink (plan docs/winlink-custom-gateways-plan.md 2.1).
+  gateways: (mode, band, refresh) => ipcRenderer.invoke('winlink-cmd-gateways', { mode, band, refresh: refresh === true }),
   history: () => ipcRenderer.invoke('winlink-cmd-history'),
   template: (op, t) => ipcRenderer.invoke('winlink-cmd-template', { op, t }),
   contact: (op, c) => ipcRenderer.invoke('winlink-cmd-contact', { op, c }),
   contactGroup: (op, g) => ipcRenderer.invoke('winlink-cmd-contact-group', { op, g }),
-  favourite: (op, g) => ipcRenderer.invoke('winlink-cmd-favourite', { op, call: g && g.call, mode: g && g.mode, dialKhz: g && (g.dialKhz != null ? g.dialKhz : g.khz), url: g && g.url }),
+  favourite: (op, g) => ipcRenderer.invoke('winlink-cmd-favourite', { op, call: g && g.call, mode: g && g.mode, dialKhz: g && (g.dialKhz != null ? g.dialKhz : g.khz), url: g && g.url, mine: g && g.mine, note: g && g.note, via: g && g.via, bw: g && g.bw, was: g && g.was }),
   onCatFrequency: (cb) => ipcRenderer.on('cat-frequency', (_e, hz) => cb(hz)),
   setMode: (mode) => ipcRenderer.send('winlink-cmd-set-mode', mode),
   acceptNotice: () => ipcRenderer.invoke('winlink-cmd-accept-notice'),

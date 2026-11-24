@@ -37,6 +37,7 @@ const TESTS = [
   'test/guest-pass-owner-controls-test.js', // #200 / #541 step 3: Take the radio (Now / In 5 minutes), Give it back, Cancel pass
   'test/guest-pass-handback-test.js', // #200 / #541 step 4: after 5 idle owner minutes the guest may take the radio back; no automatic hand-back
   'test/rigctld-spawn-test.js',
+  'test/rigctld-bind-test.js', // Casey 2026-11-22: POTACAT's own rigctld binds 127.0.0.1 (-T), dialled on 127.0.0.1
   'test/echocat-connect-diet-test.js',
   'test/cw-live-watchdog-test.js',
   'test/yaesu-cw-text-test.js',
@@ -47,6 +48,8 @@ const TESTS = [
   'test/cw-tx-lockout-timer-test.js', // #583: the TX lockout ends when its timer fires a millisecond early
   'test/pass-radio-free-notify-test.js', // #541: the station tells Cloud the radio is free, once per idle offer
   'test/space-ptt-not-scan-test.js', // Space as Hold-a-key-to-talk never toggles scan (B9)
+  'test/cw-sideband-test.js', // #753: CW or CW-R (CW-U or CW-L) per rig; Automatic is the rule before #753 on every band; one rule in lib/cw-sideband.js
+  'test/rig-audio-jack-test.js', // #153: sound card on the data or mic jack, per rig: the one DATA-mode rule for every transmission
   'test/plain-ssb-for-digital-test.js', // a Winlink session keeps the data mode with JTCAT's plain-USB setting off (FTDX10 on flrig)
   'test/lz3aw-web-parity-test.js',
   'test/lz3aw-round5-test.js',
@@ -61,6 +64,7 @@ const TESTS = [
   'test/cloud-tunnel-enable-remote-test.js', // ECHOCAT ask 2026-11-21: an owner device turns the Cloud Tunnel on with Cloud access; never a Guest Pass
   'test/cloud-tunnel-auto-test.js', // ECHOCAT ask 2026-11-21: the Cloud Tunnel turns on when the account gets access; never after the operator turned it off
   'test/cloud-state-test.js', // ECHOCAT ask 2026-11-21: auth-ok carries the shack's Cloud state and cloud-state follows it; never to a Guest Pass
+  'test/settings-sync-gone-test.js', // #379: the unused settings-sync wiring (cloud-get/put-settings, /v1/settings) stays removed
   'test/scan-run-test.js', // #37: a phone-started scan run on the desktop: the phone's 13 filter vectors, the desktop's exclusions, start/step/end rules, wire and glue
   'test/clock-platform-test.js', // NJ2DX 2026-11-21: each OS gets only the clock buttons it can honour; Time settings opens on a Mac
   'test/main-ismac-scope-test.js', // K3SBP 2026-11-21: isMac is not defined (opening APRS crashed); every isMac in main.js is declared in its own function
@@ -78,6 +82,7 @@ const TESTS = [
   'test/vfo-monitor-tx-mute-test.js', // #713: VFO window radio monitor is silent while transmitting
   'test/vfo-log-spot-test.js',
   'test/vfo-wheel-direction-test.js', // #192 w0tlp: wheel up = frequency up in the VFO window
+  'test/vfo-step-keys-test.js', // #256 LZ3AW / K4DZC: Step down / Step up buttons and arrow keys tune by the step (hold repeats), never while typing, lock kept; main-window arrows stay on spots
   'test/vfo-tx-power-test.js', // #199 w0tlp: TX power slider in the VFO window, the Rig panel's caps and dispatcher
   'test/smartsdr-self-slice-test.js',
   'test/bundle-mac-deps-test.js',
@@ -117,6 +122,7 @@ const TESTS = [
   'test/guest-pass-lease-end-test.js', // the end of a pass stops every transmitter and closes the guest socket
   'test/guest-pass-hopping-test.js', // guests hop between rigs; the owner takes over and hands back
   'test/pass-guest-activity-test.js', // the take-over dialog learns whether the guest is connected and when they last used the radio
+  'test/pass-list-used-by-test.js', // #1003 the Guest Pass list says guests have used the pass, not connected now
   'test/guest-sdr-test.js', // #543: a guest uses the station's own SDRs; a typed-in host and SDR settings writes are refused in words
   'test/guest-settings-secrets-test.js', // a guest never receives the station's SDR passwords or other settings secrets; refusals in plain words
   'test/guest-pass-authority-test.js', // a Guest Pass is default-deny: the allowlist wall in the demux + the rig-control action wall
@@ -135,7 +141,9 @@ const TESTS = [
   'test/sstv-audio-device-test.js',
   'test/sstv-live-path-test.js',
   'test/sstv-drive-test.js', // #279: the SSTV Drive slider keeps 0, shows its value, and is never squeezed
+  'test/sstv-tx-power-test.js', // #279: Transmit power for SSTV, set before a picture and put back after it, every way it ends
   'test/sstv-start-band-test.js', // #292: SSTV never tunes a radio to a band it is not set up for
+  'test/sstv-quiet-wait-test.js', // #326: SSTV waits for a quiet frequency: busy waits, quiet sends, Send now, Cancel, the 4-minute give-up, off by default, the phone path, wiring
   'test/sstv-echocat-send-test.js', // #357: a picture from ECHOCAT: its own copy for the encoder, a status line not a dialog, tuned before it keys
   'test/sstv-freq-box-test.js', // #359: the frequency box is not overwritten while typing; kHz or MHz; FM from 2 m up
   'test/sstv-text-styles-test.js', // #327: typeface, outline, shadow, letter spacing per SSTV text layer
@@ -155,6 +163,9 @@ const TESTS = [
   'test/worked-roster-test.js',
   'test/grid-state-test.js',
   'test/worked-overlay-test.js',
+  'test/remote-scope-freq-test.js',
+  'test/protocol-registration-test.js',
+  'test/vara-mac-guide-link-test.js',
   'test/modem-rx-level-test.js',
   'test/watchlist-groups-test.js',
   'test/cert-san-policy-test.js',
@@ -162,6 +173,7 @@ const TESTS = [
   'test/lan-advertise-test.js',
   'test/custom-cat-parity-test.js',
   'test/vfo-custom-cat-slider-test.js', // #526: a custom CAT slider in the VFO window stays where it is dragged; no rebuild per push
+  'test/custom-cat-25-test.js', // #164: up to 25 custom CAT buttons, no padding, a button may belong to some radios; one filter on every surface and in the reader
   'test/custom-cat-read-test.js', // #242: a custom toggle's own read command + ON-when rule; unknown, not OFF, when unread; no read during TX
   'test/worked-qsos-chunk-test.js',
   'test/worked-incremental-test.js', // #731: a worked-incremental client gets the full worked list once per connection, not after every QSO; ECHOCAT Web merges qso-added with the full list's entry rule
@@ -183,6 +195,7 @@ const TESTS = [
   'test/rigctld-yaesu-power-read-test.js', // a Yaesu on rigctld reads its power with w PC; (#656); non-Yaesu rigs still send l RFPOWER
   'test/rigctld-kenwood-power-test.js', // a TS-590/TS-2000 behind Hamlib keeps its power: raw PC, never Hamlib's PC000/PC255 probe
   'test/jtcat-tx-watchdog-test.js',
+  'test/jtcat-calling-time-test.js',
   'test/jtcat-replace-log-test.js',
   'test/jtcat-second-caller-test.js',
   'test/jtcat-quiet-freq-test.js', // CQ quiet frequency: main measures the engine audio while no waterfall draws (one rule, lib/jtcat-quiet-freq.js)
@@ -191,10 +204,17 @@ const TESTS = [
   'test/elecraft-data-mode-test.js',
   'test/elecraft-atu-tune-test.js', // Elecraft tunes with SWT (K3 19, KX3 44, KX2 20 by OM;), never AC
   'test/ts590-atu-ac111-test.js', // TS-590S/SG starts a tune with AC111; per its PC command guide (VA2PSL #635); other Kenwoods keep AC011;
+  'test/ft2000-atu-cmd-test.js', // #990: FT-2000 tune is AC002; per its CAT reference p. 5, not the Kenwood AC011;
   'test/freedv-spot-merge-test.js', // #742: one row per FreeDV station across PSKReporter + FreeDV Reporter; departed stations leave; rows keyed by mode too
   'test/freedv-display-mode-test.js', // #716: RADE, not DIGU/PKTUSB, on every surface while FreeDV runs
+  'test/echocat-web-data-mode-test.js', // DIGU / DIGL in ECHOCAT Web's mode picker for radios that have them (lib/data-mode-picker.js)
   'test/vfo-ptt-row-test.js', // #190: ECHOCAT Web VFO-tab PTT row shows while the mode is unknown; hidden in CW/data
   'test/ws-liveness-test.js', // ECHOCAT Web: reconnect when no pong comes back or the screen wakes on a dead socket
+  'test/ptt-release-test.js', // ECHOCAT Web: PTT lets go on blur/hidden/cancel, Space up with a box focused, and resends off after a reconnect (#935)
+  'test/ws-limits-test.js', // ECHOCAT: 16 MiB maxPayload, a frame over 64 KiB before sign-in closes the socket unparsed (1009), sstv-photo over 4 MiB refused with sstv-tx-status error and never encoded
+  'test/remote-origin-security-test.js', // ECHOCAT: foreign page Origin refused on LAN sockets, /api/ptt cross-site refused with no ACAO, device-writable settings allowlist, public source needs the token, directory cards escaped
+  'test/ptt-api-plain-http-test.js', // /api/ptt on the plain-HTTP fallback: keying needs the ECHOCAT password, release always works, HTTPS unchanged, local usage stamp (lib/ptt-api-gate.js, lib/ptt-api-usage.js)
+  'test/ptt-client-id-test.js', // #941: a reconnecting ECHOCAT Web page releases PTT its own dead socket holds; another id or none never does
   'test/error-banner-text-test.js', // #806: ECHOCAT Web error banner shows the message on iPhone Safari (stack has no message there)
   'test/freedv-diag-test.js', // #717: FreeDV audio in, sync on/off and capture failures in the session log, rate-limited
   'test/freedv-mac-mic-test.js', // #718: FreeDV capture runs the macOS microphone check and a 10 s silence watch, the shared rule
@@ -261,6 +281,7 @@ const TESTS = [
   'test/aprs-beacon-tx-readback-test.js', // #856: the radio beacon hears the radio's TX readback while POTACAT holds PTT (IC-7300 over CI-V), not only TX-state changes
   'test/aprs-listen-moved-test.js', // APRS listening pauses when the radio moves off the APRS frequency (any cause), the return is dropped; the once-a-minute audio line
   'test/aprs-auto-listen-test.js', // APRS window: listen on open (receive only), once per open, every switch refusal plus TX / JTCAT QSO / owner / Guest Pass, off stays off
+  'test/aprs-start-stops-ft8-test.js', // APRS Start with FT8 decoding: halts JTCAT TX, stops FT8 the SSTV way, says so; automatic starts and guests keep the refusal
   'test/tune-link-pending-test.js', // a potacat://tune link that launches POTACAT waits for the radio (link up + a readback), tunes once; 60 s then a notice; only the latest link counts
   'test/radio-tune-route-test.js', // the one "radio reachable for tuning" decision: TCI, Flex Direct, CAT (APRS on a FLEX-8600M, 2026-11-18)
   'test/aprs-window-test.js', // APRS window layout: status cards (no heading), timer banner only with an interval, on-air banner only while keyed + Stop = the close abort, one-click beacon buttons, TX power -/+, two-line stations, "Within" in round units -> whole km, one-time range conversion
@@ -310,6 +331,7 @@ const TESTS = [
   'test/sstv-feed-gate-test.js',
   'test/wrl-packet-test.js',
   'test/jtcat-snr-floor-test.js', // Hunt does not call a CQ below the operator's signal floor (per band)
+  'test/jtcat-spectrum-resume-test.js', // #943: an engine restart (band/mode change) resumes the phone's FT8 waterfall feed
   'test/rx-spectrum-test.js', // the phone's VFO waterfall with no FT8 engine: Flex/Icom streams, the rig's sound card
   'test/ft4222-library-test.js', // #360: FTDI's LibFT4222 names per platform (versioned Mac dylib + libftd2xx), Setup's copy plan, Mach-O archs, the loader's reason in Mac words
   'test/yaesu-scope-test.js', // the FT-710's own scope: frame parser, axis, helper exit codes, remote payload guard (was CI-only)
@@ -331,6 +353,8 @@ const TESTS = [
   'test/look-picker-test.js', // #376: Light / Dark / System, the six swatches in order, contrast 4.5:1 per theme
   'test/vfo-compact-test.js', // VFO window: Audio on/off, the mini VFO strip, POTACAT colours for PTT, sliders and CW
   'test/vfo-layout-test.js', // VFO window: Large and Small VFO layouts, one-line Small VFO, CAT buttons, Scan
+  'test/vfo-gain-steps-test.js', // #997: VFO window Preamp/Att step through the radio's ladder (FTX-1 AMP2, Att 12/18 dB)
+  'test/split-up-test.js', // #689: Split up N from the VFO window and ECHOCAT Web (TX = RX + N, lock, caps)
   'test/vfo-freq-entry-test.js', // #672: the Small VFO's frequency is typed in place, a click grows to the keypad; Enter never tunes a hidden buffer
   'test/main-window-layout-fixes-test.js', // #285 Log button "L", #284 HF Nets check mark, #298 HOLD TO TALK off screen
   'test/wd3d-activator-test.js', // WD3D: toolbar wraps at full screen; a two-fer/n-fer spot fills every P2P park
@@ -350,6 +374,7 @@ const TESTS = [
   'test/operating-entity-test.js', // W1AW/KL7 is Alaska; the log takes QRZ's DXCC entity, not its mailing country
   'test/hound-log-call-test.js', // a hound calls the fox's base call but logs the full call (level_death 6W/IK2HKT)
   'test/jtcat-hound-chip-test.js', // #160: HOUND chip is a two-way toggle on the main screen
+  'test/jtcat-waterfall-off-test.js', // #391: Show the audio waterfall (off hides the pane and stops drawing; decoding unaffected)
   'test/qrz-login-message-test.js', // Settings > Logging QRZ line: signed in vs no subscription vs bad password (K0DHW)
   'test/voice-tx-check-test.js', // 0 W / no ALC on a voice over: one hint naming the radio's audio-input menu
   'test/rig-test-saved-note-test.js', // a passing rig-editor Test says when its port is not saved yet
@@ -363,6 +388,7 @@ const TESTS = [
   'test/yaesu-audit-ftdx101-test.js', // Yaesu CAT audit: FTDX101 width SH00nn + its Table 3, AGC GT0 order, MD0 9/E/F, PC from 5 (2308-L)
   'test/yaesu-sd-break-in-delay-test.js', // Yaesu CAT audit: FT-710/FTDX10/FTDX101 SD is a two-digit index 00-33, sent and read
   'test/tx-audio-input-test.js', // TS-480/590/890/990 transmit audio input per rig; TS-480 asks on first transmit (#594)
+  'test/ft891-tx-audio-input-test.js', // FT-891 transmit audio input per rig: MIC SELECT / DATA IN SELECT set while connected, put back after (#602)
   'test/tx-channel-test.js', // transmit on left only or both channels, per rig: modem bridge, FT8, Tune (#654)
   'test/rig-list-a11y-test.js', // #603: every rig-list control names its rig for VoiceOver
   'test/split-first-tune-test.js', // #113 item 2: no split OFF unless POTACAT turned split on
@@ -385,13 +411,17 @@ const TESTS = [
   'test/adif-mode-test.js', // #381: MFSK submodes (JS8, JTTY, FT4, FT2) read by name everywhere; FT4/FT2 still written bare
   'test/qso-edit-test.js', // #509: My Park edit sets MY_SIG so Past Activations finds the QSO
   'test/activation-auto-end-test.js', // #147: a forgotten activation ends at the UTC day change or after 6 h with no contacts
+  'test/activation-relaunch-700-test.js', // #700: a saved activation clock that ran out while POTACAT was closed ends the activation at launch, not 33 s later
   'test/activation-device-ref-00z-test.js', // #734: the phone's own park is kept on a QSO that arrives after the desktop's activation ended (00Z)
   'test/activation-logging-388-test.js', // #388: a habit Tab after the RST jump is absorbed; a corrected park grid is kept per park
   'test/activation-announce-508-test.js', // #508: QSOs from the Log window (and ECHOCAT) join the live activation list, once
   'test/state-backfill-test.js', // #389: QRZ state fill counts only tracked entities (never VK) and names the QSOs left
   'test/diagnostic-snapshot-test.js',
   'test/mercury-process-test.js',
+  'test/mercury-offer-test.js', // Mercury experimental: no 2750 bandwidth; the chat window hidden until on-air use (Casey 2026-11-22)
   'test/winlink-pat-test.js',
+  'test/winlink-own-modem-test.js', // 2026-11-22 community-modem gateways (DATA2G and the like) after the standard rows, under their own heading
+  'test/winlink-list-refresh-test.js', // the gateway list downloads again on Refresh and daily; Other service codes (plan docs/winlink-custom-gateways-plan.md 1-2)
   'test/winlink-reach-test.js',      // a radio session goes only where this radio can transmit
   'test/winlink-units-test.js',
   'test/winlink-spectrum-test.js',
@@ -412,6 +442,8 @@ const TESTS = [
   'test/winlink-busy-wait-test.js', // #296: Keep waiting stays chosen, Stop ends Pat's busy wait, the watchdog does not call the wait a stall
   'test/modem-audio-lane-test.js', // #187: the modem's audio off the main process; credit, drain, counted cuts
   'test/winlink-awake-test.js', // #187: a radio Winlink session holds off App Nap (the hidden bridge window starved on a Mac)
+  'test/winlink-my-gateways-test.js', // #585: Add a gateway: the form's checks, the dial from the centre, Mine entries (note, via, ARDOP bandwidth), Edit and Remove, their own group in the list
+  'test/winlink-mine-web-test.js', // #585 phase 4: My own gateways in ECHOCAT Web (Add a gateway, Edit, Remove), the winlink-mine capability and the older-shack line, the shack's own check, Guest Pass refused
   'test/winlink-history-test.js', // #254: gateway history from Pat's event log, My gateways (saved gateways)
   'test/winlink-outcome-test.js', // #425: how a session ended is worded in one place; Pat's reply never reaches a status; one summary line per session
   'test/winlink-pat-recover-test.js', // #430: after an Abort, Connect restarts a Pat that is stuck on the last call; a session never starts on top of a dial (VARA)
@@ -426,6 +458,7 @@ const TESTS = [
   'test/winlink-summary-store-test.js', // #425: the session summary lines survive a restart, so Report a Bug still holds the session that dropped
   'test/winlink-mail-select-test.js', // #346: select several Winlink messages and delete them with one confirm
   'test/winlink-folders-test.js', // #462 #475: Archive and back, the Deleted folder (copies, Restore, purge after N days), Reply all; a real Pat when present
+  'test/winlink-mode-note-test.js',
   'test/winlink-mail-views-test.js', // 2026-11-15 ECHOCAT ask: the dial stays on the gateway while a phone's Mail tab is open; two devices, the window and a phone, a closed socket
   'test/winlink-tx-level-test.js', // #300: Winlink's own TX level; the summary says the RX peak and what our overs sent; the pause between overs is not a gap
   'test/rigctld-shim-hamlib-test.js',
@@ -449,6 +482,7 @@ const TESTS = [
   'test/ssb-sideband-tune-test.js', // a 60 m SSB spot tunes USB
   'test/ssb-sideband-one-rule-test.js', // #445: band buttons and typed frequencies pick LSB/USB by band in voice SSB; one copy of the rule
   'test/mac-mic-access-test.js', // #463: a Mac that refuses the microphone is named, logged and in Report a Bug
+  'test/rx-direct-source-test.js', // #936: JTCAT/SSTV pop-outs hear Icom network audio, not the local input
   'test/capture-stall-test.js', // kc8zp_ryan: JTCAT capture rebuilt when the OS mutes/suspends it or it stops delivering
   'test/jtcat-capture-gate-test.js', // #133: a remote-started FT8 capture is restarted like a desktop one; one capture build at a time
   'test/remote-off-release-test.js', // #746: ECHOCAT turned off releases the radio input a phone-started FT8/JS8 held
@@ -461,6 +495,7 @@ const TESTS = [
   'test/wspr-beacon-power-test.js', // #268: the beacon keeps the operator's RF power; rigctld reports the radio's power
   'test/wspr-reported-dbm-test.js', // #268: the beacon reports the power it runs at (5 W = 37 dBm), or the operator's fixed pick, 0..60 dBm
   'test/js8-native-test.js',
+  'test/check-required-natives-test.js', // release gate: ft8_native/js8_native exist, right arch (PE/ELF/Mach-O header), load
   'test/rade-native-test.js',
   'test/freedv-playback-test.js',
   'test/js8-varicode-test.js',
@@ -487,6 +522,7 @@ const TESTS = [
   'test/echocat-web-gate-test.js',
   'test/tunnel-webui-gate-test.js',
   'test/cloud-session-change-test.js',
+  'test/cloud-device-revoked-test.js', // a computer removed from the Cloud account is signed out: tokens cleared, loops and tunnel stopped
   'test/cloud-log-sync-test.js',
   'test/cloud-sync-log-test.js', // B10: Cloud sync writes its pulls, errors and "not started" reason to the session log
   'test/cloud-pair-errors-test.js', // a second desktop registers before Cloud pairing; Cloud answers in plain words; its device id never leaves in an export
@@ -511,6 +547,7 @@ const TESTS = [
   'test/review-ask-test.js',
   'test/rigctld-gain-fallback-test.js',
   'test/release-notes-format-test.js',
+  'test/website-links-guard-test.js', // release.yml update-website pushes only version strings in the download block; anything else is a website handoff branch
   'test/contests-view-test.js',
   'test/remote-server-rewire-test.js',
   'test/sstv-tx-data-mode-test.js',
@@ -531,6 +568,7 @@ const TESTS = [
   'test/web-keyer-heard-release-test.js', // #244: a late release never takes back an element that has started to sound
   'test/cw-playout-lateness-test.js', // #244 diagnostic: paddle playout edge lateness, one line per over
   'test/cw-sidetone-air-agree-test.js', // #244: ECHOCAT Web's sidetone and the air agree; an element is committed once it sounds
+  'test/web-paddle-input-first-test.js', // #244 Part A: paddle keys and MIDI reach the web keyer first (capture phase); drawing pauses during a paddle over
   'test/spot-hides-test.js',
   'test/mac-titlebar-test.js',
   'test/vfo-and-greyout-test.js',
@@ -547,6 +585,7 @@ const TESTS = [
   'test/commander-codec-test.js',
   'test/logger-cat-test.js',
   'test/cm108-ptt-test.js',
+  'test/window-security-test.js', // app windows: only the permissions POTACAT uses (mic, MIDI, CM108 WebHID, copy, audio output, full screen) for its own pages; no navigation away; no new windows, web links through the open-external allowlist
   'test/removed-features-test.js',
   'test/dxpedition-contests-test.js',
   'test/vfo-meters-test.js',
@@ -594,6 +633,7 @@ const TESTS = [
   'test/window-min-size-test.js',     // N0KAH: no window shrinks past its own controls
   'test/window-rules-test.js',        // every window opens in the theme and remembers its place
   'test/mac-frameless-windows-test.js', // #866: every visible frameless window keeps the macOS traffic lights; the APRS and JTCAT map title bars keep their own controls on a Mac
+  'test/linux-native-frame-test.js',  // #345: optional system title bar on Linux (off by default); one rule in lib/window-frame.js, the pages hide their own buttons
   'test/meter-box-test.js', // NJ2DX 2026-11-21: the S-meter box is clamped on screen as it appears, and draws with the theme's colours
   'test/yaesu-fa-digits-test.js',
   'test/yaesu-audit-ft891-test.js', // Yaesu CAT audit: FT-891 preamp, AGC, PROC, CW text, RTTY
@@ -619,6 +659,8 @@ const TESTS = [
   'test/jtcat-split-panes-test.js',
   'test/qrz-base-call-test.js',
   'test/external-links-allowed-test.js',
+  'test/external-url-test.js', // open-external: host compared exactly (no lookalikes, userinfo, trailing dot); file:// only inside the app folders
+  'test/secret-file-test.js', // the ECHOCAT TLS key, the Tailscale key and settings.json are 0600; an older key is chmod'ed at start
   'test/fetch-policy-test.js',
   'test/icom-picker-models-test.js',
   'test/k9cyt-requests-test.js',
@@ -630,12 +672,14 @@ const TESTS = [
   'test/lotw-split-test.js',
   'test/station-county-test.js', // the operator's own state and county: per park on activations, home only from the home grid
   'test/guest-pass-station-location-test.js', // a Guest Pass contact carries the lending station's grid, state and county (#822)
+  'test/guest-log-station-location-test.js', // #909: a guest desktop's own log forms on a pass stamp the station's location (settings.stationLocation)
   'test/sdr-scope-test.js',
   'test/sdr-scope-if-tap-test.js', // #394: an SDR on a radio's IF output stays on the IF
   'test/rtltcp-audio-test.js',
   'test/landmarks-test.js', // Directory > Landmarks: the catalog gate, hours, rig coverage, the NCDXF clock, the feed, wiring
   'test/directory-key-nav-test.js', // #501: Directory arrow keys move from the row you clicked; ends clamp; a tab switch resets
   'test/lz3aw-round14-test.js',
+  'test/logbook-map-filter-test.js', // #702: the Logbook map plots exactly the filtered rows; one filter for list, map and ECHOCAT Web
   'test/lz3aw-batch-b-test.js',
   'test/lotw-report-test.js',
   'test/import-confirmations-test.js', // Import Log merges QSL / LoTW confirmations into QSOs already logged (#461)
@@ -647,8 +691,10 @@ const TESTS = [
   'test/log-freq-test.js',
   'test/log-freq-resolution-test.js',
   'test/log-tx-power-test.js',
+  'test/log-fixed-power-test.js',
   'test/station-clock-test.js', // ECHOCAT device sets the FT8 slot clock
   'test/rig-bands-test.js',
+  'test/rotor-bands-test.js', // #356 rotor only on chosen bands
   'test/band-last-freq-test.js',
   'test/spot-band-filter-test.js',
   'test/award-tables-test.js',
@@ -679,6 +725,7 @@ const TESTS = [
   'test/rig-power-off-guard-test.js', // #293: no Power Off for a radio POTACAT cannot switch back on, unless the rig allows it
   'test/rig-power-off-defaults-test.js', // #768: Power Off shown by default on a direct serial port or SCU-LAN10, hidden on Hamlib; a stored choice wins
   'test/amp-drive-limit-test.js', // B10 row 10: a per-rig amplifier drive limit, enforced in every radio client
+  'test/g90-power-scale-test.js', // the Xiegu G90 through rigctld sends RFPOWER on its own 20 W full scale (20 W = 1.000, not 0.200); other radios' bytes unchanged (#989)
   'test/remote-multi-client-test.js',
   'test/remote-bridge-test.js',
   'test/aprs-remote-shack-test.js', // #868: a desktop driving a remote shack starts APRS listening there (aprs-listen), shows the shack's aprs-state and the stations its radio heard
@@ -698,6 +745,7 @@ const TESTS = [
   'test/layout-alignment-test.js',
   'test/jtcat-stations-test.js', // #557: the Stations view, one line per station heard (fold, expiry, clear, sort, row, click)
   'test/jtcat-stations-needed-test.js', // #557 part 2: needed marks from the roster under the map's scope, the Park column, Wanted in Stations
+  'test/jtcat-auto-compact-test.js', // #857: the JTCAT window picks a compact layout by itself when short (hysteresis; an explicit Full/Compact wins; never resizes the window)
   'test/jtcat-own-tx-offset-test.js', // #503: our own TX rows show the offset that slot went out on
   'test/net-reminder-row-test.js', // a Net Reminders row always names its net (#284)
   'test/freq-dots-test.js', // every frequency an operator reads is written the VFO way, 14.074.00 (Casey 2026-11-11)
@@ -747,6 +795,7 @@ const TESTS = [
   'test/jtcat-hunt-ignore-test.js', // Hunt: Never answer (right-click a decode) and 30-min auto-skip after a failed QSO
   'test/jtcat-hunt-cq-dx-test.js', // Hunt: never answer a CQ DX from our own continent, nor a CQ NA/EU aimed elsewhere
   'test/jtcat-fake-it-test.js', // Split operation "Fake It" (level_death): tone 1500-1999 Hz, dial shifted per transmission and put back
+  'test/jtcat-fake-it-default-test.js', // Fake It on for new installs, written off once for existing ones; plain offset where it cannot work (TCI, no CAT, split)
   'test/jtcat-hunt-echocat-test.js', // Hunt filters over ECHOCAT: jtcat-hunt-filters (Guest Pass refused), hunt-filters cap, web Filters sheet
   'test/civ-pacing-test.js', // one CI-V command in flight: an Icom abandons a reply when the next command arrives (NA4DQ IC-7300 Guest Pass)
   'test/guest-pass-no-power-test.js', // Guest Pass with no power report: plain refusal to the guest's windows, owner fix line, power read after the cap (NA4DQ/KF0WWL)
@@ -754,6 +803,7 @@ const TESTS = [
   'test/log-false-p2p-test.js', // no false park-to-park: a General contact after a POTA spot or contact carries no park (web sheet, desktop banner)
   'test/n3fjp-confirm-keep-test.js', // N3FJP pull never deletes a confirmation; eQSL and ClubLog count as confirmed
   'test/n3fjp-deleted-test.js', // a contact deleted after an N3FJP pull is not brought back by the daily re-read
+  'test/n3fjp-call-in-progress-test.js', // #712 the call in progress goes to N3FJP's entry window; debounced; never logs
   'test/kenwood-tx-latch-test.js', // a Kenwood is not latched in transmit after a hand-mic over (IF; P8 asked during TX)
   'test/civ-pacing-ptt-order-test.js', // CI-V pacing never sends TX OFF before TX ON; the newest key state wins
   'test/forced-data-no-tune-test.js', // a forced-DATA key-down sets the mode only; never a frequency write (Icom repeater memories)
@@ -763,7 +813,11 @@ const TESTS = [
   'test/qrz-late-backfill-test.js', // a late QRZ answer fills the saved record's empty fields
   'test/qrz-request-timeout-test.js', // a stalled QRZ socket gives up at its timeout (activation review fix 1)
   'test/log-qso-fast-reply-test.js', // #732: ECHOCAT's log-ok at the disk write; uploads and respots after, respot outcome as a follow-up
+  'test/phone-tx-power-test.js', // ECHOCAT #85: log-qso keeps the phone's txPower (else the usual fill), log-ok records carry it, hello lists log-tx-power
+  'test/phone-activation-gear-test.js', // #975: log-qso keeps the phone's rig and antenna (64 chars), desktop rig otherwise; MY_ANTENNA written and read back
   'test/log-qso-idempotent-test.js', // #733: log-qso idempotent by uuid; the log's uuid index; no duplicate uuid reaches the Cloud
+  'test/qso-identity-test.js', // #988: which QSO a Logbook edit/delete means: uuid, else CALL+QSO_DATE+TIME_ON+BAND+MODE; refuse when no single match
+  'test/logbook-delete-988-test.js', // #988: Logbook deletes/edits hit the clicked QSO after a delete; a uuid-less delete is written; ECHOCAT reports the real result
   'test/hunt-polish-test.js', // Hunt says who it is working; web Filters with Hunt off and for a guest; the list saved on every change; the review window closes on decline
   'test/tx-review-low-test.js', // drop detector paused in TX; Winlink re-key restarts the TX limit; full power on rigctld raw PC; multi-slice TX kind
   'test/lan-review-test.js', // VFO speaker plays LAN audio; a reopened port clears POTACAT's old close; FT-710 named; LAN scope text; LAN transport window and strangers
@@ -781,7 +835,50 @@ const TESTS = [
   'test/serial-quit-test.js', // #657: every serial port closed and every native serial call finished before quit (macOS SIGABRT)
   'test/remote-tune-click-label-test.js', // #756: the ECHOCAT Web tuneClick switch is labelled for the click sound, not "Tap to Tune"
   'test/tune-link-guard-test.js', // a potacat://tune link stops Run, Hunt, the WSPR beacon, the Spot Target, a QSO and TX before it tunes; notice in the main and JTCAT windows
+  'test/test-manifest-complete-test.js', // every test/ and lib/ *-test.js / *.test.js is in TESTS or in EXCEPTIONS below, so no test file silently never runs
+  // 2026-11-23: test files that existed but were on no list, so CI never ran them.
+  'lib/psk-engine-test.js', // PSK31 engine: varicode round-trip, TX->RX loopback, AFC pull-in, squelch, Ft8Engine contract
+  'test/all-qsos-cap-test.js', // legacy all-qsos frame bounded by bytes (iOS 1009 kill), chunked path, qso-added delta gate
+  'test/aprs-is-test.js', // APRS-IS packet builders: passcode, gate, position packets
+  'test/cloud-export-test.js', // Cloud ADIF export: 401 -> refresh + retry once; temp file then rename (local stub server)
+  'test/cloud-tunnel-degraded-test.js', // Cloud Tunnel flags "degraded" when cloudflared loses DNS but does not exit
+  'test/cloudflared-arch-test.js', // cloudflared EBADARCH (-86): system binary fallback or a clear message
+  'test/cw-keyer-script-test.js', // the persistent CW keyer's generated Python keys the right line and dispatches commands
+  'test/freedv-reporter-test.js', // FreeDV Reporter: an error with no listener never kills the process
+  'test/js8-mailbox-test.js', // JS8 mailbox parsing and the SMS / email message builders
+  'test/linux-sandbox-test.js', // #37: the Linux no-sandbox fallback fires only where launch would abort
+  'test/local-ips-test.js', // which interfaces may be advertised as the LAN (VPN overlays dropped, bridged hypervisor kept)
+  'test/lz3aw-round13-test.js', // LZ3AW round 13: Live CW button, log time, F-key macros, readable greys, multi-call filter
+  'test/pair-request-retry-test.js', // tap-to-pair: a retry with the same requestId collects or re-attaches; a different one is busy
+  'test/park-state-test.js', // a park spanning states writes a clean ADIF STATE
+  'test/popout-theme-boot-test.js', // pop-outs open in the theme on the first frame; applyPopoutTheme takes a string or { theme, variant }
+  'test/profile-dirs-test.js', // slash-callsign profile directories and the nested-dir migration
+  'test/pskreporter-test.js', // PSKReporter: transient 5xx retried quietly, a real failure only after a run of them
+  'test/pskreporter-tx-test.js', // PSKReporter IPFIX datagram decodes back to what was sent
+  'test/qso-chunker-test.js', // chunked all-qsos: every chunk under the byte cap, order and every record kept
+  'test/remote-client-dial-test.js', // RemoteClient: an unreachable leg never crashes the app; a fingerprint mismatch advances once
+  'test/remote-tune-echo-test.js', // a tune is echoed to the client at once, not on the next CAT poll
+  'test/revoke-kick.test.js', // revoking a device closes its live session (4004), spares others and blocks re-auth
+  'test/rig-audio-mirror-test.js', // an empty remoteAudioInput follows the rig's CODEC, never the built-in mic
+  'test/rotorez-test.js', // Rotor-EZ wire format, reply parser and the brake-delay queue (fake serial port)
+  'test/rx-level-test.js', // shack-side receive level: gain graph, live update, TX mute wins, Flex Direct stand-in capture
+  'test/smartsdr-discovery-test.js', // SmartSDR: POTACAT's own previous GUI-client registration is not a foreign client
+  'test/smartsdr-reconnect-test.js', // SmartSDR reconnect: fast retries, one give-up, then a background probe
+  'test/wspr-bandhop-test.js', // WSPR band-hop schedule
+  'test/wspr-decoder-test.js', // wsprd output parser and the WAV writer
+  'test/wspr-encode-test.js', // WSPR encoder: 50-bit packing proved by an independent unpack
+  'test/wspr-network-test.js', // WSPR band table and the wsprnet upload formatter (fake fetch)
+  'test/wspr-stats-test.js', // WSPR stats: dBm to watts, miles per watt
+  'test/wspr-wsprlive-test.js', // "Where am I heard" from wspr.live (fake fetch)
 ];
+
+// Test files that CI does not run, each with the reason. A file named
+// *-test.js or *.test.js in test/ or lib/ must be in TESTS or here
+// (test/test-manifest-complete-test.js). Reasons start with one of:
+// "manual:", "needs hardware:", "needs network:", "harness:", "superseded by ", "stale:".
+const EXCEPTIONS = {
+  'lib/jtcat-echocat-test.js': 'needs hardware: an in-app on-air harness (exports a function that takes the running app, keys a real radio at 5 W on 20 m / 15 m FT8 and FT4); nothing in the repo loads it',
+};
 
 
 // Files that must run alone, after the parallel pool. Each was seen to fail
@@ -791,6 +888,13 @@ const SERIAL = new Set([
   'test/atu-wizard-test.js', // runs the wizard on a 40x clock over real timers; under load a point times out (K3SBP run 1 case)
   'test/tci-audio-test.js', // 2 s budgets for a loopback TCI server to answer; missed in 2 of 9 parallel runs on a loaded machine, never alone
   'test/paddle-bounce-test.js', // web keyer element timing in real milliseconds; a dash was cut short once under load
+  'test/civ-pacing-test.js', // fixed 60/200 ms waits on a fake CI-V radio; failed four pushes under parallel load on 2026-11-22, passes alone
+  'test/ptt-client-id-test.js', // fixed port 17461; "Port 17461 busy" blocked two pushes under parallel load on 2026-11-23, passes alone
+  // Added 2026-11-23 when they joined TESTS; not yet seen to fail, placed here up front:
+  'test/revoke-kick.test.js', // fixed port 17310, a real ECHOCAT server and 300-1500 ms waits for the kick to land
+  'test/remote-client-dial-test.js', // fixed port 17320 and a 2.5 s window of dial rounds with backoff
+  'test/pair-request-retry-test.js', // fixed port 17330, sockets killed after 150 ms and 300-400 ms waits
+  'test/rotorez-test.js', // the brake-delay state machine on real timers (20-450 ms waits)
 ]);
 
 // SERIAL files that may be retried once after a failure (timing under load,
@@ -961,7 +1065,7 @@ function parseArgs(argv) {
   return o;
 }
 
-module.exports = { TESTS, SERIAL, RETRY_ONCE, SLOW_FIRST, runAll, parseArgs, defaultJobs };
+module.exports = { TESTS, EXCEPTIONS, SERIAL, RETRY_ONCE, SLOW_FIRST, runAll, parseArgs, defaultJobs };
 
 if (require.main === module) {
   const o = parseArgs(process.argv.slice(2));

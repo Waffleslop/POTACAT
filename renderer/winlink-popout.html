@@ -68,6 +68,33 @@
     .wl-fav-btn { width: 34px; padding: 0 !important; display: inline-flex; align-items: center; justify-content: center; }
     .wl-fav-btn[aria-pressed="true"] { border-color: var(--accent-blue, #4fc3f7); }
     .wl-fav-btn .wl-star { width: 17px; height: 17px; }
+    .wl-fav-btn[hidden] { display: none; }
+
+    /* Add a gateway (#585): a gateway the list does not have, typed in. The
+       links sit under the Gateway list; the form opens under the bar. */
+    .wl-gw-links { display: flex; gap: 14px; align-items: center; margin-top: 3px; min-height: 18px; }
+    .wl-link { background: none; border: none; padding: 0; font: inherit; font-size: 13px; color: var(--accent-blue, #4fc3f7); text-decoration: underline; cursor: pointer; white-space: nowrap; }
+    .wl-link:hover { color: var(--text-primary); }
+    .wl-link:focus-visible { outline: 2px solid var(--accent-blue, #4fc3f7); outline-offset: 2px; border-radius: 2px; }
+    .wl-link[hidden] { display: none; }
+    .wl-link.danger { color: var(--accent-red-text, var(--accent-red, #e94560)); font-weight: 700; }
+    .wl-add-card { display: none; padding: 10px 12px 12px; background: var(--bg-secondary); border-bottom: 1px solid var(--border-primary); font-size: 14px; color: var(--text-primary); }
+    .wl-add-card.show { display: block; }
+    .wl-add-title { display: block; font-size: 15px; font-weight: 700; margin-bottom: 8px; }
+    .wl-add-grid { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: flex-start; }
+    .wl-add-f { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; min-width: 0; }
+    .wl-add-f[hidden] { display: none; }
+    .wl-add-f > span:first-child { font-size: 13px; color: var(--text-secondary); }
+    .wl-add-f input, .wl-add-f select { font-size: 14px; height: 30px; box-sizing: border-box; }
+    #wl-add-call { width: 130px; text-transform: uppercase; font-family: Consolas, 'Courier New', monospace; }
+    #wl-add-freq { width: 160px; font-family: Consolas, 'Courier New', monospace; }
+    #wl-add-via { width: 170px; text-transform: uppercase; font-family: Consolas, 'Courier New', monospace; }
+    #wl-add-note { width: 240px; }
+    .wl-add-hint { font-size: 13px; color: var(--text-secondary); max-width: 300px; }
+    .wl-add-hint:empty, .wl-add-err:empty { display: none; }
+    .wl-add-err { font-size: 13px; font-weight: 600; color: var(--accent-red-text, var(--accent-red, #e94560)); max-width: 300px; }
+    .wl-add-older { display: block; max-width: none; margin-bottom: 8px; }
+    .wl-add-actions { display: flex; gap: 8px; align-items: center; margin-top: 10px; flex-wrap: wrap; }
 
     /* Templates menu (Casey 2026-11-11): opens beside the Templates button. */
     .wl-tpl-menu { position: absolute; z-index: 6; min-width: 240px; max-width: 320px; max-height: calc(100% - 16px); overflow-y: auto; padding: 4px; border-radius: 8px; border: 1px solid var(--border-primary); background: var(--bg-secondary); color: var(--text-primary); box-shadow: 0 10px 28px rgba(0,0,0,0.35); font-size: 14px; }
@@ -374,6 +401,13 @@
           <button class="wl-btn wl-fav-btn" id="wl-fav" aria-pressed="false" title="Add this gateway to your favorites" aria-label="Add this gateway to your favorites" disabled><svg class="wl-star empty" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.8l2.8 5.9 6.4.8-4.7 4.4 1.2 6.4L12 17.2l-5.7 3.1 1.2-6.4-4.7-4.4 6.4-.8z"></path></svg></button>
           <button class="wl-btn" id="wl-gw-refresh" title="Fetch the gateway list again" aria-label="Fetch the gateway list again">&#8635;</button>
         </div>
+        <!-- Under the list (#585): Add a gateway; for one the operator typed in,
+             Edit and Remove (the star is hidden then). Links, so the bar is no wider. -->
+        <div class="wl-gw-links">
+          <button class="wl-link" id="wl-gw-add" title="Type in a gateway the list does not show" aria-controls="wl-add-card">Add a gateway</button>
+          <button class="wl-link" id="wl-mine-edit" hidden>Edit</button>
+          <button class="wl-link" id="wl-mine-remove" hidden>Remove</button>
+        </div>
       </div>
       <div class="wl-field wl-dial">
         <span class="wl-label">Radio dial</span>
@@ -396,6 +430,44 @@
       <span class="wl-predict-bar"><span id="wl-predict-fill"></span></span>
     </div>
     <div class="wl-connnotes"><span class="wl-mode-note" id="wl-gw-note"></span><span class="wl-mode-note" id="wl-mode-note"></span><span class="wl-sound" id="wl-sound"></span></div>
+  </div>
+  <!-- Add a gateway (#585, plan docs/winlink-custom-gateways-plan.md 2.3). -->
+  <div class="wl-add-card" id="wl-add-card" role="group" aria-labelledby="wl-add-title">
+    <span class="wl-add-title" id="wl-add-title">Add a gateway</span>
+    <!-- Driving a shack whose hello lacks winlink-mine (#585 phase 4): one line, the shack needs an update. -->
+    <span class="wl-add-hint wl-add-older" id="wl-add-older" role="note"></span>
+    <div class="wl-add-grid">
+      <label class="wl-add-f"><span>Call</span>
+        <input id="wl-add-call" maxlength="12" placeholder="W2XYZ-10" autocomplete="off" spellcheck="false">
+        <span class="wl-add-err" id="wl-add-call-err" role="alert"></span></label>
+      <label class="wl-add-f"><span>Mode</span>
+        <select id="wl-add-mode"></select>
+        <span class="wl-add-err" id="wl-add-mode-err" role="alert"></span></label>
+      <label class="wl-add-f"><span id="wl-add-freq-label">Center frequency</span>
+        <input id="wl-add-freq" inputmode="decimal" autocomplete="off" spellcheck="false">
+        <span class="wl-add-hint" id="wl-add-dial" aria-live="polite"></span>
+        <span class="wl-add-err" id="wl-add-freq-err" role="alert"></span></label>
+      <label class="wl-add-f" id="wl-add-bw-row"><span>ARDOP bandwidth</span>
+        <select id="wl-add-bw">
+          <option value="0">My own setting</option>
+          <option value="200">200 Hz</option><option value="500">500 Hz</option>
+          <option value="1000">1000 Hz</option><option value="2000">2000 Hz</option>
+        </select>
+        <span class="wl-add-hint">The widest this gateway takes. POTACAT never goes wider than your own setting.</span>
+        <span class="wl-add-err" id="wl-add-bw-err" role="alert"></span></label>
+      <label class="wl-add-f" id="wl-add-via-row" hidden><span>Via (optional)</span>
+        <input id="wl-add-via" placeholder="W2ABC-1" autocomplete="off" spellcheck="false">
+        <span class="wl-add-hint">Up to two digipeaters, in order.</span>
+        <span class="wl-add-err" id="wl-add-via-err" role="alert"></span></label>
+      <label class="wl-add-f"><span>Note (optional)</span>
+        <input id="wl-add-note" maxlength="60" placeholder="club net Tuesdays" autocomplete="off">
+        <span class="wl-add-err" id="wl-add-note-err" role="alert"></span></label>
+    </div>
+    <div class="wl-add-actions">
+      <button class="wl-btn primary" id="wl-add-save">Save</button>
+      <button class="wl-btn" id="wl-add-cancel">Cancel</button>
+      <span class="wl-add-err" id="wl-add-msg" role="alert"></span>
+    </div>
   </div>
   <!-- No Winlink password yet: set the account up right here. winlink.org has
        no web sign-up; an account is created by a client, which is this. -->
@@ -596,6 +668,7 @@
   </div>
 
   <script src="../lib/freq-dots.js"></script>
+  <script src="../lib/winlink-my-gateways.js"></script>
   <script src="../lib/waterfall-palettes.js"></script>
   <script src="waterfall.js"></script>
   <script src="../lib/winlink-spectrum.js"></script>

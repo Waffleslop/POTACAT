@@ -119,9 +119,10 @@ fetches. You don't need to download them.
 
 </details>
 
-POTACAT isn't code-signed yet, so the first launch takes one extra click on Windows and macOS.
-That's normal for an independent app and doesn't mean anything is wrong — signing is on the
-roadmap, and these steps go away with it.
+The macOS builds are signed and notarized by Apple, so they open normally. The Windows and Linux
+builds are not code-signed yet, so on Windows the first launch takes one extra click. That's normal
+for an independent app and doesn't mean anything is wrong. Windows signing is planned (see
+**[CODE_SIGNING.md](CODE_SIGNING.md)**), and this step goes away with it.
 
 ### 🪟 Windows
 
