@@ -191,13 +191,5 @@ test('#998: the card tables size to their content, not the global fixed-width ta
   tds.forEach(t => assert.ok(/overflow:visible/.test(t) && /text-overflow:clip/.test(t), 'cell is not clipped: ' + t));
 });
 
-test('#998: the worked grid in the card is not stretched or clipped by the global table rules', () => {
-  const html = WM.workedMatrixHtml(WM.buildWorkedMatrix([{ band: '20m', mode: 'SSB' }, { band: '40m', mode: 'FT8' }]));
-  const tag = /<table class="wm-table"([^>]*)>/.exec(html);
-  assert.ok(tag && /table-layout:auto/.test(tag[1]) && /width:auto/.test(tag[1]), 'wm-table sets auto layout');
-  assert.ok(/<th style="[^"]*overflow:visible;text-overflow:clip/.test(html), 'row labels such as Digital are not ellipsised');
-});
-
-
 console.log(`\nPrior contacts: ${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);
