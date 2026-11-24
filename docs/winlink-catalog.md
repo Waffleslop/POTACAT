@@ -67,7 +67,8 @@ anyway** and **Cancel**. Over Telnet they queue at once.
   categories and sizes. There is no file to save and nothing to import.
 - A catalog is recognised by its table, not by its sender or subject (neither is verified,
   section 3). That is why it is taken **by itself only when the operator asked for one**: a request
-  is pending. Even then, one with fewer than half the items of the catalog in use is not taken.
+  is pending and the message is dated no earlier than 10 minutes before that request. Even then,
+  one with fewer than half the items of the catalog in use is not taken.
 - **Any other catalog message is offered, never taken.** One requested from another program, or
   months ago, or sent by anyone at all, gets the line "A catalog message from <sender> is in your
   Inbox: N items." and a **Use it** button. The operator's list changes only on that click. The
@@ -253,6 +254,11 @@ throws.
 7. Limits: 5,000 items; a subject is cut at 200 characters; a line over 1,000 characters is
    skipped; text past 2,000,000 characters is not read.
 
+8. Known limit: a subject that holds a double quote followed by a space and a number, such as
+   `"Chart 5" 12 hour forecast"`, ends at that inner quote (the subject reads `Chart 5` and 12 is
+   taken for the size). The table has no escaping, so the two readings cannot be told apart. The
+   item ID is unaffected and the item can still be requested.
+
 An item is `{ category, id, subject, size }`.
 
 `looksLikeCatalog(message)` is the cheap check before parsing: the body is over 5,000 characters
@@ -267,34 +273,38 @@ from an HTML string, and a guard test fails if `innerHTML` appears in the catalo
 ### Reading the Inbox
 
 Every decision is a pure function in `lib/winlink-catalog.js`; `main.js` supplies Pat and applies
-the result.
+the result. The glue itself is run by `test/winlink-catalog-glue-test.js`.
 
-When the Inbox is looked at:
+When the Inbox is looked at (`shouldScan`):
 - while a request for the full catalog is pending, after each refresh of the Inbox;
 - once when the Catalog panel is first opened in a run (this is what finds an older reply);
 - when Get, Update or Request again is pressed.
 
-Never the whole Inbox on every launch. A high-water mark (the date of the newest message examined,
-kept per operator profile) means no message is fetched twice across launches. Reads are one at a
-time, newest first, at most 200 in a pass (`toExamine`, `scanInbox`).
+Which messages are read (`toExamine`): every Inbox message not examined before, whatever its date.
+What was examined is remembered by message ID, the last 1,000, per operator profile. It is not
+remembered by date: a message's date is the sender's, and a future-dated or out-of-order message
+must never hide the reply. Reads are one at a time, newest-dated first, at most 200 in a pass; when
+more wait, another pass follows.
 
 What happens to one message (`decideMessage`):
 
 | The message | Result |
 |---|---|
 | Not over 5,000 characters, or no `INQUIRY_ID` in it, or no header line | Not a catalog. Nothing is flagged or logged. |
-| Header found, the table does not parse, and fewer than 5 rows read while nothing is pending | Not a catalog. A mail that merely mentions the column names lands here. |
-| Header found, the table does not parse, and a request is pending or at least 5 rows read | "Could not read it": the flag is set, a pending request is cleared, and one log line gives the sender and the row counts. |
-| A catalog, and a request is pending, and it has at least half the items of the catalog in use | Taken. The pending request is cleared. |
-| A catalog in any other case | Offered. The operator's list is unchanged until **Use it**. |
+| Header found, the table does not parse, fewer than 5 rows read | Not a catalog, pending or not. A help text that shows the column names lands here and never ends a wait. |
+| Header found, the table does not parse, at least 5 rows read | "Could not read it": noted with its message ID (so a restart still explains it), and one log line gives the sender and the row counts. |
+| A catalog, a request is pending, the message is dated no earlier than 10 minutes before the request, and it has at least half the items of the catalog in use | Taken. |
+| A catalog in any other case (nobody asked, dated before the request, or much smaller) | Offered. The operator's list is unchanged until **Use it**. |
 | A catalog from a message already answered or superseded | Passed over. |
 
-The first catalog found is the newest, so the pass ends there.
+The wait ends (`applyScan`) when the reply arrived: a catalog was taken, or a message dated after
+the request was offered or could not be read. It never ends while the request's own message is
+still in the Outbox, and an older catalog found on the way ends nothing.
 
 A message counts as examined only on a clean answer (not a catalog, could not read it, offered) or
 after its catalog was written to disk. A read that fails, a Pat that does not answer, or a write
-that is refused (the settings write gate during a profile switch) leaves it unexamined: nothing is
-set in memory, no success is logged, the mark does not move, and the next pass asks again.
+that fails or is refused (the settings write gate during a profile switch) leaves it unexamined:
+nothing is set in memory, no success is logged, and the next pass asks again.
 
 ## 6. Data files and settings
 
@@ -302,18 +312,32 @@ set in memory, no success is logged, the mark does not move, and the next pass a
 |---|---|---|
 | The full catalog | `winlink-catalog.json` in POTACAT's user data folder | `{ modified, readAt, sourceMid, sourceDate, sourceFrom, items }`. One file for every operator profile: the catalog is the same for everyone. Written atomically. Never synced to the cloud. Deleting it brings back the short list. |
 | Picks | settings `winlinkCatalogPicks`, `winlinkCatalogPicksAt` | Per operator profile: `{ starred: [ids], recent: [ids] }`, at most 50 and 8, and when they last changed. |
-| Pending request | setting `winlinkCatalogRequest` | Per operator profile: `{ at, mid }`, when the `LIST` request was queued and which Outbox message it is. Removed when it is no longer waited for (`pendingState`). |
+| Pending request | setting `winlinkCatalogRequest` | Per operator profile: `{ at, mid }`, when the `LIST` request was queued and which Outbox message it is (`mid` is empty when that could not be told). Removed only by `settleRequest`. |
 | An offer | setting `winlinkCatalogOffer` | Per operator profile: `{ mid, from, date, count, have }` of a catalog message waiting for **Use it**. The items are read from the message again on the click. |
 | Answered offers | setting `winlinkCatalogDeclined` | Per operator profile: the last 50 message IDs not to offer again. |
-| High-water mark | setting `winlinkCatalogScannedTo` | Per operator profile: the date of the newest Inbox message examined. |
+| Examined mail | setting `winlinkCatalogExamined` | Per operator profile: the last 1,000 Inbox message IDs already examined. (An earlier date mark, `winlinkCatalogScannedTo`, is ignored and removed.) |
+| Could not read | setting `winlinkCatalogUnreadable` | Per operator profile: `{ mid }` of the catalog message that could not be read. Cleared when a good catalog is read or used. |
 
 None of these is a secret.
 
-Where a request stands (`pendingState`): **queued** while its message is in the Outbox; **sent**
-once it is in Sent, until a catalog is read after it or 7 days pass; **none** otherwise, which
-includes the operator deleting it from the Outbox. Before the folders are listed, a request stays
-as it was. A request whose message could not be identified counts as sent, so there is always a
-button.
+Where a request stands (`settleRequest`):
+
+| Kind | When | Shown as |
+|---|---|---|
+| queued | Its message is in the Outbox. When the message could not be identified: while any catalog request is in the Outbox. | "requested", no button |
+| sent | Its message is in Sent. When it could not be identified: no catalog request is in the Outbox. | "requested", with **Request again** |
+| unknown | Its message is in neither folder as far as is known: the folders are not listed yet, the Sent list is older than the Outbox's, or Sent failed to list. | "requested", no button; settled by the next full refresh |
+| none | Nothing is waited for. | Get / Update |
+
+A request is forgotten only when: a catalog was read after it; its message is gone from the Outbox
+and a Sent list taken with or after that Outbox list does not hold it (the operator deleted it
+before it went); or 7 days have passed and its message is not in the Outbox. A request stamped up
+to an hour ahead of the clock (the clock was set back) counts as just made.
+
+Queuing the request (`listRule`, `newRequest`): Pat's Outbox is listed afresh and each catalog
+request in it is read, never the cached list. While a `LIST` request is in the Outbox no second one
+is queued, whatever the state says. After the send the Outbox is listed again; the `LIST` message
+that is new is the one the request is tied to.
 
 Window calls (the Winlink window's preload): `catalogGet`, `catalogRequest(ids)`,
 `catalogRequestList(again)`, `catalogStar(id, on)`, `catalogOffer(use)`, `onCatalogUpdated`. Channels:
@@ -377,14 +401,22 @@ U3 are settled by this, and sections 2 and 3 are then updated.
   - what to do with one message: not a catalog, could not read it, taken, offered, the shrink rule,
     a forged 21-row mail in each state;
   - the pass over the Inbox with a stand-in for Pat: newest wins, a failed read, a refused or
-    failing write, pending cleared on read, pending plus an unreadable reply, the mark, the cap;
-  - where a request stands: queued, deleted, sent, expired, answered;
+    failing write, pending cleared on read, pending plus an unreadable reply, future and
+    out-of-order dates, a catalog dated before the request, the cap;
+  - where a request stands: queued, deleted, sent, unknown (a stale or failed Sent list), expired,
+    answered, a clock set back;
   - which IDs may be asked for, the command words, more than 200;
   - the request messages for 1, 10, 11 and 25 IDs and the exact bytes Pat is given; search and
     grouping; size advice per mode and threshold; the picks; the source row in every combination;
     every sentence;
   - when a Pat binary is present (`assets/pat`, or `POTACAT_TEST_PAT`): a real Pat, offline. Where
     there is none the check is skipped and says so.
+- `test/winlink-catalog-glue-test.js`: `main.js`'s catalog functions lifted out and run with
+  stand-ins for Pat, the settings, the cached folders and the file write: which Outbox message a
+  request is tied to, no second `LIST`, an old catalog while pending, a reply while the request is
+  still in the Outbox, a stale or failed Sent list, a save that throws or is refused, an offer
+  arriving during Use it, a profile switch in the middle of a pass, more than 200 through the
+  remote link.
 - `test/winlink-catalog-wiring-test.js`: the button and panel, the preload methods and channels,
   `hideForms`, the one send path, no connect, the glue making no decision of its own, the Inbox
   message never changed, no `innerHTML` with catalog text, the remote link's rows and wire messages.

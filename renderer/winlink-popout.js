@@ -1122,7 +1122,7 @@
         return;
       }
       // More than 200 were ticked: the first 200 went, the rest stay ticked for the next press.
-      if (r.over > 0 && catTickedItems().length) { catErr(WCAT.overText(queued.length, catTickedItems().length)); if (catPanelOpen()) renderCatalog(); return; }
+      if (catTickedItems().length) { catErr(WCAT.overText(queued.length, catTickedItems().length)); if (catPanelOpen()) renderCatalog(); return; }
       // Still on the panel: say what happens next. Closed meanwhile: the Outbox count says it.
       if (catPanelOpen()) showReader('<div class="wl-empty">' + esc(WCAT.queuedText(queued.length)) + '</div>');
     };
