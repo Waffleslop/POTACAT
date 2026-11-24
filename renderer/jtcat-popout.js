@@ -170,6 +170,7 @@ function _applyPopoutTheme(payload) {
     if (fdExchInput) fdExchInput.value = s.jtcatFdExch || '';
     reflectFd();
     setJpLayoutChoice(s.jtcatLayout, false); // #857: Automatic unless the operator chose Full or Compact
+    setJpChimeChoices(s.jtcatChimeCall, s.jtcatChimeStop); // Options > Sounds, both off unless chosen
     skipTx1 = !!s.jtcatSkipTx1;
     reflectSkipTx1();
     huntCqFallback = !!s.jtcatHuntCqFallback;
@@ -7233,6 +7234,43 @@ function _applyPopoutTheme(payload) {
     }, 8000);
   }
   if (layoutSelect) layoutSelect.addEventListener('change', function() { setJpLayoutChoice(layoutSelect.value, true); });
+
+  // --- Options > Sounds: the two JTCAT chimes -------------------------------
+  // The sound lists are lib/chime-sounds.js (each chime has its own, so the two
+  // can never be the same sound). main decides when (lib/jtcat-chimes.js) and
+  // the MAIN window plays, on the computer's default output: this window makes
+  // no sound, and Test takes the same road as the real thing.
+  var chimeCallSelect = document.getElementById('jp-chime-call');
+  var chimeStopSelect = document.getElementById('jp-chime-stop');
+  function fillJpChimeSelect(sel, sounds) {
+    if (!sel) return;
+    sounds.forEach(function(s) {
+      var o = document.createElement('option');
+      o.value = s.id;
+      o.textContent = s.label;
+      sel.appendChild(o);
+    });
+  }
+  fillJpChimeSelect(chimeCallSelect, ChimeSounds.CALL_SOUNDS);
+  fillJpChimeSelect(chimeStopSelect, ChimeSounds.STOP_SOUNDS);
+  function setJpChimeChoice(sel, v) {
+    if (!sel) return;
+    sel.value = v || 'off';
+    if (sel.selectedIndex < 0) sel.value = 'off'; // a value this build does not know reads as Off
+  }
+  function setJpChimeChoices(call, stop) {
+    setJpChimeChoice(chimeCallSelect, call);
+    setJpChimeChoice(chimeStopSelect, stop);
+  }
+  if (chimeCallSelect) chimeCallSelect.addEventListener('change', function() { window.api.saveSettings({ jtcatChimeCall: chimeCallSelect.value }); });
+  if (chimeStopSelect) chimeStopSelect.addEventListener('change', function() { window.api.saveSettings({ jtcatChimeStop: chimeStopSelect.value }); });
+  [['jp-chime-call-test', chimeCallSelect], ['jp-chime-stop-test', chimeStopSelect]].forEach(function(pair) {
+    var btn = document.getElementById(pair[0]);
+    if (btn && pair[1]) btn.addEventListener('click', function(e) {
+      e.preventDefault(); // the row is a label: a click must not also open the select
+      window.api.jtcatChimeTest(pair[1].value);
+    });
+  });
   // Moved to another display, or a display's work area changed.
   window.api.onJtcatWorkArea(function(h) {
     var n = Number(h);

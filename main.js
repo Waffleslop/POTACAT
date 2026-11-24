@@ -626,6 +626,7 @@ const { checkClockOffset, syncSystemClock, classifyClockOffset, clockFixSupporte
 const StationClock = require('./lib/station-clock'); // FT8/FT4/FT2/WSPR/JTTY slot clock, correctable from an ECHOCAT device
 const JtcatParser = require('./renderer/jtcat-parser'); // shared FT8 message classifier (also a browser global in the renderers)
 const JtcatSpotTarget = require('./lib/jtcat-spot-target'); // which finished QSO ends the spot target; watcher refuses worked calls (#518)
+const JtcatChimes = require('./lib/jtcat-chimes'); // the two JTCAT chimes: a station calls me, TX stopped by itself (sound only)
 const CqTarget = require('./renderer/cq-target'); // shared CQ "chase target" tags + decode-match (also a browser global)
 const { RemoteServer } = require('./lib/remote-server');
 const { buildDiagnosticSnapshot, redactLogLines } = require('./lib/diagnostic-snapshot');
@@ -968,6 +969,8 @@ const GLOBAL_KEYS = new Set([
   'jtcatShowWaterfall',  // #391: the JTCAT pop-out's audio waterfall shown (default on) — display
   'jtcatStationsExpiryMin', // JTCAT Stations view: minutes a station stays (2/5/10) — display (#557)
   'jtcatLayout',         // #857: JTCAT pop-out layout auto | full | compact — display
+  'jtcatChimeCall',      // JTCAT chime when a station calls me: a sound id or off — this computer's speakers
+  'jtcatChimeStop',      // JTCAT chime when transmitting stops by itself — same
   'waterfallPalette',  // waterfall / band scope colours (lib/waterfall-palettes.js) — display
                        // (same reasoning as lightMode/darkVariant above)
   'wsprPreCapPower',   // {watts, rigId, at}: the RF power the WSPR beacon found on the
@@ -21983,6 +21986,7 @@ function jtcatPauseRunCq(engine) {
   }
   sendCatLog(`[JTCAT] Full Auto CQ PAUSED — ${jtcatFullAutoCqUnanswered} unanswered CQs and nobody new calling. Listening; will resume when a workable station appears.`);
   broadcastFullAutoCqState();
+  jtcatChimeTxStopped('run-paused');
   if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
     jtcatPopoutWin.webContents.send('jtcat-qso-notice', { message: 'Run paused — band is worked out. Listening for new callers.' });
   }
@@ -22145,11 +22149,52 @@ function jtcatTxWatchdogTripped(mode) {
   return now - last > jtcatTxWatchdogMs();
 }
 
+// ── JTCAT chimes (lib/jtcat-chimes.js decides; sound only) ────────────────
+// Both are off by default (Options > Sounds in the JTCAT window). The main
+// window plays them on the PC's default output, the path the QSO logged chime
+// uses; it is never the transmit audio device. A chime is not started while
+// JTCAT is transmitting: a station that runs its radio's codec as the Windows
+// default output would put it on the air.
+const _jtcatChimeState = JtcatChimes.createState();
+
+function jtcatSendChime(sound) {
+  if (!sound || jtcatAnyTxActive()) return;
+  if (win && !win.isDestroyed()) win.webContents.send('jtcat-chime', { sound });
+}
+
+/** Once per decode event, both decode paths. */
+function jtcatChimeCallers(data) {
+  try {
+    jtcatSendChime(JtcatChimes.callChime(_jtcatChimeState, {
+      setting: settings.jtcatChimeCall,
+      myCall: onAirCall(),
+      results: (data && data.results) || [],
+      qsoCalls: jtcatQsoOwners().map((o) => { const q = o.get(); return q && q.call; }),
+      period: jtcatPeriodUtc(data && data.mode, data && data.periodStartMs),
+      now: Date.now(),
+      txActive: jtcatAnyTxActive(),
+    }));
+  } catch (e) { console.error('[JTCAT] chime:', e); }
+}
+
+/**
+ * JTCAT stopped transmitting by itself. Called only from the automatic stops
+ * (JtcatChimes.AUTO_STOP_REASONS), never from a path the operator shares. The
+ * sound waits for the key-up, and is dropped if TX is on again by then.
+ */
+function jtcatChimeTxStopped(reason) {
+  try {
+    const sound = JtcatChimes.stopChime(_jtcatChimeState, { setting: settings.jtcatChimeStop, reason, now: Date.now() });
+    if (sound) setTimeout(() => jtcatSendChime(sound), JtcatChimes.STOP_DELAY_MS);
+  } catch (e) { console.error('[JTCAT] chime:', e); }
+}
+
 function jtcatTxWatchdogStop() {
   const mins = Math.round(jtcatTxWatchdogMs() / 60000);
   const why = `TX watchdog: ${mins} ${mins === 1 ? 'minute' : 'minutes'} of transmitting with no answer and nothing from the operator. TX stopped. Call CQ or reply again to carry on.`;
   jtcatHaltTxNow('TX watchdog');
   _jtcatTxWatchArmedAt = 0;
+  jtcatChimeTxStopped('tx-watchdog');
   if (win && !win.isDestroyed()) win.webContents.send('app-notice', { message: why, warn: true, duration: 12000 });
   if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) jtcatPopoutWin.webContents.send('jtcat-qso-state', { phase: 'error', error: why });
   if (remoteServer && remoteServer.hasClient && remoteServer.hasClient()) remoteServer.broadcastJtcatQsoState({ phase: 'error', error: why });
@@ -22161,6 +22206,7 @@ function jtcatFullAutoCqWatchdog() {
   if (!idle) return;
   if (jtcatFullAutoCq) {
     stopFullAutoCq('30-minute attended limit reached — confirm you are at the radio to resume');
+    jtcatChimeTxStopped('run-idle');
   }
   // Hunt answers CQs on its own, which is automatic operation too. With
   // ULTRACAT unlocked the operator has taken full responsibility and Hunt runs
@@ -22171,6 +22217,7 @@ function jtcatFullAutoCqWatchdog() {
     const notice = 'Hunt stopped — 30 minutes with no QSO progress and nothing from the operator. '
       + 'Pick a Hunt mode again to resume.';
     setJtcatHuntMode('off', jtcatAutoCqOwner);
+    jtcatChimeTxStopped('hunt-idle');
     sendCatLog('[JTCAT] ' + notice);
     if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
       jtcatPopoutWin.webContents.send('jtcat-qso-state', { phase: 'error', error: notice });
@@ -24128,6 +24175,9 @@ function startJtcat(mode) {
       const sliceBand = jtcatManager ? jtcatManager.getDialFreq('default').band : '';
       remoteServer.broadcastJtcatDecode({ ...data, time: timeStr, sliceId: 'default', band: sliceBand });
     }
+    // "Chime when a station calls me": asked before the QSO machines below
+    // take an answer to our CQ into a QSO.
+    jtcatChimeCallers(data);
     // Attended-operator watchdog for Full Auto CQ run mode (Part 97).
     jtcatFullAutoCqWatchdog();
     // Clean up completed QSOs. In Full Auto CQ run mode the owning session
@@ -57858,6 +57908,8 @@ function cloudShackNotice(text, kind) {
     if (ft8Engine) ft8Engine._txEnabled = enabled;
   });
   ipcMain.on('jtcat-halt-tx', () => { jtcatHaltTxNow('Halt TX (JTCAT window)'); });
+  // Options > Sounds, the Test buttons: the same path a real chime takes.
+  ipcMain.on('jtcat-chime-test', (_e, sound) => { if (JtcatChimes.isChimeSound(sound)) jtcatSendChime(String(sound)); });
 
   // KD2TJU: WSJT-X-style Tune button — keys PTT and plays a steady tone
   // through the rig USB CODEC for up to 90s, so the user can dial in TX
@@ -58281,6 +58333,8 @@ function cloudShackNotice(text, kind) {
           const timeStr = jtcatPeriodUtc(data.mode);
           remoteServer.broadcastJtcatDecode({ ...data, sliceId: s.sliceId, band: s.band, time: timeStr });
         }
+        // "Chime when a station calls me" (one per period across the slices).
+        jtcatChimeCallers(data);
         // Advance QSO state machine from this slice's decodes
         // (same logic as single-engine path in startJtcat)
         jtcatFullAutoCqWatchdog();
