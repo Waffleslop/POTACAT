@@ -203,18 +203,17 @@ test('keying and abort use the existing paths only', () => {
 });
 
 test('log first, then TU: the logs resolve true only for a saved contact', () => {
-  const fn = app.slice(app.indexOf('async function activatorLogContact() {'), app.indexOf('function activatorReadEntry()'));
+  const fn = app.slice(app.indexOf('async function activatorLogContact(opts) {'), app.indexOf('function activatorReadEntry()'));
   assert.ok(fn.includes('if (!snap) return false;'));
   assert.ok(fn.includes('ok = (await activatorLogContactNow(_activatorLogInFlight)) === true;'));
   assert.ok(fn.includes('_activatorLogInFlight.resolve(ok);'));
-  assert.ok(fn.includes('return snap.done;'));
+  assert.ok(fn.includes('return wantResult ? snap.done : undefined;'));
+  assert.ok(block.includes('activatorLogContact({ result: true })'), 'ESM asks for the result');
   const now = app.slice(app.indexOf('async function activatorLogContactNow(s) {'), app.indexOf('function clearActivatorEntry()'));
   assert.ok(now.includes("showLogToast(`Not logged: ${(res && res.error) || 'save failed'}`, { warn: true, duration: 6000 });\n    return false;"));
   assert.ok(/clearActivatorEntry\(\);\n  return true;\n\}/.test(now));
   const bl = app.slice(app.indexOf('async function saveBannerQso() {'), app.indexOf("blLogBtn.addEventListener('click', saveBannerQso);"));
-  assert.ok(bl.includes('if (_bannerSaveBusy) return false;'));
-  assert.ok(bl.includes('saved = true;'));
-  assert.ok(bl.includes('  return saved;\n}'));
+  assert.ok(bl.includes('saved = true;') && bl.includes('  return saved;\n}'));
 });
 
 test('banks: Settings saves cwMacros (S&P) and cwMacrosRun (Run); the bar follows the mode', () => {

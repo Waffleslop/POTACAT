@@ -4930,15 +4930,8 @@ function parseBannerFreq(s) {
 
 // Resolves true only when the contact is in the log: Enter Sends Message
 // sends the exchange after a saved contact, never after a failed one (#741).
+// (ESM's own session ignores an Enter while this save runs: never twice.)
 async function saveBannerQso() {
-  let saved = false;
-  if (_bannerSaveBusy) return false; // one save at a time: never log twice
-  _bannerSaveBusy = true;
-  try { saved = (await saveBannerQsoNow()) === true; } finally { _bannerSaveBusy = false; }
-  return saved;
-}
-let _bannerSaveBusy = false;
-async function saveBannerQsoNow() {
   const rawCallsign = blCallsign.value.trim().toUpperCase();
   if (!rawCallsign) { blCallsign.focus(); return; }
   const frequency = LogFreqField.value(blFreq);
@@ -24841,8 +24834,7 @@ async function updateCwMacroBar() {
     const cwHk = hotkeyBindings.find(h => h.action === 'cw-macro-' + (i + 1));
     btn.title = (m.text || '') + (cwHk && cwHk.key ? ' (' + cwHk.key + ')' : '');
     btn.addEventListener('click', () => {
-      const t = expandDesktopCwMacros(m.text);
-      if (t) window.api.sendCwText(t);
+      window.api.sendCwText(expandDesktopCwMacros(m.text));
     });
     cwMacroBtns.appendChild(btn);
   });
@@ -24855,8 +24847,7 @@ function sendCwMacroByIndex(i) {
   if (!_cwMacroCache) { updateCwMacroBar(); return false; } // bar never rendered yet: load it, this press keeps its default
   const m = _cwMacroCache && _cwMacroCache[i];
   if (!m || (!m.label && !m.text) || !m.text) return false;
-  const t = expandDesktopCwMacros(m.text);
-  if (t) window.api.sendCwText(t);
+  window.api.sendCwText(expandDesktopCwMacros(m.text));
   return true;
 }
 // Callsign typed in the Log pop-out (a separate BrowserWindow, so its field
@@ -30614,10 +30605,12 @@ if (crossRefWwbota) crossRefWwbota.addEventListener('blur', rebuildCrossRefs);
 let _activatorLogBusy = false;
 const _activatorLogQueue = [];
 let _activatorLogInFlight = null;
-// Resolves true only when this press's contact is saved; false when the form
-// was not ready, the same contact was already waiting, or the save failed.
-// Enter Sends Message sends TU on true only (#741: log first, then TU).
-async function activatorLogContact() {
+// With { result: true } (Enter Sends Message, #741) it resolves true only when
+// this press's contact is saved; false when the form was not ready, the same
+// contact was already waiting, or the save failed. TU is sent on true only.
+// A plain press (button, Enter) returns as soon as it is queued, as before.
+async function activatorLogContact(opts) {
+  const wantResult = !!(opts && opts.result === true);
   const snap = activatorReadEntry();
   if (!snap) return false;
   if ((_activatorLogInFlight && _activatorLogInFlight.key === snap.key) || _activatorLogQueue.some((q) => q.key === snap.key)) return false;
@@ -30625,7 +30618,7 @@ async function activatorLogContact() {
   _activatorLogQueue.push(snap);
   if (_activatorLogBusy) {
     showLogToast(`${snap.callsigns.join(', ')} will be logged right after the contact being saved now`, { duration: 3000 });
-    return snap.done;
+    return wantResult ? snap.done : undefined;
   }
   _activatorLogBusy = true;
   try {
@@ -30639,7 +30632,7 @@ async function activatorLogContact() {
     _activatorLogInFlight = null;
     _activatorLogBusy = false;
   }
-  return snap.done;
+  return wantResult ? snap.done : undefined;
 }
 
 /**
@@ -30927,7 +30920,7 @@ function cwVarContext(side, call) {
   };
 }
 function cwReportUnknown(vars) {
-  showLogToast('Not sent: ' + vars.join(' ') + ' is not a macro variable POTACAT knows. Fix it in Settings > Macros.', { warn: true, duration: 5000 });
+  showLogToast('Not sent: ' + vars.join(' ') + ' is not a macro variable POTACAT knows. Fix it in Settings > Station > Macros.', { warn: true, duration: 5000 });
 }
 // The text goes out on the existing CW path, and the badge says SENDING for
 // about as long as the radio needs (the envelope main's duplicate guard uses).
@@ -30944,12 +30937,12 @@ function esmAbort(side) {
   updateEsmBadges();
 }
 function esmLog(side) {
-  return side === 'run' ? activatorLogContact().then((ok) => ok === true) : saveBannerQso().then((ok) => ok === true);
+  return side === 'run' ? activatorLogContact({ result: true }).then((ok) => ok === true) : saveBannerQso().then((ok) => ok === true);
 }
 async function esmEnter(side) {
   const bank = esmBank(side);
   if (!CwBanks.esmReady(bank)) {
-    showLogToast(`The ${CW_BANK_NAMES[side]} macros are not laid out for Enter Sends Message. Settings > Macros > ${CW_BANK_NAMES[side]} > Load ESM layout. Nothing was sent.`, { warn: true, duration: 7000 });
+    showLogToast(`The ${CW_BANK_NAMES[side]} macros are not laid out for Enter Sends Message: Settings > Station > Macros, the ${CW_BANK_NAMES[side]} tab, Load ESM layout. Nothing was sent.`, { warn: true, duration: 7000 });
     return;
   }
   const field = esmCallField(side);
@@ -31040,7 +31033,7 @@ async function setCwEsmEnabled(on) {
   esmSessions.run.reset(); esmSessions.sp.reset();
   const set = document.getElementById('set-cw-esm');
   if (set) set.checked = cwEsmOn();
-  if (patch.cwMacrosRun) showLogToast('Enter Sends Message is on. The Activator macros now use the contest layout (Settings > Macros).', { duration: 5000 });
+  if (patch.cwMacrosRun) showLogToast('Enter Sends Message is on. The Activator macros now use the contest layout (Settings > Station > Macros).', { duration: 5000 });
 }
 {
   const t = document.getElementById('activator-esm-toggle');
