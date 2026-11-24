@@ -596,6 +596,26 @@ function fnBody(src, name) {
     assert.ok(/_patHoldsVara\[kind\] = null;/.test(check), 'Pat\'s old connection is not reused');
   });
 
+  await test('Settings copy for "Start VARA for me" says what #697 does (release blocker V1)', () => {
+    const html = read('renderer/index.html');
+    const at = html.indexOf('id="set-vara-autolaunch"');
+    assert.ok(at >= 0, 'the setting exists');
+    const row = html.slice(html.lastIndexOf('<div class="vara-win-only">', at), html.indexOf('</div>', at) + 6);
+    const text = row.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
+    assert.ok(!/never closes it/i.test(text), 'the old "POTACAT never closes it" claim is gone (it is false since #903)');
+    assert.ok(/Start VARA for me when a session needs it/.test(text), 'the label keeps its name (error messages point to it)');
+    assert.ok(/stays open between sessions/.test(text), 'the normal case: it stays open');
+    assert.ok(/POTACAT started for a session begun from ECHOCAT \(phone or web\) is closed again when that session is over/.test(text), 'the one exception, as shouldCloseVara has it');
+    assert.ok(/unless a session at this computer has used it since/.test(text), 'a desktop session that used it keeps it open');
+    assert.ok(/A VARA you started yourself is never closed/.test(text), 'the operator\'s own VARA');
+    // The words match the rule.
+    const base = { launchedByUs: true, startedFromEchocat: true, sessionActive: false, retryPending: false, connected: false, transmitting: false };
+    assert.strictEqual(V.shouldCloseVara(base).close, true, 'POTACAT\'s own launch for an ECHOCAT session: closed after it');
+    assert.strictEqual(V.shouldCloseVara({ ...base, sessionActive: true }).close, false, 'not while the session runs');
+    assert.strictEqual(V.shouldCloseVara({ ...base, startedFromEchocat: false }).close, false, 'opened for (or since used by) a desktop session: stays open');
+    assert.strictEqual(V.shouldCloseVara({ ...base, launchedByUs: false }).close, false, 'started by the operator: never closed');
+  });
+
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })();
