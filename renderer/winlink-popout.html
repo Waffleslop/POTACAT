@@ -120,6 +120,46 @@
     .wl-star { width: 15px; height: 15px; flex-shrink: 0; fill: var(--accent-blue, #4fc3f7); }
     .wl-star.empty { fill: none; stroke: var(--text-secondary); stroke-width: 1.6; }
 
+    /* Winlink catalog (docs/winlink-catalog.md): rows to tick in the reading pane, like Forms.
+       Theme variables only; the fallbacks are POTACAT's own blue. */
+    .wl-cat-source { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: 0 0 12px; max-width: 720px; }
+    .wl-cat-source > .wl-form-help { flex: 1 1 240px; font-size: 13px; line-height: 1.5; }
+    .wl-cat-confirm { padding: 9px 12px; border-radius: 6px; border: 1px solid var(--border-primary); border-left: 3px solid var(--accent-blue, #4fc3f7); background: var(--bg-secondary); color: var(--text-primary); font-size: 13px; line-height: 1.5; }
+    .wl-cat-confirm > span:first-child { flex: 1 1 240px; }
+    #wl-form-catalog .wl-form-lead, #wl-form-catalog .wl-forms-row, #wl-form-catalog .wl-forms-msg { max-width: 720px; }
+    #wl-form-catalog .wl-forms-msg .wl-btn { margin-left: 8px; }
+    .wl-cat-list, .wl-cat-rows { display: flex; flex-direction: column; max-width: 720px; }
+    .wl-cat-group { border-top: 1px solid var(--border-primary); }
+    .wl-cat-head { display: flex; align-items: center; gap: 8px; width: 100%; box-sizing: border-box; padding: 9px 6px; border: none; border-radius: 6px; background: transparent; color: var(--text-primary); font-size: 14px; font-weight: 700; text-align: left; cursor: pointer; }
+    .wl-cat-head:hover { background: var(--bg-hover); }
+    .wl-cat-head:focus-visible, .wl-cat-star:focus-visible { outline: 2px solid var(--accent-blue, #4fc3f7); outline-offset: -2px; }
+    .wl-cat-chev { width: 0; height: 0; flex-shrink: 0; border-left: 6px solid var(--text-secondary); border-top: 5px solid transparent; border-bottom: 5px solid transparent; }
+    .wl-cat-head[aria-expanded="true"] .wl-cat-chev { transform: rotate(90deg); }
+    .wl-cat-code { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: Consolas, 'Courier New', monospace; font-size: 12px; font-weight: 400; color: var(--text-secondary); }
+    .wl-cat-gname { min-width: 0; overflow-wrap: anywhere; }
+    .wl-cat-n { margin-left: auto; flex-shrink: 0; font-size: 12px; font-weight: 400; color: var(--text-secondary); }
+    .wl-cat-row { display: flex; align-items: flex-start; gap: 2px; border-radius: 6px; }
+    .wl-cat-row:hover, .wl-cat-row:focus-within { background: var(--bg-hover); }
+    .wl-cat-pick { flex: 1; min-width: 0; display: flex; align-items: flex-start; gap: 10px; padding: 8px 4px 8px 8px; cursor: pointer; }
+    .wl-cat-body { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 12px; }
+    .wl-cat-text { flex: 1 1 200px; min-width: 0; display: flex; flex-direction: column; gap: 1px; overflow-wrap: anywhere; color: var(--text-primary); }
+    .wl-cat-note { font-size: 12px; color: var(--text-secondary); }
+    .wl-cat-meta { flex: 0 1 auto; min-width: 0; margin-left: auto; display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: baseline; gap: 2px 10px; font-size: 12px; color: var(--text-secondary); }
+    .wl-cat-id { font-family: Consolas, 'Courier New', monospace; overflow-wrap: anywhere; }
+    .wl-cat-size { white-space: nowrap; min-width: 58px; text-align: right; }
+    .wl-cat-star { width: 34px; height: 34px; flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; padding: 0; border: none; border-radius: 6px; background: transparent; cursor: pointer; }
+    .wl-cat-star:hover { background: var(--bg-primary); }
+    .wl-cat-total { font-size: 13px; font-weight: 700; color: var(--text-primary); }
+    /* The advice takes a line of its own above the total, so the buttons never move when it appears. */
+    .wl-cat-advice { flex: 1 1 100%; order: -1; min-width: 0; font-size: 13px; line-height: 1.4; color: var(--text-primary); }
+    .wl-cat-advice:empty { display: none; }
+    #wl-cat-err { padding: 6px 14px; }
+    /* A very narrow pane (the window at its smallest): the find box and the buttons give way, and the
+       action bar scrolls inside its share, so the list is never squeezed out and nothing spills sideways. */
+    #wl-form-catalog .wl-forms-row input[type=text] { min-width: 0; }
+    #wl-form-catalog .wl-c-actions { max-height: 55%; overflow-y: auto; }
+    #wl-form-catalog .wl-c-actions .wl-btn, .wl-cat-source .wl-btn { white-space: normal; height: auto; min-height: 32px; }
+
     /* A good session's card (#254): over the mail area, theme colours only. */
     .wl-done-card { display: none; position: absolute; left: 50%; top: 40%; transform: translate(-50%, -50%); width: 400px; max-width: calc(100% - 32px); box-sizing: border-box; flex-direction: column; gap: 8px; padding: 18px 20px 16px; border-radius: 10px; border: 1px solid var(--border-primary); background: var(--bg-secondary); color: var(--text-primary); box-shadow: 0 12px 32px rgba(0,0,0,0.35); z-index: 5; }
     .wl-done-card.show { display: flex; }
@@ -522,6 +562,7 @@
       <button class="wl-btn primary" id="wl-new">New message</button>
       <button class="wl-btn" id="wl-tpl-btn" aria-haspopup="menu" aria-expanded="false" title="Start from a template: Position report, POTA spot, or your own">Templates</button>
       <button class="wl-btn" id="wl-forms-btn" title="Fill in a Winlink form: Winlink Check-in, ICS-213 and the rest of the Winlink Standard Forms">Forms</button>
+      <button class="wl-btn" id="wl-catalog-btn" title="Ask Winlink to mail you weather, propagation, gateway lists and help files">Catalog</button>
       <span class="wl-spacer"></span>
       <button class="wl-btn" id="wl-history-btn" title="Every gateway you have called">History</button>
       <button class="wl-btn" id="wl-settings">Settings</button>
@@ -578,6 +619,32 @@
           <div class="wl-forms-msg" id="wl-forms-msg" role="status"></div>
         </div>
         <div class="wl-c-actions"><span class="wl-spacer"></span><button type="button" class="wl-btn" id="wl-forms-close">Close</button></div>
+      </div>
+      <!-- Winlink catalog requests (docs/winlink-catalog.md): tick what you want, Put in Outbox; each answer arrives as mail. -->
+      <div class="wl-form" id="wl-form-catalog" hidden>
+        <div class="wl-form-body">
+          <h2 class="wl-form-title">Winlink catalog</h2>
+          <p class="wl-form-lead">Winlink can mail you weather, propagation forecasts, gateway lists and help files. Tick what you want and put the request in the Outbox. Each answer arrives as its own message: send the request with Send / Receive, wait a few minutes, then connect again to collect it.</p>
+          <div class="wl-cat-source" id="wl-cat-source">
+            <span class="wl-form-help" id="wl-cat-source-text" role="status"></span>
+            <button type="button" class="wl-btn" id="wl-cat-get" hidden></button>
+            <!-- The quiet second choice: "Request again" once a request has gone out, "No thanks" on a catalog nobody asked for. -->
+            <button type="button" class="wl-link" id="wl-cat-get2" hidden></button>
+          </div>
+          <!-- Over the radio the full catalog is asked for only after this line is answered. -->
+          <div class="wl-cat-source wl-cat-confirm" id="wl-cat-confirm" role="group" aria-labelledby="wl-cat-confirm-text" hidden>
+            <span id="wl-cat-confirm-text">The catalog is about 70 KB. Over the radio that can take a long time; it is quick over Telnet.</span>
+            <button type="button" class="wl-btn" id="wl-cat-confirm-yes">Request it anyway</button><button type="button" class="wl-btn" id="wl-cat-confirm-no">Cancel</button>
+          </div>
+          <div class="wl-forms-row" id="wl-cat-find-row">
+            <input type="text" id="wl-cat-find" placeholder="Find: propagation, Texas forecast, packet gateways" spellcheck="false" autocomplete="off" aria-label="Find in the catalog">
+          </div>
+          <div id="wl-cat-picks-wrap" hidden><div class="wl-forms-head" id="wl-cat-picks-head">Your picks</div><div class="wl-cat-rows" id="wl-cat-picks" role="group" aria-labelledby="wl-cat-picks-head"></div></div>
+          <div class="wl-cat-list" id="wl-cat-list"></div>
+          <div class="wl-forms-msg" id="wl-cat-msg" role="status"></div>
+        </div>
+        <div class="wl-c-err" id="wl-cat-err" role="alert"></div>
+        <div class="wl-c-actions"><span class="wl-cat-total" id="wl-cat-total" role="status" aria-live="polite"></span><span class="wl-cat-advice" id="wl-cat-advice" role="note"></span><span class="wl-spacer"></span><button type="button" class="wl-btn" id="wl-cat-close">Close</button><button type="button" class="wl-btn primary" id="wl-cat-send" disabled>Put in Outbox</button></div>
       </div>
       <!-- Position report (Casey 2026-11-11: "what is the full strategy"): a form, not an instant queue. -->
       <form class="wl-form" id="wl-form-pos" hidden autocomplete="off">
@@ -680,6 +747,7 @@
   <script src="../lib/winlink-mail-view.js"></script>
   <script src="../lib/pota-email-spot.js"></script>
   <script src="../lib/winlink-forms.js"></script>
+  <script src="../lib/winlink-catalog.js"></script>
   <script src="winlink-popout.js"></script>
 </body>
 </html>

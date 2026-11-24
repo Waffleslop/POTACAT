@@ -32,6 +32,14 @@ contextBridge.exposeInMainWorld('api', {
   formOpen: (o) => ipcRenderer.invoke('winlink-form-open', o),
   formInfo: (o) => ipcRenderer.invoke('winlink-form-info', o), // #346 phase 2: does this received form name a reply form?
   onFormResult: (cb) => ipcRenderer.on('winlink-form-result', (_e, m) => cb(m || {})),
+  // Winlink catalog requests (docs/winlink-catalog.md): the list and the operator's picks, a request
+  // for the ticked items, a request for the full catalog (LIST), a star. Main queues; nothing connects.
+  catalogGet: () => ipcRenderer.invoke('winlink-catalog-get'),
+  catalogRequest: (ids) => ipcRenderer.invoke('winlink-catalog-request', ids),
+  catalogRequestList: (again) => ipcRenderer.invoke('winlink-catalog-request-list', again === true),
+  catalogOffer: (use) => ipcRenderer.invoke('winlink-catalog-offer', use === true), // a catalog message nobody asked for: Use it / No thanks
+  catalogStar: (id, on) => ipcRenderer.invoke('winlink-catalog-star', { id, on }),
+  onCatalogUpdated: (cb) => ipcRenderer.on('winlink-catalog-updated', () => cb()),
 
   // Sessions — Connect is the only way a radio session starts.
   connect: (o) => ipcRenderer.invoke('winlink-cmd-connect', o),
