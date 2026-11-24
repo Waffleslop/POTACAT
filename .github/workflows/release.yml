@@ -236,10 +236,10 @@ jobs:
         run: node scripts/fetch-cloudflared.js --platform=mac --arch=arm64
       - name: Build macOS dmg (arm64)
         run: npx electron-builder --mac --arm64 --publish never --config builder-config.js
-        # Signing + notarization are GATED on these secrets. Absent (today) =>
-        # empty strings => electron-builder ad-hoc signs and scripts/notarize.js
-        # skips, i.e. the current unsigned build, unchanged. Present => a
-        # Developer ID signed + notarized build with working auto-update.
+        # Signing + notarization are GATED on these secrets. Present (since
+        # v1.14.7 at the latest) => a Developer ID signed + notarized build with
+        # working auto-update. Absent (forks) => empty strings => electron-builder
+        # ad-hoc signs and scripts/notarize.js skips, i.e. an unsigned build.
         env:
           CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
