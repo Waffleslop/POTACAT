@@ -8427,7 +8427,7 @@ async function _shareRigRefreshList() {
         : (st === 'scheduled' ? 'scheduled'
           : (st === 'expired' ? 'expired' : 'revoked'));
       const sessions = (p.activeSessionCount || p.active_session_count || 0);
-      const sessionLine = sessions > 0 ? '<span class="lst-meta" style="color:var(--accent-green);">· ' + sessions + ' guest connected now</span>' : '';
+      const sessionLine = sessions > 0 ? '<span class="lst-meta" style="color:var(--accent-green);">· ' + _esc(PassWording.guestsUsedText(sessions)) + '</span>' : '';
       // Active and scheduled passes can both be cancelled + their link
       // copied. Expired/cancelled can't.
       const canActOn = (st === 'active' || st === 'scheduled');
@@ -16135,6 +16135,11 @@ function render() {
 
       for (const cell of cells) {
         const td = document.createElement('td');
+        // Only a reference cell that can overflow wraps (#999): several program
+        // refs only. A single ref (pills or not) keeps the old nowrap cell, so row
+        // height is unchanged (like source-multi-program on the Source cell).
+        const multiRef = cell.col === 'reference' && String(cell.val || '').indexOf(' / ') !== -1;
+        const refWraps = multiRef;
         // Make park ref and name clickable links to park/summit pages
         if ((cell.col === 'reference' || cell.col === 'parkName') && s.reference && s.source !== 'net') {
           let url;
@@ -16146,7 +16151,19 @@ function render() {
           else if (s.source === 'gma') url = `https://www.cqgma.org/`; // was falling through to a bogus POTA link
           else url = `https://pota.app/#/park/${s.reference}`;
           const a = document.createElement('a');
-          a.textContent = cell.val;
+          if (multiRef) {
+            // Each ref is its own nowrap unit so a long cell wraps between
+            // refs, never inside "US-1234" (#999).
+            String(cell.val || '').split(' / ').forEach((ref, i) => {
+              if (i > 0) a.appendChild(document.createTextNode(' / '));
+              const part = document.createElement('span');
+              part.className = 'ref-part';
+              part.textContent = ref;
+              a.appendChild(part);
+            });
+          } else {
+            a.textContent = cell.val;
+          }
           a.href = '#';
           a.className = 'park-link';
           a.addEventListener('click', (e) => {
@@ -16155,9 +16172,18 @@ function render() {
             window.api.openExternal(url);
           });
           td.appendChild(a);
+        } else if (multiRef) {
+          String(cell.val || '').split(' / ').forEach((ref, i) => {
+            if (i > 0) td.appendChild(document.createTextNode(' / '));
+            const part = document.createElement('span');
+            part.className = 'ref-part';
+            part.textContent = ref;
+            td.appendChild(part);
+          });
         } else {
           td.textContent = cell.val;
         }
+        if (refWraps) td.classList.add('ref-wrap');
         if (cell.col) td.setAttribute('data-col', cell.col);
         if (cell.cls) td.className = cell.cls;
         // Bearing column: clickable in manual rotor mode
@@ -16196,6 +16222,7 @@ function render() {
         if (cell.wwff) {
           const badge = document.createElement('span');
           badge.textContent = 'WWFF';
+          badge.className = 'ref-wwff-pill';
           badge.style.cssText = `background:${SOURCE_COLORS_ACTIVE.wwff};color:#000;font-size:9px;font-weight:bold;padding:1px 3px;border-radius:3px;margin-left:4px;`;
           td.appendChild(badge);
         }

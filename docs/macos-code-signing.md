@@ -1,12 +1,18 @@
 # macOS code signing + notarization — activation checklist
 
-The desktop build is **already wired** for Developer ID signing, notarization,
+**Status (checked 2026-11-23): active.** The secrets below are set, and the
+v1.14.7 release run signed both macOS builds (x64 and arm64) with the Developer
+ID Application certificate, notarized them with Apple and stapled the ticket.
+The checklist is kept for reference (certificate renewal, a new machine, forks).
+Windows and Linux builds are not signed; see `CODE_SIGNING.md`.
+
+The desktop build is wired for Developer ID signing, notarization,
 and auto-update (commit that added `scripts/notarize.js`, `build/entitlements.mac.plist`,
 the `mac` block in `package.json`, and the mac jobs in `.github/workflows/release.yml`).
-It is **inert until the five GitHub secrets below exist** — today's CI keeps
-producing the same unsigned/ad-hoc DMGs, and `macBuildIsSigned()` in `main.js`
-keeps mac auto-update off. The moment the secrets are set, the next tagged
-release signs + notarizes automatically and Mac auto-update turns itself on.
+Without the five GitHub secrets below (a fork, a local build), CI produces
+unsigned/ad-hoc DMGs, and `macBuildIsSigned()` in `main.js`
+keeps mac auto-update off. With them, each tagged
+release signs + notarizes automatically and Mac auto-update is on.
 
 Nothing here changes the release routine: you still just push a `vX.Y.Z` tag.
 
