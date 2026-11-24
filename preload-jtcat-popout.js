@@ -15,6 +15,8 @@ contextBridge.exposeInMainWorld('api', {
   onJtcatModeHopped: (cb) => ipcRenderer.on('jtcat-mode-hopped', (_e, d) => cb(d)),
   // #857: the work-area height of the display the window is on (layout pick).
   onJtcatWorkArea: (cb) => ipcRenderer.on('jtcat-work-area', (_e, h) => cb(h)),
+  // Options > Sounds, Test: the main window plays it, as it plays the real one.
+  jtcatChimeTest: (sound) => ipcRenderer.send('jtcat-chime-test', sound),
   platform: process.platform,
   // Prior contacts card (#154): the log index and the worked grid for one call, no QRZ.
   priorContacts: (call) => ipcRenderer.invoke('prior-contacts', call),

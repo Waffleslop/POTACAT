@@ -65,9 +65,34 @@ Two ways for VARA on this computer:
    those devices to VARA, and whether POTACAT's device lists show the end it must record from
    (a null sink's monitor source may not be listed).
 
+The two boxes are a pair of virtual cables or nothing. With only one set, or with one set to the
+radio's own sound card, POTACAT carries no audio: VARA opens the radio's sound card itself, and
+the session log says so (`lib/vara-dial.js` `cableRoute`). Carrying the radio's own sound card
+would play its receive audio back into its transmit audio input. Leave both on None when VARA
+opens the sound card itself.
+
 A radio whose audio comes over the network (Flex Direct, Icom Network) has no sound card VARA
 can open on this computer: use the virtual cable route, or VARA on another computer with that
 radio's audio there.
+
+## The first call after POTACAT starts
+
+Pat opens VARA's command port (and the data port one above it) on its first VARA call and keeps
+it for as long as POTACAT runs. VARA serves one command client at a time and is not listening
+again for a moment after a client leaves, and POTACAT's own checks of the port before a session
+are such clients. So the first call after a start can find the port closed. Pat then never
+reached VARA: nothing was asked of it and nothing was transmitted. POTACAT places that call
+again after 500 ms, 1 s and 2 s (`lib/vara-dial.js` `dialWithRedial`), never once the radio has
+been keyed. If all four are refused it says that VARA refused the connection; it does not say
+the gateway did not answer.
+
+Two more things guard that first call (#1040). After POTACAT's own last connection to the port
+closes, VARA is left alone for at least one second before Pat is asked to call. And on a first
+call Pat sends VARA its whole setup and CONNECT in one burst and takes the first DISCONNECTED it
+sees as the end of the call ("connect timeout" in Pat's log): when that comes within 5 seconds
+of the dial with the radio never keyed, no call was made, and it is placed again on the same
+schedule. A call that keyed the radio is never placed again by itself. The `[Winlink]` log lines give the time between POTACAT's check and
+the call, and each refusal.
 
 ## Checked, and what still needs the air
 

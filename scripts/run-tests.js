@@ -55,6 +55,9 @@ const TESTS = [
   'test/lz3aw-round5-test.js',
   'test/call-filter-test.js',
   'test/desktop-ux-test.js',
+  'test/qso-sounds-test.js', // #1041: which sound for which contact, the milestones (1/10/25/50/100/250; 500 retired for the phone), defaults, the qso-milestone message
+  'test/sound-guard-test.js', // #1041 the transmit guard: no sound on the radio's sound card, none while transmitting (held 3 s, then dropped)
+  'test/qso-sound-files-test.js', // #1041: renderer/sounds/*.wav are byte for byte what scripts/make-qso-sounds.js renders
   'test/host-port-test.js',
   'test/serial-callout-twin-test.js',
   'test/clock-offset-test.js',
@@ -437,6 +440,7 @@ const TESTS = [
   'test/winlink-wf-audio-test.js', // the Winlink waterfall says why it is black (no radio audio reaching POTACAT)
   'test/winlink-main-wiring-test.js',
   'test/winlink-vara-test.js',
+  'test/vara-dial-test.js', // the first VARA call after a start: a dial VARA refused is placed again while nothing was keyed, never read as 'did not answer'; a box set to the radio's own sound card is not a virtual cable
   'test/winlink-vara-anywhere-test.js', // #287: VARA HF and VARA FM on Linux, macOS and Windows, at a host and port; a fake VARA TNC (real Pat when its binary is present)
   'test/winlink-connect-test.js', // #128: /api/connect over http.request with no headers timeout; VARA and ARDOP send the same request
   'test/direwolf-skipped-path-log-test.js', // #1031: a configured winlinkDirewolfPath that is missing or not executable is named in the log
@@ -581,6 +585,7 @@ const TESTS = [
   'test/cw-playout-lateness-test.js', // #244 diagnostic: paddle playout edge lateness, one line per over
   'test/cw-sidetone-air-agree-test.js', // #244: ECHOCAT Web's sidetone and the air agree; an element is committed once it sounds
   'test/cw-keyer-setmode-same-mode-test.js', // ECHOCAT Web: a settings or config echo with the same keyer mode does not cut a CW over
+  'test/cw-keyer-timing-diag-test.js', // #244 diagnostic: the page keyer's timing record of one over; keying identical with and without it
   'test/web-paddle-input-first-test.js', // #244 Part A: paddle keys and MIDI reach the web keyer first (capture phase); drawing pauses during a paddle over
   'test/spot-hides-test.js',
   'test/mac-titlebar-test.js',
@@ -640,6 +645,8 @@ const TESTS = [
   'test/dx-rule-test.js',            // G4BFG: DX = another entity, or the operator's HF / 6 m-up distance
   'test/park-entity-test.js',        // #662: a home call signed in a park abroad takes the park's DXCC entity
   'test/external-atu-carrier-test.js', // N8JMS: RF-sense tuner carrier in AM (CW over CAT is key-up)
+  'test/tx-power-control-test.js', // N5XHI FT-857D 2026-11-24: the one rule "can POTACAT set this radio's TX power?", per radio and transport, the question's wording, the tune gate
+  'test/ext-atu-own-power-test.js', // ... the real gate + tune in a sandbox: no power commands or power claims on such a radio, Cancel keys nothing, a device is refused or asked, power-capable radios unchanged
   'test/jtcat-map-popout-arcs-test.js', // TacticalIndex: QSO arcs in the JTCAT map pop-out
   'test/jtcat-map-popout-rr73-test.js', // #1029: RR73 is not a grid in the map pop-out
   'test/ae5je-settings-audio-test.js', // AE5JE: audio devices follow their name; bug report says whether settings saves land
@@ -764,6 +771,7 @@ const TESTS = [
   'test/jtcat-stations-needed-test.js', // #557 part 2: needed marks from the roster under the map's scope, the Park column, Wanted in Stations
   'test/jtcat-auto-compact-test.js', // #857: the JTCAT window picks a compact layout by itself when short (hysteresis; an explicit Full/Compact wins; never resizes the window)
   'test/jtcat-own-tx-offset-test.js', // #503: our own TX rows show the offset that slot went out on
+  'test/jtcat-chimes-test.js', // optional JTCAT chimes: a station calls me, TX stopped by itself (off by default, one sound engine, sound only)
   'test/net-reminder-row-test.js', // a Net Reminders row always names its net (#284)
   'test/freq-dots-test.js', // every frequency an operator reads is written the VFO way, 14.074.00 (Casey 2026-11-11)
   'test/settings-contrast-test.js', // Settings meets the contrast rule in every theme (VARA button in She's On Frequency); rendered: scripts/settings-contrast-audit.js

@@ -542,7 +542,8 @@ test('wired: winlinkEndSession words the ending from the facts, logs Pat\'s repl
   // the start: reset, and the phase flag set just before Pat is asked to call
   const start = fnBody(main, 'winlinkStartSession');
   assert.ok(/winlinkOutcomeReset\(mode\);/.test(start));
-  assert.ok(/_winlinkDialed = true; dialed = true;\s*const received = await patClient\.connect\(url\);/.test(start));
+  // The call goes through lib/vara-dial.js, which asks Pat again only when VARA refused Pat's connection (test/vara-dial-test.js).
+  assert.ok(/_winlinkDialed = true; dialed = true;\s*const received = await VaraDial\.dialWithRedial\(\{\s*mode,\s*connect: async \(\) => \{ _winlinkDialAt = Date\.now\(\); return await patClient\.connect\(url\); \},/.test(start));
   // Pat's reply is kept for the log and gives the Inbox count; it never becomes the reason on a stopped attempt
   assert.ok(/_winlinkPatReply = dialed \? String\(\(e && e\.message\) \|\| e\) : '';/.test(start));
   assert.ok(/WinlinkOutcome\.receivedFromPatBody\(e\.body\)/.test(start));
