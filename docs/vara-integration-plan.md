@@ -50,7 +50,9 @@ A "VARA (your own copy, Windows)" row replacing the hidden fields:
   Settings).
 - **Start VARA for me** (`varaAutoLaunch`, default on): POTACAT launches the program minimised at
   session start if it is not already running, and leaves it running (the operator's window; never
-  killed, like JS8Call).
+  killed, like JS8Call). Changed by #903 (#697, merged 2026-11-22): a VARA POTACAT itself started
+  for a session begun from ECHOCAT is closed again when that session is over, unless a desktop
+  session has used it since. A VARA the operator started is still never closed.
 - Copy: "VARA is EA5HVK's modem, installed and licensed by you; POTACAT points its Winlink client
   at it. In VARA, set PTT to **None** (POTACAT keys the radio) and choose your radio's sound card.
   Without a licence VARA runs at reduced speed." Links: rosmodem.wordpress.com.
