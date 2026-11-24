@@ -976,6 +976,8 @@ const GLOBAL_KEYS = new Set([
   'aprsRfBeaconLastAt', // when this station last beaconed over its radio (confirmed): the radio timer counts from it after a restart
   'aprsListenReturn',  // {freqHz, mode, rigId, listenHz, state}: where the radio was before APRS
                        // listening tuned it (lib/aprs-radio-return.js) — this machine's radio
+  'extAtuOwnPowerOk',  // { rigId: {at, by, radio} }: the operator agreed to an RF-sense tune at the radio's own
+                       // power on a radio POTACAT cannot set the power of (lib/tx-power-control.js) — this machine's rigs
   'sstvTxPowerW',      // #279: Transmit power for SSTV in W (null = the radio's own power) — this machine's radio
   'sstvTxPowerRestore', // {watts, sstvWatts, rigId, at, state}: the power to put back after an SSTV
                        // picture (lib/sstv-tx-power.js) — this machine's radio
@@ -2507,6 +2509,7 @@ const CONDITIONS_MIN_H = 280;
 const EXTERNAL_ATU_CARRIER_MODE = 'AM';
 const ExtAtuRestore = require('./lib/ext-atu-restore');
 const PowerRestore = require('./lib/power-restore');
+const TxPowerControl = require('./lib/tx-power-control'); // can POTACAT set this radio's power? (FT-857D class: no)
 const { withTimeout } = require('./lib/with-timeout');
 const SerialHsTrial = require('./lib/serial-hs-trial');
 const PttFlowConflict = require('./lib/ptt-flow-conflict'); // #544: PTT on RTS + RTS/CTS on one port
@@ -2541,8 +2544,13 @@ async function waitForModeReadback(sinceTs, predicate, timeoutMs) {
 // over CAT. AM transmits its carrier with no key and no audio on every
 // brand; it was the operator's own workaround. Radios cap the AM carrier
 // (25 W on an FTDX10/IC-7300), which is also this tune's ceiling.
-runExternalAtuTune = async function () {
+runExternalAtuTune = async function (opts) {
   if (_externalAtuActive) return true; // already running
+  // ownPower: a radio POTACAT cannot set the power of (lib/tx-power-control.js,
+  // N5XHI FT-857D 2026-11-24). The carrier goes out at the radio's own setting,
+  // so no power is read, set, restored or claimed; mode and PTT are as ever.
+  // extAtuTuneRequest decides it, after the operator has agreed once.
+  const ownPower = !!(opts && opts.ownPower);
   const activeRig = (settings.rigs || []).find(r => r.id === settings.activeRigId);
   if (!activeRig || activeRig.externalAtu !== 'rf-sense') return false;
   if (!cat || !cat.connected) {
@@ -2565,12 +2573,12 @@ runExternalAtuTune = async function () {
   // once; still unknown: nothing is restored (1.13.10 "restored" the Default
   // power, 100 W, and the operator's knob was fought back to it — GitHub
   // #111, nocodegeneralwitha7300).
-  if (!(_currentTxPower > 0) && cat._codec && typeof cat._codec.getPower === 'function') {
+  if (!ownPower && !(_currentTxPower > 0) && cat._codec && typeof cat._codec.getPower === 'function') {
     const askedAt = Date.now();
     try { cat._codec.getPower(); } catch {}
     await waitForPowerReadback(askedAt, (w) => w > 0, 1500);
   }
-  const restorePower = PowerRestore.restoreTarget(_currentTxPower);
+  const restorePower = ownPower ? null : PowerRestore.restoreTarget(_currentTxPower);
   const powerKnown = restorePower != null;
   const carrierMode = EXTERNAL_ATU_CARRIER_MODE;
   // Remembered BEFORE the power is lowered, the Station Setup test way: a
@@ -2583,12 +2591,13 @@ runExternalAtuTune = async function () {
     _setupPowerRestoreAttempt = 0;
     try { saveSettings(settings); } catch {}
   }
-  sendCatLog(`[ExtATU] Firing ${watts} W ${carrierMode} carrier for ${seconds}s (mode ${restoreMode} → ${carrierMode}, power ${powerKnown ? restorePower + 'W' : 'never reported by the radio'} → ${watts}W)`);
-  if (win && !win.isDestroyed()) win.webContents.send('external-atu-start', { seconds });
+  if (ownPower) sendCatLog(TxPowerControl.tuneStartLine({ carrierMode, seconds, restoreMode }));
+  else sendCatLog(`[ExtATU] Firing ${watts} W ${carrierMode} carrier for ${seconds}s (mode ${restoreMode} → ${carrierMode}, power ${powerKnown ? restorePower + 'W' : 'never reported by the radio'} → ${watts}W)`);
+  if (win && !win.isDestroyed()) win.webContents.send('external-atu-start', ownPower ? { seconds, ownPower: true } : { seconds });
   try {
     if (cat.setModeOnly) cat.setModeOnly(carrierMode, _currentFreqHz);
     else if (cat.setMode) cat.setMode(carrierMode);
-    gatedSetTxPower(watts);
+    if (!ownPower) gatedSetTxPower(watts);
     await new Promise(r => setTimeout(r, 300));
     if (_externalAtuCancel) throw new Error('cancelled');
     gatedSetTransmit(true);
@@ -2642,7 +2651,9 @@ runExternalAtuTune = async function () {
     }
     _externalAtuActive = false;
     _externalAtuCancel = false;
-    if (lowering && confirmed != null) {
+    if (ownPower) {
+      sendCatLog(TxPowerControl.tuneCompleteLine(modeText));
+    } else if (lowering && confirmed != null) {
       delete settings.setupTxPowerRestore;
       try { saveSettings(settings); } catch {}
       sendCatLog(`[ExtATU] Tune complete — ${modeText}; radio confirms ${confirmed} W`);
@@ -2658,6 +2669,134 @@ runExternalAtuTune = async function () {
   return true;
 }
 ipcMain.on('external-atu-cancel', () => { _externalAtuCancel = true; });
+
+// --- RF-sense Tune on a radio POTACAT cannot set the power of ---------------
+// FT-817/818/857/897 (direct, flrig, rigctld), IC-706MKII/G, anything behind
+// DXLab Commander, any radio whose caps say no power control: the rule is
+// lib/tx-power-control.js. Such a radio still gets its Tune (an outboard tuner
+// is the only one it has), but the carrier is at the radio's own power, so the
+// operator is asked once per rig before the first one, and no power command or
+// power claim is made. Radios POTACAT does set the power of never reach any of
+// this: the gate returns 'run' with ownPower false and the tune is as it was.
+
+/**
+ * Can POTACAT set the power of a rig? q null: the active rig, with what its
+ * live link has said (flrig's transceiver name, Hamlib's set-level list).
+ * q {rigId, model, catTarget}: a rig as the editor has it.
+ */
+function extAtuPowerControl(q) {
+  const active = (settings.rigs || []).find(r => r && r.id === settings.activeRigId) || null;
+  const target = (q ? q.catTarget : (active && active.catTarget) || settings.catTarget) || null;
+  // An Icom is often named by its CI-V model on the target, not by rigs[].model.
+  const modelName = String((q ? q.model : active && active.model) || (target && target.civModel) || '');
+  const transport = TxPowerControl.transportOf(target);
+  let row = null;
+  try { row = modelName ? getModel(modelName, null) : null; } catch { row = null; }
+  const c = {
+    transport, modelName,
+    ownRowTxpower: row && row.caps ? row.caps.txpower : null,
+    ownRowProtocol: row ? row.protocol : null,
+    hamlibRigId: target && target.rigId,
+  };
+  const isActive = !q || !!(active && q.rigId && q.rigId === active.id && TxPowerControl.transportOf(settings.catTarget) === transport);
+  if (isActive) {
+    if (!q) { try { const m = getActiveRigModel(); if (m && m.caps) c.capsTxpower = m.caps.txpower; } catch {} }
+    const codec = cat && cat.connected ? cat._codec : null;
+    if (codec && transport === 'flrig') c.flrigXcvr = codec._xcvr;
+    if (codec && transport === 'rigctld') {
+      if (codec._hamlibRigId) c.hamlibRigId = codec._hamlibRigId;
+      if (typeof codec.canSetRfPower === 'function') c.hamlibSetsRfpower = codec.canSetRfPower();
+    }
+  }
+  return TxPowerControl.canSetTxPower(c);
+}
+
+function extAtuRememberOwnPower(rig, ctl, by) {
+  settings.extAtuOwnPowerOk = TxPowerControl.remember(settings.extAtuOwnPowerOk, rig.id, ctl, Date.now(), by);
+  try { saveSettings(settings); } catch {}
+  sendCatLog(`[ExtATU] ${rig.name || 'This rig'}: tuning at the radio's own power was agreed (${by}). POTACAT does not ask again for this rig; Settings > Radio, Edit the rig, External ATU has "Ask me again".`);
+}
+
+let _extAtuOwnPowerAsking = false;
+let _extAtuOwnPowerAsked = null; // { rigId, at }: the question last sent to a device
+
+/** The question, on the window that pressed Tune. Only its Tune now button tunes. */
+async function extAtuAskOwnPower(rig, ctl, sender) {
+  if (_extAtuOwnPowerAsking) return;
+  let parent = null;
+  try { parent = sender && !sender.isDestroyed() ? BrowserWindow.fromWebContents(sender) : null; } catch { parent = null; }
+  if (!parent || parent.isDestroyed()) parent = (win && !win.isDestroyed()) ? win : null;
+  if (!parent) { sendCatLog(TxPowerControl.NO_WINDOW_LINE); return; }
+  _extAtuOwnPowerAsking = true;
+  try {
+    const r = await dialog.showMessageBox(parent, TxPowerControl.confirmDialog(ctl));
+    if (!TxPowerControl.answerIsTune(r && r.response)) { sendCatLog(TxPowerControl.CANCELLED_LINE); return; }
+    // The question was open for a while: the rig must still be the active one
+    // with this tuner, and the rule is asked again.
+    const now = (settings.rigs || []).find(x => x && x.id === settings.activeRigId);
+    if (!now || now.id !== rig.id || now.externalAtu !== 'rf-sense') { sendCatLog('[ExtATU] Tune not sent: the rig changed while the question was open'); return; }
+    const ctlNow = extAtuPowerControl();
+    if (!ctlNow.canSet) extAtuRememberOwnPower(now, ctlNow, 'on this computer');
+    noteAtuTuneStarted();
+    runExternalAtuTune({ ownPower: !ctlNow.canSet }); // async fire-and-forget
+  } catch (err) {
+    sendCatLog(`[ExtATU] Tune not sent: ${err && err.message}`);
+  } finally {
+    _extAtuOwnPowerAsking = false;
+  }
+}
+
+/**
+ * A Tune press on a rig with an RF-sense tuner, from any surface (the
+ * dispatcher's atu-tune case). source 'echocat' is a device: phone, ECHOCAT
+ * Web, another desktop. Nothing here keys the radio except runExternalAtuTune.
+ */
+function extAtuTuneRequest(rig, data, source, meta) {
+  const ctl = extAtuPowerControl();
+  const remote = source === 'echocat';
+  const asked = _extAtuOwnPowerAsked;
+  const gate = TxPowerControl.tuneGate({
+    canSet: ctl.canSet,
+    catConnected: !!(cat && cat.connected),
+    confirmed: TxPowerControl.isConfirmed(settings.extAtuOwnPowerOk, rig.id, ctl),
+    remote,
+    guest: !!(meta && meta.guest),
+    clientCanAsk: !!(data && data.ownPowerAsk === true),
+    clientSaidTune: !!(data && data.ownPowerOk === true && data.rigId === rig.id
+      && asked && asked.rigId === rig.id && Date.now() - asked.at < TxPowerControl.ASK_WINDOW_MS),
+  });
+  if (gate.action === 'refuse-remote') {
+    sendCatLog('[ExtATU] From a remote device: ' + TxPowerControl.REMOTE_REFUSAL);
+    if (remoteServer && remoteServer.running) remoteServer.sendToAsker({ type: 'tune-blocked', reason: TxPowerControl.REMOTE_REFUSAL });
+    return;
+  }
+  if (gate.action === 'ask-remote') {
+    _extAtuOwnPowerAsked = { rigId: rig.id, at: Date.now() };
+    sendCatLog("[ExtATU] From a remote device: asked on that device before the first tune at the radio's own power; nothing transmitted");
+    if (remoteServer && remoteServer.running) remoteServer.sendToAsker(TxPowerControl.remoteAsk(ctl, rig));
+    return;
+  }
+  if (gate.action === 'ask-desktop') { extAtuAskOwnPower(rig, ctl, meta && meta.sender); return; }
+  if (gate.remember) { _extAtuOwnPowerAsked = null; extAtuRememberOwnPower(rig, ctl, 'from a remote device'); }
+  noteAtuTuneStarted();
+  runExternalAtuTune({ ownPower: gate.ownPower }); // async fire-and-forget
+}
+
+// The rig editor: is "Tune carrier power" a thing POTACAT can do for this rig,
+// and has the question been answered (so "Ask me again" can be offered).
+ipcMain.handle('ext-atu-own-power-state', (_e, q) => {
+  q = (q && typeof q === 'object') ? q : {};
+  const rigId = String(q.rigId || '');
+  const ctl = extAtuPowerControl({ rigId, model: String(q.model || ''), catTarget: (q.catTarget && typeof q.catTarget === 'object') ? q.catTarget : null });
+  if (ctl.canSet) return { canSet: true, note: '', help: '', confirmed: false };
+  return { canSet: false, note: TxPowerControl.FIELD_NOTE, help: TxPowerControl.SETTINGS_HELP, confirmed: TxPowerControl.isConfirmed(settings.extAtuOwnPowerOk, rigId, ctl) };
+});
+ipcMain.handle('ext-atu-own-power-forget', (_e, rigId) => {
+  settings.extAtuOwnPowerOk = TxPowerControl.forget(settings.extAtuOwnPowerOk, String(rigId || ''));
+  try { saveSettings(settings); } catch {}
+  return { ok: true };
+});
+
 // THE single rig-control dispatcher. Both transports — desktop IPC
 // (ipcMain.handle 'rig-control') and the ECHOCAT phone (remoteServer.on
 // 'rig-control') — route through this one function so a control added once
@@ -3146,7 +3285,11 @@ function sstvPowerControl() {
   if (!cat || !cat.connected) return { canSet: false, why: 'no-radio' };
   let caps = {};
   try { caps = getRigCapabilities(rigType) || {}; } catch {}
-  return caps.txpower ? { canSet: true } : { canSet: false, why: 'no-power-control' };
+  if (!caps.txpower) return { canSet: false, why: 'no-power-control' };
+  // The caps of flrig and rigctld claim power control for every radio; the one
+  // rule (lib/tx-power-control.js) knows the radios that have none (an FT-857
+  // behind flrig "takes" a power set and never changes).
+  return extAtuPowerControl().canSet ? { canSet: true } : { canSet: false, why: 'no-power-control' };
 }
 
 /** The SSTV window's view: the saved level, whether it can be used, the line to show. */
@@ -34092,6 +34235,9 @@ function connectRemote() {
     // Where the shack's VARA runs is typed at the shack only (#287): Pat
     // connects to that host, so a device never names it.
     if (partial) { delete partial.winlinkVaraHost; delete partial.winlinkVaraFmHost; }
+    // The answer to the own-power tune question is written by the question
+    // only (extAtuRememberOwnPower), never by a settings save from a device.
+    if (partial) delete partial.extAtuOwnPowerOk;
     // #279: saved as watts or null, whatever the device sent.
     const sstvPowerChanged = !!partial && 'sstvTxPowerW' in partial;
     if (sstvPowerChanged) partial.sstvTxPowerW = SstvTxPower.parseWatts(partial.sstvTxPowerW);
@@ -50817,8 +50963,8 @@ function cloudShackNotice(text, kind) {
   // The SSTV window's tuner button and the trip banner's Tune ATU: the same
   // rig-control action every other surface uses, so the SWR guard's
   // match-awaiting episode (setAtu wrapper) applies here too.
-  ipcMain.handle('sstv-atu-tune', async () => {
-    try { await applyRigControl({ action: 'atu-tune' }, 'sstv'); return { ok: true }; }
+  ipcMain.handle('sstv-atu-tune', async (_e) => {
+    try { await applyRigControl({ action: 'atu-tune' }, 'sstv', { sender: _e && _e.sender }); return { ok: true }; }
     catch (err) { return { ok: false, error: err.message || String(err) }; }
   });
   ipcMain.on('sstv-rig-state-get', () => pushSstvRigState());
@@ -53081,8 +53227,7 @@ function cloudShackNotice(text, kind) {
         // only when no external tuner is configured on the active rig.
         const rig = (settings.rigs || []).find(r => r.id === settings.activeRigId);
         if (rig && rig.externalAtu === 'rf-sense') {
-          noteAtuTuneStarted();
-          runExternalAtuTune(); // async fire-and-forget
+          extAtuTuneRequest(rig, data, source, meta);
           break;
         }
         if (flexNeedsApi) { sendCatLog('ATU requires SmartSDR API — not connected'); break; }
@@ -53823,7 +53968,7 @@ function cloudShackNotice(text, kind) {
       remoteClient.sendRaw({ type: 'rig-control', data });
       return { ok: true, remote: true };
     }
-    return applyRigControl(data, 'desktop');
+    return applyRigControl(data, 'desktop', { sender: _e.sender });
   });
 
   ipcMain.on('refresh', () => { markUserActive(); refreshSpots(); });
@@ -55841,6 +55986,8 @@ function cloudShackNotice(text, kind) {
     delete newSettings.jtcatRxSource;
     stampSstvTemplatesPatch(newSettings);
     setImmediate(() => afterSstvSettingsSaved(newSettings));
+    // The own-power tune answer has one writer too (extAtuRememberOwnPower / -forget).
+    if (newSettings) delete newSettings.extAtuOwnPowerOk;
     // #279 Transmit power for SSTV: watts or null; every device and the SSTV window follow.
     if (newSettings && 'sstvTxPowerW' in newSettings) {
       newSettings.sstvTxPowerW = SstvTxPower.parseWatts(newSettings.sstvTxPowerW);

@@ -54,6 +54,9 @@ contextBridge.exposeInMainWorld('api', {
   onExternalAtuStart: (cb) => ipcRenderer.on('external-atu-start', (_e, d) => cb(d)),
   onExternalAtuComplete: (cb) => ipcRenderer.on('external-atu-complete', () => cb()),
   externalAtuCancel: () => ipcRenderer.send('external-atu-cancel'),
+  // Rig editor: can POTACAT set this rig's power for the RF-sense tune, and was the own-power question answered
+  extAtuOwnPowerState: (q) => ipcRenderer.invoke('ext-atu-own-power-state', q),
+  extAtuOwnPowerForget: (rigId) => ipcRenderer.invoke('ext-atu-own-power-forget', rigId),
   rotateTo: (azimuth) => ipcRenderer.send('rotate-to', azimuth),
   // Scan on/off sync with ECHOCAT mobile (scan-state-sync-desktop)
   scanStateChanged: (scanning) => ipcRenderer.send('scan-state-changed', scanning),

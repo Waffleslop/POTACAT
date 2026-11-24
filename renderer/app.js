@@ -3807,6 +3807,51 @@ function syncTxAudioInputRow() {
   }
 }
 if (rigModelSelect) rigModelSelect.addEventListener('change', syncTxAudioInputRow);
+
+// External ATU, "Tune carrier power (W)": greyed, with the reason, for a rig
+// whose power POTACAT cannot set (FT-817/818/857/897, IC-706MKII/G, DXLab
+// Commander: the rule is lib/tx-power-control.js, asked of main so the active
+// rig's live link counts too). "Ask me again" forgets the answer to the
+// question POTACAT asks before the first tune at the radio's own power.
+let _extAtuOwnPowerSeq = 0;
+let _extAtuHelpDefault = null;
+async function syncExtAtuOwnPowerRow() {
+  const wattsEl = document.getElementById('set-external-atu-watts');
+  const note = document.getElementById('external-atu-own-power-note');
+  const help = document.getElementById('external-atu-help');
+  const reset = document.getElementById('external-atu-own-power-reset');
+  const resetText = document.getElementById('external-atu-own-power-reset-text');
+  if (!wattsEl || !note || !help || !reset || !window.api.extAtuOwnPowerState) return;
+  if (_extAtuHelpDefault == null) _extAtuHelpDefault = help.textContent;
+  const seq = ++_extAtuOwnPowerSeq;
+  let st = null;
+  try {
+    st = await window.api.extAtuOwnPowerState({ rigId: editingRigId || '', model: rigModelSelect ? rigModelSelect.value : '', catTarget: buildCatTargetFromForm() });
+  } catch { st = null; }
+  if (seq !== _extAtuOwnPowerSeq) return; // a newer answer is on its way
+  if (!st) st = { canSet: true, note: '', help: '', confirmed: false };
+  wattsEl.disabled = !st.canSet;
+  wattsEl.title = st.canSet ? '' : st.note;
+  wattsEl.style.opacity = st.canSet ? '' : '0.5'; // a disabled number box looks the same as a live one in some themes
+  note.textContent = st.canSet ? '' : st.note;
+  note.classList.toggle('hidden', !!st.canSet);
+  help.textContent = st.canSet ? _extAtuHelpDefault : st.help;
+  reset.classList.toggle('hidden', !st.confirmed);
+  if (resetText) resetText.textContent = st.confirmed && window.TxPowerControl ? window.TxPowerControl.CONFIRMED_NOTE : '';
+}
+if (rigModelSelect) rigModelSelect.addEventListener('change', syncExtAtuOwnPowerRow);
+document.querySelectorAll('input[name="radio-type"]').forEach((b) => b.addEventListener('change', syncExtAtuOwnPowerRow));
+{
+  // Opening the section asks again: the connection fields may have changed since.
+  const d = document.getElementById('rig-external-atu-details');
+  if (d) d.addEventListener('toggle', () => { if (d.open) syncExtAtuOwnPowerRow(); });
+  const b = document.getElementById('external-atu-own-power-reset-btn');
+  if (b) b.addEventListener('click', async () => {
+    if (!editingRigId) return;
+    try { await window.api.extAtuOwnPowerForget(editingRigId); } catch { /* main says so in its log */ }
+    syncExtAtuOwnPowerRow();
+  });
+}
 // Where the sound card interface plugs in (#153, lib/rig-audio-jack.js).
 // rigVoiceDataSwitchChoice is the operator's own tick-box choice for the rig
 // being edited: true or false once stored or once the box is clicked,
@@ -3992,6 +4037,7 @@ async function openRigEditor(mode, rigId) {
   rigEditor.classList.remove('hidden');
   rigAddBtn.classList.add('hidden');
   updateFlexStatus();
+  syncExtAtuOwnPowerRow();
   setRigName.focus();
 }
 
@@ -17177,21 +17223,27 @@ function showLogToast(message, opts) {
 (function setupExternalAtuModal() {
   let modal = null;
   let countdownTimer = null;
-  window.api.onExternalAtuStart(({ seconds }) => {
+  window.api.onExternalAtuStart(({ seconds, ownPower }) => {
+    // ownPower: a radio POTACAT cannot set the power of (lib/tx-power-control.js).
+    // The carrier is at the radio's own setting, so it is not called low-power.
+    const carrierLine = ownPower && window.TxPowerControl ? window.TxPowerControl.MODAL_LINE
+      : 'Low-power carrier out (AM) — the tuner\'s relays will click as it matches.';
     if (modal) modal.remove();
     modal = document.createElement('div');
     modal.id = 'external-atu-modal';
     modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:10000;display:flex;align-items:center;justify-content:center;';
     const card = document.createElement('div');
-    card.style.cssText = 'background:var(--bg-header,#16213e);color:#fff;padding:24px 28px;border-radius:8px;max-width:340px;text-align:center;box-shadow:0 6px 24px rgba(0,0,0,0.5);';
+    // Theme colours: white on --bg-header was unreadable in the light themes.
+    card.style.cssText = 'background:var(--bg-header,#16213e);color:var(--text-primary,#fff);padding:24px 28px;border-radius:8px;max-width:340px;text-align:center;box-shadow:0 6px 24px rgba(0,0,0,0.5);';
     let remaining = seconds;
     card.innerHTML = [
       '<div style="font-size:28px;margin-bottom:10px;">📡</div>',
       '<div style="font-size:15px;font-weight:700;margin-bottom:8px;">Tuning external ATU</div>',
       '<div id="ext-atu-countdown" style="font-size:28px;font-family:monospace;margin-bottom:6px;color:#e94560;">' + remaining.toFixed(1) + 's</div>',
-      '<div style="font-size:12px;color:#ccc;margin-bottom:16px;">Low-power carrier out (AM) — the tuner\'s relays will click as it matches.</div>',
+      '<div id="ext-atu-carrier-line" style="font-size:13px;color:var(--text-secondary,#ccc);margin-bottom:16px;"></div>',
       '<button type="button" id="ext-atu-stop" style="padding:8px 18px;background:#c24150;color:#fff;border:none;border-radius:4px;font-weight:700;cursor:pointer;">Stop</button>',
     ].join('');
+    card.querySelector('#ext-atu-carrier-line').textContent = carrierLine;
     modal.appendChild(card);
     document.body.appendChild(modal);
     card.querySelector('#ext-atu-stop').addEventListener('click', () => window.api.externalAtuCancel());

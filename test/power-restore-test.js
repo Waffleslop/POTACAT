@@ -59,9 +59,10 @@ test('nothing while the carrier runs, on another rig, or inside the retry gap', 
 
 const main = readSrc(path.join(__dirname, '..', 'main.js'));
 test('main: the tune never falls back to the Default power, and marks a restore only when the power was read', () => {
-  const t = main.slice(main.indexOf('runExternalAtuTune = async function () {'), main.indexOf("ipcMain.on('external-atu-cancel'"));
+  const t = main.slice(main.indexOf('runExternalAtuTune = async function ('), main.indexOf("ipcMain.on('external-atu-cancel'"));
   assert.ok(!/settings\.defaultPower \|\| 100/.test(t), 'no 100 W fallback');
-  assert.ok(/const restorePower = PowerRestore\.restoreTarget\(_currentTxPower\);/.test(t));
+  // ownPower: a radio POTACAT cannot set the power of has nothing to restore (test/ext-atu-own-power-test.js).
+  assert.ok(/const restorePower = ownPower \? null : PowerRestore\.restoreTarget\(_currentTxPower\);/.test(t));
   assert.ok(/const lowering = restorePower != null && restorePower > watts \+ 0\.5;/.test(t));
 });
 

@@ -637,6 +637,8 @@ const TESTS = [
   'test/dx-rule-test.js',            // G4BFG: DX = another entity, or the operator's HF / 6 m-up distance
   'test/park-entity-test.js',        // #662: a home call signed in a park abroad takes the park's DXCC entity
   'test/external-atu-carrier-test.js', // N8JMS: RF-sense tuner carrier in AM (CW over CAT is key-up)
+  'test/tx-power-control-test.js', // N5XHI FT-857D 2026-11-24: the one rule "can POTACAT set this radio's TX power?", per radio and transport, the question's wording, the tune gate
+  'test/ext-atu-own-power-test.js', // ... the real gate + tune in a sandbox: no power commands or power claims on such a radio, Cancel keys nothing, a device is refused or asked, power-capable radios unchanged
   'test/jtcat-map-popout-arcs-test.js', // TacticalIndex: QSO arcs in the JTCAT map pop-out
   'test/jtcat-map-popout-rr73-test.js', // #1029: RR73 is not a grid in the map pop-out
   'test/ae5je-settings-audio-test.js', // AE5JE: audio devices follow their name; bug report says whether settings saves land
