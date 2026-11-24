@@ -33915,7 +33915,7 @@ function jtcatWaterfallLoop() {
   // Auto-detect quietest TX frequency — analyze every ~30 frames (~0.5s)
   jtcatQuietFreqFrame++;
   if (jtcatQuietFreqFrame % 30 === 0) {
-    // The quietest 50 Hz window in 200-2800 Hz (lib/jtcat-quiet-freq.js; main
+    // The quietest 50 Hz window, auto range 500-2400 Hz (lib/jtcat-quiet-freq.js; main
     // runs the same rule on the engine audio while this loop is paused).
     jtcatQuietFreq = window.JtcatQuietFreq.pickQuietFreq(freqData, nyquist / freqData.length);
     window.api.jtcatQuietFreq(jtcatQuietFreq);
