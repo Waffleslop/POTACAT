@@ -200,6 +200,7 @@ const TESTS = [
   'test/jtcat-replace-log-test.js',
   'test/jtcat-second-caller-test.js',
   'test/jtcat-quiet-freq-test.js', // CQ quiet frequency: main measures the engine audio while no waterfall draws (one rule, lib/jtcat-quiet-freq.js)
+  'test/jtcat-auto-tone-passband-test.js', // #1032: the automatic CQ tone stays in 500..2400 Hz (inside every common DATA-mode TX filter); an operator's tone is never bounded
   'test/port-picker-test.js',
   'test/pota-parks-db-test.js',
   'test/elecraft-data-mode-test.js',
@@ -501,6 +502,7 @@ const TESTS = [
   'test/wspr-scheduler-test.js', // #268: a beacon never keys two slots in a row unless TX % is over 50
   'test/wspr-hop-atu-test.js', // #747: a receive-only WSPR hop runs no band-change ATU tune
   'test/wspr-beacon-power-test.js', // #268: the beacon keeps the operator's RF power; rigctld reports the radio's power
+  'test/wspr-beacon-power-scale-test.js', // #521: the beacon's level on each rig's scale (KX3, G90, Icom, Yaesu, Flex), never above the entry; none entered = power left alone
   'test/wspr-reported-dbm-test.js', // #268: the beacon reports the power it runs at (5 W = 37 dBm), or the operator's fixed pick, 0..60 dBm
   'test/js8-native-test.js',
   'test/check-required-natives-test.js', // release gate: ft8_native/js8_native exist, right arch (PE/ELF/Mach-O header), load
@@ -538,7 +540,7 @@ const TESTS = [
   'test/cloud-merge-dupe-test.js',
   'test/cloud-pull-per-profile-test.js', // #245: profiles sharing one account: each pulls only its own QSOs; the dupe guard and journal stay per profile
   'test/cloud-delete-guard-test.js', // #245: delete pushes held (another profile's QSOs, or over 25 an hour) until the operator confirms; dupe guard keeps station callsigns apart
-  'test/cloud-pull-forward-test.js', // #267: a phone's off-grid QSOs of this station reach MacLoggerDX etc. via the pull, once; never another PC's or the history
+  'test/cloud-pull-forward-test.js', // #267/#838: this station's QSOs from a phone or any other device reach MacLoggerDX etc. via the pull, once, retried when a logger refuses; never another PC's or the history
   'test/swr-guard-test.js',
   'test/atu-wizard-test.js',         // Flex ATU Calibration Wizard: plan vs privileges, classifier, run loop on a fake Flex, wiring
   'test/ft8-worker-respawn-test.js',
@@ -798,6 +800,7 @@ const TESTS = [
   'test/park-db-check-test.js', // activator: only POTA refs are checked against the parks list (og3e WWFF/SOTA flagged as typos), and the warning never overflows
   'test/rigctld-passthrough-test.js', // custom CAT over rigctld: a + or \ command goes to rigctld as typed (electricfalcon)
   'test/mono-upmix-test.js', // the VFO monitor plays radio audio in both ears (hoogskev, macOS left-channel only)
+  'test/setup-test-mode-test.js', // #755: the transmit test keys in the DATA mode FT8 uses (USB->DIGU on sound-card radios), says so, puts it back
   'test/setup-test-freq-test.js', // Station Setup test transmit: at the dial if the licence allows, else at the band's FT8 dial and back, else refused with why (w0tlp)
   'test/jtcat-spot-target-after-qso-test.js', // #518: a finished QSO (done, Skip, Cancel) with the spot target's call clears it, armed or engaged; the watcher never calls a worked station again
   'test/jtcat-hold-tx-resend-test.js', // #688: jtcat-start resends the Hold TX state so a phone FT8 screen opened after connect shows it; Hold TX Freq: ON reaches the CAT log

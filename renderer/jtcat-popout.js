@@ -3842,6 +3842,7 @@ function _applyPopoutTheme(payload) {
 
   // Band buttons
   function selectBand(btn, save) {
+    pkDxpOn = null; // a band pick leaves a DXpedition's dial (#1033)
     var freq = parseFloat(btn.dataset.freq);
     if (!(freq > 0)) { showJtcatErrorToast('No ' + modeSelect.value + ' dial on ' + btn.dataset.band); return; }
     // A stopped engine (a voice/CW spot QSY stops it) is started first, or the
@@ -3910,7 +3911,13 @@ function _applyPopoutTheme(payload) {
   var pkApplyBtn = document.getElementById('jp-pk-apply');
   var pkHintEl = document.getElementById('jp-pk-hint');
   var PK_MODE_LABEL = { FT8: 'FT8', FT4: 'FT4', FT2: 'FT2', WSPR: 'WSPR', PSK31: 'PSK', JTTY: 'JTTY' };
-  var pk = { mode: '', band: '' };
+  var pk = { mode: '', band: '', dxp: '' };
+  // #1033 DXpeditions on the air (main's list, lib/dxpedition-dials.js) and
+  // the one the radio was last tuned to from here (null after any band pick).
+  var pkDxpList = [];
+  var pkDxpOn = null;
+  var pkDxpsEl = document.getElementById('jp-pk-dxps');
+  var pkDxpSecEl = document.getElementById('jp-pk-dxp-sec');
   // Dials the VFO way everywhere (14.074.00, 7.047.50; lib/freq-dots.js).
   function pkFmtMhz(k) {
     return FreqDots.khzMhz(k);
@@ -3930,11 +3937,13 @@ function _applyPopoutTheme(payload) {
     // Running, but the radio is off JTCAT's dial: the distance at which main's
     // pre-TX guard refuses to transmit.
     var dial = document.querySelector('.jp-band-opt.active');
-    var off = !engineStopped && !multiActive && radioHz > 0 && dial && !(bandSelect && /^dxp:/.test(bandSelect.value)) &&
-      Math.abs(radioHz - parseFloat(dial.dataset.freq) * 1000) > 2500;
+    var expectKhz = pkDxpOn ? pkDxpOn.khz : parseFloat(dial ? dial.dataset.freq : 0);
+    var off = !engineStopped && !multiActive && radioHz > 0 && !!dial && Math.abs(radioHz - expectKhz * 1000) > 2500;
     if (radioFreqEl) {
       radioFreqEl.style.color = off ? 'var(--accent-orange, #f0a500)' : '#4fc3f7';
-      radioFreqEl.title = off ? 'Radio frequency: off the ' + pkModeLabel(modeSelect.value) + ' dial for ' + band : 'Radio frequency';
+      radioFreqEl.title = !off ? 'Radio frequency'
+        : pkDxpOn ? 'Radio frequency: off the ' + pkDxpOn.call + ' dial'
+        : 'Radio frequency: off the ' + pkModeLabel(modeSelect.value) + ' dial for ' + band;
     }
   }
   // The band the radio is on, by the nearest JTCAT dial.
@@ -3945,6 +3954,87 @@ function _applyPopoutTheme(payload) {
       if (d < bestD) { bestD = d; best = o.dataset.band; }
     });
     return radioHz > 0 ? best : '';
+  }
+  // #1033 DXpeditions on the air with a published FT8/FT4 dial, under the
+  // bands. Shown only when one is on a band this radio uses. Picking one is
+  // like picking a band: nothing changes until Switch. Returns the picked row.
+  function pkRenderDxps(curBand) {
+    if (!pkDxpsEl || !pkDxpSecEl) return null;
+    var bands = [];
+    document.querySelectorAll('.jp-band-opt').forEach(function(bo) { if (!bo.hidden || bo.dataset.band === curBand) bands.push(bo.dataset.band); });
+    var modes = Array.prototype.map.call(modeSelect.options, function(o) { return o.value; });
+    var rows = window.DxpeditionDials ? DxpeditionDials.pickerDxpeditionDials(pkDxpList, { bands: bands, modes: modes }) : [];
+    var picked = null;
+    pkDxpsEl.innerHTML = '';
+    rows.forEach(function(d) {
+      var on = d.key === pk.dxp;
+      if (on) picked = d;
+      var tag = DxpeditionDials.dxpeditionTag(d);
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'jp-pk-band jp-pk-dxp' + (on ? ' on' : '');
+      b.setAttribute('role', 'radio');
+      b.setAttribute('aria-checked', String(on));
+      b.dataset.dxp = d.key;
+      b.setAttribute('aria-label', d.call + ', ' + d.mode + ', ' + pkFmtMhz(d.khz).replace(' MHz', ' megahertz') + (tag ? ', ' + tag : ''));
+      b.title = (d.entity ? d.entity + ': ' : '') + d.call + ' on ' + d.mode + ' ' + pkFmtMhz(d.khz) + (d.end ? ', until ' + d.end : '');
+      b.innerHTML = '<span class="jp-pk-band-name">' + esc(d.call) + '</span>' +
+        '<span class="jp-pk-band-dial">' + esc(d.mode + ' ' + FreqDots.fromKhz(d.khz)) + '</span>' +
+        (tag ? '<span class="jp-pk-dxp-tag">' + esc(tag) + '</span>' : '');
+      b.addEventListener('click', function() { pk.dxp = d.key; pk.mode = d.mode; pk.band = d.band; pkRender(); });
+      pkDxpsEl.appendChild(b);
+    });
+    var dxpEl = pkDxpsEl, dxpSec = pkDxpSecEl;
+    dxpSec.hidden = dxpEl.hidden = !rows.length;
+    if (!picked) pk.dxp = '';
+    return picked;
+  }
+  function pkRenderDxpApply(d) {
+    var same = !engineStopped && !!pkDxpOn && pkDxpOn.key === d.key;
+    if (pkApplyBtn) {
+      pkApplyBtn.disabled = same;
+      pkApplyBtn.textContent = (same ? 'On ' : 'Tune to ') + d.call + ' ' + d.mode + ' ' + FreqDots.fromKhz(d.khz);
+    }
+    if (pkHintEl) {
+      var note = DxpeditionDials.dxpeditionNote(d, houndMode);
+      pkHintEl.textContent = (same ? 'Tuned to their published dial.'
+        : 'Tunes the radio to ' + pkFmtMhz(d.khz) + (engineStopped ? ' and starts decoding.' : ' and keeps decoding.')) + (note ? ' ' + note : '');
+    }
+  }
+  // Tune to a DXpedition: the band pick first (its mode, its band, starting a
+  // stopped engine), then the JTCAT tune to their dial. A tune from this
+  // window moves main's pre-TX dial anchor, so TX is allowed on their dial.
+  function tuneDxpedition(d) {
+    var bandOpt = document.querySelector('.jp-band-opt[data-band="' + d.band + '"]');
+    var hasMode = Array.prototype.some.call(modeSelect.options, function(x) { return x.value === d.mode; });
+    if (hasMode && modeSelect.value !== d.mode) {
+      if (bandOpt) {
+        document.querySelectorAll('.jp-band-opt').forEach(function(bo) { bo.classList.remove('active'); });
+        bandOpt.classList.add('active');
+      }
+      modeSelect.value = d.mode;
+      modeSelect.dispatchEvent(new Event('change')); // selectBand on the band's own dial; the tune below lands after it
+    } else if (bandOpt && parseFloat(bandOpt.dataset.freq) > 0) {
+      selectBand(bandOpt, true);
+    }
+    // Start before tuning: starting clears the dial anchor the tune then sets.
+    if (engineStopped) {
+      window.api.jtcatStart(modeSelect.value);
+      setEngineStopped(false);
+    }
+    window.api.tune(d.khz, d.mode);
+    pkDxpOn = d;
+    document.querySelectorAll('.jp-band-opt').forEach(function(b) { b.classList.toggle('active', b.dataset.band === d.band); });
+    bandSelectFollowActive();
+    syncBandMode();
+    showJtcatWarnToast('Tuned to ' + d.call + ' on ' + FreqDots.khzMhz(d.khz) + ' ' + d.mode, DxpeditionDials.dxpeditionNote(d, houndMode));
+  }
+  // Switch with a DXpedition picked.
+  function pkApplyDxpedition() {
+    var rows = window.DxpeditionDials ? DxpeditionDials.pickerDxpeditionDials(pkDxpList, {}) : [];
+    var d = rows.filter(function(r) { return r.key === pk.dxp; })[0];
+    if (d) tuneDxpedition(d);
+    pkClose();
   }
   function pkIsOpen() { return !!pickerEl && !pickerEl.classList.contains('hidden'); }
   function pkRender() {
@@ -3963,6 +4053,7 @@ function _applyPopoutTheme(payload) {
       if (o.title) b.title = o.title;
       b.addEventListener('click', function() {
         pk.mode = o.value;
+        pk.dxp = '';
         // Keep the band if the new mode has a dial for it, else the first that does.
         var t = bandTableFor(pk.mode);
         if (!t[pk.band]) {
@@ -3982,9 +4073,10 @@ function _applyPopoutTheme(payload) {
       var khz = table[band];
       var b = document.createElement('button');
       b.type = 'button';
-      b.className = 'jp-pk-band' + (band === pk.band ? ' on' : '');
+      var bandOn = band === pk.band && !pk.dxp;
+      b.className = 'jp-pk-band' + (bandOn ? ' on' : '');
       b.setAttribute('role', 'radio');
-      b.setAttribute('aria-checked', String(band === pk.band));
+      b.setAttribute('aria-checked', String(bandOn));
       b.dataset.band = band;
       if (!khz) {
         b.disabled = true;
@@ -3993,13 +4085,16 @@ function _applyPopoutTheme(payload) {
       } else {
         b.setAttribute('aria-label', band + ', ' + pkFmtMhz(khz).replace(' MHz', ' megahertz'));
         b.innerHTML = '<span class="jp-pk-band-name">' + esc(band) + '</span><span class="jp-pk-band-dial">' + esc(pkFmtMhz(khz)) + '</span>';
-        b.addEventListener('click', function() { pk.band = band; pkRender(); });
+        b.addEventListener('click', function() { pk.band = band; pk.dxp = ''; pkRender(); });
       }
       pkBandsEl.appendChild(b);
       shown++;
     });
     if (!shown) pkBandsEl.innerHTML = '<div class="jp-pk-hint">This radio has no ' + esc(pkModeLabel(pk.mode)) + ' bands.</div>';
-    var same = !engineStopped && pk.mode === curMode && pk.band === curBand;
+    var dxpRow = pkRenderDxps(curBand);
+    if (dxpRow) { pkRenderDxpApply(dxpRow); return; }
+    // On a DXpedition's dial, picking its own band again is a switch back to the standard dial.
+    var same = !engineStopped && pk.mode === curMode && pk.band === curBand && !pkDxpOn;
     var dial = table[pk.band];
     if (pkApplyBtn) {
       pkApplyBtn.disabled = same || !dial;
@@ -4018,12 +4113,13 @@ function _applyPopoutTheme(payload) {
     if (!pickerEl) return;
     pk.mode = modeSelect.value;
     pk.band = pkActiveBand();
+    pk.dxp = pkDxpOn && !engineStopped ? pkDxpOn.key : '';
     // Stopped: offer the band the radio went to, when this mode has a dial there.
     if (engineStopped && bandTableFor(pk.mode)[pkRadioBand()] && !isBandHidden(pkRadioBand())) pk.band = pkRadioBand();
     pkRender();
     pickerEl.classList.remove('hidden');
     if (bandModeBtn) bandModeBtn.setAttribute('aria-expanded', 'true');
-    var on = pkBandsEl.querySelector('.jp-pk-band.on') || pkModesEl.querySelector('.jp-pk-mode.on');
+    var on = pkBandsEl.querySelector('.jp-pk-band.on') || (pkDxpsEl && pkDxpsEl.querySelector('.jp-pk-dxp.on')) || pkModesEl.querySelector('.jp-pk-mode.on');
     if (on) on.focus();
   }
   function pkClose() {
@@ -4036,6 +4132,7 @@ function _applyPopoutTheme(payload) {
   // the new mode, so the band is marked active first; a band-only change is
   // the same selectBand call the old dropdown made.
   function pkApply() {
+    if (pk.dxp) { pkApplyDxpedition(); return; }
     var curMode = modeSelect.value, curBand = pkActiveBand(), wasStopped = engineStopped;
     var opt = document.querySelector('.jp-band-opt[data-band="' + pk.band + '"]');
     if (!opt || !bandTableFor(pk.mode)[pk.band]) return;
@@ -4050,7 +4147,7 @@ function _applyPopoutTheme(payload) {
       opt.classList.add('active');
       modeSelect.value = pk.mode;
       modeSelect.dispatchEvent(new Event('change'));
-    } else if (pk.band !== curBand && !wasStopped) {
+    } else if ((pk.band !== curBand || pkDxpOn) && !wasStopped) {
       selectBand(opt, true);
     }
     pkClose();
@@ -4078,7 +4175,8 @@ function _applyPopoutTheme(payload) {
     if (!group) return;
     e.preventDefault();
     var items = Array.prototype.slice.call(group.querySelectorAll('button'));
-    var step = group === pkModesEl ? (dirs[e.key] < 0 ? -1 : 1) : dirs[e.key];
+    var step = group === pkModesEl ? (dirs[e.key] < 0 ? -1 : 1)
+      : group === pkDxpsEl && Math.abs(dirs[e.key]) === 4 ? dirs[e.key] / 4 * 3 : dirs[e.key]; // DXpeditions are 3 across
     var i = items.indexOf(t), j = i + step;
     if (j < 0 || j >= items.length) return;
     items[j].focus();
@@ -4101,52 +4199,15 @@ function _applyPopoutTheme(payload) {
   syncBandMode();
 
   // DXpeditions on the air with a published FT8/FT4 dial (level_death
-  // 2026-10-31; the feed's `freqs`, lib/dxpedition-dials.js). A group at the
-  // end of the band menu. Picking one switches to its mode, tunes its dial
-  // and marks its band; the menu then shows the band again. These options
-  // are NOT .jp-band-opt, so mode changes, rig bands and idle QSY never
-  // touch them, and the capture listener runs before the band handler.
+  // 2026-10-31; the feed's `freqs`, lib/dxpedition-dials.js). They sat in the
+  // old band menu until the picker replaced it; since #1033 they are a group
+  // in the picker (pkRenderDxps), tuned by tuneDxpedition.
   function renderDxpeditionDials(list) {
-    if (!bandSelect) return;
-    var old = document.getElementById('jp-dxp-group');
-    if (old) old.remove();
-    if (!Array.isArray(list) || !list.length) return;
-    var g = document.createElement('optgroup');
-    g.id = 'jp-dxp-group';
-    g.label = 'DXpeditions';
-    list.forEach(function(d) {
-      var o = document.createElement('option');
-      o.className = 'jp-dxp-opt';
-      o.value = 'dxp:' + d.call + ':' + d.mode + ':' + d.khz;
-      o.dataset.call = d.call; o.dataset.mode = d.mode; o.dataset.freq = d.khz; o.dataset.band = d.band;
-      if (d.hound) o.dataset.hound = '1';
-      if (d.superFox) o.dataset.superfox = '1';
-      o.textContent = d.call + ' ' + d.mode + ' ' + FreqDots.fromKhz(d.khz) + (d.superFox ? ' SuperFox' : d.hound ? ' F/H' : '');
-      o.title = (d.entity ? d.entity + ': ' : '') + d.call + ' on ' + d.mode + ' ' + FreqDots.khzMhz(d.khz) + (d.end ? ', until ' + d.end : '');
-      g.appendChild(o);
-    });
-    bandSelect.appendChild(g);
+    pkDxpList = Array.isArray(list) ? list : [];
+    if (pkIsOpen()) pkRender();
   }
-  if (bandSelect) {
-    bandSelect.addEventListener('change', function(e) {
-      var opt = bandSelect.options[bandSelect.selectedIndex];
-      if (!opt || !opt.classList.contains('jp-dxp-opt')) return;
-      e.stopImmediatePropagation();
-      var mode = opt.dataset.mode, khz = parseFloat(opt.dataset.freq);
-      if (mode && modeSelect.value !== mode && Array.prototype.some.call(modeSelect.options, function(x) { return x.value === mode; })) {
-        modeSelect.value = mode;
-        modeSelect.dispatchEvent(new Event('change')); // retunes the band's own dial first; the tune below lands after it
-      }
-      window.api.tune(khz, mode || modeSelect.value);
-      document.querySelectorAll('.jp-band-opt').forEach(function(b) { b.classList.toggle('active', b.dataset.band === opt.dataset.band); });
-      bandSelectFollowActive();
-      var sub = opt.dataset.superfox ? 'They run SuperFox, which POTACAT\'s Hound mode does not decode. Use WSJT-X in SuperFox Hound mode for this one.'
-        : opt.dataset.hound ? (houndMode ? 'Fox/Hound: Hound is on.' : 'They run Fox/Hound: turn on Hound before you call.') : '';
-      showJtcatWarnToast('Tuned to ' + opt.dataset.call + ' on ' + FreqDots.khzMhz(khz) + ' ' + (mode || ''), sub);
-    }, true);
-    if (window.api.onJtcatDxpeditions) window.api.onJtcatDxpeditions(renderDxpeditionDials);
-    if (window.api.jtcatDxpeditionsGet) window.api.jtcatDxpeditionsGet().then(renderDxpeditionDials).catch(function() {});
-  }
+  if (window.api.onJtcatDxpeditions) window.api.onJtcatDxpeditions(renderDxpeditionDials);
+  if (window.api.jtcatDxpeditionsGet) window.api.jtcatDxpeditionsGet().then(renderDxpeditionDials).catch(function() {});
 
   // main.js hopped the FTx mode on us (settings.jtcatModeHop). The radio and
   // the engine have already moved — this is only the display catching up, so
@@ -4156,6 +4217,7 @@ function _applyPopoutTheme(payload) {
   if (window.api.onJtcatModeHopped) {
     window.api.onJtcatModeHopped(function(d) {
       if (!d || !d.mode) return;
+      pkDxpOn = null; // the hop moved the radio to the new mode's own dial
       modeSelect.value = d.mode;
       updateBandFreqs();  // band buttons now carry the new mode's dials
       document.querySelectorAll('.jp-band-opt').forEach(function(btn) {

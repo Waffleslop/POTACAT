@@ -626,6 +626,12 @@
     .jp-pk-band.on .jp-pk-band-dial { color: var(--accent-blue, #4fc3f7); }
     .jp-pk-band:disabled { border: 1px dashed var(--border-primary); background: transparent; color: var(--text-dim, #888); cursor: not-allowed; }
     .jp-pk-band:disabled .jp-pk-band-dial { color: var(--text-dim, #888); }
+    /* #1033 DXpeditions on the air: three across, so a long call (VP2V/GU4YOX) fits. */
+    .jp-pk-dxps { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .jp-pk-dxps[hidden], .jp-picker-sec-row[hidden] { display: none; }
+    .jp-pk-band.jp-pk-dxp { height: auto; min-height: 72px; padding: 8px 6px; }
+    .jp-pk-band.jp-pk-dxp .jp-pk-band-name { font-size: 18px; overflow-wrap: anywhere; text-align: center; }
+    .jp-pk-band.jp-pk-dxp .jp-pk-dxp-tag { font-size: 14px; font-weight: 700; color: var(--text-primary); }
     .jp-pk-apply { height: 56px; margin-top: 4px; border-radius: 14px; border: none; background: var(--accent-green, #4ecca3); color: var(--on-accent-green, #000); font-size: 18px; font-weight: 800; cursor: pointer; font-family: inherit; }
     /* A global button:hover would paint this dark, which reads as unavailable. */
     .jp-pk-apply:hover:not(:disabled) { background: var(--accent-green, #4ecca3); color: var(--on-accent-green, #000); filter: brightness(1.12); }
@@ -759,6 +765,11 @@
         <span class="jp-picker-note">Only the bands ticked for this radio (Settings &gt; Radio, Edit the rig)</span>
       </div>
       <div id="jp-pk-bands" class="jp-pk-bands" role="radiogroup" aria-label="Band"></div>
+      <div id="jp-pk-dxp-sec" class="jp-picker-sec-row" hidden>
+        <span class="jp-picker-sec">DXPEDITIONS ON THE AIR</span>
+        <span class="jp-picker-note">Their published dial, from the DXpedition list</span>
+      </div>
+      <div id="jp-pk-dxps" class="jp-pk-bands jp-pk-dxps" role="radiogroup" aria-label="DXpeditions on the air" hidden></div>
       <button type="button" id="jp-pk-apply" class="jp-pk-apply" disabled>Running FT8 on 20m</button>
       <div id="jp-pk-hint" class="jp-pk-hint">Pick a band or mode to switch.</div>
       <div class="jp-pk-keys">Arrow keys move &middot; Enter switches &middot; Esc closes</div>
@@ -831,7 +842,7 @@
           <span style="color:var(--text-dim);">You can change this later next to Beacon TX.</span>
         </div>
         <div class="jp-wspr-beacon-row">
-          <label class="jp-wspr-tx" title="Beacon: transmit a low-power WSPR signal so distant stations spot you on wsprnet.org. Power is HARD-CAPPED at 1 W (QRPp). Attended only — verify actual output on a meter / dummy load.">
+          <label class="jp-wspr-tx" title="Beacon: transmit a low-power WSPR signal so distant stations spot you on wsprnet.org. It transmits at the radio's own power setting; to beacon at another level, change TX Pwr while it is armed (used for the frames only, your level comes back after each one). Attended only — verify actual output on a meter / dummy load.">
             <input type="checkbox" id="jp-wspr-tx-enable"> <b>Beacon TX</b>
           </label>
           <span id="jp-wspr-beacon-status" class="jp-wspr-beacon-status" title="Slots are drawn at random per the TX % — listening slots are normal and expected"></span>
@@ -840,7 +851,7 @@
             <input type="range" id="jp-wspr-txpct" min="0" max="100" step="5" value="20" style="width:70px;vertical-align:middle;">
             <span id="jp-wspr-txpct-val" class="jp-wspr-num">20%</span>
           </label>
-          <label title="Power the beacon reports to WSPRnet. Auto follows the RF power the beacon runs at: 1 W, or the level you set with TX Pwr while it is armed. Pick a value to report a fixed power instead. WSPR decodes far below the noise, so a watt or less carries a long way.">Reported
+          <label title="Power the beacon reports to WSPRnet. Auto follows the RF power the beacon runs at: the radio's own setting, or the level you set with TX Pwr while it is armed. Pick a value to report a fixed power instead. WSPR decodes far below the noise, so a watt or less carries a long way.">Reported
             <select id="jp-wspr-dbm" class="jp-wspr-select">
               <option value="auto" selected>Auto</option>
             </select>
@@ -1413,6 +1424,7 @@
   </div>
 
   <script src="../lib/freq-dots.js"></script>
+  <script src="../lib/dxpedition-dials.js"></script>
   <script src="../node_modules/leaflet/dist/leaflet.js"></script>
   <script src="../lib/rig-family.js"></script>
   <script src="../lib/rig-bands.js"></script>

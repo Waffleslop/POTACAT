@@ -68,7 +68,7 @@ test('main: the test plans first, moves and confirms arrival, keys with the plan
   assert.ok(plan > 0 && plan < f.indexOf("applyRigControl({ action: 'set-tx-power', value: testW }, 'setup')"), 'decided before the power is touched');
   assert.ok(/if \(plan\.action === 'refuse'\) \{[\s\S]*?return done\(\{ result: 'error', message: plan\.why \}\);/.test(f));
   assert.ok(/const arrived = await waitForCondition\(/.test(f) && /did not report arriving there, so nothing was keyed/.test(f));
-  assert.ok(/startJtcatTune\(\{ toneHz: STATION_SETUP_TEST_TONE_HZ, emission: plan\.emission, noDataSwap: voice \}\);/.test(f));
+  assert.ok(/startJtcatTune\(\{ toneHz: STATION_SETUP_TEST_TONE_HZ, emission: plan\.emission, noDataSwap: voice, \.\.\.dataSwap \}\);/.test(f));
   assert.ok(/if \(movedFromHz\) \{\s*tuneRadio\(movedFromHz \/ 1000/.test(f), 'back to the operator\'s frequency');
   assert.ok(/The voice test needs a phone frequency your licence allows/.test(f), 'the voice test never moves to a data frequency');
 });
