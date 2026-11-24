@@ -829,7 +829,50 @@ const TESTS = [
   'test/serial-quit-test.js', // #657: every serial port closed and every native serial call finished before quit (macOS SIGABRT)
   'test/remote-tune-click-label-test.js', // #756: the ECHOCAT Web tuneClick switch is labelled for the click sound, not "Tap to Tune"
   'test/tune-link-guard-test.js', // a potacat://tune link stops Run, Hunt, the WSPR beacon, the Spot Target, a QSO and TX before it tunes; notice in the main and JTCAT windows
+  'test/test-manifest-complete-test.js', // every test/ and lib/ *-test.js / *.test.js is in TESTS or in EXCEPTIONS below, so no test file silently never runs
+  // 2026-11-23: test files that existed but were on no list, so CI never ran them.
+  'lib/psk-engine-test.js', // PSK31 engine: varicode round-trip, TX->RX loopback, AFC pull-in, squelch, Ft8Engine contract
+  'test/all-qsos-cap-test.js', // legacy all-qsos frame bounded by bytes (iOS 1009 kill), chunked path, qso-added delta gate
+  'test/aprs-is-test.js', // APRS-IS packet builders: passcode, gate, position packets
+  'test/cloud-export-test.js', // Cloud ADIF export: 401 -> refresh + retry once; temp file then rename (local stub server)
+  'test/cloud-tunnel-degraded-test.js', // Cloud Tunnel flags "degraded" when cloudflared loses DNS but does not exit
+  'test/cloudflared-arch-test.js', // cloudflared EBADARCH (-86): system binary fallback or a clear message
+  'test/cw-keyer-script-test.js', // the persistent CW keyer's generated Python keys the right line and dispatches commands
+  'test/freedv-reporter-test.js', // FreeDV Reporter: an error with no listener never kills the process
+  'test/js8-mailbox-test.js', // JS8 mailbox parsing and the SMS / email message builders
+  'test/linux-sandbox-test.js', // #37: the Linux no-sandbox fallback fires only where launch would abort
+  'test/local-ips-test.js', // which interfaces may be advertised as the LAN (VPN overlays dropped, bridged hypervisor kept)
+  'test/lz3aw-round13-test.js', // LZ3AW round 13: Live CW button, log time, F-key macros, readable greys, multi-call filter
+  'test/pair-request-retry-test.js', // tap-to-pair: a retry with the same requestId collects or re-attaches; a different one is busy
+  'test/park-state-test.js', // a park spanning states writes a clean ADIF STATE
+  'test/popout-theme-boot-test.js', // pop-outs open in the theme on the first frame; applyPopoutTheme takes a string or { theme, variant }
+  'test/profile-dirs-test.js', // slash-callsign profile directories and the nested-dir migration
+  'test/pskreporter-test.js', // PSKReporter: transient 5xx retried quietly, a real failure only after a run of them
+  'test/pskreporter-tx-test.js', // PSKReporter IPFIX datagram decodes back to what was sent
+  'test/qso-chunker-test.js', // chunked all-qsos: every chunk under the byte cap, order and every record kept
+  'test/remote-client-dial-test.js', // RemoteClient: an unreachable leg never crashes the app; a fingerprint mismatch advances once
+  'test/remote-tune-echo-test.js', // a tune is echoed to the client at once, not on the next CAT poll
+  'test/revoke-kick.test.js', // revoking a device closes its live session (4004), spares others and blocks re-auth
+  'test/rig-audio-mirror-test.js', // an empty remoteAudioInput follows the rig's CODEC, never the built-in mic
+  'test/rotorez-test.js', // Rotor-EZ wire format, reply parser and the brake-delay queue (fake serial port)
+  'test/rx-level-test.js', // shack-side receive level: gain graph, live update, TX mute wins, Flex Direct stand-in capture
+  'test/smartsdr-discovery-test.js', // SmartSDR: POTACAT's own previous GUI-client registration is not a foreign client
+  'test/smartsdr-reconnect-test.js', // SmartSDR reconnect: fast retries, one give-up, then a background probe
+  'test/wspr-bandhop-test.js', // WSPR band-hop schedule
+  'test/wspr-decoder-test.js', // wsprd output parser and the WAV writer
+  'test/wspr-encode-test.js', // WSPR encoder: 50-bit packing proved by an independent unpack
+  'test/wspr-network-test.js', // WSPR band table and the wsprnet upload formatter (fake fetch)
+  'test/wspr-stats-test.js', // WSPR stats: dBm to watts, miles per watt
+  'test/wspr-wsprlive-test.js', // "Where am I heard" from wspr.live (fake fetch)
 ];
+
+// Test files that CI does not run, each with the reason. A file named
+// *-test.js or *.test.js in test/ or lib/ must be in TESTS or here
+// (test/test-manifest-complete-test.js). Reasons start with one of:
+// "manual:", "needs hardware:", "needs network:", "harness:", "superseded by ", "stale:".
+const EXCEPTIONS = {
+  'lib/jtcat-echocat-test.js': 'needs hardware: an in-app on-air harness (exports a function that takes the running app, keys a real radio at 5 W on 20 m / 15 m FT8 and FT4); nothing in the repo loads it',
+};
 
 
 // Files that must run alone, after the parallel pool. Each was seen to fail
@@ -840,6 +883,11 @@ const SERIAL = new Set([
   'test/tci-audio-test.js', // 2 s budgets for a loopback TCI server to answer; missed in 2 of 9 parallel runs on a loaded machine, never alone
   'test/paddle-bounce-test.js', // web keyer element timing in real milliseconds; a dash was cut short once under load
   'test/civ-pacing-test.js', // fixed 60/200 ms waits on a fake CI-V radio; failed four pushes under parallel load on 2026-11-22, passes alone
+  // Added 2026-11-23 when they joined TESTS; not yet seen to fail, placed here up front:
+  'test/revoke-kick.test.js', // fixed port 17310, a real ECHOCAT server and 300-1500 ms waits for the kick to land
+  'test/remote-client-dial-test.js', // fixed port 17320 and a 2.5 s window of dial rounds with backoff
+  'test/pair-request-retry-test.js', // fixed port 17330, sockets killed after 150 ms and 300-400 ms waits
+  'test/rotorez-test.js', // the brake-delay state machine on real timers (20-450 ms waits)
 ]);
 
 // SERIAL files that may be retried once after a failure (timing under load,
@@ -1010,7 +1058,7 @@ function parseArgs(argv) {
   return o;
 }
 
-module.exports = { TESTS, SERIAL, RETRY_ONCE, SLOW_FIRST, runAll, parseArgs, defaultJobs };
+module.exports = { TESTS, EXCEPTIONS, SERIAL, RETRY_ONCE, SLOW_FIRST, runAll, parseArgs, defaultJobs };
 
 if (require.main === module) {
   const o = parseArgs(process.argv.slice(2));
