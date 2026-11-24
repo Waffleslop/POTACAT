@@ -174,6 +174,20 @@ test('hostile input never throws: not a string, empty, binary, only quotes', () 
     assert.ok(Array.isArray(p.items) && p.items.length === 0);
   }
 });
+test('lines built to be slow are not: thousands of spaces, repeated header words', () => {
+  const rows = ROWS.map((r) => line(r));
+  const slow = [];
+  for (let i = 0; i < 1500; i++) slow.push('CAT' + i + ' ID' + i + ' "s"' + ' '.repeat(900) + 'x');
+  for (let i = 0; i < 300; i++) slow.push('CATEGORY INQUIRY_ID '.repeat(48));
+  const t0 = Date.now();
+  const pre = [];
+  for (let i = 0; i < 300; i++) pre.push('CATEGORY INQUIRY_ID '.repeat(48));
+  const p = C.parseCatalogList(pre.concat([HEADER], rows, slow).join('\n'));
+  assert.ok(Date.now() - t0 < 1500, 'took ' + (Date.now() - t0) + ' ms');
+  assert.strictEqual(p.ok, true);
+  assert.strictEqual(p.items.length, 40 + 1500, 'a row with unknown text after the subject is still a row');
+  assert.strictEqual(p.items[45].size, null);
+});
 test('an ID or category with markup or spaces in it is never a row', () => {
   const rows = ROWS.map((r) => line(r));
   rows.push('<img src=x> <script> "bad row" 5');
