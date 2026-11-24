@@ -2714,7 +2714,8 @@ function voiceTxCheckEnd() {
   if (!c) return;
   const model = getActiveRigModel() || {};
   const d = decideVoiceTxHint({ keyedMs: Date.now() - c.startedAt, fwdEvents: c.fwdEvents, peakW: c.peakW,
-    alcEvents: c.alcEvents, peakAlc: c.peakAlc, mode: c.mode || _currentMode, brand: model.brand, model: getActiveRigModelName() });
+    alcEvents: c.alcEvents, peakAlc: c.peakAlc, mode: c.mode || _currentMode, brand: model.brand, model: getActiveRigModelName(),
+    network: !!(settings.catTarget && settings.catTarget.type === 'icom-network') });
   if (!d) return;
   const k = (settings.activeRigId || '') + '|' + d.key;
   if (_voiceTxHinted.has(k)) return;
@@ -7135,7 +7136,7 @@ async function _runStationSetupTxTest(rigId, { keepPower = false, voice = false 
   // A silent voice path names the radio's input menu (lib/voice-tx-check.js).
   let hint = null;
   if (voice && result === 'no-power') {
-    const d = decideVoiceTxHint({ keyedMs: 3000, fwdEvents: meas.fwdEvents, peakW: 0, alcEvents: 0, peakAlc: 0, mode: modeNow, brand: info.brand, model: rig.model });
+    const d = decideVoiceTxHint({ keyedMs: 3000, fwdEvents: meas.fwdEvents, peakW: 0, alcEvents: 0, peakAlc: 0, mode: modeNow, brand: info.brand, model: rig.model, network: !!(rig.catTarget && rig.catTarget.type === 'icom-network') });
     hint = d ? d.hint : null;
   }
   return done({ result, watts, swr, keyed: keyedProven, evidence, restored, restoreNote, hint });
@@ -11663,7 +11664,14 @@ function findPat() {
   }), WinlinkPat.patBinaryName(process.platform));
 }
 
+let _direwolfSkipLogged = '';
 function findDirewolf() {
+  // #1031: say so once when a configured path is ignored (this also runs on status polls).
+  const skipMsg = DirewolfProcess.skippedConfiguredPathMessage(settings, fs.statSync, (p) => fs.accessSync(p, fs.constants.X_OK));
+  if (skipMsg !== _direwolfSkipLogged) {
+    _direwolfSkipLogged = skipMsg;
+    if (skipMsg) console.log('[Winlink] ' + skipMsg);
+  }
   return _findBinary(DirewolfProcess.direwolfPathCandidates({
     settings, isPackaged: app.isPackaged, resourcesPath: process.resourcesPath, appDir: __dirname, platform: process.platform,
   }), DirewolfProcess.direwolfBinaryName(process.platform));
@@ -42900,6 +42908,7 @@ function setEventOptIn(eventId, optedIn, dismissed) {
   if (dismissed !== undefined) settings.events[eventId].dismissed = dismissed;
   saveSettings(settings);
   pushEventsToRenderer();
+  updateRemoteSettings(); // the phone alerts from eventSubscriptions; send it the change (#1030)
 }
 
 // The banner at the top of the main window, per event. A year-long event
@@ -43049,6 +43058,7 @@ function markEventRegion(eventId, region, qsoData) {
   };
   saveSettings(settings);
   pushEventsToRenderer();
+  updateRemoteSettings(); // progress rides eventSubscriptions to the phone (#1030)
 }
 
 // Union of log-derived progress (state.progress, rebuilt from the ADIF log by

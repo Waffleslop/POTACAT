@@ -91,6 +91,9 @@
 
     function registerStation(call, grid) {
       if (!call || !grid || !/^[A-R]{2}[0-9]{2}$/i.test(grid)) return;
+      // RR73 is the "roger, 73" token, not a grid: it only looks like one (#1029).
+      // Same rule as the JTCAT window's map (jtcat-popout.js).
+      if (/^RR[0-9]{2}$/i.test(grid)) return;
       grid = grid.toUpperCase();
       var bounds = gridToBounds(grid);
       var pos = gridToLatLon(grid);
