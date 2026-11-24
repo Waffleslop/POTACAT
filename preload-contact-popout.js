@@ -1,7 +1,8 @@
 'use strict';
 // Preload for the Contact details window (lib/contact-card.js builds what it
 // shows in main). Sandboxed: only the electron module is here, and the page
-// can show, copy, open the QRZ page and switch weather; nothing else.
+// can show, refresh, copy the mailing address to the clipboard, open the QRZ
+// page and switch weather; it has no way to write the log.
 const { contextBridge, ipcRenderer } = require('electron');
 
 let platform = '';
@@ -14,6 +15,7 @@ contextBridge.exposeInMainWorld('api', {
   copyText: (text) => ipcRenderer.invoke('copy-to-clipboard', text),
   openExternal: (url) => ipcRenderer.send('open-external', url),
   setWeather: (on) => ipcRenderer.send('contact-card-weather', on === true),
+  refresh: () => ipcRenderer.send('contact-card-refresh'),
   minimize: () => ipcRenderer.send('contact-card-minimize'),
   close: () => ipcRenderer.send('contact-card-close'),
 });

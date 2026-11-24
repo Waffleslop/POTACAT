@@ -1415,6 +1415,7 @@ if (setExtraUdp) {
 const setDisableAutoUpdate = document.getElementById('set-disable-auto-update');
 const setEnableTelemetry = document.getElementById('set-enable-telemetry');
 const setEnableQrz = document.getElementById('set-enable-qrz');
+const setContactWeather = document.getElementById('set-contact-weather'); // Contact details weather (Open-Meteo), on unless turned off
 const qrzConfig = document.getElementById('qrz-config');
 const setQrzUsername = document.getElementById('set-qrz-username');
 const setQrzPassword = document.getElementById('set-qrz-password');
@@ -18679,6 +18680,7 @@ async function openSettingsDialog(tab) {
   if (setEnableGma) setEnableGma.checked = s.enableGma === true;
   if (setEnableParc) setEnableParc.checked = s.enableParc === true;
   setEnableQrz.checked = s.enableQrz === true;
+  setContactWeather.checked = s.contactWeather !== false;
   setQrzUsername.value = s.qrzUsername || '';
   setQrzPassword.value = s.qrzPassword || '';
   setQrzFullName.checked = s.qrzFullName === true;
@@ -19697,6 +19699,7 @@ settingsSave.addEventListener('click', async () => {
     enableGma: gmaEnabled,
     enableParc: parcEnabled,
     enableQrz: qrzEnabled,
+    contactWeather: setContactWeather.checked,
     qrzUsername: qrzUsername,
     qrzPassword: qrzPassword,
     qrzFullName: qrzFullNameEnabled,

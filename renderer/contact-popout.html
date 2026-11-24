@@ -9,46 +9,97 @@
   <script src="popout-theme-bootstrap.js"></script>
   <link rel="stylesheet" href="styles.css">
   <style>
+    /* Layout approved by Casey 2026-11-23 (Contact details mockup). Colours
+       come only from theme tokens, so every theme works. */
     html, body { margin: 0; padding: 0; height: 100%; }
     body { display: flex; flex-direction: column; overflow: hidden; background: var(--bg-primary); color: var(--text-primary);
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 14px; line-height: 1.4; }
-    .cd-main { flex: 1; overflow-y: auto; padding: 14px 16px 18px; }
-    .cd-loading { color: var(--text-secondary); font-size: 15px; padding: 18px 0; }
+      font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; font-size: 14px; }
+    .cd-muted { color: var(--text-secondary); }
 
-    /* Who: photo beside the call, name and the worked line */
-    .cd-who { display: flex; gap: 14px; align-items: flex-start; }
-    .cd-photo { width: 112px; height: 140px; flex-shrink: 0; border-radius: 6px; object-fit: cover; background: var(--bg-secondary); border: 1px solid var(--border-primary); }
-    .cd-who-text { min-width: 0; flex: 1; }
-    .cd-call { font-size: 26px; font-weight: 800; letter-spacing: .5px; font-family: ui-monospace, Menlo, Consolas, monospace; color: var(--text-primary); overflow-wrap: anywhere; }
-    .cd-name { font-size: 17px; font-weight: 600; margin-top: 2px; }
-    .cd-sub { color: var(--text-secondary); font-size: 14px; }
-    .cd-worked { margin-top: 8px; font-size: 14px; font-weight: 600; color: var(--accent-blue, #4fc3f7); }
-    .cd-worked.confirmed { color: var(--accent-green, #4ecca3); }
-    .cd-worked.never { color: var(--text-secondary); font-weight: 500; }
+    .cd-head { flex-shrink: 0; min-height: 76px; box-sizing: border-box; padding: 10px 24px; display: flex; align-items: center; gap: 16px;
+      flex-wrap: wrap; border-bottom: 1px solid var(--border-primary); }
+    .cd-call { font-size: 32px; font-weight: 700; letter-spacing: 1px; }
+    .cd-pill { font-weight: 600; font-size: 13px; padding: 5px 12px; border-radius: 14px; }
+    .cd-pill.confirmed { background: var(--accent-green, #4ecca3); color: var(--on-accent-green, #10241c); }
+    .cd-pill.worked { background: var(--accent-blue, #4fc3f7); color: var(--on-accent-blue, #0b1a24); }
+    .cd-headline { font-size: 15px; color: var(--text-primary); }
+    .cd-spacer { flex-grow: 1; }
+    .cd-hbtn { height: 38px; box-sizing: border-box; background: var(--bg-secondary); color: var(--text-primary); border: 1px solid var(--border-secondary);
+      border-radius: 6px; padding: 0 14px; font-size: 14px; cursor: pointer; }
+    .cd-hbtn.link { color: var(--accent-blue, #4fc3f7); }
+    .cd-hbtn:hover { background: var(--bg-hover); }
 
-    /* At a glance: local time, weather, beam and distance */
-    .cd-glance { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; margin-top: 14px; }
-    .cd-tile { background: var(--bg-secondary); border: 1px solid var(--border-primary); border-radius: 6px; padding: 7px 10px; }
-    .cd-tile .l { font-size: 12px; color: var(--text-secondary); font-weight: 600; }
-    .cd-tile .v { font-size: 18px; font-weight: 700; font-variant-numeric: tabular-nums; }
-    .cd-tile .s { font-size: 12px; color: var(--text-secondary); }
+    .cd-body { flex-grow: 1; overflow-y: auto; padding: 20px 24px; }
+    .cd-loading { color: var(--text-secondary); font-size: 15px; }
+    .cd-grid { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); grid-auto-rows: auto; gap: 16px; }
+    .cd-card { background: var(--bg-secondary); border: 1px solid var(--border-primary); border-radius: 10px; padding: 18px; display: flex;
+      flex-direction: column; gap: 12px; min-width: 0; box-sizing: border-box; }
+    .cd-h { font-size: 12px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 1px; }
+    .cd-fill { flex-grow: 1; }
+    .s6 { grid-column: span 6; } .s3 { grid-column: span 3; } .s7 { grid-column: span 7; } .s5 { grid-column: span 5; } .s12 { grid-column: span 12; }
+    .cd-row1 { min-height: 236px; } .cd-row2 { min-height: 176px; }
 
-    .cd-section { margin-top: 16px; }
-    .cd-section h2 { font-size: 13px; font-weight: 700; color: var(--text-secondary); margin: 0 0 6px; text-transform: none; }
-    .cd-section-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-    .cd-address { font-size: 15px; line-height: 1.45; user-select: text; }
-    dl.cd-facts { display: grid; grid-template-columns: max-content 1fr; gap: 5px 14px; margin: 0; }
-    dl.cd-facts dt { color: var(--text-secondary); font-size: 13px; padding-top: 1px; }
-    dl.cd-facts dd { margin: 0; font-size: 15px; user-select: text; overflow-wrap: anywhere; }
-    .cd-btn { background: var(--bg-input); color: var(--text-primary); border: 1px solid var(--border-primary); border-radius: 4px; padding: 4px 11px; font-size: 13px; cursor: pointer; }
-    .cd-btn:hover { background: var(--bg-hover); }
-    .cd-btn.done { color: var(--accent-green, #4ecca3); border-color: var(--accent-green, #4ecca3); }
-    .cd-links { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
-    .cd-link { color: var(--accent-blue, #4fc3f7); background: none; border: 0; padding: 0; font-size: 15px; cursor: pointer; text-decoration: underline; }
-    .cd-note { margin-top: 18px; padding-top: 10px; border-top: 1px solid var(--border-primary); color: var(--text-secondary); font-size: 13px; }
-    .cd-weather-off { margin-top: 12px; color: var(--text-secondary); font-size: 13px; }
-    .cd-weather-off .cd-link { font-size: 13px; }
-    .cd-weather-stop { margin-left: 4px; font-size: 12px; }
+    /* Operator */
+    .cd-op { flex-direction: row; gap: 18px; }
+    .cd-photo { width: 198px; height: 198px; flex-shrink: 0; border-radius: 8px; background: var(--bg-primary); border: 1px solid var(--border-primary);
+      display: flex; align-items: center; justify-content: center; color: var(--text-secondary); font-size: 13px; text-align: center; overflow: hidden; }
+    .cd-photo img { width: 100%; height: 100%; object-fit: cover; }
+    .cd-photo.none, .cd-dashed { border-style: dashed; border-color: var(--border-secondary); }
+    .cd-op-text { display: flex; flex-direction: column; gap: 8px; min-width: 0; flex-grow: 1; }
+    .cd-name { font-size: 20px; font-weight: 600; line-height: 1.3; overflow-wrap: anywhere; }
+    .cd-town { color: var(--text-primary); }
+    .cd-pills { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 4px; }
+    .cd-chip { background: var(--bg-primary); border: 1px solid var(--border-primary); border-radius: 12px; padding: 3px 10px; font-size: 13px; }
+    .cd-chip.grid { color: var(--accent-green, #4ecca3); }
+    .cd-small { font-size: 13px; color: var(--text-secondary); }
+
+    /* Path from you / At their end */
+    .cd-big { font-size: 30px; font-weight: 700; line-height: 1.1; font-variant-numeric: tabular-nums; }
+    .cd-compass { display: flex; align-items: center; gap: 14px; }
+    .cd-compass svg circle.ring { stroke: var(--border-secondary); }
+    .cd-compass svg text { fill: var(--text-secondary); }
+    .cd-compass svg line { stroke: var(--accent-red, #e94560); }
+    .cd-compass svg circle.hub { fill: var(--text-primary); }
+    .cd-kv { display: flex; justify-content: space-between; gap: 8px; }
+    .cd-kv.first { border-top: 1px solid var(--border-primary); padding-top: 10px; }
+    .cd-kv .v { font-weight: 600; text-align: right; }
+    .cd-linkbtn { background: none; border: 0; padding: 0; color: var(--accent-blue, #4fc3f7); font-size: 12px; cursor: pointer; text-decoration: underline; }
+
+    /* Station */
+    .cd-fields { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px 16px; }
+    .cd-field { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+    .cd-field .l { font-size: 12px; color: var(--text-secondary); }
+    .cd-field .v { font-weight: 600; overflow-wrap: anywhere; user-select: text; }
+
+    /* QSL */
+    .cd-qsl-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+    .cd-address { white-space: pre-line; line-height: 1.45; user-select: text; }
+    .cd-email { color: var(--accent-blue, #4fc3f7); user-select: text; overflow-wrap: anywhere; }
+    .cd-copy { align-self: flex-start; height: 36px; background: var(--accent-red, #e94560); color: var(--on-accent-red, #fff); border: 0; border-radius: 6px;
+      padding: 0 14px; font-size: 14px; font-weight: 600; cursor: pointer; }
+    .cd-copy:disabled { opacity: .45; cursor: default; }
+    .cd-copy.done { background: var(--accent-green, #4ecca3); color: var(--on-accent-green, #10241c); }
+
+    /* Your contacts */
+    .cd-table { display: grid; grid-template-columns: 1.2fr 0.8fr 0.8fr 1.2fr 1fr 1fr; gap: 8px 16px; font-variant-numeric: tabular-nums; }
+    .cd-table .th { font-size: 12px; color: var(--text-secondary); }
+    .cd-table .current { font-weight: 700; }
+    .cd-ok { color: var(--accent-green, #4ecca3); }
+    .cd-worked { color: var(--accent-blue, #4fc3f7); }
+
+    .cd-foot { flex-shrink: 0; min-height: 30px; border-top: 1px solid var(--border-primary); padding: 6px 24px; box-sizing: border-box;
+      display: flex; align-items: center; color: var(--text-secondary); font-size: 12px; }
+
+    /* A narrow window: the cards stack, two small ones side by side. */
+    @media (max-width: 900px) {
+      .s6, .s7, .s5 { grid-column: span 12; }
+      .s3 { grid-column: span 6; }
+      .cd-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+    @media (max-width: 560px) {
+      .s3 { grid-column: span 12; }
+      .cd-op { flex-direction: column; }
+    }
     [hidden] { display: none !important; }
   </style>
 </head>
@@ -61,47 +112,67 @@
     </div>
   </div>
 
-  <div class="cd-main" id="cd-main">
+  <div class="cd-head" id="cd-head" hidden>
+    <span class="cd-call" id="cd-call"></span>
+    <span class="cd-pill" id="cd-pill" hidden></span>
+    <span class="cd-headline" id="cd-headline"></span>
+    <span class="cd-spacer"></span>
+    <button type="button" class="cd-hbtn link" id="cd-qrz" hidden>Open QRZ page</button>
+    <button type="button" class="cd-hbtn" id="cd-refresh">Refresh</button>
+  </div>
+
+  <div class="cd-body">
     <div class="cd-loading" id="cd-loading">Looking up the station...</div>
-    <div id="cd-card" hidden>
-      <div class="cd-who">
-        <img class="cd-photo" id="cd-photo" alt="" hidden>
-        <div class="cd-who-text">
-          <div class="cd-call" id="cd-call"></div>
-          <div class="cd-name" id="cd-name"></div>
-          <div class="cd-sub" id="cd-sub"></div>
-          <div class="cd-worked" id="cd-worked"></div>
+    <div class="cd-grid" id="cd-grid" hidden>
+      <section class="cd-card cd-op s6 cd-row1" aria-label="Operator">
+        <div class="cd-photo" id="cd-photo"></div>
+        <div class="cd-op-text">
+          <span class="cd-h">Operator</span>
+          <span class="cd-name" id="cd-name"></span>
+          <span class="cd-town" id="cd-town"></span>
+          <div class="cd-pills" id="cd-pills"></div>
+          <span class="cd-fill"></span>
+          <div id="cd-notes"></div>
         </div>
-      </div>
+      </section>
 
-      <div class="cd-glance" id="cd-glance"></div>
+      <section class="cd-card s3 cd-row1" aria-label="Path from you">
+        <span class="cd-h">Path from you</span>
+        <div id="cd-path"></div>
+      </section>
 
-      <div class="cd-section" id="cd-address-section" hidden>
-        <div class="cd-section-head">
-          <h2>Mailing address</h2>
-          <button type="button" class="cd-btn" id="cd-copy-address" title="Copy the address for a QSL card">Copy address</button>
+      <section class="cd-card s3 cd-row1" aria-label="At their end">
+        <span class="cd-h">At their end</span>
+        <div id="cd-end" style="display:flex;flex-direction:column;gap:12px;flex-grow:1;"></div>
+      </section>
+
+      <section class="cd-card s7 cd-row2" aria-label="Station">
+        <span class="cd-h">Station</span>
+        <div class="cd-fields" id="cd-fields"></div>
+        <span class="cd-fill"></span>
+        <span class="cd-small" id="cd-station-note" hidden></span>
+      </section>
+
+      <section class="cd-card s5 cd-row2" id="cd-qsl-card" aria-label="QSL">
+        <div class="cd-qsl-head">
+          <span class="cd-h">QSL</span>
+          <span id="cd-via" style="font-size:13px;" hidden><span class="cd-muted">Via</span> <strong id="cd-via-v"></strong></span>
         </div>
-        <div class="cd-address" id="cd-address"></div>
-      </div>
+        <span class="cd-address" id="cd-address" hidden></span>
+        <span class="cd-email" id="cd-email" hidden></span>
+        <span class="cd-small" id="cd-qsl-note" hidden></span>
+        <span class="cd-fill"></span>
+        <button type="button" class="cd-copy" id="cd-copy" title="Copies the address to the clipboard, for a QSL card. Nothing goes into your log.">Copy mailing address</button>
+      </section>
 
-      <div class="cd-section" id="cd-facts-section" hidden>
-        <dl class="cd-facts" id="cd-facts"></dl>
-        <div class="cd-links" id="cd-links"></div>
-      </div>
-
-      <div class="cd-section" id="cd-this-section" hidden>
-        <h2>This contact</h2>
-        <dl class="cd-facts" id="cd-this"></dl>
-      </div>
-
-      <div class="cd-weather-off" id="cd-weather-off" hidden>
-        <button type="button" class="cd-link" id="cd-weather-on">Show the local weather</button>:
-        POTACAT asks Open-Meteo (open-meteo.com) for the weather in this station's grid square. No callsign is sent.
-      </div>
-
-      <div class="cd-note" id="cd-note" hidden></div>
+      <section class="cd-card s12" aria-label="Your contacts">
+        <span class="cd-h" id="cd-contacts-h"></span>
+        <div class="cd-table" id="cd-contacts"></div>
+      </section>
     </div>
   </div>
+
+  <div class="cd-foot" id="cd-foot"></div>
 
   <script src="contact-popout.js"></script>
 </body>

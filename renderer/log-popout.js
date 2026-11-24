@@ -40,7 +40,7 @@ function _applyPopoutTheme(payload) {
   if (callInput) callInput.addEventListener('input', reportCall);
   const nameInput = document.getElementById('lp-name');
   const qrzBtn = document.getElementById('lp-qrz-link');
-  // Details: the Contact details window for the call being typed (lib/contact-card.js).
+  // + More info: the Contact details window for the call being typed (lib/contact-card.js).
   const contactBtn = document.getElementById('lp-contact-details');
   if (contactBtn) contactBtn.addEventListener('click', () => {
     const raw = callInput.value.trim().toUpperCase();
@@ -380,6 +380,8 @@ function _applyPopoutTheme(payload) {
         // awaiting, ignore stale results.
         if (raw !== callInput.value.trim().toUpperCase()) return;
         updateIdentity(result.qrz, raw);
+        // The one line under the call (Contact details): name, town, beam, distance, worked.
+        if (result.summary) identityEl.textContent = result.summary;
         renderPastQsos(result.pastQsos, result.totalQsos, raw);
         renderWorkedMatrix(result.workedMatrix);
       } catch (err) {

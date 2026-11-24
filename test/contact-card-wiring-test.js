@@ -4,8 +4,8 @@
 //  - The Logbook: a "Details" button on every row opens the window for that
 //    row's QSO, named by its identity (lib/qso-identity.js, #988), never by
 //    its row position alone.
-//  - The Log QSO window: a "Details" button beside the callsign field opens it
-//    for the call being typed.
+//  - Log QSO: "+ More info" beside the QRZ button opens it for the call being
+//    typed, and a one-line summary sits under the call field.
 // One window (renderer/contact-popout.html) serves both and follows the window
 // rules (theme, remembered place). Nothing here writes the log.
 // Run: node test/contact-card-wiring-test.js
@@ -93,9 +93,16 @@ const lp = read('renderer/log-popout.js');
 const lpHtml = read('renderer/log-popout.html');
 const lpPreload = read('preload-log-popout.js');
 
-test('Log QSO: a Details button sits in the callsign row', () => {
+test('Log QSO: "+ More info" sits right after the QRZ button in the callsign row', () => {
   const row = lpHtml.slice(lpHtml.indexOf('<div class="lp-call-row">'), lpHtml.indexOf('<div id="lp-identity">'));
-  assert.ok(/<button id="lp-contact-details" type="button"[^>]*>Details<\/button>/.test(row), row);
+  assert.ok(/id="lp-qrz-link"[^>]*>QRZ&#8599;<\/button>\s*<button id="lp-contact-details" type="button"[^>]*>\+ More info<\/button>/.test(row), row);
+});
+
+test('Log QSO: the one-line summary under the call comes from main (ContactCard.summaryLine)', () => {
+  const i = main.indexOf("ipcMain.handle('log-popout-callsign-info'");
+  const h = main.slice(i, main.indexOf('\n  });', i));
+  assert.ok(/const summary = ContactCard\.summaryLine\(/.test(h) && /workedMatrix, summary \}/.test(h), 'the lookup answer carries the summary');
+  assert.ok(/identityEl\.textContent = result\.summary/.test(lp), 'the logger shows it under the call');
 });
 
 test('Log QSO: it opens the window for the call in the field, and is off with no call', () => {
@@ -130,11 +137,26 @@ test('main: the card uses the QRZ detail lookup, the log history and the clicked
   assert.ok(!/mutateLog|logContact\(|appendQso|writeFileSync/.test(f), 'it only reads');
 });
 
-test('main: weather is asked only when the operator turned it on', () => {
+test('main: weather is on unless the operator turned it off (Casey, 2026-11-23)', () => {
   const i = main.indexOf('async function contactCardData(');
   const f = main.slice(i, main.indexOf('\n}\n', i));
-  assert.ok(/settings\.contactWeather === true/.test(f), 'off unless set');
-  assert.ok(/contactWeather\.current\(/.test(f));
+  assert.ok(/settings\.contactWeather !== false/.test(f), 'on to begin with, a setting turns it off');
+  assert.ok(/contactWeather\.current\(ContactCard\.where\(/.test(f), 'only the grid-square centre is asked about');
+  assert.ok(/<input type="checkbox" id="set-contact-weather">/.test(read('renderer/index.html')), 'Settings has the switch');
+  const app = read('renderer/app.js');
+  assert.ok(/setContactWeather\.checked = s\.contactWeather !== false/.test(app));
+  assert.ok(/contactWeather: setContactWeather\.checked/.test(app));
+});
+
+test('main: Refresh asks QRZ again for that call', () => {
+  assert.ok(/ipcMain\.on\('contact-card-refresh', \(\) => contactCardRefresh\(\{ fresh: true \}\)\)/.test(main));
+  assert.ok(/refresh: \(\) => ipcRenderer\.send\('contact-card-refresh'\)/.test(read('preload-contact-popout.js')));
+});
+
+test('Copy mailing address goes to the clipboard only', () => {
+  const js = read('renderer/contact-popout.js');
+  assert.ok(/api\.copyText\(vm\.qsl\.address\.copy\)/.test(js));
+  assert.ok(!/logContact|saveQso|updateQso/.test(js + read('preload-contact-popout.js')), 'the window has no way to write the log');
 });
 
 test('the photo may come only from QRZ (the page CSP)', () => {

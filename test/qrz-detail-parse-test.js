@@ -115,6 +115,15 @@ test('lookupDetails: a failed refresh keeps the older record instead of losing t
   assert.strictEqual(c.cached('G4ABC'), old);
 });
 
+test('forget(): Refresh drops one call, by its base call, and nothing else', () => {
+  const c = new Q.QrzClient();
+  c._cache.set('W1XYZ', { call: 'W1XYZ' });
+  c._cache.set('G4ABC', { call: 'G4ABC' });
+  c.forget('W1XYZ/P');
+  assert.strictEqual(c.cached('W1XYZ'), undefined);
+  assert.ok(c.cached('G4ABC'));
+});
+
 test('the lookup itself goes through parseQrzCallsign (one parse, not two)', () => {
   const src = readSrc(path.join(__dirname, '..', 'lib', 'qrz.js'));
   const body = src.slice(src.indexOf('async _doLookup('), src.indexOf('async batchLookup('));

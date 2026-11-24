@@ -5,7 +5,7 @@
 // temperature and a short condition at the centre of the station's 4-character
 // grid square, never a street position, and keeps each answer 30 minutes per
 // square. It is asked only when the window shows a station, and only when the
-// operator has turned weather on. fetch is stubbed: no network here.
+// operator has not turned weather off. fetch is stubbed: no network here.
 // Run: node test/contact-weather-test.js
 const assert = require('assert');
 const path = require('path');
@@ -40,7 +40,7 @@ console.log('Contact details: weather');
 
 test('asks Open-Meteo for the square centre only, current temperature and condition, local time zone', async () => {
   const fetch = stubFetch(answer);
-  const c = W.createWeatherClient({ fetch, now: () => 0 });
+  const c = W.createWeatherClient({ fetch, now: () => 1000 });
   const r = await c.current({ lat: 42.1014, lon: -72.5898 });
   assert.strictEqual(fetch.calls.length, 1);
   const u = new URL(fetch.calls[0].url);
@@ -50,7 +50,7 @@ test('asks Open-Meteo for the square centre only, current temperature and condit
   assert.strictEqual(u.searchParams.get('current'), 'temperature_2m,weather_code,is_day');
   assert.strictEqual(u.searchParams.get('timezone'), 'auto');
   assert.ok(!/call|name|key/i.test(fetch.calls[0].url), 'nothing but the position');
-  assert.deepStrictEqual(r, { tempC: 6.3, code: 61, text: 'Light rain', isDay: true, utcOffsetSeconds: -18000, timezone: 'America/New_York', grid4: 'FN32' });
+  assert.deepStrictEqual(r, { tempC: 6.3, code: 61, text: 'Light rain', isDay: true, utcOffsetSeconds: -18000, timezone: 'America/New_York', grid4: 'FN32', fetchedAt: 1000 }, 'fetchedAt: when it was asked, for "4 min ago"');
 });
 
 test('one answer per grid square for 30 minutes, then asked again', async () => {

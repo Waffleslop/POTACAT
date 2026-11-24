@@ -1,12 +1,13 @@
 #!/usr/bin/env node
 'use strict';
-// Contact details (Discord "Jump", 2026-11-23): one window that shows the
-// station behind a callsign, opened from the Logbook and from the Log QSO
-// window. lib/contact-card.js turns a QRZ record, the log's history with the
-// call, the clicked QSO and the operator's own grid into what the window
-// shows: the worked / confirmed line, bearing short and long path, distance in
-// the operator's units, local time, the mailing address and the QSL routes.
-// A field nobody knows is left out, never shown empty.
+// Contact details (Discord "Jump", 2026-11-23; layout approved by Casey the
+// same day): one window that shows the station behind a callsign, opened from
+// the Logbook and from Log QSO. lib/contact-card.js turns a QRZ record, the
+// log's history with the call, the clicked QSO and the operator's own grid
+// into what the window shows: the status pill and the worked / confirmed
+// line, the Operator card, Path from you (short and long path, distance in
+// the operator's units), At their end (local time, weather), Station, QSL and
+// Your contacts. A field nobody knows is left out, never shown empty.
 // Run: node test/contact-card-test.js
 const assert = require('assert');
 const path = require('path');
@@ -23,49 +24,54 @@ function test(name, fn) {
 const qrzFull = parseQrzCallsign(readSrc(path.join(__dirname, 'fixtures', 'qrz-callsign-subscriber.xml')));
 const qrzThin = parseQrzCallsign(readSrc(path.join(__dirname, 'fixtures', 'qrz-callsign-nonsubscriber.xml')));
 const history = [
-  { date: '20260720', time: '1432', band: '20m', mode: 'SSB', ref: 'POTA US-1234', qsl: 'L' },
-  { date: '20250301', time: '0910', band: '40M', mode: 'CW', ref: '', qsl: '' },
+  { date: '20261123', time: '2347', band: '20m', mode: 'FT8', ref: '', qsl: '', rstSent: '-08', rstRcvd: '-12' },
+  { date: '20260720', time: '1402', band: '20M', mode: 'SSB', ref: 'POTA US-1234', qsl: 'L', rstSent: '59', rstRcvd: '57' },
+  { date: '20260302', time: '0115', band: '40m', mode: 'CW', ref: '', qsl: '', rstSent: '599', rstRcvd: '579' },
 ];
 const prefixUS = { entity: 'United States', dxcc: 291, cqZone: 5, ituZone: 8, lat: 37.53, lon: -91.67, source: 'cty' };
-// 2026-11-23 15:00 UTC
-const NOW = Date.UTC(2026, 10, 23, 15, 0, 0);
+const NOW = Date.UTC(2026, 10, 23, 15, 0, 0); // 2026-11-23 15:00 UTC
 const base = { call: 'W1XYZ', qrz: qrzFull, qrzState: 'subscriber', history, ownGrid: 'FM18lv', distUnit: 'mi', prefix: prefixUS, now: NOW };
-const fact = (vm, key) => { const f = vm.facts.find((x) => x.key === key); return f ? f.value : undefined; };
+const cell = (vm, label) => { const r = vm.station.find((x) => x.label === label); return r ? r.value : undefined; };
 
 console.log('Contact details: the view model');
 
-test('header: worked twice, the last contact, confirmed by LoTW', () => {
+test('header: Confirmed pill, and the line names the confirmed contact', () => {
   const vm = CC.build(base);
   assert.strictEqual(vm.call, 'W1XYZ');
-  assert.strictEqual(vm.header.text, 'Worked 2 times, last on 2026-07-20, 20m SSB. Confirmed by LoTW.');
-  assert.strictEqual(vm.header.confirmed, true);
-  assert.strictEqual(vm.header.count, 2);
+  assert.strictEqual(vm.status, 'confirmed');
+  assert.strictEqual(vm.statusLabel, 'Confirmed');
+  assert.strictEqual(vm.headline, 'Worked 3 times. Confirmed 2026-07-20 on 20m SSB by LoTW.');
 });
 
-test('header: once, not confirmed; never; confirmed by card and LoTW', () => {
-  assert.strictEqual(CC.build({ ...base, history: [history[1]] }).header.text, 'Worked once, last on 2025-03-01, 40m CW. Not confirmed yet.');
+test('header: Worked pill when nothing is confirmed; nothing when never worked', () => {
+  const once = CC.build({ ...base, history: [history[0]] });
+  assert.strictEqual(once.status, 'worked');
+  assert.strictEqual(once.statusLabel, 'Worked');
+  assert.strictEqual(once.headline, 'Worked once, 2026-11-23 on 20m FT8. Not confirmed yet.');
+  assert.strictEqual(CC.build({ ...base, history: [history[0], history[2]] }).headline, 'Worked 2 times, last 2026-11-23 on 20m FT8. Not confirmed yet.');
   const none = CC.build({ ...base, history: [] });
-  assert.strictEqual(none.header.text, 'Not worked before.');
-  assert.strictEqual(none.header.confirmed, false);
-  const both = CC.build({ ...base, history: [{ ...history[0], qsl: 'P' }, { ...history[1], qsl: 'LE' }] });
-  assert.strictEqual(both.header.text, 'Worked 2 times, last on 2026-07-20, 20m SSB. Confirmed by LoTW, QSL card and eQSL.');
+  assert.strictEqual(none.status, 'new');
+  assert.strictEqual(none.statusLabel, '');
+  assert.strictEqual(none.headline, 'Not worked before.');
+  const both = CC.build({ ...base, history: [{ ...history[1], qsl: 'LP' }] });
+  assert.strictEqual(both.headline, 'Worked once. Confirmed 2026-07-20 on 20m SSB by LoTW and QSL card.');
 });
 
-test('bearing short and long path, and distance in miles', () => {
-  const vm = CC.build(base);
-  // FM18lv (Washington DC area) to 42.1014, -72.5898 (Springfield MA)
-  assert.ok(vm.path, 'a path');
-  assert.strictEqual(vm.path.shortPath, '045°');
-  assert.strictEqual(vm.path.longPath, '225°');
-  assert.strictEqual(vm.path.distance, '322 mi');
-  assert.strictEqual(vm.path.longDistance, '24,552 mi');
-  assert.strictEqual(vm.path.approx, false);
+test('Path from you: short path, long path, distance in miles', () => {
+  const p = CC.build(base).path;
+  // FM18lv (Washington DC) to 42.1014, -72.5898 (Springfield MA)
+  assert.strictEqual(p.shortDeg, 45);
+  assert.strictEqual(p.shortPath, '45°');
+  assert.strictEqual(p.longPath, '225°');
+  assert.strictEqual(p.distance, '322 mi');
+  assert.strictEqual(p.longDistance, '24,552 mi');
+  assert.strictEqual(p.approx, false);
 });
 
 test('distance in kilometres when the operator chose km', () => {
-  const vm = CC.build({ ...base, distUnit: 'km' });
-  assert.strictEqual(vm.path.distance, '518 km');
-  assert.strictEqual(vm.path.longDistance, '39,512 km');
+  const p = CC.build({ ...base, distUnit: 'km' }).path;
+  assert.strictEqual(p.distance, '518 km');
+  assert.strictEqual(p.longDistance, '39,512 km');
 });
 
 test('no own grid: no path (nothing made up)', () => {
@@ -73,130 +79,159 @@ test('no own grid: no path (nothing made up)', () => {
   assert.strictEqual(CC.build({ ...base, ownGrid: 'nonsense' }).path, null);
 });
 
-test('no QRZ position: the log grid, else the prefix (marked approximate)', () => {
-  const fromLog = CC.build({ ...base, qrz: null, qrzState: 'off', record: { CALL: 'W1XYZ', GRIDSQUARE: 'FN32' } });
+test('no QRZ position: the log grid, else the prefix, said as "about"', () => {
+  const fromLog = CC.build({ ...base, qrz: null, qrzState: 'off', history: [], record: { CALL: 'W1XYZ', GRIDSQUARE: 'FN32' } });
   assert.strictEqual(fromLog.path.approx, false);
-  assert.strictEqual(fromLog.path.from, 'grid FN32');
-  const fromPrefix = CC.build({ ...base, qrz: null, qrzState: 'off' });
+  const fromPrefix = CC.build({ ...base, qrz: null, qrzState: 'off', history: [] });
   assert.strictEqual(fromPrefix.path.approx, true);
-  assert.strictEqual(fromPrefix.path.from, 'United States (from the callsign)');
+  assert.ok(/^about [\d,]+ mi$/.test(fromPrefix.path.distance), fromPrefix.path.distance);
 });
 
-test('name, nickname and licence class', () => {
-  const vm = CC.build(base);
-  assert.strictEqual(vm.name, 'Jane Sample');
-  assert.strictEqual(vm.nickname, 'Jan');
-  assert.strictEqual(vm.licence, 'Amateur Extra');
-  // Outside the US the class is shown as QRZ gives it.
-  assert.strictEqual(CC.build({ ...base, qrz: { ...qrzFull, land: 'England', class: 'Full' } }).licence, 'Full');
+test('At their end: QRZ offset with summer time is a guess; standard time in November', () => {
+  const nov = CC.build(base).time;
+  assert.strictEqual(nov.offsetMinutes, -300);
+  assert.strictEqual(nov.text, '10:00');
+  assert.strictEqual(nov.utc, 'UTC−5');
+  const jul = CC.build({ ...base, now: Date.UTC(2026, 6, 1, 15, 0, 0) }).time;
+  assert.strictEqual(jul.offsetMinutes, -240, 'summer time adds an hour');
+  assert.strictEqual(jul.approx, true);
+  assert.strictEqual(jul.sub, 'local time, about UTC−4');
 });
 
-test('mailing address for QSL cards, with the text the Copy button copies', () => {
-  const vm = CC.build(base);
-  assert.deepStrictEqual(vm.address.lines, ['Jane Sample', 'c/o Club Station', '12 Example Road', 'Springfield, MA 01101', 'United States']);
-  assert.strictEqual(vm.address.copy, 'Jane Sample\nc/o Club Station\n12 Example Road\nSpringfield, MA 01101\nUnited States');
-  assert.strictEqual(fact(vm, 'county'), 'Hampden');
-});
-
-test('location facts: grid, DXCC number and name, zones, IOTA, and the park from the log', () => {
-  const vm = CC.build(base);
-  assert.strictEqual(fact(vm, 'grid'), 'FN32rc');
-  assert.strictEqual(fact(vm, 'dxcc'), '291 United States');
-  assert.strictEqual(fact(vm, 'zones'), 'CQ 5, ITU 8');
-  assert.strictEqual(fact(vm, 'iota'), 'NA-046');
-  assert.strictEqual(fact(vm, 'refs'), 'POTA US-1234 (last contact)');
-});
-
-test('QSL routes, e-mail, the QRZ page and aliases', () => {
-  const vm = CC.build(base);
-  assert.strictEqual(fact(vm, 'qslvia'), 'LoTW, Mail');
-  assert.strictEqual(fact(vm, 'qslmgr'), 'Direct or bureau');
-  assert.strictEqual(vm.email, 'jane@example.invalid');
-  assert.deepStrictEqual(vm.links, [{ label: 'QRZ page', url: 'https://www.qrz.com/db/W1XYZ' }]);
-  assert.strictEqual(fact(vm, 'aliases'), 'W1XYZ/P, KA1XYZ');
-});
-
-test('photo: only an https address is used', () => {
-  assert.strictEqual(CC.build(base).photo, 'https://cdn-xml.qrz.com/z/w1xyz/photo.jpg');
-  assert.strictEqual(CC.build({ ...base, qrz: { ...qrzFull, image: 'http://x/y.jpg' } }).photo, '');
-  assert.strictEqual(CC.build({ ...base, qrz: { ...qrzFull, image: 'javascript:alert(1)' } }).photo, '');
-});
-
-test('local time: QRZ offset with summer time is approximate; outside summer it is the offset', () => {
-  const nov = CC.build(base); // November: Eastern standard time, -5
-  assert.strictEqual(nov.time.offsetMinutes, -300);
-  assert.strictEqual(nov.time.text, '10:00');
-  assert.strictEqual(nov.time.utc, 'UTC-5');
-  const jul = CC.build({ ...base, now: Date.UTC(2026, 6, 1, 15, 0, 0) });
-  assert.strictEqual(jul.time.offsetMinutes, -240, 'summer time adds an hour');
-  assert.strictEqual(jul.time.approx, true);
-});
-
-test('local time: from the weather service when it answered (exact), else from longitude (approximate)', () => {
-  const w = CC.build({ ...base, weather: { tempC: 12.4, text: 'Light rain', utcOffsetSeconds: -18000 } });
-  assert.strictEqual(w.time.offsetMinutes, -300);
+test('At their end: the weather service time zone is exact; longitude says so', () => {
+  const w = CC.build({ ...base, weather: { tempC: 3.3, text: 'Clear', utcOffsetSeconds: -18000, fetchedAt: NOW - 4 * 60000 } });
   assert.strictEqual(w.time.approx, false);
-  const lon = CC.build({ ...base, qrz: null, qrzState: 'off', record: { CALL: 'W1XYZ', GRIDSQUARE: 'FN32' } });
-  assert.strictEqual(lon.time.approx, true);
-  assert.strictEqual(lon.time.offsetMinutes, -300, 'longitude -71 is UTC-5');
+  assert.strictEqual(w.time.sub, 'local time, UTC−5');
+  const lon = CC.build({ ...base, qrz: null, qrzState: 'off', history: [], record: { CALL: 'W1XYZ', GRIDSQUARE: 'FN32' } }).time;
+  assert.strictEqual(lon.approx, true);
+  assert.strictEqual(lon.offsetMinutes, -300, 'longitude -73 is UTC-5');
+  assert.strictEqual(lon.sub, 'local time, from longitude');
 });
 
-test('weather: in the operator units, and hidden when there is none', () => {
-  const w = { tempC: 12.4, text: 'Light rain', utcOffsetSeconds: -18000 };
-  assert.strictEqual(CC.build({ ...base, weather: w }).weather.text, '54 °F, light rain');
-  assert.strictEqual(CC.build({ ...base, distUnit: 'km', weather: w }).weather.text, '12 °C, light rain');
+test('weather: in the operator units, with its source and age; none when there is none', () => {
+  const w = { tempC: 3.3, text: 'Clear', utcOffsetSeconds: -18000, fetchedAt: NOW - 4 * 60000 };
+  const vm = CC.build({ ...base, weather: w });
+  assert.strictEqual(vm.weather.text, '38°F, clear');
+  assert.strictEqual(vm.weather.source, 'Open-Meteo, 4 min ago');
+  assert.strictEqual(CC.build({ ...base, distUnit: 'km', weather: w }).weather.text, '3°C, clear');
   assert.strictEqual(CC.build(base).weather, null);
 });
 
-test('the clicked Logbook contact: its own line, its notes, its park first', () => {
-  const record = { CALL: 'W1XYZ', QSO_DATE: '20260720', TIME_ON: '143200', BAND: '20M', MODE: 'SSB', SIG: 'POTA', SIG_INFO: 'US-0001', COMMENT: 'Mobile, great signal' };
-  const vm = CC.build({ ...base, record });
-  assert.strictEqual(vm.thisContact, '2026-07-20 14:32 UTC, 20m SSB, POTA US-0001');
-  assert.strictEqual(vm.notes, 'Mobile, great signal');
-  assert.strictEqual(fact(vm, 'refs'), 'POTA US-0001 (this contact)');
+test('Operator card: photo, name, town, licence and grid pills, notes and aliases', () => {
+  const record = { CALL: 'W1XYZ', QSO_DATE: '20260720', TIME_ON: '140200', BAND: '20M', MODE: 'SSB', COMMENT: 'club call' };
+  const o = CC.build({ ...base, record }).operator;
+  assert.strictEqual(o.photo, 'https://cdn-xml.qrz.com/z/w1xyz/photo.jpg');
+  assert.strictEqual(o.name, 'Jane Sample');
+  assert.strictEqual(o.town, 'Springfield, MA, United States');
+  assert.deepStrictEqual(o.pills, [{ text: 'Amateur Extra', kind: '' }, { text: 'Goes by Jan', kind: '' }, { text: 'FN32rc', kind: 'grid' }]);
+  assert.deepStrictEqual(o.notes, ['Notes: club call', 'Also uses: W1XYZ/P, KA1XYZ']);
+  assert.strictEqual(o.note, '', 'a subscriber sees no subscription line');
+  assert.strictEqual(CC.build({ ...base, qrz: { ...qrzFull, land: 'England', class: 'Full' } }).operator.pills[0].text, 'Full');
 });
 
-test('without QRZ: name and town from the log, DXCC and zones from the prefix, a quiet note', () => {
+test('photo: only an https address is used', () => {
+  assert.strictEqual(CC.build({ ...base, qrz: { ...qrzFull, image: 'http://x/y.jpg' } }).operator.photo, '');
+  assert.strictEqual(CC.build({ ...base, qrz: { ...qrzFull, image: 'javascript:alert(1)' } }).operator.photo, '');
+});
+
+test('Station card: county, state, DXCC, zones and the four programs', () => {
+  const vm = CC.build(base);
+  assert.deepStrictEqual(vm.station.map((r) => r.label), ['County', 'State', 'DXCC', 'CQ / ITU zone', 'POTA', 'SOTA', 'WWFF', 'IOTA']);
+  assert.strictEqual(cell(vm, 'County'), 'Hampden');
+  assert.strictEqual(cell(vm, 'State'), 'MA');
+  assert.strictEqual(cell(vm, 'DXCC'), '291 United States');
+  assert.strictEqual(cell(vm, 'CQ / ITU zone'), '5 / 8');
+  assert.strictEqual(cell(vm, 'POTA'), 'US-1234', 'from the log');
+  assert.strictEqual(cell(vm, 'SOTA'), '—');
+  assert.strictEqual(cell(vm, 'IOTA'), 'NA-046');
+  assert.strictEqual(vm.stationNote, '');
+});
+
+test('the clicked Logbook contact: its own park first, and its row marked in Your contacts', () => {
+  const record = { CALL: 'W1XYZ', QSO_DATE: '20260720', TIME_ON: '140200', BAND: '20M', MODE: 'SSB', SIG: 'POTA', SIG_INFO: 'US-0001' };
+  const vm = CC.build({ ...base, record });
+  assert.strictEqual(cell(vm, 'POTA'), 'US-0001');
+  assert.deepStrictEqual(vm.contacts.map((c) => !!c.current), [false, true, false]);
+});
+
+test('QSL card: via, mailing address with what Copy copies, e-mail', () => {
+  const q = CC.build(base).qsl;
+  assert.strictEqual(q.available, true);
+  assert.strictEqual(q.via, 'LoTW, Mail');
+  assert.deepStrictEqual(q.address.lines, ['Jane Sample', 'c/o Club Station', '12 Example Road', 'Springfield, MA 01101, United States']);
+  assert.strictEqual(q.address.copy, 'Jane Sample\nc/o Club Station\n12 Example Road\nSpringfield, MA 01101, United States');
+  assert.strictEqual(q.email, 'jane@example.invalid');
+  assert.strictEqual(q.note, '');
+});
+
+test('Your contacts: date, band, mode, sent / received, park, status', () => {
+  assert.deepStrictEqual(CC.build(base).contacts, [
+    { when: '2026-11-23 23:47', band: '20m', mode: 'FT8', rst: '-08 / -12', park: '—', status: 'Worked' },
+    { when: '2026-07-20 14:02', band: '20m', mode: 'SSB', rst: '59 / 57', park: 'US-1234', status: 'Confirmed' },
+    { when: '2026-03-02 01:15', band: '40m', mode: 'CW', rst: '599 / 579', park: '—', status: 'Worked' },
+  ]);
+});
+
+test('header buttons and the source line', () => {
+  const vm = CC.build({ ...base, call: 'W1XYZ/P' });
+  assert.strictEqual(vm.qrzUrl, 'https://www.qrz.com/db/W1XYZ', 'the base call');
+  assert.strictEqual(vm.full, true);
+  assert.strictEqual(vm.source, 'Looked up on QRZ.com (XML subscription).');
+  assert.strictEqual(CC.build({ ...base, qrz: null, qrzState: 'off' }).qrzUrl, '', 'no QRZ, no QRZ button');
+});
+
+test('without QRZ: log and prefix data, the quiet subscription line, the QSL box says where it comes from', () => {
   const record = { CALL: 'W1XYZ', NAME: 'Jane', QTH: 'Springfield', STATE: 'MA', GRIDSQUARE: 'FN32' };
-  const vm = CC.build({ ...base, qrz: null, qrzState: 'off', record });
-  assert.strictEqual(vm.name, 'Jane');
-  assert.strictEqual(vm.photo, '');
-  assert.strictEqual(vm.address, null, 'no mailing address without QRZ');
-  assert.strictEqual(fact(vm, 'qth'), 'Springfield, MA');
-  assert.strictEqual(fact(vm, 'dxcc'), '291 United States');
-  assert.strictEqual(fact(vm, 'zones'), 'CQ 5, ITU 8');
-  assert.strictEqual(vm.qrzNote, 'Turn on QRZ.com lookups (Settings > Station) for the name and town. A QRZ XML Data subscription adds the photo and the mailing address.');
+  const vm = CC.build({ ...base, qrz: null, qrzState: 'off', history: [history[0]], record });
+  assert.strictEqual(vm.full, false);
+  assert.strictEqual(vm.operator.photo, '');
+  assert.strictEqual(vm.operator.name, 'Jane');
+  assert.strictEqual(vm.operator.town, 'Springfield, MA, United States');
+  assert.deepStrictEqual(vm.operator.pills, [{ text: 'FN32', kind: 'grid' }]);
+  assert.strictEqual(vm.operator.note, 'A QRZ XML subscription adds the photo, full name and mailing address. Turn on QRZ.com lookups in Settings > Station.');
+  assert.deepStrictEqual(vm.station.map((r) => r.label), ['State', 'DXCC', 'CQ / ITU zone', 'POTA']);
+  assert.strictEqual(vm.stationNote, 'From your log and the callsign prefix. Fields nobody knows are left out.');
+  assert.deepStrictEqual(vm.qsl, { available: false, via: '', address: null, email: '', note: 'Mailing address and QSL route come from QRZ XML.' });
+  assert.strictEqual(vm.source, 'No QRZ.com lookup: from your log and the callsign prefix.');
 });
 
 test('a QRZ login with no XML subscription: what QRZ gave, and one quiet line', () => {
-  const vm = CC.build({ ...base, call: 'G4ABC', qrz: qrzThin, qrzState: 'no-subscription', history: [], prefix: { entity: 'England', dxcc: 223, cqZone: 14, ituZone: 27, lat: 52.8, lon: -1.5, source: 'cty' } });
-  assert.strictEqual(vm.name, "Peter O'Brien");
-  assert.strictEqual(fact(vm, 'qth'), 'Bristol, England');
-  assert.strictEqual(vm.address, null);
-  assert.strictEqual(vm.qrzNote, 'A QRZ XML Data subscription adds the photo and the mailing address.');
+  const vm = CC.build({ ...base, call: 'G4ABC', qrz: qrzThin, qrzState: 'no-subscription', history: [], prefix: { entity: 'England', dxcc: 223, cqZone: 14, ituZone: 27, lat: 52.8, lon: -1.5 } });
+  assert.strictEqual(vm.operator.name, "Peter O'Brien");
+  assert.strictEqual(vm.operator.town, 'Bristol, England');
+  assert.strictEqual(vm.qsl.address, null);
+  assert.strictEqual(vm.operator.note, 'A QRZ XML subscription adds the photo, full name and mailing address.');
+  assert.strictEqual(vm.source, 'Looked up on QRZ.com, without an XML subscription.');
 });
 
-test('a subscriber with a full record: no note at all; a call QRZ does not know says so', () => {
-  assert.strictEqual(CC.build(base).qrzNote, '');
-  assert.strictEqual(CC.build({ ...base, qrz: null }).qrzNote, 'QRZ.com has no record for W1XYZ.');
-  assert.strictEqual(CC.build({ ...base, qrz: null, qrzState: 'login-failed' }).qrzNote, 'QRZ.com did not accept the login, so this shows only what the log knows. Check it in Settings > Station.');
+test('a subscriber QRZ does not know, and a refused login, say so', () => {
+  assert.strictEqual(CC.build({ ...base, qrz: null }).operator.note, 'QRZ.com has no record for W1XYZ.');
+  assert.strictEqual(CC.build({ ...base, qrz: null, qrzState: 'login-failed' }).operator.note, CC.NOTE_LOGIN);
 });
 
 test('missing fields are left out, never shown empty', () => {
   const vm = CC.build({ call: 'XX9XX', qrz: null, qrzState: 'off', history: [], ownGrid: '', distUnit: 'mi', prefix: null, now: NOW });
-  assert.deepStrictEqual(vm.facts, []);
-  assert.strictEqual(vm.name, '');
+  assert.deepStrictEqual(vm.station, [{ label: 'POTA', value: '—' }]);
+  assert.strictEqual(vm.operator.name, '');
+  assert.strictEqual(vm.operator.town, '');
+  assert.deepStrictEqual(vm.operator.pills, []);
   assert.strictEqual(vm.path, null);
   assert.strictEqual(vm.time, null);
-  assert.strictEqual(vm.email, '');
-  for (const f of CC.build(base).facts) assert.ok(String(f.value).trim(), f.key + ' has a value');
+  assert.deepStrictEqual(vm.contacts, []);
+  for (const r of CC.build(base).station) assert.ok(r.value.trim(), r.label + ' has a value');
 });
 
-test('where(): the position the weather is asked for, to a grid square only', () => {
+test('summaryLine: the one line under the Log QSO call field', () => {
+  assert.strictEqual(CC.summaryLine(base), 'Jane Sample, Springfield, MA, United States. 45° 322 mi. Worked 3 times, confirmed.');
+  assert.strictEqual(CC.summaryLine({ ...base, history: [] }), 'Jane Sample, Springfield, MA, United States. 45° 322 mi. Not worked before.');
+  assert.strictEqual(CC.summaryLine({ ...base, qrz: null, qrzState: 'off', history: [history[0]], ownGrid: '', prefix: null }), 'Worked once, not confirmed yet.');
+});
+
+test('where(): the weather is asked for a grid square centre only', () => {
   const p = CC.where(base);
   assert.strictEqual(p.grid4, 'FN32');
   assert.ok(Math.abs(p.lat - 42.5) < 0.01 && Math.abs(p.lon - -73) < 0.01, 'the 4-character square centre, not the street');
-  assert.strictEqual(CC.where({ ...base, qrz: null, prefix: null }), null);
+  assert.strictEqual(CC.where({ ...base, qrz: null, history: [], prefix: null }), null);
 });
 
 test('this test is in the list CI runs', () => {

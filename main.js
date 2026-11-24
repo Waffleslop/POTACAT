@@ -38009,6 +38009,8 @@ function buildQsoDetailsIndex() {
         ref: adifRef(rec),
         // For Contact details: confirmed or not, and what the log knows of the station.
         qsl: qslLetters(rec),
+        rstSent: rec.RST_SENT || '',
+        rstRcvd: rec.RST_RCVD || '',
         name: rec.NAME || '',
         qth: rec.QTH || '',
         state: rec.STATE || '',
@@ -38046,6 +38048,9 @@ function appendToQsoDetailsIndex(qsoData) {
     band: qsoData.band || '',
     comment: qsoData.comment || '',
     ref,
+    rstSent: qsoData.rstSent || '',
+    rstRcvd: qsoData.rstRcvd || '',
+    grid: qsoData.gridsquare || qsoData.grid || '',
   };
   if (!qsoDetails.has(key)) qsoDetails.set(key, []);
   // Insert at front (newest-first invariant).
@@ -38065,7 +38070,8 @@ function lookupPastQsos(call, limit) {
 // shows; it never writes the log. QRZ through the existing client (one more
 // lookup at most, for a record cached before the detail fields), the log's
 // own history, cty.dat for the prefix, and Open-Meteo weather only when the
-// operator turned it on (settings.contactWeather, off to begin with).
+// operator turned it off (settings.contactWeather === false; on to begin with,
+// Casey 2026-11-23). Open-Meteo gets the grid-square centre, never the call.
 
 /** What cty.dat says about a call: entity, DXCC number, zones and a centre. */
 function contactPrefixInfo(call) {
@@ -38099,7 +38105,7 @@ async function contactCardData(req, opts) {
     ownGrid: settings.grid || '', distUnit: settings.distUnit === 'km' ? 'km' : 'mi',
     prefix: contactPrefixInfo(call), now: Date.now(), weather: null,
   };
-  const weatherOn = settings.contactWeather === true;
+  const weatherOn = settings.contactWeather !== false; // on unless turned off (Casey, 2026-11-23)
   if (weatherOn && opts && opts.withWeather) {
     try { input.weather = await contactWeather.current(ContactCard.where(input)); } catch { input.weather = null; }
   }
@@ -38110,9 +38116,11 @@ async function contactCardData(req, opts) {
 }
 
 /** Fill the window: everything at once, then again with the weather when it is on. */
-async function contactCardRefresh() {
+async function contactCardRefresh(opts) {
   const req = contactCardReq;
   if (!req || !contactCardWin || contactCardWin.isDestroyed()) return;
+  // Refresh: ask QRZ again for this call (the log is read fresh every time).
+  if (opts && opts.fresh) qrz.forget(JtcatParser.baseCall(req.call));
   const seq = ++contactCardSeq;
   const send = (vm) => {
     if (seq !== contactCardSeq || !contactCardWin || contactCardWin.isDestroyed()) return;
@@ -38141,15 +38149,15 @@ function openContactCard(msg) {
     return;
   }
   contactCardWin = new BrowserWindow({
-    minWidth: 380, minHeight: 360, // never smaller than its own controls
-    width: 460, height: 660, title: 'Contact details',
+    minWidth: 520, minHeight: 480, // the cards stack below 900 px wide (renderer/contact-popout.html)
+    width: 1120, height: 860, title: 'Contact details',
     backgroundColor: getThemeWindowBg(),
     show: false,
     ...windowFrame(),
     icon: getIconPath(),
     webPreferences: { preload: path.join(__dirname, 'preload-contact-popout.js'), contextIsolation: true, nodeIntegration: false },
   });
-  rememberWindowPlace(contactCardWin, 'contactCardBounds', { minWidth: 380, minHeight: 360 });
+  rememberWindowPlace(contactCardWin, 'contactCardBounds', { minWidth: 520, minHeight: 480 });
   contactCardWin.setMenuBarVisibility(false);
   contactCardWin.loadFile(path.join(__dirname, 'renderer', 'contact-popout.html'), { query: themeQuery() });
   contactCardWin.once('ready-to-show', () => { if (contactCardWin && !contactCardWin.isDestroyed()) contactCardWin.show(); });
@@ -55079,17 +55087,23 @@ function cloudShackNotice(text, kind) {
     const pastQsos = limit ? all.slice(0, limit) : all;
     // The bands and modes already worked with this call (#108, AE5JE).
     const workedMatrix = WorkedMatrix.buildWorkedMatrix(WorkedMatrix.entriesForCall(workedQsos, trimmed, JtcatParser.baseCall));
-    return { qrz: qrzInfo, pastQsos, totalQsos: all.length, workedMatrix };
+    // The one line under the call field (Contact details): name, town, beam, distance, worked.
+    const summary = ContactCard.summaryLine({
+      call: trimmed, qrz: qrzInfo, qrzState: qrzInfo ? 'subscriber' : 'off', history: all,
+      ownGrid: settings.grid || '', distUnit: settings.distUnit === 'km' ? 'km' : 'mi', prefix: contactPrefixInfo(trimmed),
+    });
+    return { qrz: qrzInfo, pastQsos, totalQsos: all.length, workedMatrix, summary };
   });
 
   // Contact details: Details on a Logbook row and beside the Log QSO call field.
   ipcMain.on('contact-card-open', (_e, req) => openContactCard(req));
-  // The window's own switch for weather (off to begin with; the page says what it sends).
+  // The window's own switch for weather (the same setting as Settings > Station).
   ipcMain.on('contact-card-weather', (_e, on) => {
     settings.contactWeather = on === true;
     saveSettings(settings);
     contactCardRefresh();
   });
+  ipcMain.on('contact-card-refresh', () => contactCardRefresh({ fresh: true }));
   ipcMain.on('contact-card-minimize', () => { if (contactCardWin && !contactCardWin.isDestroyed()) contactCardWin.minimize(); });
   ipcMain.on('contact-card-close', () => { if (contactCardWin && !contactCardWin.isDestroyed()) contactCardWin.close(); });
 
