@@ -436,6 +436,7 @@ const TESTS = [
   'test/winlink-vara-test.js',
   'test/winlink-vara-anywhere-test.js', // #287: VARA HF and VARA FM on Linux, macOS and Windows, at a host and port; a fake VARA TNC (real Pat when its binary is present)
   'test/winlink-connect-test.js', // #128: /api/connect over http.request with no headers timeout; VARA and ARDOP send the same request
+  'test/direwolf-skipped-path-log-test.js', // #1031: a configured winlinkDirewolfPath that is missing or not executable is named in the log
   'test/direwolf-agw-monitor-test.js', // #128: what Dire Wolf heard, over its AGW port's monitor mode
   'test/packet-link-close-test.js', // #300: a packet link is closed (DISC answered) before Dire Wolf stops; a call on a link the gateway still holds is ended, not retried
   'test/packet-rig-mode-test.js', // #128 N5XHI FT-857D: Packet mode on the radio per rig; Automatic is the old behaviour for every family

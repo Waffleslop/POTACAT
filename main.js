@@ -11664,7 +11664,14 @@ function findPat() {
   }), WinlinkPat.patBinaryName(process.platform));
 }
 
+let _direwolfSkipLogged = '';
 function findDirewolf() {
+  // #1031: say so once when a configured path is ignored (this also runs on status polls).
+  const skipMsg = DirewolfProcess.skippedConfiguredPathMessage(settings, fs.statSync, (p) => fs.accessSync(p, fs.constants.X_OK));
+  if (skipMsg !== _direwolfSkipLogged) {
+    _direwolfSkipLogged = skipMsg;
+    if (skipMsg) console.log('[Winlink] ' + skipMsg);
+  }
   return _findBinary(DirewolfProcess.direwolfPathCandidates({
     settings, isPackaged: app.isPackaged, resourcesPath: process.resourcesPath, appDir: __dirname, platform: process.platform,
   }), DirewolfProcess.direwolfBinaryName(process.platform));
