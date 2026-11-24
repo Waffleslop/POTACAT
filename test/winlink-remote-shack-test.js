@@ -41,6 +41,11 @@ const sample = {
   'winlink-cmd-contact-group': [{ op: 'save', g: { name: 'ARES', members: ['W1AW', 'K3SBP'] } }],
   'winlink-cmd-favourite': [{ op: 'add', call: 'W5ABC', mode: 'ardop', dialKhz: 7102, url: '' }],
   'winlink-cmd-accept-notice': [],
+  // Winlink catalog requests (docs/winlink-catalog.md): the shack's catalog, picks and Outbox.
+  'winlink-catalog-get': [],
+  'winlink-catalog-request': [['PROP_3DAY', 'PROP_WWV']],
+  'winlink-catalog-request-list': [],
+  'winlink-catalog-star': [{ id: 'PROP_WWV', on: true }],
 };
 
 test('every invoke the window makes has a sample here', () => {
