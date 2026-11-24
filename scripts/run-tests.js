@@ -55,6 +55,9 @@ const TESTS = [
   'test/lz3aw-round5-test.js',
   'test/call-filter-test.js',
   'test/desktop-ux-test.js',
+  'test/qso-sounds-test.js', // #1041: which sound for which contact, the milestones (1/10/25/50/100/250; 500 retired for the phone), defaults, the qso-milestone message
+  'test/sound-guard-test.js', // #1041 the transmit guard: no sound on the radio's sound card, none while transmitting (held 3 s, then dropped)
+  'test/qso-sound-files-test.js', // #1041: renderer/sounds/*.wav are byte for byte what scripts/make-qso-sounds.js renders
   'test/host-port-test.js',
   'test/serial-callout-twin-test.js',
   'test/clock-offset-test.js',

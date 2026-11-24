@@ -404,6 +404,7 @@ const ActivationClock = require('./lib/activation-clock'); // #147: a forgotten 
 const ActivationAnnounce = require('./lib/activation-announce'); // #508: which saved contacts join the live activation list
 const QsoExpand = require('./lib/qso-expand'); // one contact -> its ADIF records (logContact)
 const LogAfterWrite = require('./lib/log-after-write'); // #732: ECHOCAT's log-ok at the disk write, not after the uploads
+const QsoSounds = require('./lib/qso-sounds'); // #1041: contact sounds and daily milestones (what, never when or where: lib/sound-guard.js)
 const LogQsoReplay = require('./lib/log-qso-replay'); // #733: log-qso is idempotent by uuid
 const QsoLogSource = require('./lib/qso-log-source'); // APP_POTACAT_LOG_SOURCE: ECHOCAT or blank (#634)
 const { dxccCodeForEntity } = require('./lib/dxcc-codes'); // cty.dat entity -> ADIF DXCC number (#554)
@@ -950,6 +951,9 @@ const GLOBAL_KEYS = new Set([
   'appearance',        // 'light' | 'dark' | 'system' (#376, lib/app-theme.js)
   'themeLight', 'themeDark', // the chosen theme for each mode, ECHOCAT's ids
   'themeLegacy',       // the pre-#376 theme values, remembered once by the migration
+  // #1041 Settings > Sounds: this computer's speakers, so the same for every operator on it.
+  'soundsOn', 'soundContact', 'soundMilestones', 'milestoneBanners', 'soundVolume',
+  'soundOutput', 'soundOutputLabel', 'soundCoinOffered',
   'themeNotice',       // the one-time "Your theme is now ..." message, cleared when shown
   'updateChannel',     // auto-update channel
   'telemetry',         // telemetry opt-in
@@ -19690,6 +19694,7 @@ async function logContact(entry, opts) {
         ? `No mode given, and the radio is in ${_currentMode}, which does not say which mode was worked. Pick the mode and log again.`
         : 'No mode given, and no mode from the radio. Pick the mode and log again.';
       sendCatLog(`[QSO] Not logged: ${e.callsign} — ${why}`);
+      tellQsoLogFailed(opts, why);
       return { success: false, error: why, records: [] };
     }
     e.mode = fromRig;
@@ -19796,6 +19801,10 @@ async function logContact(entry, opts) {
       console.error('[Activation] live list not told:', err.message);
     }
   }
+  // Nothing was written, by saveQsoRecord's own answer: the main window is told
+  // (the save-failed sound, #1041). A second press the double-save guard
+  // swallowed is not a failure: the first press saved it.
+  if (!written.length && !(failure && failure.suppressed)) tellQsoLogFailed(opts, failure && failure.error);
   for (const [c, lookup] of late) {
     lookup.then((info) => {
       if (!info) return;
@@ -19811,6 +19820,15 @@ async function logContact(entry, opts) {
     calls,
     after: opts.replyOnWrite ? Promise.all(afters).then(LogAfterWrite.mergeAfterResults) : undefined,
   };
+}
+
+// A contact was not saved (logContact's result): the main window plays the
+// save-failed sound. Sound only; the caller still gets the result and reports
+// the reason as before.
+function tellQsoLogFailed(opts, error) {
+  if (win && !win.isDestroyed()) {
+    win.webContents.send('qso-log-failed', { origin: (opts && opts.origin) || 'local-manual', error: String(error || '') });
+  }
 }
 
 // QRZ answered after the contact was saved without it (logContact's 2.5 s
@@ -20132,8 +20150,16 @@ async function saveQsoRecord(qsoData, opts) {
   // dialog, pop-out, quick log, JTCAT auto-log, phone, WSJT-X. The QSO-logged
   // chime hangs off this (N2FSM 2026-09-12).
   _lastQsoLoggedAt = Date.now(); // the Rate-ECHOCAT card never lands on a fresh QSO
+  // #1041: `origin` and `fromDevice` say which device logged it (the one that
+  // plays the sound), `dupe` whether the log already held it (QsoSounds.isDupe,
+  // read from the worked list before this record joins it).
+  const workedEntry = { date: qsoData.qsoDate || '', ref: (qsoData.sigInfo || '').toUpperCase(), myRef: (qsoData.mySigInfo || qsoData.myPotaRef || '').toUpperCase(), band: (qsoData.band || '').toUpperCase(), mode: normalizeLogMode(qsoData.mode, qsoData.submode) };
+  const soundDupe = !logAs && QsoSounds.isDupe(workedQsos.get(String(qsoData.callsign || '').toUpperCase()), workedEntry);
   if (win && !win.isDestroyed()) {
-    win.webContents.send("qso-logged", { callsign: qsoData.callsign, band: qsoData.band, mode: qsoData.mode, logAs: logAs ? logAs.call : "" });
+    win.webContents.send("qso-logged", {
+      callsign: qsoData.callsign, band: qsoData.band, mode: qsoData.mode, logAs: logAs ? logAs.call : "",
+      origin, fromDevice: origin === 'jtcat-engine' && !!qsoData.logSource, dupe: soundDupe,
+    });
   }
   // The JTCAT window's JTTY chats: a saved JTTY QSO marks that station's
   // chat logged (and closes it after "Log and close"), from whichever path
@@ -20158,7 +20184,7 @@ async function saveQsoRecord(qsoData, opts) {
   // QSO logged for another operator is not one of theirs)
   if (!logAs && qsoData.callsign) {
     const call = qsoData.callsign.toUpperCase();
-    const entry = { date: qsoData.qsoDate || '', ref: (qsoData.sigInfo || '').toUpperCase(), myRef: (qsoData.mySigInfo || qsoData.myPotaRef || '').toUpperCase(), band: (qsoData.band || '').toUpperCase(), mode: normalizeLogMode(qsoData.mode, qsoData.submode) };
+    const entry = workedEntry;
     if (qsoData.state) entry.state = String(qsoData.state).trim().toUpperCase();
     if (!workedQsos.has(call)) workedQsos.set(call, []);
     workedQsos.get(call).push(entry);
@@ -20171,6 +20197,7 @@ async function saveQsoRecord(qsoData, opts) {
     if (remoteServer && remoteServer.running) {
       remoteServer.sendWorkedQsos([...workedQsos.entries()]);
     }
+    checkRemoteQsoMilestone(true); // #1041: the phone's milestone at the contact, not at the next full re-read
     // Update roster needed sets live. A record's grid is GRIDSQUARE; this
     // read `grid`, which no record carries, so a grid just worked stayed
     // "new" on every later decode (level_death 2026-10-31).
@@ -32658,6 +32685,10 @@ function connectRemote() {
         band: first.band,
         rstSent: first.rstSent,
         rstRcvd: first.rstRcvd,
+        // #1041: the session list's own dupe mark for this contact (same
+        // call and band already in this session), so the device can play its
+        // dupe sound. Always a boolean.
+        dupe: !!first.dupe,
         // Final identity of the logged record — lets the device stamp its
         // local copy with the SAME uuid so cloud sync sees one QSO, not two.
         uuid: (result.records[0] && result.records[0].uuid) || '',
@@ -38038,18 +38069,16 @@ function workedOverlayEnrichDecode(r, call, band, mode) {
   }
 }
 
-// --- Daily QSO milestone broadcast (ECHOCAT parity of the renderer's cat
-// celebration; mobile handoff: qso-milestone-celebrations). Semantics mirror
-// renderer/app.js checkQsoMilestone exactly: UTC-day count over the active
-// operator's logbook, one milestone per pass, pre-marked on first load (no
-// celebration burst for QSOs made before launch), set cleared when the count
-// drops (UTC day rollover / smaller log after a profile switch). The desktop
-// window celebrates via its own renderer-side logic; this covers the phone —
-// including headless mode where no renderer exists.
-const REMOTE_QSO_MILESTONES = [10, 25, 50, 100, 150, 200, 250, 500];
-const _remoteCelebrated = new Set();
-let _remoteLastDailyCount = 0;
-let _remoteMilestonesSeeded = false;
+// --- Daily QSO milestone broadcast to an ECHOCAT device (S2C qso-milestone,
+// docs/echocat-protocol.md). #1041: the rungs are QsoSounds.MILESTONES (1, 10,
+// 25, 50, 100, 250) and the message is "First contact today" / "N contacts
+// today"; the 150, 200 and 500 messages are no longer sent. Counted per UTC day
+// over the active operator's logbook; the first read marks the rungs already
+// passed (no celebration for contacts made before launch); a count that drops
+// (a new UTC day, a smaller log after a profile switch) starts again; several
+// rungs passed at once send the highest. The desktop window keeps its own
+// state in the renderer; this covers the phone, headless mode included.
+const _remoteMilestones = QsoSounds.createState();
 
 function _todayUtcQsoCount() {
   const now = new Date();
@@ -38065,33 +38094,11 @@ function _todayUtcQsoCount() {
   return count;
 }
 
-function checkRemoteQsoMilestone() {
+function checkRemoteQsoMilestone(afterContact) {
   const count = _todayUtcQsoCount();
-  if (!_remoteMilestonesSeeded) {
-    _remoteMilestonesSeeded = true;
-    _remoteLastDailyCount = count;
-    for (const m of REMOTE_QSO_MILESTONES) {
-      if (count >= m) _remoteCelebrated.add(m);
-    }
-    return;
-  }
-  if (count < _remoteLastDailyCount) _remoteCelebrated.clear();
-  _remoteLastDailyCount = count;
-  for (const m of REMOTE_QSO_MILESTONES) {
-    if (count >= m && !_remoteCelebrated.has(m)) {
-      _remoteCelebrated.add(m);
-      const mega = m === 500;
-      if (remoteServer && remoteServer.running) {
-        remoteServer.sendToClient({
-          type: 'qso-milestone',
-          milestone: m,
-          count,
-          mega,
-          message: mega ? '500 QSOs today! You are UNSTOPPABLE!' : `${m} QSOs today! Keep going!`,
-        });
-      }
-      break; // one celebration at a time
-    }
+  const hit = QsoSounds.countChanged(_remoteMilestones, count, Date.now(), { rungs: QsoSounds.MILESTONES, afterContact: !!afterContact });
+  if (hit && remoteServer && remoteServer.running) {
+    remoteServer.sendToClient(QsoSounds.milestoneMessage(hit.rung, count));
   }
 }
 
@@ -44799,6 +44806,30 @@ function jtcatAnyTxActive() {
     }
   }
   return false;
+}
+
+// #1041, the transmit guard's "when": is the station transmitting, by any
+// means POTACAT knows of. Read only: nothing here keys, unkeys or sets the
+// radio. The main window asks before every operator sound (renderer/sounds.js)
+// and lib/sound-guard.js holds or drops the sound while this is true.
+function soundTxActive() {
+  if (_isEffectivelyTransmitting()) return true; // PTT from any surface, FT8, SSTV, voice macros, CW text, TCI
+  if (rigPresetTransmitting()) return true;      // every key-down sent over the CAT link (an external tuner's carrier, FreeDV), and TX the radio reports itself (a hand key, the mic's PTT)
+  if (jtcatAnyTxActive()) return true;           // JTCAT, every slice
+  if (_jtcatTuneTxActive) return true;           // the JTCAT Tune tone
+  if (_atuSweeping || _atuTuneEpisode) return true; // an antenna tuner cycle
+  return false;
+}
+
+// The guard's "where": every output POTACAT sends transmit audio to. The
+// radio's sound card of every saved rig counts, not only the active one.
+function soundTxDevices() {
+  const ids = new Set();
+  if (settings.remoteAudioOutput) ids.add(String(settings.remoteAudioOutput));
+  for (const r of Array.isArray(settings.rigs) ? settings.rigs : []) {
+    if (r && r.remoteAudioOutput) ids.add(String(r.remoteAudioOutput));
+  }
+  return [...ids];
 }
 
 function sstvHaltTxNow({ keepWait = false } = {}) {
@@ -53866,6 +53897,8 @@ function cloudShackNotice(text, kind) {
   ipcMain.on('refresh', () => { markUserActive(); refreshSpots(); });
 
   ipcMain.on('app-relaunch', () => { app.relaunch(); app.exit(0); });
+  // #1041: the transmit guard asks before every operator sound. Read only.
+  ipcMain.handle('sound-tx-state', () => ({ tx: soundTxActive(), txDevices: soundTxDevices() }));
   // themeNow: the theme in force (Appearance System decided here), for a
   // window that reads the theme from the settings (#376).
   ipcMain.handle('get-settings', () => ({ ...settings, appVersion: getAppDisplayVersion(), remoteShack: isRemoteMode(), shackGrid: isRemoteMode() ? remoteShackGrid : '', themeNow: themeQuery() }));

@@ -741,6 +741,10 @@ contextBridge.exposeInMainWorld('api', {
   resetAllRigCommands: () => ipcRenderer.invoke('reset-all-rig-commands'),
   onRigState: (cb) => ipcRenderer.on('rig-state', (_e, state) => cb(state)),
   onRemoteTxState: (cb) => ipcRenderer.on('remote-tx-state', (_e, state) => cb(state)),
+  // #1041, the transmit guard: { tx, txDevices }, asked before every operator sound.
+  soundTxState: () => ipcRenderer.invoke('sound-tx-state'),
+  // #1041: a contact was not saved (logContact's result). Drives the save-failed sound.
+  onQsoLogFailed: (cb) => ipcRenderer.on('qso-log-failed', (_e, d) => cb(d)),
   onRemoteStatus: (cb) => ipcRenderer.on('remote-status', (_e, s) => cb(s)),
   onReloadPrefs: (cb) => ipcRenderer.on('reload-prefs', () => cb()),
   onActivationAutoEnded: (cb) => ipcRenderer.on('activation-auto-ended', (_e, d) => cb(d)), // #147

@@ -1496,6 +1496,7 @@
         <button type="button" class="settings-tab" data-tab="logging">Logging</button>
         <button type="button" class="settings-tab" data-tab="network">ECHOCAT</button>
         <button type="button" class="settings-tab" data-tab="display">Display</button>
+        <button type="button" class="settings-tab" data-tab="sounds">Sounds</button>
         <button type="button" class="settings-tab" data-tab="cloud">Cloud</button>
         <!-- Appearance, one step from any tab (#376): Light, Dark or System.
              The themes for each mode are chosen in Settings > Display. -->
@@ -2785,16 +2786,6 @@
       </div>
       <label class="checkbox-label"><input type="checkbox" id="set-notify-popup" checked> Pop-up notification</label>
       <label class="checkbox-label"><input type="checkbox" id="set-notify-sound" checked> Sound notification</label>
-      <label title="A short sound each time a QSO is logged — from any window, the mobile device, JTCAT or WSJT-X — so you know a contact went in the log even when POTACAT is in the background.">QSO logged chime:
-        <select id="set-qso-chime" style="margin-left:4px;">
-          <option value="off">Off</option>
-          <option value="soft">Soft ding</option>
-          <option value="twotone">Two-tone</option>
-          <option value="bell">Bell</option>
-          <option value="morse-r">Morse R (received)</option>
-        </select>
-        <button type="button" id="set-qso-chime-test" style="margin-left:6px;padding:2px 8px;font-size:12px;">Test</button>
-      </label>
       <label>Notification duration (seconds):
         <input type="number" id="set-notify-timeout" min="3" max="60" step="1" value="10">
       </label>
@@ -3308,6 +3299,41 @@
         <div class="dir-suggest-link">Want a net or SWL station added? <a href="#" id="dir-suggest-sheet">Leave a comment on the Google Sheet</a> and we'll review it.</div>
       </div>
       <div id="dir-hover-popup" class="dir-hover-popup hidden"></div>
+    </fieldset>
+
+    <!-- Sounds (#1041): the contact sound, the milestone sounds and banners, the volume and the output.
+         What plays is lib/qso-sounds.js; when and on which output is lib/sound-guard.js (never the radio's sound card). -->
+    <fieldset class="source-toggles sounds-pane" data-settings-tab="sounds">
+      <legend>Sounds</legend>
+      <label class="checkbox-label"><input type="checkbox" id="set-sounds-on" checked> Sounds</label>
+      <span class="help-text sounds-help">Off is silent everywhere, except the low buzz that tells you a contact was not saved.</span>
+      <label class="checkbox-label"><input type="checkbox" id="set-sound-contact" checked> Contact logged sound</label>
+      <label class="sounds-row">Sound:
+        <select id="set-qso-chime">
+          <option value="coin">Coin</option>
+          <option value="soft">Soft ding</option>
+          <option value="twotone">Two-tone</option>
+          <option value="bell">Bell</option>
+          <option value="morse-r">Morse R (received)</option>
+        </select>
+      </label>
+      <span class="help-text sounds-help">A short sound each time a contact goes into the log, from any window, JTCAT or WSJT-X. A contact that is already in this activation's log plays two falling notes instead. A contact logged on your phone sounds on the phone, not here.</span>
+      <label class="checkbox-label"><input type="checkbox" id="set-sound-milestones" checked> Milestone sounds</label>
+      <label class="checkbox-label"><input type="checkbox" id="set-milestone-banners" checked> Milestone banners</label>
+      <span class="help-text sounds-help">At 1, 10, 25, 50, 100 and 250 contacts in a UTC day: one line at the top of the window for about 3 seconds, and from 10 contacts up a short tune after the contact sound.</span>
+      <label class="sounds-row">Volume:
+        <input type="range" id="set-sound-volume" min="10" max="100" step="5" value="80">
+        <span id="set-sound-volume-val">80%</span>
+        <button type="button" id="set-qso-chime-test">Test</button>
+      </label>
+      <label class="sounds-row">Sound output:
+        <select id="set-sound-output">
+          <option value="">Automatic</option>
+        </select>
+      </label>
+      <span class="help-text sounds-help">Automatic is your computer's default output, but never the radio's sound card. The radio's sound card is not in this list: a sound sent to it would go on the air.</span>
+      <div id="set-sound-status" class="sounds-status" role="status"></div>
+      <span class="help-text sounds-help">No sound plays while you transmit. One that comes due during a transmission waits for it to end, for up to 3 seconds.</span>
     </fieldset>
 
     <!-- 8. Display (trimmed — bearing moved to Antenna, SmartSDR absorbed) -->
@@ -5637,6 +5663,9 @@
   <script src="remote-ptt.js"></script>
   <script src="../lib/cw-banks.js"></script>
   <script src="../lib/cw-esm.js"></script>
+  <script src="../lib/qso-sounds.js"></script>
+  <script src="../lib/sound-guard.js"></script>
+  <script src="sounds.js"></script>
   <script src="app.js"></script>
   <script src="station-setup.js"></script>
   <script src="echocat-review.js"></script>

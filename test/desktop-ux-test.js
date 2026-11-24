@@ -29,19 +29,25 @@ test('Hunt: an exclusive view is switched to the table before the split opens; m
 
 test('chime: main emits qso-logged from saveQsoRecord, the one log choke point', () => {
   const fn = main.slice(main.indexOf('async function saveQsoRecord'), main.indexOf('async function saveQsoRecord') + 20000);
-  assert.ok(/win\.webContents\.send\("qso-logged", \{ callsign: qsoData\.callsign, band: qsoData\.band, mode: qsoData\.mode, logAs: logAs \? logAs\.call : "" \}\);/.test(fn));
+  // #1041 added origin, fromDevice and dupe to the payload (test/qso-sounds-test.js).
+  assert.ok(/win\.webContents\.send\("qso-logged", \{\s+callsign: qsoData\.callsign, band: qsoData\.band, mode: qsoData\.mode, logAs: logAs \? logAs\.call : "",/.test(fn));
   assert.strictEqual((main.match(/send\("qso-logged"/g) || []).length, 1, 'exactly one emitter');
   assert.ok(/onQsoLogged: \(cb\) => ipcRenderer\.on\('qso-logged'/.test(preload));
 });
 
-test('chime: off by default, four synthesized flavours, persisted as settings.qsoChime, Test button', () => {
+// #1041: the chime is no longer off by default. An operator who picked one of
+// the four flavours keeps it as the contact sound; 'off' (and anything else)
+// is the coin, switched by Settings > Sounds > "Contact logged sound"
+// (test/qso-sounds-test.js). The select moved to the Sounds pane, Coin first.
+test('chime: four synthesized flavours, persisted as settings.qsoChime, Test button', () => {
   assert.ok(/let qsoChime = 'off';/.test(app));
   assert.ok(/qsoChime = settings\.qsoChime \|\| 'off';/.test(app), 'loaded with the other settings');
   assert.ok(/qsoChime: setQsoChime \? setQsoChime\.value : 'off',/.test(app), 'saved with the other settings');
-  assert.ok(/window\.api\.onQsoLogged\(\(\) => \{ try \{ playQsoChime\(qsoChime\); \} catch \{\} \}\)/.test(app));
+  assert.ok(/window\.api\.onQsoLogged\(\(q\) => \{ try \{ onContactLogged\(q\); \} catch \{\} \}\)/.test(app));
+  assert.ok(/if \(r\.sound\.chime\) playQsoChime\(r\.sound\.chime\);/.test(app), 'a picked flavour still plays through playQsoChime');
   for (const k of ["case 'soft':", "case 'twotone':", "case 'bell':", "case 'morse-r':"]) assert.ok(app.includes(k), k);
   assert.ok(/id="set-qso-chime"/.test(html) && /id="set-qso-chime-test"/.test(html));
-  assert.ok(/<option value="off">Off<\/option>/.test(html.slice(html.indexOf('id="set-qso-chime"'), html.indexOf('id="set-qso-chime"') + 300)), 'Off is the first option');
+  assert.ok(/<option value="coin">Coin<\/option>/.test(html.slice(html.indexOf('id="set-qso-chime"'), html.indexOf('id="set-qso-chime"') + 300)), 'Coin is the first option');
   assert.ok(!/new Audio\(/.test(app.slice(app.indexOf('function playQsoChime'), app.indexOf('function playQsoChime') + 1500)), 'synthesized, no audio asset');
 });
 
