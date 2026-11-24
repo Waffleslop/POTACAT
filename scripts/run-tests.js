@@ -122,6 +122,7 @@ const TESTS = [
   'test/guest-pass-lease-end-test.js', // the end of a pass stops every transmitter and closes the guest socket
   'test/guest-pass-hopping-test.js', // guests hop between rigs; the owner takes over and hands back
   'test/pass-guest-activity-test.js', // the take-over dialog learns whether the guest is connected and when they last used the radio
+  'test/pass-list-used-by-test.js', // #1003 the Guest Pass list says guests have used the pass, not connected now
   'test/guest-sdr-test.js', // #543: a guest uses the station's own SDRs; a typed-in host and SDR settings writes are refused in words
   'test/guest-settings-secrets-test.js', // a guest never receives the station's SDR passwords or other settings secrets; refusals in plain words
   'test/guest-pass-authority-test.js', // a Guest Pass is default-deny: the allowlist wall in the demux + the rig-control action wall
