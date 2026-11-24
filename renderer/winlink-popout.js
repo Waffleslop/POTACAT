@@ -169,6 +169,7 @@
     if (radio && !gateways.length) loadGateways(false);
     renderFavBtn();
     renderDial();
+    if (catPanelOpen()) renderCatalogBar(); // the size advice follows the mode
   }
 
   function renderSession(ss) {
@@ -543,9 +544,20 @@
       $('wl-c-hint').textContent = pre.note || '';
       if (composeForm) $('wl-c-hint').textContent = formNote(composeForm);
       $('wl-c-hint').hidden = !$('wl-c-hint').textContent;
+      composeNote = $('wl-c-hint').textContent;
+      renderComposeHint();
       (pre.template ? $('wl-c-name') : pre.to ? $('wl-c-body') : chipFields.to.input).focus();
     };
     if (pre && pre.template) go(); else requireNotice(go);
+  }
+  // The hint line above the body: the template's or the form's own note, else one line when To is
+  // Winlink's catalog address (the Catalog button builds that request).
+  var composeNote = '';
+  function renderComposeHint() {
+    var to = chipFields.to ? chipFields.to.hidden.value + ' ' + chipFields.to.input.value : '';
+    var t = composeNote || (!tplEdit && WCAT.isCatalogAddress(to) ? WCAT.TEXT.composeHint : '');
+    $('wl-c-hint').textContent = t;
+    $('wl-c-hint').hidden = !t;
   }
   function renderFiles() {
     var total = pendingFiles.reduce(function (n, f) { return n + f.size; }, 0);
@@ -759,6 +771,318 @@
   if (window.api.onFormResult) window.api.onFormResult(function (m) {
     if (!m || m.error) { showForm('wl-form-forms'); formsSay((m && m.error) || 'The form did not come back.', true); return; }
     compose({ to: m.to, cc: m.cc, subject: m.subject, body: m.body, form: { id: m.id, name: m.name, readOnly: !!m.readOnly } });
+  });
+
+  // ── Winlink catalog requests (docs/winlink-catalog.md) ───────────────────
+  // Winlink mails you weather, propagation, gateway lists and help files on
+  // request. The operator ticks rows and presses Put in Outbox; main builds
+  // the request (lib/winlink-catalog.js) and queues it like any message.
+  // Nothing here sends or connects. The list is the short starter list until
+  // Winlink's own catalog has arrived by mail (Get the full catalog); main
+  // reads that message by itself and this list fills in.
+  // Catalog text comes from mail: every row is built from DOM nodes with
+  // textContent, never from an HTML string.
+  var WCAT = window.WinlinkCatalog;
+  var cat = null;               // main's answer: { items (the full catalog, or none), picks, pending, ... }
+  var catView = WCAT.mergeCatalog(null);
+  var catTicked = {};           // item ID -> true
+  var catOpen = {};             // category code -> true / false once the operator opened or closed it
+  var catBusy = false;          // a request is on its way into the Outbox
+  var catStamp = '';
+  var catFor = '';              // the operator the ticks belong to
+  function catPanelOpen() { return !$('wl-form-catalog').hidden; }
+  function catStampOf(s) {
+    var c = (s && s.catalog) || {};
+    return [(s && s.mycall) || '', s && s.remoteShack ? 1 : 0, s && s.shackLacksCatalog ? 1 : 0, c.count || 0, c.readAt || 0, c.requestedAt || 0, c.unreadable ? 1 : 0].join('|');
+  }
+  function catErr(t) { $('wl-cat-err').textContent = t || ''; }
+  function catClear(el) { while (el.firstChild) el.removeChild(el.firstChild); }
+  function catSpan(cls, text) { var e = document.createElement('span'); e.className = cls; e.textContent = text; return e; }
+  function catTickedItems() { return catView.items.filter(function (i) { return catTicked[i.id] === true; }); }
+  function catSame(el, attr, value) { return el.getAttribute(attr) === value; }
+
+  function catRow(item, inPicks) {
+    var label = WCAT.itemLabel(item);
+    var starred = WCAT.isStarred(cat && cat.picks, item.id);
+    var row = document.createElement('div');
+    row.className = 'wl-cat-row';
+    var pick = document.createElement('label');
+    pick.className = 'wl-cat-pick';
+    var box = document.createElement('input');
+    box.type = 'checkbox';
+    box.className = 'wl-sel';
+    box.checked = catTicked[item.id] === true;
+    box.setAttribute('data-id', item.id);
+    box.setAttribute('aria-label', 'Request ' + label);
+    pick.appendChild(box);
+    var body = document.createElement('span');
+    body.className = 'wl-cat-body';
+    var text = document.createElement('span');
+    text.className = 'wl-cat-text';
+    var name = catSpan('wl-cat-name', label);
+    if (item.name && item.subject) name.title = item.subject;   // Winlink's own words for it
+    text.appendChild(name);
+    if (item.note) text.appendChild(catSpan('wl-cat-note', item.note));
+    body.appendChild(text);
+    var meta = document.createElement('span');
+    meta.className = 'wl-cat-meta';
+    meta.appendChild(catSpan('wl-cat-id', item.id));
+    var size = WCAT.formatSize(item.size);
+    if (size) meta.appendChild(catSpan('wl-cat-size', size));
+    if (WCAT.showLargeTag(item)) meta.appendChild(catSpan('wl-kind', WCAT.TEXT.large));
+    body.appendChild(meta);
+    pick.appendChild(body);
+    row.appendChild(pick);
+    var star = document.createElement('button');
+    star.type = 'button';
+    star.className = 'wl-cat-star';
+    star.setAttribute('data-star', item.id);
+    if (inPicks) star.setAttribute('data-in-picks', '1');
+    star.setAttribute('aria-pressed', String(starred));
+    star.setAttribute('aria-label', (starred ? 'Remove ' + label + ' from Your picks' : 'Keep ' + label + ' in Your picks'));
+    star.title = starred ? 'In Your picks. Click to remove the star.' : 'Keep in Your picks';
+    var svg = $('wl-fav').querySelector('svg').cloneNode(true);   // the window's own star
+    svg.setAttribute('class', 'wl-star' + (starred ? '' : ' empty'));
+    star.appendChild(svg);
+    row.appendChild(star);
+    return row;
+  }
+
+  function renderCatalogBar() {
+    var a = WCAT.sizeAdvice(catTickedItems(), currentMode().id);
+    $('wl-cat-total').textContent = a.total;
+    $('wl-cat-advice').textContent = a.advice;
+    $('wl-cat-send').disabled = catBusy || !a.count || catGated();
+  }
+  function catGated() { return !!(state && state.remoteShack && state.shackLacksCatalog); }
+  function catSourceRow() { return WCAT.sourceRow(cat || {}); }
+  function renderCatalogSource() {
+    var row = catSourceRow();
+    $('wl-cat-source-text').textContent = row.text;
+    $('wl-cat-get').textContent = row.button;
+    $('wl-cat-get').hidden = !row.button;
+    $('wl-cat-get').disabled = catBusy;
+    if (!row.button) { $('wl-cat-confirm').hidden = true; $('wl-cat-source').hidden = false; }
+  }
+  function renderCatalogList() {
+    var q = $('wl-cat-find').value.trim();
+    var finding = !!q;
+    var found = finding ? WCAT.searchItems(catView.items, q, WCAT.SEARCH_LIMIT + 1) : catView.items;
+    var more = finding && found.length > WCAT.SEARCH_LIMIT;
+    if (more) found = found.slice(0, WCAT.SEARCH_LIMIT);
+    var picks = finding ? [] : WCAT.pickItems(catView.items, cat && cat.picks);
+    var pickBox = $('wl-cat-picks');
+    catClear(pickBox);
+    picks.forEach(function (it) { pickBox.appendChild(catRow(it, true)); });
+    $('wl-cat-picks-wrap').hidden = !picks.length;
+    var list = $('wl-cat-list');
+    catClear(list);
+    var ids = WCAT.pickIds(cat && cat.picks);
+    WCAT.groupItems(found).forEach(function (g) {
+      var open = finding ? true : (catOpen.hasOwnProperty('$' + g.code) ? catOpen['$' + g.code] : WCAT.groupStartsOpen(g, { full: catView.full, pickIds: ids }));
+      var wrap = document.createElement('div');
+      wrap.className = 'wl-cat-group';
+      var head = document.createElement('button');
+      head.type = 'button';
+      head.className = 'wl-cat-head';
+      head.setAttribute('data-group', g.code);
+      head.setAttribute('aria-expanded', String(open));
+      head.appendChild(catSpan('wl-cat-chev', ''));
+      head.appendChild(catSpan('wl-cat-gname', g.name));
+      if (g.name !== g.code) head.appendChild(catSpan('wl-cat-code', g.code));
+      head.appendChild(catSpan('wl-cat-n', String(g.items.length)));
+      head.disabled = finding;   // while finding, every group shown is open
+      wrap.appendChild(head);
+      if (open) {
+        var rows = document.createElement('div');
+        rows.className = 'wl-cat-rows';
+        rows.setAttribute('role', 'group');
+        rows.setAttribute('aria-label', g.name);
+        g.items.forEach(function (it) { rows.appendChild(catRow(it, false)); });
+        wrap.appendChild(rows);
+      }
+      list.appendChild(wrap);
+    });
+    var msg = $('wl-cat-msg');
+    catClear(msg);
+    if (finding && !found.length) {
+      msg.appendChild(document.createTextNode(WCAT.TEXT.findNone + (catView.full ? '' : ' ' + WCAT.TEXT.findNoneStarter)));
+      var src = catSourceRow();
+      if (!catView.full && src.button) {
+        var get = document.createElement('button');
+        get.type = 'button';
+        get.className = 'wl-btn';
+        get.setAttribute('data-cat-get', '1');
+        get.textContent = src.button;
+        msg.appendChild(get);
+      }
+    } else if (more) {
+      msg.textContent = WCAT.TEXT.findMore;
+    }
+  }
+  function renderCatalog() {
+    var gated = catGated();
+    $('wl-cat-source').hidden = gated;
+    $('wl-cat-find-row').hidden = gated;
+    $('wl-cat-list').hidden = gated;
+    if (gated) {
+      $('wl-cat-confirm').hidden = true;
+      $('wl-cat-picks-wrap').hidden = true;
+      $('wl-cat-msg').textContent = WCAT.TEXT.shackOlder;
+      renderCatalogBar();
+      return;
+    }
+    renderCatalogSource();
+    renderCatalogList();
+    renderCatalogBar();
+  }
+  function catApply(r) {
+    cat = r;
+    catView = WCAT.mergeCatalog(r.items);
+    var have = {};
+    catView.items.forEach(function (i) { if (catTicked[i.id] === true) have[i.id] = true; });
+    catTicked = have;            // a tick for an item this list does not hold is dropped
+  }
+  function loadCatalog() {
+    var who = (state && state.mycall) || '';
+    if (who !== catFor) { catFor = who; catTicked = {}; catOpen = {}; }   // another operator: nothing carried over
+    if (catGated()) { cat = null; renderCatalog(); return; }
+    window.api.catalogGet().then(function (r) {
+      if (!r || !r.ok) {
+        // No answer: the short list still shows, with the reason.
+        catApply({ items: [], picks: (cat && cat.picks) || null, pending: false });
+        catErr((r && r.error) || WCAT.TEXT.noAnswer);
+      } else {
+        catApply(r);
+      }
+      if (catPanelOpen()) renderCatalog();
+    }, function () { catErr(WCAT.TEXT.noAnswer); });
+  }
+  function catalogStateChanged() {
+    var st = catStampOf(state);
+    if (st === catStamp) return;
+    catStamp = st;
+    if (catPanelOpen()) loadCatalog();
+  }
+  function openCatalogPanel() {
+    requireNotice(function () {
+      showForm('wl-form-catalog');
+      catErr('');
+      $('wl-cat-find').value = '';
+      $('wl-cat-confirm').hidden = true;
+      $('wl-cat-source').hidden = false;
+      $('wl-cat-source-text').textContent = WCAT.TEXT.loading;
+      $('wl-cat-get').hidden = true;
+      catStamp = catStampOf(state);
+      if (cat) renderCatalog(); else { renderCatalogList(); renderCatalogBar(); }   // the short list is there at once
+      $('wl-cat-find').focus();
+      loadCatalog();
+    });
+  }
+  $('wl-catalog-btn').addEventListener('click', function () { closeTemplateMenu(); openCatalogPanel(); });
+  $('wl-cat-close').addEventListener('click', function () { showReader('<div class="wl-empty">Pick a message.</div>'); });
+  $('wl-cat-find').addEventListener('input', renderCatalogList);
+  window.api.onCatalogUpdated(function () { if (catPanelOpen()) loadCatalog(); });
+
+  // Ticks: one item may show twice (Your picks and its category); both boxes follow.
+  $('wl-form-catalog').addEventListener('change', function (e) {
+    var box = e.target;
+    if (!box.classList || !box.classList.contains('wl-sel')) return;
+    var id = box.getAttribute('data-id');
+    if (box.checked) catTicked[id] = true; else delete catTicked[id];
+    Array.prototype.forEach.call($('wl-form-catalog').querySelectorAll('.wl-sel'), function (b) { if (catSame(b, 'data-id', id)) b.checked = box.checked; });
+    catErr('');
+    renderCatalogBar();
+  });
+  $('wl-form-catalog').addEventListener('click', function (e) {
+    var star = e.target.closest('.wl-cat-star');
+    if (star) {
+      var id = star.getAttribute('data-star');
+      var on = star.getAttribute('aria-pressed') !== 'true';
+      var inPicks = star.hasAttribute('data-in-picks');
+      if (!cat) cat = { items: [], picks: null, pending: false };
+      cat.picks = WCAT.setStar(cat.picks, id, on);
+      renderCatalogList();
+      // The row was drawn again: the focus goes back to the same star (or its copy in the list).
+      var stars = Array.prototype.filter.call($('wl-form-catalog').querySelectorAll('.wl-cat-star'), function (b) { return catSame(b, 'data-star', id); });
+      var again = stars.filter(function (b) { return b.hasAttribute('data-in-picks') === inPicks; })[0] || stars[0];
+      if (again) again.focus();
+      window.api.catalogStar(id, on).then(function (r) { if (!r || !r.ok) loadCatalog(); });
+      return;
+    }
+    var head = e.target.closest('.wl-cat-head');
+    if (head) {
+      var code = head.getAttribute('data-group');
+      catOpen['$' + code] = head.getAttribute('aria-expanded') !== 'true';
+      renderCatalogList();
+      var h = Array.prototype.filter.call($('wl-cat-list').querySelectorAll('.wl-cat-head'), function (b) { return catSame(b, 'data-group', code); })[0];
+      if (h) h.focus();
+      return;
+    }
+    if (e.target.closest('[data-cat-get]')) catGetFull();
+  });
+
+  // Get / Update the full catalog: one LIST request in the Outbox. Over the
+  // radio the 70 KB reply is slow, so that asks first; over Telnet it queues at once.
+  function catRequestList() {
+    if (catBusy) return;
+    catBusy = true;
+    catErr('');
+    $('wl-cat-confirm').hidden = true;
+    $('wl-cat-source').hidden = false;
+    renderCatalogSource();
+    var done = function (r) {
+      catBusy = false;
+      if (!r || !r.ok) { if (!(r && r.busy)) catErr((r && r.error) || WCAT.TEXT.sendFailed); if (catPanelOpen()) renderCatalog(); return; }
+      loadCatalog();
+    };
+    window.api.catalogRequestList().then(done, function () { done(null); });
+  }
+  function catGetFull() {
+    if (catBusy) return;
+    catErr('');
+    if (!(state && state.mycall)) { catErr(WCAT.TEXT.noCallsign); return; }
+    if (WCAT.isRadioMode(currentMode().id)) {
+      $('wl-cat-source').hidden = true;
+      $('wl-cat-confirm').hidden = false;
+      $('wl-cat-confirm-yes').focus();
+      return;
+    }
+    catRequestList();
+  }
+  $('wl-cat-get').addEventListener('click', catGetFull);
+  $('wl-cat-confirm-yes').addEventListener('click', catRequestList);
+  $('wl-cat-confirm-no').addEventListener('click', function () {
+    $('wl-cat-confirm').hidden = true;
+    $('wl-cat-source').hidden = false;
+    $('wl-cat-get').focus();
+  });
+
+  // Put in Outbox: the ticked items, in the order the list shows them. A
+  // second click while the first is on its way does nothing.
+  $('wl-cat-send').addEventListener('click', function () {
+    if (catBusy) return;
+    var ids = catTickedItems().map(function (i) { return i.id; });
+    if (!ids.length) return;
+    catErr('');
+    if (!(state && state.mycall)) { catErr(WCAT.TEXT.noCallsign); return; }
+    catBusy = true;
+    $('wl-cat-send').disabled = true;
+    var done = function (r) {
+      catBusy = false;
+      r = r || { ok: false, error: WCAT.TEXT.sendFailed };
+      var queued = Array.isArray(r.queued) ? r.queued : [];
+      queued.forEach(function (id) { delete catTicked[id]; });   // what is in the Outbox is no longer ticked
+      if (r.picks && cat) cat.picks = r.picks;
+      if (!r.ok) {
+        if (!r.busy) catErr(queued.length ? WCAT.partialText(queued.length, catTickedItems().length, r.error) : (r.error || WCAT.TEXT.sendFailed));
+        if (catPanelOpen()) renderCatalog();
+        return;
+      }
+      // Still on the panel: say what happens next. Closed meanwhile: the Outbox count says it.
+      if (catPanelOpen()) showReader('<div class="wl-empty">' + esc(WCAT.queuedText(queued.length)) + '</div>');
+    };
+    window.api.catalogRequest(ids).then(done, function () { done(null); });
   });
 
   // ── waterfall: is the gateway frequency in use? ──────────────────────────
@@ -1963,6 +2287,7 @@
   // ── the forms share the reading pane with the reader and compose ────────
   function hideForms() {
     $('wl-form-forms').hidden = true;
+    $('wl-form-catalog').hidden = true;
     $('wl-form-pos').hidden = true;
     $('wl-form-spot').hidden = true;
     closeBook();
@@ -2051,6 +2376,8 @@
       : '';
   }
   chipFields.parks.onChange = renderSpotPreview;
+  chipFields.to.onChange = renderComposeHint;
+  chipFields.to.input.addEventListener('input', renderComposeHint);
   ['wl-spot-freq', 'wl-spot-comment'].forEach(function (id) { $(id).addEventListener('input', renderSpotPreview); });
   $('wl-spot-mode').addEventListener('change', renderSpotPreview);
   function openSpotForm(t) {
@@ -2095,7 +2422,7 @@
   }
 
   // ── wiring ───────────────────────────────────────────────────────────────
-  window.api.onState(function (s) { state = s; renderState(); renderSound(); autoSound(); wfSync(); renderTxLevel(); });
+  window.api.onState(function (s) { state = s; renderState(); renderSound(); autoSound(); wfSync(); renderTxLevel(); catalogStateChanged(); });
   window.api.onSession(function (ss) { if (state) state.session = ss; renderSession(ss); });
   window.api.onMailbox(function (d) {
     if (!d || !lists.hasOwnProperty(d.box)) return;
