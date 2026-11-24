@@ -7,6 +7,8 @@ const { readSrc } = require('./_src');
 //   - FT4's dB reached the screen as "+10.9874995727539", widening its cell.
 // This renders the real row builders (lib/spot-row.js, lib/decode-row.js)
 // with the real stylesheets in hidden Electron windows (test/layout/harness.js)
+// at stated viewports (390, 520, 900 and 1100 px wide, 900 px tall; the harness
+// sets them, so the display of the machine running this plays no part)
 // and checks that every column starts at the same x on every row, no row
 // wraps, and every number on screen is formatted.
 //
@@ -158,6 +160,18 @@ if (!data) {
   const keys = Object.keys(data);
   test('every surface was rendered', () => {
     for (const want of ['spots', 'decodes', 'band', 'mine', 'stations']) assert.ok(keys.some(k => k.endsWith('-' + want)), 'missing ' + want);
+  });
+  // Each render names its width in its key ("jtcat-900-"). The page must really
+  // have been that wide: on a display narrower than the width, a window alone is
+  // cut down to the display and the columns below are measured at the wrong size.
+  test('every page was measured at the viewport its name states, 900 px tall', () => {
+    const views = keys.filter(k => k.endsWith('-viewport'));
+    assert.ok(views.length >= 10, 'a viewport is reported for every render (' + views.length + ' found)');
+    for (const k of views) {
+      const want = Number((/-(\d+)-/.exec(k) || [])[1]);
+      assert.ok(want > 0, k + ': no width in the name');
+      assert.deepStrictEqual(data[k], { width: want, height: 900 }, `${k}: laid out at ${data[k].width}x${data[k].height}, not ${want}x900`);
+    }
   });
   for (const k of keys.filter(k => k.endsWith('-spots'))) {
     test(`${k}: one cell per column, same x on every row, one line, formatted numbers`, () => {

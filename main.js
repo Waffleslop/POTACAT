@@ -404,6 +404,7 @@ const ActivationClock = require('./lib/activation-clock'); // #147: a forgotten 
 const ActivationAnnounce = require('./lib/activation-announce'); // #508: which saved contacts join the live activation list
 const QsoExpand = require('./lib/qso-expand'); // one contact -> its ADIF records (logContact)
 const LogAfterWrite = require('./lib/log-after-write'); // #732: ECHOCAT's log-ok at the disk write, not after the uploads
+const QsoSounds = require('./lib/qso-sounds'); // #1041: contact sounds and daily milestones (what, never when or where: lib/sound-guard.js)
 const LogQsoReplay = require('./lib/log-qso-replay'); // #733: log-qso is idempotent by uuid
 const QsoLogSource = require('./lib/qso-log-source'); // APP_POTACAT_LOG_SOURCE: ECHOCAT or blank (#634)
 const { dxccCodeForEntity } = require('./lib/dxcc-codes'); // cty.dat entity -> ADIF DXCC number (#554)
@@ -420,6 +421,7 @@ const FakeIt = require('./lib/jtcat-fake-it'); // split operation "Fake It" (fak
 const JtcatCaptureGate = require('./lib/jtcat-capture-gate'); // #746: ECHOCAT off releases a phone-driven capture
 const { WsprScheduler } = require('./lib/wspr/scheduler');
 const WsprPowerMemory = require('./lib/wspr-power-memory'); // pre-beacon RF power remember/restore decisions
+const WsprBeaconPower = require('./lib/wspr-beacon-power'); // the beacon's per-frame RF power, on this rig's scale (#521)
 const WsprDbm = require('./lib/wspr/dbm'); // the dBm the beacon reports: follows its RF power, or the operator's fixed pick (#268)
 const Privileges = require('./lib/privileges');
 const SwrGuard = require('./lib/swr-guard'); // SWR-guard auto-tune + ATU result policy (pure)
@@ -544,6 +546,7 @@ const AprsMap = require('./lib/aprs-map');                 // APRS window: the m
 const AprsEchocat = require('./lib/aprs-echocat');         // APRS phase 6: APRS on ECHOCAT devices through this desktop
 const VaraProcess = require('./lib/vara-process');
 const VaraSetup = require('./lib/vara-setup');
+const VaraDial = require('./lib/vara-dial'); // the first VARA call after a start is placed again when VARA refused Pat's connection; what counts as a virtual cable
 const WinlinkModes = require('./lib/winlink-modes');
 const WinlinkReturn = require('./lib/winlink-return');
 const WinlinkMailViews = require('./lib/winlink-mail-views');
@@ -627,6 +630,7 @@ const { checkClockOffset, syncSystemClock, classifyClockOffset, clockFixSupporte
 const StationClock = require('./lib/station-clock'); // FT8/FT4/FT2/WSPR/JTTY slot clock, correctable from an ECHOCAT device
 const JtcatParser = require('./renderer/jtcat-parser'); // shared FT8 message classifier (also a browser global in the renderers)
 const JtcatSpotTarget = require('./lib/jtcat-spot-target'); // which finished QSO ends the spot target; watcher refuses worked calls (#518)
+const JtcatChimes = require('./lib/jtcat-chimes'); // the two JTCAT chimes: a station calls me, TX stopped by itself (sound only)
 const CqTarget = require('./renderer/cq-target'); // shared CQ "chase target" tags + decode-match (also a browser global)
 const { RemoteServer } = require('./lib/remote-server');
 const { buildDiagnosticSnapshot, redactLogLines } = require('./lib/diagnostic-snapshot');
@@ -951,6 +955,9 @@ const GLOBAL_KEYS = new Set([
   'appearance',        // 'light' | 'dark' | 'system' (#376, lib/app-theme.js)
   'themeLight', 'themeDark', // the chosen theme for each mode, ECHOCAT's ids
   'themeLegacy',       // the pre-#376 theme values, remembered once by the migration
+  // #1041 Settings > Sounds: this computer's speakers, so the same for every operator on it.
+  'soundsOn', 'soundContact', 'soundMilestones', 'milestoneBanners', 'soundVolume',
+  'soundOutput', 'soundOutputLabel', 'soundCoinOffered',
   'themeNotice',       // the one-time "Your theme is now ..." message, cleared when shown
   'updateChannel',     // auto-update channel
   'telemetry',         // telemetry opt-in
@@ -969,6 +976,8 @@ const GLOBAL_KEYS = new Set([
   'jtcatShowWaterfall',  // #391: the JTCAT pop-out's audio waterfall shown (default on) — display
   'jtcatStationsExpiryMin', // JTCAT Stations view: minutes a station stays (2/5/10) — display (#557)
   'jtcatLayout',         // #857: JTCAT pop-out layout auto | full | compact — display
+  'jtcatChimeCall',      // JTCAT chime when a station calls me: a sound id or off — this computer's speakers
+  'jtcatChimeStop',      // JTCAT chime when transmitting stops by itself — same
   'waterfallPalette',  // waterfall / band scope colours (lib/waterfall-palettes.js) — display
                        // (same reasoning as lightMode/darkVariant above)
   'wsprPreCapPower',   // {watts, rigId, at}: the RF power the WSPR beacon found on the
@@ -977,6 +986,8 @@ const GLOBAL_KEYS = new Set([
   'aprsRfBeaconLastAt', // when this station last beaconed over its radio (confirmed): the radio timer counts from it after a restart
   'aprsListenReturn',  // {freqHz, mode, rigId, listenHz, state}: where the radio was before APRS
                        // listening tuned it (lib/aprs-radio-return.js) — this machine's radio
+  'extAtuOwnPowerOk',  // { rigId: {at, by, radio} }: the operator agreed to an RF-sense tune at the radio's own
+                       // power on a radio POTACAT cannot set the power of (lib/tx-power-control.js) — this machine's rigs
   'sstvTxPowerW',      // #279: Transmit power for SSTV in W (null = the radio's own power) — this machine's radio
   'sstvTxPowerRestore', // {watts, sstvWatts, rigId, at, state}: the power to put back after an SSTV
                        // picture (lib/sstv-tx-power.js) — this machine's radio
@@ -1595,6 +1606,8 @@ function applyWaterfallPalette(id) {
 
 let _jtcatRxGainSaveTimer = null;
 let _jtcatRxGainBand = '';   // band whose level is currently loaded
+// The RX slider is 0 to 100%. Settings written by older builds may hold more.
+function clampJtcatRxGain(v) { v = Number(v); return Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : 1; }
 function applyJtcatRxGain(value, origin) {
   let v = Number(value);
   if (!Number.isFinite(v)) return;
@@ -1635,8 +1648,9 @@ function jtcatRxGainFollowBand(hz) {
   const band = freqToBand(hz / 1e6);
   if (!band || band === _jtcatRxGainBand) return;
   _jtcatRxGainBand = band;
-  const stored = settings.jtcatRxGainByBand && settings.jtcatRxGainByBand[band];
-  if (typeof stored !== 'number' || !Number.isFinite(stored)) return;
+  const storedRaw = settings.jtcatRxGainByBand && settings.jtcatRxGainByBand[band];
+  if (typeof storedRaw !== 'number' || !Number.isFinite(storedRaw)) return;
+  const stored = clampJtcatRxGain(storedRaw);
   const current = typeof settings.jtcatRxGain === 'number' ? settings.jtcatRxGain : 1;
   if (Math.abs(stored - current) < 0.005) return;   // already there — stay quiet
   sendCatLog(`[JTCAT] RX gain ${Math.round(stored * 100)}% restored for ${band}`);
@@ -2171,6 +2185,11 @@ let _winlinkOutMidsAtStart = null;   // #442: their ids, so the ones the session
 let _winlinkModemAudioClosed = false; // the modem closed its audio connection while the session ran
 let _winlinkTxCutMs = 0;             // transmit audio the sound card would not take, this session
 let _winlinkPatLastLine = '';        // Pat's own last word on a failure ("Exchange failed: ...")
+let _winlinkKeyDowns = 0;            // key-downs in this attempt: a call that keyed the radio is never placed again by itself
+const _winlinkVaraRefusals = new VaraDial.RefusalNotes(); // Pat said VARA refused its TCP connection (lib/vara-dial.js)
+let _winlinkVaraCheckedAt = 0;       // when POTACAT's own last connection to VARA's port closed (0 = Pat already holds the port)
+let _winlinkVaraRoute = '';          // this session's VARA audio: 'direct' | 'cable' | 'remote'
+let _winlinkDialAt = 0;              // when Pat was last asked to call
 let _winlinkPatReply = '';           // Pat's raw /api/connect reply: for the log, never for the status
 let _winlinkReceived = null;         // messages Pat took into the Inbox, when a session did not finish
 let _patArqTimeoutAskedS = 0;        // #425: the ARDOP link timeout the running Pat was started with (seconds)
@@ -2508,11 +2527,13 @@ const CONDITIONS_MIN_H = 280;
 const EXTERNAL_ATU_CARRIER_MODE = 'AM';
 const ExtAtuRestore = require('./lib/ext-atu-restore');
 const PowerRestore = require('./lib/power-restore');
+const TxPowerControl = require('./lib/tx-power-control'); // can POTACAT set this radio's power? (FT-857D class: no)
 const { withTimeout } = require('./lib/with-timeout');
 const SerialHsTrial = require('./lib/serial-hs-trial');
 const PttFlowConflict = require('./lib/ptt-flow-conflict'); // #544: PTT on RTS + RTS/CTS on one port
 const IdleWsprBand = require('./lib/idle-wspr-band');
 const SetupTestFreq = require('./lib/setup-test-freq');
+const SetupTestMode = require('./lib/setup-test-mode'); // #755: the transmit test keys in the mode FT8 uses
 const HuntFilters = require('./lib/jtcat-hunt-filters');
 const N3fjpDeleted = require('./lib/n3fjp-deleted');
 // The radio's last mode report ({ mode, at }), set in sendCatMode: what the
@@ -2542,8 +2563,13 @@ async function waitForModeReadback(sinceTs, predicate, timeoutMs) {
 // over CAT. AM transmits its carrier with no key and no audio on every
 // brand; it was the operator's own workaround. Radios cap the AM carrier
 // (25 W on an FTDX10/IC-7300), which is also this tune's ceiling.
-runExternalAtuTune = async function () {
+runExternalAtuTune = async function (opts) {
   if (_externalAtuActive) return true; // already running
+  // ownPower: a radio POTACAT cannot set the power of (lib/tx-power-control.js,
+  // N5XHI FT-857D 2026-11-24). The carrier goes out at the radio's own setting,
+  // so no power is read, set, restored or claimed; mode and PTT are as ever.
+  // extAtuTuneRequest decides it, after the operator has agreed once.
+  const ownPower = !!(opts && opts.ownPower);
   const activeRig = (settings.rigs || []).find(r => r.id === settings.activeRigId);
   if (!activeRig || activeRig.externalAtu !== 'rf-sense') return false;
   if (!cat || !cat.connected) {
@@ -2566,12 +2592,12 @@ runExternalAtuTune = async function () {
   // once; still unknown: nothing is restored (1.13.10 "restored" the Default
   // power, 100 W, and the operator's knob was fought back to it — GitHub
   // #111, nocodegeneralwitha7300).
-  if (!(_currentTxPower > 0) && cat._codec && typeof cat._codec.getPower === 'function') {
+  if (!ownPower && !(_currentTxPower > 0) && cat._codec && typeof cat._codec.getPower === 'function') {
     const askedAt = Date.now();
     try { cat._codec.getPower(); } catch {}
     await waitForPowerReadback(askedAt, (w) => w > 0, 1500);
   }
-  const restorePower = PowerRestore.restoreTarget(_currentTxPower);
+  const restorePower = ownPower ? null : PowerRestore.restoreTarget(_currentTxPower);
   const powerKnown = restorePower != null;
   const carrierMode = EXTERNAL_ATU_CARRIER_MODE;
   // Remembered BEFORE the power is lowered, the Station Setup test way: a
@@ -2584,12 +2610,13 @@ runExternalAtuTune = async function () {
     _setupPowerRestoreAttempt = 0;
     try { saveSettings(settings); } catch {}
   }
-  sendCatLog(`[ExtATU] Firing ${watts} W ${carrierMode} carrier for ${seconds}s (mode ${restoreMode} → ${carrierMode}, power ${powerKnown ? restorePower + 'W' : 'never reported by the radio'} → ${watts}W)`);
-  if (win && !win.isDestroyed()) win.webContents.send('external-atu-start', { seconds });
+  if (ownPower) sendCatLog(TxPowerControl.tuneStartLine({ carrierMode, seconds, restoreMode }));
+  else sendCatLog(`[ExtATU] Firing ${watts} W ${carrierMode} carrier for ${seconds}s (mode ${restoreMode} → ${carrierMode}, power ${powerKnown ? restorePower + 'W' : 'never reported by the radio'} → ${watts}W)`);
+  if (win && !win.isDestroyed()) win.webContents.send('external-atu-start', ownPower ? { seconds, ownPower: true } : { seconds });
   try {
     if (cat.setModeOnly) cat.setModeOnly(carrierMode, _currentFreqHz);
     else if (cat.setMode) cat.setMode(carrierMode);
-    gatedSetTxPower(watts);
+    if (!ownPower) gatedSetTxPower(watts);
     await new Promise(r => setTimeout(r, 300));
     if (_externalAtuCancel) throw new Error('cancelled');
     gatedSetTransmit(true);
@@ -2643,7 +2670,9 @@ runExternalAtuTune = async function () {
     }
     _externalAtuActive = false;
     _externalAtuCancel = false;
-    if (lowering && confirmed != null) {
+    if (ownPower) {
+      sendCatLog(TxPowerControl.tuneCompleteLine(modeText));
+    } else if (lowering && confirmed != null) {
       delete settings.setupTxPowerRestore;
       try { saveSettings(settings); } catch {}
       sendCatLog(`[ExtATU] Tune complete — ${modeText}; radio confirms ${confirmed} W`);
@@ -2659,6 +2688,134 @@ runExternalAtuTune = async function () {
   return true;
 }
 ipcMain.on('external-atu-cancel', () => { _externalAtuCancel = true; });
+
+// --- RF-sense Tune on a radio POTACAT cannot set the power of ---------------
+// FT-817/818/857/897 (direct, flrig, rigctld), IC-706MKII/G, anything behind
+// DXLab Commander, any radio whose caps say no power control: the rule is
+// lib/tx-power-control.js. Such a radio still gets its Tune (an outboard tuner
+// is the only one it has), but the carrier is at the radio's own power, so the
+// operator is asked once per rig before the first one, and no power command or
+// power claim is made. Radios POTACAT does set the power of never reach any of
+// this: the gate returns 'run' with ownPower false and the tune is as it was.
+
+/**
+ * Can POTACAT set the power of a rig? q null: the active rig, with what its
+ * live link has said (flrig's transceiver name, Hamlib's set-level list).
+ * q {rigId, model, catTarget}: a rig as the editor has it.
+ */
+function extAtuPowerControl(q) {
+  const active = (settings.rigs || []).find(r => r && r.id === settings.activeRigId) || null;
+  const target = (q ? q.catTarget : (active && active.catTarget) || settings.catTarget) || null;
+  // An Icom is often named by its CI-V model on the target, not by rigs[].model.
+  const modelName = String((q ? q.model : active && active.model) || (target && target.civModel) || '');
+  const transport = TxPowerControl.transportOf(target);
+  let row = null;
+  try { row = modelName ? getModel(modelName, null) : null; } catch { row = null; }
+  const c = {
+    transport, modelName,
+    ownRowTxpower: row && row.caps ? row.caps.txpower : null,
+    ownRowProtocol: row ? row.protocol : null,
+    hamlibRigId: target && target.rigId,
+  };
+  const isActive = !q || !!(active && q.rigId && q.rigId === active.id && TxPowerControl.transportOf(settings.catTarget) === transport);
+  if (isActive) {
+    if (!q) { try { const m = getActiveRigModel(); if (m && m.caps) c.capsTxpower = m.caps.txpower; } catch {} }
+    const codec = cat && cat.connected ? cat._codec : null;
+    if (codec && transport === 'flrig') c.flrigXcvr = codec._xcvr;
+    if (codec && transport === 'rigctld') {
+      if (codec._hamlibRigId) c.hamlibRigId = codec._hamlibRigId;
+      if (typeof codec.canSetRfPower === 'function') c.hamlibSetsRfpower = codec.canSetRfPower();
+    }
+  }
+  return TxPowerControl.canSetTxPower(c);
+}
+
+function extAtuRememberOwnPower(rig, ctl, by) {
+  settings.extAtuOwnPowerOk = TxPowerControl.remember(settings.extAtuOwnPowerOk, rig.id, ctl, Date.now(), by);
+  try { saveSettings(settings); } catch {}
+  sendCatLog(`[ExtATU] ${rig.name || 'This rig'}: tuning at the radio's own power was agreed (${by}). POTACAT does not ask again for this rig; Settings > Radio, Edit the rig, External ATU has "Ask me again".`);
+}
+
+let _extAtuOwnPowerAsking = false;
+let _extAtuOwnPowerAsked = null; // { rigId, at }: the question last sent to a device
+
+/** The question, on the window that pressed Tune. Only its Tune now button tunes. */
+async function extAtuAskOwnPower(rig, ctl, sender) {
+  if (_extAtuOwnPowerAsking) return;
+  let parent = null;
+  try { parent = sender && !sender.isDestroyed() ? BrowserWindow.fromWebContents(sender) : null; } catch { parent = null; }
+  if (!parent || parent.isDestroyed()) parent = (win && !win.isDestroyed()) ? win : null;
+  if (!parent) { sendCatLog(TxPowerControl.NO_WINDOW_LINE); return; }
+  _extAtuOwnPowerAsking = true;
+  try {
+    const r = await dialog.showMessageBox(parent, TxPowerControl.confirmDialog(ctl));
+    if (!TxPowerControl.answerIsTune(r && r.response)) { sendCatLog(TxPowerControl.CANCELLED_LINE); return; }
+    // The question was open for a while: the rig must still be the active one
+    // with this tuner, and the rule is asked again.
+    const now = (settings.rigs || []).find(x => x && x.id === settings.activeRigId);
+    if (!now || now.id !== rig.id || now.externalAtu !== 'rf-sense') { sendCatLog('[ExtATU] Tune not sent: the rig changed while the question was open'); return; }
+    const ctlNow = extAtuPowerControl();
+    if (!ctlNow.canSet) extAtuRememberOwnPower(now, ctlNow, 'on this computer');
+    noteAtuTuneStarted();
+    runExternalAtuTune({ ownPower: !ctlNow.canSet }); // async fire-and-forget
+  } catch (err) {
+    sendCatLog(`[ExtATU] Tune not sent: ${err && err.message}`);
+  } finally {
+    _extAtuOwnPowerAsking = false;
+  }
+}
+
+/**
+ * A Tune press on a rig with an RF-sense tuner, from any surface (the
+ * dispatcher's atu-tune case). source 'echocat' is a device: phone, ECHOCAT
+ * Web, another desktop. Nothing here keys the radio except runExternalAtuTune.
+ */
+function extAtuTuneRequest(rig, data, source, meta) {
+  const ctl = extAtuPowerControl();
+  const remote = source === 'echocat';
+  const asked = _extAtuOwnPowerAsked;
+  const gate = TxPowerControl.tuneGate({
+    canSet: ctl.canSet,
+    catConnected: !!(cat && cat.connected),
+    confirmed: TxPowerControl.isConfirmed(settings.extAtuOwnPowerOk, rig.id, ctl),
+    remote,
+    guest: !!(meta && meta.guest),
+    clientCanAsk: !!(data && data.ownPowerAsk === true),
+    clientSaidTune: !!(data && data.ownPowerOk === true && data.rigId === rig.id
+      && asked && asked.rigId === rig.id && Date.now() - asked.at < TxPowerControl.ASK_WINDOW_MS),
+  });
+  if (gate.action === 'refuse-remote') {
+    sendCatLog('[ExtATU] From a remote device: ' + TxPowerControl.REMOTE_REFUSAL);
+    if (remoteServer && remoteServer.running) remoteServer.sendToAsker({ type: 'tune-blocked', reason: TxPowerControl.REMOTE_REFUSAL });
+    return;
+  }
+  if (gate.action === 'ask-remote') {
+    _extAtuOwnPowerAsked = { rigId: rig.id, at: Date.now() };
+    sendCatLog("[ExtATU] From a remote device: asked on that device before the first tune at the radio's own power; nothing transmitted");
+    if (remoteServer && remoteServer.running) remoteServer.sendToAsker(TxPowerControl.remoteAsk(ctl, rig));
+    return;
+  }
+  if (gate.action === 'ask-desktop') { extAtuAskOwnPower(rig, ctl, meta && meta.sender); return; }
+  if (gate.remember) { _extAtuOwnPowerAsked = null; extAtuRememberOwnPower(rig, ctl, 'from a remote device'); }
+  noteAtuTuneStarted();
+  runExternalAtuTune({ ownPower: gate.ownPower }); // async fire-and-forget
+}
+
+// The rig editor: is "Tune carrier power" a thing POTACAT can do for this rig,
+// and has the question been answered (so "Ask me again" can be offered).
+ipcMain.handle('ext-atu-own-power-state', (_e, q) => {
+  q = (q && typeof q === 'object') ? q : {};
+  const rigId = String(q.rigId || '');
+  const ctl = extAtuPowerControl({ rigId, model: String(q.model || ''), catTarget: (q.catTarget && typeof q.catTarget === 'object') ? q.catTarget : null });
+  if (ctl.canSet) return { canSet: true, note: '', help: '', confirmed: false };
+  return { canSet: false, note: TxPowerControl.FIELD_NOTE, help: TxPowerControl.SETTINGS_HELP, confirmed: TxPowerControl.isConfirmed(settings.extAtuOwnPowerOk, rigId, ctl) };
+});
+ipcMain.handle('ext-atu-own-power-forget', (_e, rigId) => {
+  settings.extAtuOwnPowerOk = TxPowerControl.forget(settings.extAtuOwnPowerOk, String(rigId || ''));
+  try { saveSettings(settings); } catch {}
+  return { ok: true };
+});
+
 // THE single rig-control dispatcher. Both transports — desktop IPC
 // (ipcMain.handle 'rig-control') and the ECHOCAT phone (remoteServer.on
 // 'rig-control') — route through this one function so a control added once
@@ -3147,7 +3304,11 @@ function sstvPowerControl() {
   if (!cat || !cat.connected) return { canSet: false, why: 'no-radio' };
   let caps = {};
   try { caps = getRigCapabilities(rigType) || {}; } catch {}
-  return caps.txpower ? { canSet: true } : { canSet: false, why: 'no-power-control' };
+  if (!caps.txpower) return { canSet: false, why: 'no-power-control' };
+  // The caps of flrig and rigctld claim power control for every radio; the one
+  // rule (lib/tx-power-control.js) knows the radios that have none (an FT-857
+  // behind flrig "takes" a power set and never changes).
+  return extAtuPowerControl().canSet ? { canSet: true } : { canSet: false, why: 'no-power-control' };
 }
 
 /** The SSTV window's view: the saved level, whether it can be used, the line to show. */
@@ -7005,8 +7166,9 @@ async function _runStationSetupTxTest(rigId, { keepPower = false, voice = false 
   }
   // The test sends an AUDIO tone. In CW the radio keys but ignores audio, so
   // it transmits nothing — 0.0 W, SWR 1.0 — and the result blamed the audio
-  // (K3SBP's 8600, 2026-09-25). Say so instead of keying. Never switch the
-  // radio's mode behind the operator's back.
+  // (K3SBP's 8600, 2026-09-25). Say so instead of keying. The only mode the
+  // test ever changes is USB/LSB to the DATA mode FT8 uses (below, #755), and
+  // it says so and puts it back.
   const modeNow = String(_currentMode || '').toUpperCase();
   if (/^CW/.test(modeNow)) {
     return done({ result: 'error', message: 'The radio is in CW mode. The test sends an audio tone, which needs USB, LSB or a DATA mode (DIGU on a Flex). Switch the radio to USB, then test again.' });
@@ -7016,11 +7178,26 @@ async function _runStationSetupTxTest(rigId, { keepPower = false, voice = false 
   }
   sendCatLog(`[Setup] test transmit${voice ? ' (voice)' : ''}: radio mode ${modeNow || 'unknown'}`);
 
+  // The mode FT8 uses (lib/setup-test-mode.js, #755): a test in USB reached the
+  // radio's SSB menus (PTT and audio source), not the DATA ones FT8 uses, so an
+  // FTdx-101D keyed for FT8 and never for the test. The key-down switches and
+  // its release puts the mode back, however the test ends.
+  let testFamily;
+  try { testFamily = RigFamily.rigFamily(rig); } catch { testFamily = undefined; }
+  // The mode an FT8 tune sends on this radio: the one DATA-mode rule (jack + JTCAT setting).
+  const ft8TuneMode = RigAudioJack.tuneMode('FT8', { jack: activeRigAudioJack().jack, useDataMode: settings.jtcatUseDataMode !== false }).mode;
+  const testModePlan = SetupTestMode.planTestMode({
+    voice, mode: modeNow, inData: !!(pttModeReport() || {}).data, family: testFamily, ft8TuneMode,
+    dataModes: DataModePicker.dataModesFor(rigDataModeInput(detectRigType())),
+  });
+  const testMode = testModePlan.dataMode || modeNow;
+  if (testModePlan.dataMode) sendCatLog(`[Setup] test transmit: keying in ${testModePlan.dataMode}, the mode FT8 uses on this radio; ${modeNow} goes back when the test ends`);
+
   // Where the tone may go (lib/setup-test-freq.js, w0tlp: refused in LSB).
   // Outside the operator's privileges at the dial: move to the band's FT8
   // dial for the test and come back; no such frequency: say why, key nothing.
   const testBand = freqToBand(_currentFreqHz / 1e6);
-  const plan = SetupTestFreq.planTestFrequency({ freqHz: _currentFreqHz, mode: modeNow, licenseClass: settings.licenseClass,
+  const plan = SetupTestFreq.planTestFrequency({ freqHz: _currentFreqHz, mode: testMode, licenseClass: settings.licenseClass,
     extraDialsKhz: testBand && JS8_DIAL_KHZ[testBand] ? [JS8_DIAL_KHZ[testBand]] : [] });
   if (plan.action === 'refuse') {
     sendCatLog(`[Setup] test transmit: not keyed — ${plan.why}`);
@@ -7080,10 +7257,15 @@ async function _runStationSetupTxTest(rigId, { keepPower = false, voice = false 
   // Judged by the mode the radio is in: a tone in LSB on a phone segment is
   // inside a phone privilege, where a data emission would not be (W0TLP
   // 2026-11-02). Still refused where the class has no phone there.
-  startJtcatTune({ toneHz: STATION_SETUP_TEST_TONE_HZ, emission: plan.emission, noDataSwap: voice });
+  const dataSwap = testModePlan.dataMode ? { forceDataMode: true, dataReason: SetupTestMode.DATA_REASON } : {};
+  startJtcatTune({ toneHz: STATION_SETUP_TEST_TONE_HZ, emission: plan.emission, noDataSwap: voice, ...dataSwap });
   const keyed = jtcatTuneState.active;
+  // Set by the key-down when it switched the radio to DATA; its release restores it.
+  const swappedFrom = keyed && testModePlan.dataMode ? _ssbModeBeforePtt : null;
+  let releasedAt = 0;
   if (keyed) {
     await sleepMs(3000);
+    releasedAt = Date.now();
     stopJtcatTune();
     await sleepMs(900); // meters report a beat late
   }
@@ -7091,6 +7273,19 @@ async function _runStationSetupTxTest(rigId, { keepPower = false, voice = false 
   clearInterval(swrPoll);
   const meas = _stationSetupTxTest;
   _stationSetupTxTest = null;
+
+  // The release put the voice mode back (handleRemotePtt). Wait for the radio
+  // to report it before any move back, so a second restore cannot re-anchor
+  // the dial to the test frequency; then tell the operator in one line.
+  let modeNote = '';
+  if (swappedFrom) {
+    const modeBack = await waitForCondition(() => {
+      const r = pttModeReport();
+      return !!r && r.at >= releasedAt && !r.data;
+    }, 2 * PTT_RESTORE_CONFIRM_MS + 1000);
+    modeNote = SetupTestMode.modeNote({ from: swappedFrom, restored: modeBack });
+    sendCatLog(modeBack ? `[Setup] test transmit: radio back in ${swappedFrom}` : `[Setup] test transmit: sent the radio back to ${swappedFrom}, but it has not reported it — check the mode`);
+  }
 
   // Back to where the operator was, if the test moved (believed only from the radio).
   if (movedFromHz) {
@@ -7124,13 +7319,13 @@ async function _runStationSetupTxTest(rigId, { keepPower = false, voice = false 
   const judged = StationSetup.judgeTxTest({ pttAccepted: keyed, lineError, ...meas });
   if (judged.result === 'not-keyed') {
     sendCatLog(`[Setup] ${voice ? 'voice' : 'test'} transmit result: not keyed — ${lineError ? `${lineError.line} on ${lineError.port} failed: ${lineError.message}` : 'transmit was refused'}`);
-    return done({ ...judged, message: lineError ? undefined : 'The radio was not keyed: POTACAT refused to transmit. The log panel says why.', restored, restoreNote });
+    return done({ ...judged, message: lineError ? undefined : 'The radio was not keyed: POTACAT refused to transmit. The log panel says why.', restored, restoreNote, modeNote });
   }
   if (audioFault) {
     // POTACAT refused to send the tone (the radio's audio output would not
     // open) and unkeyed at once — not a "no power" radio problem.
     sendCatLog(`[Setup] test transmit: stopped, the radio's audio output could not be opened (${audioFault.reason})`);
-    return done({ result: 'error', message: "POTACAT stopped the test because the radio's audio output could not be opened. Choose the output again under Audio in the radio settings (the step above checks it), then test again.", restored, restoreNote });
+    return done({ result: 'error', message: "POTACAT stopped the test because the radio's audio output could not be opened. Choose the output again under Audio in the radio settings (the step above checks it), then test again.", restored, restoreNote, modeNote });
   }
   const { result, watts, swr, keyed: keyedProven, evidence } = judged;
   sendCatLog(`[Setup] ${voice ? 'voice' : 'test'} transmit result: ${result}${watts ? `, ${watts} W` : ''}${swr ? `, SWR ${swr}` : ''}${evidence ? ` (keyed: ${evidence})` : ' (the radio did not confirm it keyed)'}`);
@@ -7140,7 +7335,7 @@ async function _runStationSetupTxTest(rigId, { keepPower = false, voice = false 
     const d = decideVoiceTxHint({ keyedMs: 3000, fwdEvents: meas.fwdEvents, peakW: 0, alcEvents: 0, peakAlc: 0, mode: modeNow, brand: info.brand, model: rig.model, network: !!(rig.catTarget && rig.catTarget.type === 'icom-network') });
     hint = d ? d.hint : null;
   }
-  return done({ result, watts, swr, keyed: keyedProven, evidence, restored, restoreNote, hint });
+  return done({ result, watts, swr, keyed: keyedProven, evidence, restored, restoreNote, hint, modeNote });
 }
 
 function getIcomNetworkDataModSpec(target, rigModel, liveCivAddr = null) {
@@ -12014,6 +12209,7 @@ async function winlinkVaraReady(mode, { configured } = {}) {
   const host = _winlinkVaraHost(kind);
   const where = VaraProcess.varaWhere(host, port);
   let probe = await VaraProcess.probeVaraPort(port, { host });
+  _winlinkVaraCheckedAt = 0;
   if (!probe.ok && patProc && _patHoldsVara[kind] === patProc && (!_winlinkVaraLaunches(kind) || await varaProcessRunning(kind))) {
     winlinkLog(`${name} on ${where} is held by Pat from the last session — reusing it`);
     return;
@@ -12120,6 +12316,7 @@ async function winlinkVaraReady(mode, { configured } = {}) {
     throw new Error(`${name} did not accept a new connection; is another program using it?`);
   }
   if (accept.tries > 1) winlinkLog(`${name}: took ${accept.waitedMs} ms to accept a new connection after the check`);
+  _winlinkVaraCheckedAt = Date.now() - (accept.settleMs || 0); // when POTACAT's last connection to the port closed
   // A desktop session that uses a VARA POTACAT opened for the phone makes it the desktop's: it then stays open (#697).
   if (_varaLaunch[kind] && !_winlinkSessionFromEchocat) _varaLaunch[kind].forEchocat = false;
   _patVaraKind = kind;
@@ -12139,11 +12336,14 @@ async function winlinkVaraAudioReady(mode) {
   const kind = VaraProcess.kindOfMode(mode) || 'hf';
   if (!VaraProcess.isLocalVaraHost(_winlinkVaraHost(kind))) {
     winlinkLog(`vara: ${VaraProcess.varaName(kind)} runs on ${_winlinkVaraHost(kind)} — its audio is that computer's; POTACAT keys this radio through Pat as usual`);
+    _winlinkVaraRoute = 'remote';
     return 'remote';
   }
   if (!winlinkCableConfigured()) {
     if (winlinkIpAudioRoute()) throw new Error(`VARA cannot open this radio's audio (${winlinkAudioRouteName()}) — set up the virtual audio cable in Settings > Station > Winlink`);
-    winlinkLog('vara: no virtual cable set — VARA opens the radio\'s sound card itself (choose the radio\'s devices in VARA)');
+    // A box that is set but is no cable (only one of the two, or the radio's own sound card) is said, not passed over.
+    winlinkLog(VaraDial.cableRouteText(winlinkCableRoute()) || 'vara: no virtual cable set — VARA opens the radio\'s sound card itself (choose the radio\'s devices in VARA)');
+    _winlinkVaraRoute = 'direct';
     return 'direct';
   }
   if (settings.audioSource === 'smartsdr' && !(smartSdrAudio && smartSdrAudio.connected)) throw new Error('Flex Direct audio is not connected — the radio must be on for VARA');
@@ -12160,6 +12360,7 @@ async function winlinkVaraAudioReady(mode) {
   if (!ok) throw new Error(modemBridge.cable.error || 'The virtual audio cable did not open in time — check the two cable devices in Settings > Station > Winlink');
   const c = modemBridge.cable;
   winlinkLog(`vara: audio via the virtual cable (${c.captureLabel || 'from VARA'} → radio, radio → ${c.playbackLabel || 'to VARA'}) and ${winlinkAudioRouteName()}`);
+  _winlinkVaraRoute = 'cable';
   return 'cable';
 }
 function _winlinkArdopPort() {
@@ -12417,6 +12618,7 @@ function spawnPat() {
         winlinkLog(`pat: ${line}`);
         if (DirewolfProcess.patLineSaysConnected(line)) _winlinkPatConnected = true;
         if (VaraProcess.patLineSaysVaraRefused(line) && _patVaraKind && _patHoldsVara[_patVaraKind] === proc) _patHoldsVara[_patVaraKind] = null;
+        if (winlinkSessionActive()) _winlinkVaraRefusals.note('output', VaraDial.patVaraPortRefusal(line) || VaraDial.patVaraCallEnded(line));
       }
     };
     proc.stdout.on('data', relay);
@@ -12500,7 +12702,19 @@ function winlinkOnPatEvent(ev) {
     if (/Exchange failed:|Unable to establish connection to remote:/i.test(ev.text)) _winlinkPatLastLine = ev.text.slice(0, 200);
     // Pat's log is the session transcript; it stays in pat.log. Only the lines
     // an operator can act on are said, once each, in POTACAT's words.
-    if (ev.class === 'login-failed') { _winlinkSessionError = `Winlink refused the password for ${String(settings.myCallsign || '').toUpperCase()} — check it in Settings > Station > Winlink (a password made before 2018 must be typed in CAPITALS)`; _winlinkSessionErrorKind = 'login-failed'; }
+    // VARA refused Pat's TCP connection: no call was made. Pat's words ("connection
+    // refused") are the no-answer rule's too; this is never a gateway that did not
+    // answer. The dial decides what happens next (lib/vara-dial.js).
+    const refused = VaraDial.patVaraPortRefusal(ev.text);
+    // VARA answered Pat's CONNECT with DISCONNECTED ("connect timeout"): the dial decides whether that
+    // was a call (it is then the no-answer below) or the first call's setup going wrong (lib/vara-dial.js).
+    _winlinkVaraRefusals.note('log', VaraDial.patVaraCallEnded(ev.text));
+    if (refused) {
+      _winlinkVaraRefusals.note('log', refused);
+      // Pat does not hold a port it could not open, whatever was recorded before the dial.
+      if (_patVaraKind && _patHoldsVara[_patVaraKind] === patProc) _patHoldsVara[_patVaraKind] = null;
+    }
+    else if (ev.class === 'login-failed') { _winlinkSessionError = `Winlink refused the password for ${String(settings.myCallsign || '').toUpperCase()} — check it in Settings > Station > Winlink (a password made before 2018 must be typed in CAPITALS)`; _winlinkSessionErrorKind = 'login-failed'; }
     else if (ev.class === 'no-answer') { _winlinkSessionError = `${winlinkState.session.gateway || 'The gateway'} did not answer — try another gateway or band`; _winlinkSessionErrorKind = 'no-answer'; }
     else if (ev.class === 'transport-down') { _winlinkSessionError = winlinkTransportDownText(winlinkState.session.mode); _winlinkSessionErrorKind = 'transport-down'; }
     else if (ev.class === 'rig-refused') { _winlinkSessionError = 'POTACAT refused Pat\'s tune or PTT — see the [Winlink] lines above'; _winlinkSessionErrorKind = 'rig-refused'; }
@@ -12741,6 +12955,7 @@ async function startWinlinkShim() {
       winlinkTxActive = true;
       _winlinkTxBurst.keyDown();
       modemBridgeOver(true);
+      _winlinkKeyDowns++; // a call that keyed the radio is never placed again by itself (lib/vara-dial.js)
       const icom = detectRigType() === 'icom' || (getActiveRigModel()?.brand === 'Icom');
       // Packet and VARA FM: the session start put the radio in the rig's packet mode (#128); a frame never changes it.
       const pttMode = PacketRigMode.keyDownOpts({ icom, resolved: winlinkPacketRigMode(winlinkState.session.mode) });
@@ -13165,9 +13380,21 @@ function winlinkCableDevices() {
   const c = (rig && rig.modemCable) || {};
   return { inputId: c.inputId || '', outputId: c.outputId || '' };
 }
+/**
+ * Are the two boxes a pair of virtual cables to carry (lib/vara-dial.js)? Both
+ * set, and neither the radio's own sound card: that one is no cable, and
+ * carrying it would play the radio's receive audio into its own transmit input.
+ */
+function winlinkCableRoute() {
+  return VaraDial.cableRoute({ cable: winlinkCableDevices(), radio: modemBridgeDevices(), ipAudio: winlinkIpAudioRoute() });
+}
 function winlinkCableConfigured() {
-  const c = winlinkCableDevices();
-  return !!(c.inputId && c.outputId);
+  return winlinkCableRoute().use;
+}
+/** "127.0.0.1:8300" for the session's VARA. */
+function winlinkVaraWhere(mode) {
+  const kind = VaraProcess.kindOfMode(mode) || 'hf';
+  return VaraProcess.varaWhere(_winlinkVaraHost(kind), kind === 'fm' ? _winlinkVaraFmPort() : _winlinkVaraPort());
 }
 function modemBridgeWanted() {
   if (winlinkIpAudioRoute() || isRemoteMode()) return false;
@@ -15903,6 +16130,10 @@ async function winlinkStartSession({ mode, gateway, dialKhz, url: rowUrl, origin
   });
   winlinkOutcomeReset(mode);
   winlinkPacketReset(mode);
+  // This attempt's own VARA dial facts (lib/vara-dial.js): nothing keyed yet, no refusal noted.
+  _winlinkKeyDowns = 0;
+  _winlinkVaraRefusals.reset();
+  _winlinkVaraCheckedAt = 0; _winlinkVaraRoute = ''; _winlinkDialAt = 0;
   _winlinkSessionError = '';
   _winlinkSessionErrorKind = '';
   _winlinkPatConnected = false;
@@ -15993,8 +16224,30 @@ async function winlinkStartSession({ mode, gateway, dialKhz, url: rowUrl, origin
       if (mode === 'packet') winlinkPacketTimerStart(); // #300: a call that opens on a link the gateway still holds
       winlinkState.setSession({ state: 'connecting', text: radio ? `Calling ${String(gateway).toUpperCase()}` : 'Connecting to the CMS' });
       winlinkSessionPush();
+      // The first VARA call after POTACAT starts is the one where Pat has to open
+      // VARA's port, and VARA may not be listening again yet after POTACAT's own
+      // checks of it. A dial VARA refused never reached it: placed again, a few
+      // times, while nothing has been keyed (lib/vara-dial.js).
+      if (VaraDial.isVaraMode(mode)) {
+        winlinkLog(`vara: Pat is asked to call ${_winlinkVaraCheckedAt ? (Date.now() - _winlinkVaraCheckedAt) + ' ms after POTACAT\'s own check of ' + winlinkVaraWhere(mode) : 'on the connection to VARA it already holds'} (audio: ${_winlinkVaraRoute || 'not known'})`);
+      }
       _winlinkDialed = true; dialed = true;
-      const received = await patClient.connect(url);
+      const received = await VaraDial.dialWithRedial({
+        mode,
+        connect: async () => { _winlinkDialAt = Date.now(); return await patClient.connect(url); },
+        takeRefusal: () => _winlinkVaraRefusals.take(),
+        live,
+        keyed: () => _winlinkKeyDowns > 0,
+        connected: () => _winlinkPatConnected,
+        onRedial: (info) => {
+          // What the refused dial left behind is not this attempt's ending.
+          _winlinkSessionError = ''; _winlinkSessionErrorKind = '';
+          winlinkLog(VaraDial.redialLogText({ mode, where: winlinkVaraWhere(mode), ...info, sinceCheckMs: _winlinkVaraCheckedAt ? _winlinkDialAt - _winlinkVaraCheckedAt : NaN }));
+          winlinkSessionTouch();
+          winlinkState.setSession({ text: `${VaraProcess.varaName(VaraProcess.kindOfMode(mode))} was not ready for the call: calling ${String(gateway).toUpperCase()} again` });
+          winlinkSessionPush();
+        },
+      });
       if (!live()) throw cancelled();
       winlinkEndSession('done', winlinkSessionSummary(mode, winlinkState.session.sent, received, gateway), received);
     } catch (e) {
@@ -16032,6 +16285,31 @@ async function winlinkStartSession({ mode, gateway, dialKhz, url: rowUrl, origin
       _winlinkPatReply = dialed ? String((e && e.message) || e) : '';
       if (dialed && e && e.body != null) { const n = WinlinkOutcome.receivedFromPatBody(e.body); if (n != null) _winlinkReceived = n; }
       if (dialed && e && !e.status) winlinkNoteCause('pat-lost', e.message);
+      // VARA refused every connection: no call was made. Said as that, never as "did not answer".
+      if (e && e.varaRefused) {
+        _winlinkSessionError = VaraDial.refusedText({ mode, where: winlinkVaraWhere(mode), refusal: e.varaRefused, dials: e.varaDials });
+        _winlinkSessionErrorKind = 'transport-down';
+      }
+      // VARA ended every call at once with the radio never keyed: not a gateway that did not answer either.
+      if (e && e.varaEnded) {
+        _winlinkSessionError = VaraDial.endedText({ mode, where: winlinkVaraWhere(mode), dials: e.varaDials });
+        _winlinkSessionErrorKind = 'transport-down';
+      }
+      // VARA went on with a call Pat had given up on: Pat is told to end it (the session's end unkeys).
+      if (e && e.varaWentOn) {
+        winlinkLog('vara: the call went on the air after Pat reported it ended; it is not placed again, and Pat is told to hang up');
+        if (patClient) patClient.disconnect(true).catch(() => {});
+      }
+      // One line for a bug report when a VARA call ends at once with nothing keyed.
+      if (dialed) {
+        const fast = VaraDial.fastFailText({
+          mode, where: VaraDial.isVaraMode(mode) ? winlinkVaraWhere(mode) : '', msSinceDial: Date.now() - _winlinkDialAt,
+          msSinceCheck: _winlinkVaraCheckedAt ? _winlinkDialAt - _winlinkVaraCheckedAt : NaN,
+          keyed: _winlinkKeyDowns > 0, connected: _winlinkPatConnected,
+          patLine: (e && e.varaRefused) ? `VARA refused the connection to its ${e.varaRefused.port} port (${e.varaRefused.why || 'no reason given'})` : _winlinkPatLastLine, route: _winlinkVaraRoute,
+        });
+        if (fast) winlinkLog(fast);
+      }
       winlinkEndSession('error', _winlinkSessionError || e.message || String(e));
     }
   })();
@@ -19656,6 +19934,7 @@ async function logContact(entry, opts) {
         ? `No mode given, and the radio is in ${_currentMode}, which does not say which mode was worked. Pick the mode and log again.`
         : 'No mode given, and no mode from the radio. Pick the mode and log again.';
       sendCatLog(`[QSO] Not logged: ${e.callsign} — ${why}`);
+      tellQsoLogFailed(opts, why);
       return { success: false, error: why, records: [] };
     }
     e.mode = fromRig;
@@ -19762,6 +20041,10 @@ async function logContact(entry, opts) {
       console.error('[Activation] live list not told:', err.message);
     }
   }
+  // Nothing was written, by saveQsoRecord's own answer: the main window is told
+  // (the save-failed sound, #1041). A second press the double-save guard
+  // swallowed is not a failure: the first press saved it.
+  if (!written.length && !(failure && failure.suppressed)) tellQsoLogFailed(opts, failure && failure.error);
   for (const [c, lookup] of late) {
     lookup.then((info) => {
       if (!info) return;
@@ -19777,6 +20060,15 @@ async function logContact(entry, opts) {
     calls,
     after: opts.replyOnWrite ? Promise.all(afters).then(LogAfterWrite.mergeAfterResults) : undefined,
   };
+}
+
+// A contact was not saved (logContact's result): the main window plays the
+// save-failed sound. Sound only; the caller still gets the result and reports
+// the reason as before.
+function tellQsoLogFailed(opts, error) {
+  if (win && !win.isDestroyed()) {
+    win.webContents.send('qso-log-failed', { origin: (opts && opts.origin) || 'local-manual', error: String(error || '') });
+  }
 }
 
 // QRZ answered after the contact was saved without it (logContact's 2.5 s
@@ -20098,8 +20390,16 @@ async function saveQsoRecord(qsoData, opts) {
   // dialog, pop-out, quick log, JTCAT auto-log, phone, WSJT-X. The QSO-logged
   // chime hangs off this (N2FSM 2026-09-12).
   _lastQsoLoggedAt = Date.now(); // the Rate-ECHOCAT card never lands on a fresh QSO
+  // #1041: `origin` and `fromDevice` say which device logged it (the one that
+  // plays the sound), `dupe` whether the log already held it (QsoSounds.isDupe,
+  // read from the worked list before this record joins it).
+  const workedEntry = { date: qsoData.qsoDate || '', ref: (qsoData.sigInfo || '').toUpperCase(), myRef: (qsoData.mySigInfo || qsoData.myPotaRef || '').toUpperCase(), band: (qsoData.band || '').toUpperCase(), mode: normalizeLogMode(qsoData.mode, qsoData.submode) };
+  const soundDupe = !logAs && QsoSounds.isDupe(workedQsos.get(String(qsoData.callsign || '').toUpperCase()), workedEntry);
   if (win && !win.isDestroyed()) {
-    win.webContents.send("qso-logged", { callsign: qsoData.callsign, band: qsoData.band, mode: qsoData.mode, logAs: logAs ? logAs.call : "" });
+    win.webContents.send("qso-logged", {
+      callsign: qsoData.callsign, band: qsoData.band, mode: qsoData.mode, logAs: logAs ? logAs.call : "",
+      origin, fromDevice: origin === 'jtcat-engine' && !!qsoData.logSource, dupe: soundDupe,
+    });
   }
   // The JTCAT window's JTTY chats: a saved JTTY QSO marks that station's
   // chat logged (and closes it after "Log and close"), from whichever path
@@ -20124,7 +20424,7 @@ async function saveQsoRecord(qsoData, opts) {
   // QSO logged for another operator is not one of theirs)
   if (!logAs && qsoData.callsign) {
     const call = qsoData.callsign.toUpperCase();
-    const entry = { date: qsoData.qsoDate || '', ref: (qsoData.sigInfo || '').toUpperCase(), myRef: (qsoData.mySigInfo || qsoData.myPotaRef || '').toUpperCase(), band: (qsoData.band || '').toUpperCase(), mode: normalizeLogMode(qsoData.mode, qsoData.submode) };
+    const entry = workedEntry;
     if (qsoData.state) entry.state = String(qsoData.state).trim().toUpperCase();
     if (!workedQsos.has(call)) workedQsos.set(call, []);
     workedQsos.get(call).push(entry);
@@ -20137,6 +20437,7 @@ async function saveQsoRecord(qsoData, opts) {
     if (remoteServer && remoteServer.running) {
       remoteServer.sendWorkedQsos([...workedQsos.entries()]);
     }
+    checkRemoteQsoMilestone(true); // #1041: the phone's milestone at the contact, not at the next full re-read
     // Update roster needed sets live. A record's grid is GRIDSQUARE; this
     // read `grid`, which no record carries, so a grid just worked stayed
     // "new" on every later decode (level_death 2026-10-31).
@@ -20655,8 +20956,10 @@ const JtcatQuietFreq = require('./lib/jtcat-quiet-freq');
 const jtcatQuietTracker = JtcatQuietFreq.createQuietFreqTracker();
 function jtcatQuietPick() { return jtcatQuietTracker.current(Date.now()); }
 // WSPR beacon state — driven by the IPC handler + a 1 s scheduler tick.
-// The beacon's default RF power, 1 W. Since #268 it runs at the level the
-// operator sets while it is armed, and reports that power (lib/wspr/dbm.js).
+// The beacon's old 1 W cap, kept for the low-power warning in other modes (a
+// radio a beacon session from an older build left there). Since #268 the
+// beacon runs at the level the operator sets while it is armed, and since
+// #521 at the radio's own setting when none is set (lib/wspr-beacon-power.js).
 const JTCAT_WSPR_MAX_WATTS = 1;
 // The TX audio routes prepend a ~500 ms PTT-settle lead before the waveform.
 const JTCAT_TX_AUDIO_LEAD_MS = 500;
@@ -21984,6 +22287,7 @@ function jtcatPauseRunCq(engine) {
   }
   sendCatLog(`[JTCAT] Full Auto CQ PAUSED — ${jtcatFullAutoCqUnanswered} unanswered CQs and nobody new calling. Listening; will resume when a workable station appears.`);
   broadcastFullAutoCqState();
+  jtcatChimeTxStopped('run-paused');
   if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
     jtcatPopoutWin.webContents.send('jtcat-qso-notice', { message: 'Run paused — band is worked out. Listening for new callers.' });
   }
@@ -22146,11 +22450,52 @@ function jtcatTxWatchdogTripped(mode) {
   return now - last > jtcatTxWatchdogMs();
 }
 
+// ── JTCAT chimes (lib/jtcat-chimes.js decides; sound only) ────────────────
+// Both are off by default (Options > Sounds in the JTCAT window). The main
+// window plays them on the PC's default output, the path the QSO logged chime
+// uses; it is never the transmit audio device. A chime is not started while
+// JTCAT is transmitting: a station that runs its radio's codec as the Windows
+// default output would put it on the air.
+const _jtcatChimeState = JtcatChimes.createState();
+
+function jtcatSendChime(sound) {
+  if (!sound || jtcatAnyTxActive()) return;
+  if (win && !win.isDestroyed()) win.webContents.send('jtcat-chime', { sound });
+}
+
+/** Once per decode event, both decode paths. */
+function jtcatChimeCallers(data) {
+  try {
+    jtcatSendChime(JtcatChimes.callChime(_jtcatChimeState, {
+      setting: settings.jtcatChimeCall,
+      myCall: onAirCall(),
+      results: (data && data.results) || [],
+      qsoCalls: jtcatQsoOwners().map((o) => { const q = o.get(); return q && q.call; }),
+      period: jtcatPeriodUtc(data && data.mode, data && data.periodStartMs),
+      now: Date.now(),
+      txActive: jtcatAnyTxActive(),
+    }));
+  } catch (e) { console.error('[JTCAT] chime:', e); }
+}
+
+/**
+ * JTCAT stopped transmitting by itself. Called only from the automatic stops
+ * (JtcatChimes.AUTO_STOP_REASONS), never from a path the operator shares. The
+ * sound waits for the key-up, and is dropped if TX is on again by then.
+ */
+function jtcatChimeTxStopped(reason) {
+  try {
+    const sound = JtcatChimes.stopChime(_jtcatChimeState, { setting: settings.jtcatChimeStop, reason, now: Date.now() });
+    if (sound) setTimeout(() => jtcatSendChime(sound), JtcatChimes.STOP_DELAY_MS);
+  } catch (e) { console.error('[JTCAT] chime:', e); }
+}
+
 function jtcatTxWatchdogStop() {
   const mins = Math.round(jtcatTxWatchdogMs() / 60000);
   const why = `TX watchdog: ${mins} ${mins === 1 ? 'minute' : 'minutes'} of transmitting with no answer and nothing from the operator. TX stopped. Call CQ or reply again to carry on.`;
   jtcatHaltTxNow('TX watchdog');
   _jtcatTxWatchArmedAt = 0;
+  jtcatChimeTxStopped('tx-watchdog');
   if (win && !win.isDestroyed()) win.webContents.send('app-notice', { message: why, warn: true, duration: 12000 });
   if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) jtcatPopoutWin.webContents.send('jtcat-qso-state', { phase: 'error', error: why });
   if (remoteServer && remoteServer.hasClient && remoteServer.hasClient()) remoteServer.broadcastJtcatQsoState({ phase: 'error', error: why });
@@ -22162,6 +22507,7 @@ function jtcatFullAutoCqWatchdog() {
   if (!idle) return;
   if (jtcatFullAutoCq) {
     stopFullAutoCq('30-minute attended limit reached — confirm you are at the radio to resume');
+    jtcatChimeTxStopped('run-idle');
   }
   // Hunt answers CQs on its own, which is automatic operation too. With
   // ULTRACAT unlocked the operator has taken full responsibility and Hunt runs
@@ -22172,6 +22518,7 @@ function jtcatFullAutoCqWatchdog() {
     const notice = 'Hunt stopped — 30 minutes with no QSO progress and nothing from the operator. '
       + 'Pick a Hunt mode again to resume.';
     setJtcatHuntMode('off', jtcatAutoCqOwner);
+    jtcatChimeTxStopped('hunt-idle');
     sendCatLog('[JTCAT] ' + notice);
     if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
       jtcatPopoutWin.webContents.send('jtcat-qso-state', { phase: 'error', error: notice });
@@ -22453,7 +22800,9 @@ function wsprDbmAuto() {
   return WsprDbm.isAuto(settings.wsprDbmAuto);
 }
 function wsprReportedDbm() {
-  return WsprDbm.reportedDbm({ auto: wsprDbmAuto(), manualDbm: settings.wsprDbm, beaconWatts: wsprBeaconWatts() });
+  // A radio whose power POTACAT cannot read, with no level entered: report
+  // 1 W (30 dBm), the value the beacon has always reported by default.
+  return WsprDbm.reportedDbm({ auto: wsprDbmAuto(), manualDbm: settings.wsprDbm, beaconWatts: wsprBeaconWatts() || 1 });
 }
 
 // Random TX audio offset within the 200 Hz WSPR sub-band. Tone-0 base is kept
@@ -22465,42 +22814,83 @@ function wsprRandomTxAudioHz() {
   return Math.round(lo + Math.random() * (hi - lo));
 }
 
-// Command the rig to the 1 W ceiling. Returns true if SOME power-control path
-// took the command. CRITICAL on Flex Direct: CAT (PC command) is bypassed there
-// — power MUST go through the SmartSDR API, where rfpower is a PERCENT (1% ≈
-// 1 W on a 100 W Flex). We hit every path that's live so the cap can't be
-// silently skipped the way it was on the first on-air test (cat connected=false).
-function wsprForcePowerCap() {
-  let capped = false;
-  // 1 W unless the operator set the beacon a level of its own (#268).
-  const beaconW = wsprBeaconWatts();
-  // Flex Direct / SmartSDR API — rfpower percent. 1% ≈ 1 W (≤1 W on lower-power
-  // models). This is the real cap for Flex; the Flex stage limits output
-  // regardless of DAX drive level.
-  try {
-    if (smartSdr && smartSdr.connected && typeof smartSdr.setTxPower === 'function') {
-      smartSdr.setTxPower(beaconW); capped = true;
-    }
-  } catch {}
-  // CAT rigs, through the same converter as every other power set: rigctld
-  // takes a 0..1 FRACTION, so the bare 1 this used to send was "L RFPOWER
-  // 1.000" = full power — a KX3 + KXPA100 set to 20 W beaconed at 110 W, a
-  // G90 at 5 W went to 20 W (WZ1H, Frank, 2026-10-24).
-  try {
-    if (cat && cat.connected && typeof cat.setTxPower === 'function') {
-      if (gatedSetTxPower(beaconW, { rigType: detectRigType() })) capped = true;
-    }
-  } catch {}
-  // Say the level we set: every surface's TX Pwr and the "TX start ... RF
-  // power set to" line read this, and it said 100 W while the radio sat at
-  // the cap (#268, a rigctld link that never reported power back).
-  if (capped) { _currentTxPower = beaconW; broadcastRigState(); }
-  return capped;
+// The beacon's RF power for one frame (#521). It used to force 1 W at arm and
+// before every frame, on every live path: rigctld took that bare 1 as
+// "L RFPOWER 1.000" = full power (a KX3 + KXPA100 set to 20 W beaconed at
+// 110 W, a G90 at 5 W went to 20 W; WZ1H, Frank, 2026-10-24), and a level the
+// operator entered above the radio's setting was never put back. Now: the
+// level the operator entered (TX Pwr while armed), clamped to this rig and
+// rounded DOWN to the link's step (lib/wspr-beacon-power.js); with none
+// entered, the radio's power is left alone. A frame that changes the power
+// remembers the radio's level first and puts it back at tx-end.
+function wsprPowerLink() {
+  if (smartSdr && smartSdr.connected) return { link: 'flex' };
+  const rigType = detectRigType();
+  if (rigType === 'icom') return { link: 'civ' };
+  if (rigType === 'kenwood' || rigType === 'yaesu') return { link: 'kenwood' };
+  if (rigType === 'flrig') return { link: 'flrig' };
+  if (rigType === 'rigctld') {
+    const codec = cat && cat._codec;
+    if (codec && (codec._yaesuRaw || codec._kenwoodPc)) return { link: 'rigctld-raw' };
+    return { link: 'rigctld', fullScaleW: codec && Number(codec._fullScaleW) > 0 ? Number(codec._fullScaleW) : 0 };
+  }
+  return { link: rigType };
+}
+function wsprPowerRange() {
+  let model = null;
+  try { model = getActiveRigModel(); } catch { model = null; }
+  const l = wsprPowerLink();
+  return WsprBeaconPower.powerRange({
+    link: l.link, fullScaleW: l.fullScaleW,
+    // SmartSDR's rfpower is a percent and every POTACAT caller passes it
+    // watts (a 100 W Flex: 1 % = 1 W), so the beacon does the same.
+    maxW: l.link === 'flex' ? 100 : (model && Number(model.maxPower) > 0 ? Number(model.maxPower) : 0),
+    minW: model && Number(model.minPower) > 0 ? Number(model.minPower) : 0,
+    powerScale: model && model.powerScale,
+  });
+}
+function wsprEnteredBeaconWatts() {
+  return WsprPowerMemory.beaconWatts(settings.wsprBeaconWatts, settings.activeRigId || null);
+}
+function wsprFramePlan() {
+  return WsprBeaconPower.planFrame({
+    enteredW: wsprEnteredBeaconWatts(), radioW: _currentTxPower, range: wsprPowerRange(),
+  });
+}
+function wsprHasPowerControl() {
+  return !!((smartSdr && smartSdr.connected) || (cat && cat.connected));
 }
 
-// The beacon's RF power: 1 W, or the level the operator set while it was armed.
+// Called by wsprBeaconTransmit just before the frame keys. Returns the plan
+// (with `commanded`: a power command went out).
+function wsprSetFramePower() {
+  const plan = wsprFramePlan();
+  if (plan.action !== 'set') return { ...plan, commanded: false };
+  const prior = _currentTxPower;
+  const restoreW = wsprRememberPreCapPower(plan.watts);
+  const commanded = wsprCommandTxPower(plan.watts);
+  const W = WsprBeaconPower.fmtW;
+  if (!commanded) {
+    sendCatLog(`[JTCAT] WSPR: could NOT set the radio to the beacon's ${W(plan.watts)} W (no live CAT/SmartSDR power control); it transmits at the radio's own setting.`);
+    return { ...plan, commanded: false };
+  }
+  const notes = [];
+  if (plan.clamped) notes.push(`the ${W(wsprEnteredBeaconWatts())} W you set is more than this radio can be set to here`);
+  if (plan.belowMin) notes.push(`this radio cannot be set below ${W(plan.watts)} W here (you set ${W(wsprEnteredBeaconWatts())} W)`);
+  sendCatLog(`[JTCAT] WSPR frame: RF power ${prior > 0 ? W(prior) + ' W -> ' : ''}${W(plan.watts)} W` +
+    (notes.length ? ` (${notes.join('; ')})` : '') +
+    (restoreW > 0 ? `; ${W(restoreW)} W comes back when the frame ends.` : '; the radio\'s level before the beacon is unknown, so it stays at this level.'));
+  // Say the level we set: every surface's TX Pwr and the "TX start ... RF
+  // power set to" line read this (#268).
+  _currentTxPower = plan.watts;
+  broadcastRigState();
+  return { ...plan, commanded: true };
+}
+
+// The RF power the beacon runs at: the level entered (as this rig can be set
+// to it), or the radio's own setting when none is entered; 0 = unknown.
 function wsprBeaconWatts() {
-  return WsprPowerMemory.beaconWatts(settings.wsprBeaconWatts, settings.activeRigId || null);
+  return wsprFramePlan().watts || 0;
 }
 
 // A power set from any surface while the beacon is armed is the operator
@@ -22512,6 +22902,9 @@ function wsprNoteOperatorPower(watts, source) {
     armed: wsprBeaconArmed(), source, watts, rigId: settings.activeRigId || null,
   });
   if (!lvl) return;
+  // Between frames the radio is at the operator's own level, and this set is
+  // that level now: a remembered one would put the old level back over it.
+  if (!_wsprFrameRf) wsprForgetPreCapPower();
   const prev = settings.wsprBeaconWatts;
   if (prev && prev.watts === lvl.watts && (prev.rigId || null) === lvl.rigId) return;
   settings.wsprBeaconWatts = lvl;
@@ -22525,7 +22918,7 @@ function wsprNoteOperatorPower(watts, source) {
     _wsprBeaconLevelLogTimer = null;
     const m = settings.wsprPreCapPower;
     sendCatLog(`[JTCAT] WSPR beacon: TX power ${wsprBeaconWatts()} W set by you — the beacon keeps this level for its frames from now on` +
-      (m && m.watts > 0 ? `; ${m.watts} W still comes back when it stands down.` : '.'));
+      (m && m.watts > 0 ? `; ${m.watts} W comes back after each frame.` : '.'));
   }, 1500);
 }
 let _wsprBeaconLevelLogTimer = null;
@@ -22559,22 +22952,29 @@ function wsprForgetPreCapPower() {
   try { saveSettings(settings); } catch {}
 }
 
-// Called at arm, BEFORE wsprForcePowerCap(). Returns the watts that will be
-// restored, or 0 when no pre-beacon level is known.
-function wsprRememberPreCapPower() {
-  const r = WsprPowerMemory.rememberPreCapPower({
+// Called by wsprSetFramePower BEFORE it commands the frame's level. Returns
+// the watts that will be restored, or 0 when no pre-beacon level is known.
+function wsprRememberPreCapPower(beaconW) {
+  const r = WsprPowerMemory.rememberPreBeaconPower({
     current: _currentTxPower, prior: settings.wsprPreCapPower,
-    rigId: settings.activeRigId || null, cap: wsprBeaconWatts(), now: Date.now(),
+    rigId: settings.activeRigId || null, beaconW, now: Date.now(),
   });
   if (r.changed) {
-    settings.wsprPreCapPower = r.marker;
+    if (r.marker) settings.wsprPreCapPower = r.marker;
+    else delete settings.wsprPreCapPower;
     _wsprRestoreAttempts = 0;
     try { saveSettings(settings); } catch {}
   }
   return r.restoreWatts;
 }
 
+// One path for the beacon's power commands, the frame's level and every
+// restore: SmartSDR on a Flex, else CAT through gatedSetTxPower (watts to the
+// codec, which converts on its own scale). Stamped so a readback that was
+// already on its way is not taken for the radio's answer.
+let _wsprPowerCmdAt = 0;
 function wsprCommandTxPower(watts) {
+  _wsprPowerCmdAt = Date.now();
   try {
     if (smartSdr && smartSdr.connected) return gatedSmartSdrTxPower(watts);
     if (cat && cat.connected) return gatedSetTxPower(watts, { rigType: detectRigType() });
@@ -22596,7 +22996,7 @@ const WSPR_RESTORE_MAX_ATTEMPTS = 3;
 function wsprRestorePreCapPower(why, opts = {}) {
   const m = settings.wsprPreCapPower;
   const d = WsprPowerMemory.decideRestore({
-    marker: m, rigId: settings.activeRigId || null, cap: wsprBeaconWatts(),
+    marker: m, rigId: settings.activeRigId || null,
     txActiveWspr: !!(ft8Engine && ft8Engine._txActive && ft8Engine._mode === 'WSPR'),
     immediate: !!opts.immediate, attempts: _wsprRestoreAttempts, maxAttempts: WSPR_RESTORE_MAX_ATTEMPTS,
   });
@@ -22625,10 +23025,10 @@ function wsprRestorePreCapPower(why, opts = {}) {
   }
   _wsprRestoreAttempts++;
   if (!wsprCommandTxPower(m.watts)) {
-    sendCatLog(`[JTCAT] WSPR beacon ${why}: could not restore TX power to ${m.watts} W (no live CAT/SmartSDR power control). The radio is still at the beacon's ~${wsprBeaconWatts()} W — raise it by hand, or it will be restored on the next power readback.`);
+    sendCatLog(`[JTCAT] WSPR beacon ${why}: could not restore TX power to ${m.watts} W (no live CAT/SmartSDR power control). The radio is still at the beacon's ~${WsprPowerMemory.markerBeaconW(m)} W — set it by hand, or it will be restored on the next power readback.`);
     return 'failed';
   }
-  sendCatLog(`[JTCAT] WSPR beacon ${why}: TX power restored to ${m.watts} W (the beacon had set it to ${wsprBeaconWatts()} W).`);
+  sendCatLog(`[JTCAT] WSPR beacon ${why}: TX power restored to ${m.watts} W (the beacon had set it to ${WsprPowerMemory.markerBeaconW(m)} W).`);
   // Optimistic local echo so every surface shows the restored level now; the
   // radio's readback confirms it and clears the marker (or retries).
   _currentTxPower = m.watts;
@@ -22644,14 +23044,17 @@ function wsprRestorePreCapPower(why, opts = {}) {
 // flushed, a previous build that never restored at all) and is retried here.
 function wsprReconcilePreCapPower(watts) {
   const d = WsprPowerMemory.decideReconcile({
-    marker: settings.wsprPreCapPower, armed: wsprBeaconArmed(),
-    retryPending: !!_wsprRestoreRetryTimer, watts, cap: wsprBeaconWatts(),
+    marker: settings.wsprPreCapPower,
+    frameActive: !!(_wsprFrameRf || (ft8Engine && ft8Engine._txActive && ft8Engine._mode === 'WSPR')),
+    retryPending: !!_wsprRestoreRetryTimer,
+    recentCommand: Date.now() - _wsprPowerCmdAt < 3000,
+    watts, tolW: wsprPowerRange().stepW,
   });
   if (d === 'forget') wsprForgetPreCapPower();
-  else if (d === 'restore') wsprRestorePreCapPower('left the radio at the beacon cap', { immediate: true });
+  else if (d === 'restore') wsprRestorePreCapPower('left the radio at the beacon\'s level', { immediate: true });
 }
 
-let _wsprFrameRf = null; // {meterFrames, peakW, setW} while a beacon frame is out
+let _wsprFrameRf = null; // {meterFrames, peakW, setW, commanded} while a beacon frame is out (commanded: it set the power, tx-end puts it back)
 function wsprFrameRfEnd() {
   const f = _wsprFrameRf;
   _wsprFrameRf = null;
@@ -22660,15 +23063,15 @@ function wsprFrameRfEnd() {
   if (line) sendCatLog(line);
 }
 
-// Transmit one WSPR frame. The radio is commanded to the beacon's level (1 W
-// or the operator's), the message reports `dbm` (wsprReportedDbm), and a fixed
+// Transmit one WSPR frame. The radio is set to the level the operator entered
+// for the beacon (none entered: its power is left alone), and put back at
+// tx-end (#521); the message reports `dbm` (wsprReportedDbm), and a fixed
 // report below the radio's level turns the audio drive down toward it.
 // Reuses the standard tx-start audio dispatch (now failsafe-correct for the
 // 110.6 s waveform); txComplete()/the failsafe release PTT.
 function wsprBeaconTransmit(call, grid, dbm) {
   if (!ft8Engine || ft8Engine._mode !== 'WSPR' || ft8Engine._txActive) return;
   if (!WsprDbm.isValid(dbm)) dbm = WsprDbm.normalizeManual(dbm);
-  wsprForcePowerCap(); // re-assert the beacon's RF power immediately before key-up
   // Pick a fresh random spot in the 200 Hz WSPR sub-band every transmission.
   // Unlike FT8 you can't FFT a quiet slot here — WSPR signals are below the
   // noise floor (invisible), so everyone randomizes within 1400–1600 Hz and
@@ -22678,15 +23081,23 @@ function wsprBeaconTransmit(call, grid, dbm) {
   try {
     samples = encodeWspr(call, grid, dbm, { baseFreqHz: baseHz });
   } catch (e) { sendCatLog('[JTCAT] WSPR beacon encode error: ' + (e && e.message || e)); return; }
+  ft8Engine._txActive = true;
+  // The frame's RF power, only now that nothing above can return early: a
+  // power change with no frame to end would never be put back (#521).
+  // _wsprFrameRf is set first so a readback in between is not reconciled.
+  _wsprFrameRf = { meterFrames: 0, peakW: 0, setW: 0, commanded: false };
+  const framePower = wsprSetFramePower();
+  _wsprFrameRf.commanded = framePower.commanded;
+  // The level the radio is at for this frame: the one just set, else its own.
+  const setW = framePower.commanded ? framePower.watts : (_currentTxPower > 0 ? _currentTxPower : 0);
   // A fixed report below the radio's level scales the drive toward it (power
   // ~ amplitude^2); Auto reports what the radio is set to and keeps full drive.
-  const amp = WsprDbm.driveScale({ auto: wsprDbmAuto(), reportedDbm: dbm, beaconWatts: wsprBeaconWatts() });
+  const amp = WsprDbm.driveScale({ auto: wsprDbmAuto(), reportedDbm: dbm, beaconWatts: setW });
   if (amp < 0.999) { for (let i = 0; i < samples.length; i++) samples[i] *= amp; }
-  ft8Engine._txActive = true;
-  sendCatLog(`[JTCAT] WSPR beacon TX: ${call} ${grid} reporting ${WsprDbm.label(dbm)}${wsprDbmAuto() ? ' (Auto)' : ''}, rig set to ${wsprBeaconWatts()} W, drive ${Math.round(amp * 100)}% @ ${baseHz} Hz`);
+  sendCatLog(`[JTCAT] WSPR beacon TX: ${call} ${grid} reporting ${WsprDbm.label(dbm)}${wsprDbmAuto() ? ' (Auto)' : ''}, rig ${setW > 0 ? 'set to ' + WsprBeaconPower.fmtW(setW) + ' W' : 'at its own power setting'}, drive ${Math.round(amp * 100)}% @ ${baseHz} Hz`);
   // What the radio's own wattmeter says during this frame, for one line at
   // tx-end (#268: three frames at 0 W measured, and nothing said so).
-  _wsprFrameRf = { meterFrames: 0, peakW: 0, setW: wsprBeaconWatts() };
+  _wsprFrameRf.setW = setW;
   ft8Engine.emit('tx-start', { samples, message: `${call} ${grid} ${dbm}`, freq: baseHz, slot: 'wspr', offsetMs: 0 });
   // Backstop tx-end after the waveform in case an audio route doesn't call
   // txComplete itself; the armed failsafe is the hard PTT-off backstop.
@@ -22796,9 +23207,7 @@ function setWsprBeacon(on, opts = {}) {
     // restore only ever returns to a level the operator had set themselves.
     const why = opts.why || 'disarmed';
     const r = wsprRestorePreCapPower(why, { immediate: !!opts.immediate });
-    if (r === 'none') {
-      sendCatLog(`[JTCAT] WSPR beacon ${why}. TX power is still at the beacon's ~${wsprBeaconWatts()} W (no pre-beacon level was known) — raise it in the Rig panel or with the TX Pwr slider in the JTCAT window before other modes.`);
-    }
+    if (r === 'none') sendCatLog(`[JTCAT] WSPR beacon ${why}.`);
     tellPopout(false);
     return;
   }
@@ -22830,12 +23239,9 @@ function setWsprBeacon(on, opts = {}) {
     tellPopout(false);
     return;
   }
-  // Remember the level we are about to override, THEN command the beacon's
-  // level. If no power-control path is live, the operator MUST set it by hand —
-  // say so unmistakably.
+  // Arming changes nothing on the radio: each frame sets the beacon's level
+  // (if the operator entered one) and puts the radio's back at tx-end (#521).
   if (_wsprRestoreRetryTimer) { clearInterval(_wsprRestoreRetryTimer); _wsprRestoreRetryTimer = null; }
-  const restoreWatts = wsprRememberPreCapPower();
-  const capped = wsprForcePowerCap();
   if (!jtcatWsprScheduler) jtcatWsprScheduler = new WsprScheduler({});
   jtcatWsprScheduler.setTxPct(settings.wsprTxPct != null ? settings.wsprTxPct : 20);
   jtcatWsprScheduler.setDbm(wsprReportedDbm());
@@ -22853,14 +23259,17 @@ function setWsprBeacon(on, opts = {}) {
         (avgMin > 2 ? `; after that slots are drawn at random — roughly one TX every ${avgMin} minutes, listening slots in between are normal` : '')
       : ' TX 0% = listen only.') +
     (wsprBeaconRunMin() > 0 ? ` It runs for ${wsprRunLabel(wsprBeaconRunMin())}, then stands down.` : ' It runs until you stop it.'));
-  const beaconW = wsprBeaconWatts();
-  sendCatLog(capped
-    ? `[JTCAT] WSPR: radio commanded to ~${beaconW} W${beaconW === JTCAT_WSPR_MAX_WATTS ? '' : ' (the level you set for the beacon)'}. Still verify actual output on a meter;` +
-      ' some radios make almost nothing at their lowest settings, more so on VHF/UHF — raise TX Pwr in the JTCAT window and the beacon keeps that level.' +
-      (restoreWatts > 0
-        ? ` ${restoreWatts} W will be restored when the beacon stands down.`
-        : ` No pre-beacon power level was known, so it stays at ${beaconW} W until you raise it.`)
-    : `[JTCAT] WSPR: could NOT set radio power automatically (no live CAT/SmartSDR power control) — set your radio to ${beaconW} W or less BY HAND before it transmits.`);
+  const plan = wsprFramePlan();
+  const W = WsprBeaconPower.fmtW;
+  if (wsprEnteredBeaconWatts() > 0) {
+    sendCatLog(wsprHasPowerControl()
+      ? `[JTCAT] WSPR: each frame sets the radio to ${W(plan.watts)} W (the level you set for the beacon) and puts its own level back when the frame ends.` +
+        ' Verify actual output on a meter; some radios make almost nothing at their lowest settings, more so on VHF/UHF.'
+      : `[JTCAT] WSPR: could NOT set radio power automatically (no live CAT/SmartSDR power control) — the beacon transmits at the radio's own setting; set it to ${W(plan.watts)} W BY HAND if that is what you want.`);
+  } else {
+    sendCatLog(`[JTCAT] WSPR: the beacon transmits at the radio's own power setting${plan.watts > 0 ? ` (${W(plan.watts)} W now)` : ''} and does not change it.` +
+      ' To beacon at another level, change TX Pwr in the JTCAT window while the beacon is armed; it is used for the frames only and your level comes back after each one.');
+  }
   wsprRunOwedAtuTune();
   tellPopout(true);
 }
@@ -24129,6 +24538,9 @@ function startJtcat(mode) {
       const sliceBand = jtcatManager ? jtcatManager.getDialFreq('default').band : '';
       remoteServer.broadcastJtcatDecode({ ...data, time: timeStr, sliceId: 'default', band: sliceBand });
     }
+    // "Chime when a station calls me": asked before the QSO machines below
+    // take an answer to our CQ into a QSO.
+    jtcatChimeCallers(data);
     // Attended-operator watchdog for Full Auto CQ run mode (Part 97).
     jtcatFullAutoCqWatchdog();
     // Clean up completed QSOs. In Full Auto CQ run mode the owning session
@@ -24834,6 +25246,7 @@ function startJtcat(mode) {
 	    _jtcatLastTxEndMs = Date.now();
 	    clearJtcatTxFailsafe();
 	    clearJtcatIcomHardRelease();
+	    const wsprFrameSetPower = !!(_wsprFrameRf && _wsprFrameRf.commanded);
 	    wsprFrameRfEnd();
 	    // If Mercury owns the radio, this tx-end is unwinding a JTCAT TX the
 	    // arbiter blocked at tx-start — do NOT drop Mercury's PTT. Otherwise
@@ -24850,6 +25263,9 @@ function startJtcat(mode) {
 	      else handleRemotePtt(false);
 	      releaseRadio('jtcat');
 	    }
+	    // A beacon frame that changed the radio's power puts it back now, after
+	    // the PTT release above went out on the same link (#521).
+	    if (wsprFrameSetPower && settings.wsprPreCapPower) wsprRestorePreCapPower('frame done', { immediate: true });
 	    fakeItRestoreDial('end of transmission');
     // Stop the paced UDP pump if SmartSDR Direct TX was driving this cycle —
     // otherwise packets keep flowing after PTT release (harmless once the
@@ -25240,7 +25656,9 @@ function startJtcatTune(opts = {}) {
   // the tone). The 90s timer auto-releases.
   // opts.noDataSwap: Station Setup's voice test keys in plain USB/LSB, the
   // way a voice over does (the radio's SSB audio input, not its DATA one).
-  const keyed = handleRemotePtt(true, { audio: true, emission: opts.emission || 'DATA', noDataSwap: !!opts.noDataSwap, txKind: 'tune', lanOwner: directYaesuReady ? 'tune' : undefined });
+  // opts.forceDataMode: Station Setup's transmit test keys in the DATA mode
+  // FT8 uses (lib/setup-test-mode.js, #755); the release puts the mode back.
+  const keyed = handleRemotePtt(true, { audio: true, emission: opts.emission || 'DATA', noDataSwap: !!opts.noDataSwap, txKind: 'tune', forceDataMode: !!opts.forceDataMode, dataReason: opts.dataReason, lanOwner: directYaesuReady ? 'tune' : undefined });
   // Refused (SCU-LAN10 audio, SWR guard, licence...): no tone and no timers.
   // The refusal may already have stopped Tune; a tone started after that ran
   // until POTACAT closed (#214).
@@ -31155,7 +31573,7 @@ function connectRemote() {
     // RX gain — desktop-authoritative synced slider: hydrate so the client
     // shows the shack's real value (a zeroed slider = blank waterfall) and
     // never pushes its own stale copy.
-    remoteServer.sendToClient({ type: 'jtcat-rx-gain-state', value: typeof settings.jtcatRxGain === 'number' ? settings.jtcatRxGain : 1 });
+    remoteServer.sendToClient({ type: 'jtcat-rx-gain-state', value: typeof settings.jtcatRxGain === 'number' ? clampJtcatRxGain(settings.jtcatRxGain) : 1 });
     remoteServer.sendToClient({ type: 'jtcat-tx-slot-state', lock: jtcatTxSlotLock() });
     remoteServer.sendToClient({ type: 'rig-bands', bands: activeRigBands(), all: RigBands.ALL_BANDS });
     // TX power — same arrangement since 2026-09-09. The web client used to
@@ -32622,6 +33040,10 @@ function connectRemote() {
         band: first.band,
         rstSent: first.rstSent,
         rstRcvd: first.rstRcvd,
+        // #1041: the session list's own dupe mark for this contact (same
+        // call and band already in this session), so the device can play its
+        // dupe sound. Always a boolean.
+        dupe: !!first.dupe,
         // Final identity of the logged record — lets the device stamp its
         // local copy with the SAME uuid so cloud sync sees one QSO, not two.
         uuid: (result.records[0] && result.records[0].uuid) || '',
@@ -34093,6 +34515,9 @@ function connectRemote() {
     // Where the shack's VARA runs is typed at the shack only (#287): Pat
     // connects to that host, so a device never names it.
     if (partial) { delete partial.winlinkVaraHost; delete partial.winlinkVaraFmHost; }
+    // The answer to the own-power tune question is written by the question
+    // only (extAtuRememberOwnPower), never by a settings save from a device.
+    if (partial) delete partial.extAtuOwnPowerOk;
     // #279: saved as watts or null, whatever the device sent.
     const sstvPowerChanged = !!partial && 'sstvTxPowerW' in partial;
     if (sstvPowerChanged) partial.sstvTxPowerW = SstvTxPower.parseWatts(partial.sstvTxPowerW);
@@ -38002,18 +38427,16 @@ function workedOverlayEnrichDecode(r, call, band, mode) {
   }
 }
 
-// --- Daily QSO milestone broadcast (ECHOCAT parity of the renderer's cat
-// celebration; mobile handoff: qso-milestone-celebrations). Semantics mirror
-// renderer/app.js checkQsoMilestone exactly: UTC-day count over the active
-// operator's logbook, one milestone per pass, pre-marked on first load (no
-// celebration burst for QSOs made before launch), set cleared when the count
-// drops (UTC day rollover / smaller log after a profile switch). The desktop
-// window celebrates via its own renderer-side logic; this covers the phone —
-// including headless mode where no renderer exists.
-const REMOTE_QSO_MILESTONES = [10, 25, 50, 100, 150, 200, 250, 500];
-const _remoteCelebrated = new Set();
-let _remoteLastDailyCount = 0;
-let _remoteMilestonesSeeded = false;
+// --- Daily QSO milestone broadcast to an ECHOCAT device (S2C qso-milestone,
+// docs/echocat-protocol.md). #1041: the rungs are QsoSounds.MILESTONES (1, 10,
+// 25, 50, 100, 250) and the message is "First contact today" / "N contacts
+// today"; the 150, 200 and 500 messages are no longer sent. Counted per UTC day
+// over the active operator's logbook; the first read marks the rungs already
+// passed (no celebration for contacts made before launch); a count that drops
+// (a new UTC day, a smaller log after a profile switch) starts again; several
+// rungs passed at once send the highest. The desktop window keeps its own
+// state in the renderer; this covers the phone, headless mode included.
+const _remoteMilestones = QsoSounds.createState();
 
 function _todayUtcQsoCount() {
   const now = new Date();
@@ -38029,33 +38452,11 @@ function _todayUtcQsoCount() {
   return count;
 }
 
-function checkRemoteQsoMilestone() {
+function checkRemoteQsoMilestone(afterContact) {
   const count = _todayUtcQsoCount();
-  if (!_remoteMilestonesSeeded) {
-    _remoteMilestonesSeeded = true;
-    _remoteLastDailyCount = count;
-    for (const m of REMOTE_QSO_MILESTONES) {
-      if (count >= m) _remoteCelebrated.add(m);
-    }
-    return;
-  }
-  if (count < _remoteLastDailyCount) _remoteCelebrated.clear();
-  _remoteLastDailyCount = count;
-  for (const m of REMOTE_QSO_MILESTONES) {
-    if (count >= m && !_remoteCelebrated.has(m)) {
-      _remoteCelebrated.add(m);
-      const mega = m === 500;
-      if (remoteServer && remoteServer.running) {
-        remoteServer.sendToClient({
-          type: 'qso-milestone',
-          milestone: m,
-          count,
-          mega,
-          message: mega ? '500 QSOs today! You are UNSTOPPABLE!' : `${m} QSOs today! Keep going!`,
-        });
-      }
-      break; // one celebration at a time
-    }
+  const hit = QsoSounds.countChanged(_remoteMilestones, count, Date.now(), { rungs: QsoSounds.MILESTONES, afterContact: !!afterContact });
+  if (hit && remoteServer && remoteServer.running) {
+    remoteServer.sendToClient(QsoSounds.milestoneMessage(hit.rung, count));
   }
 }
 
@@ -41027,14 +41428,19 @@ ${record}
 
 /**
  * GitHub #267: a QSO of this station's that reached this PC only through the
- * Cloud pull (a paired phone logged it off-grid) goes to the same external
- * loggers a live QSO does. lib/cloud-ipc.js decides which QSOs qualify.
+ * Cloud pull (a paired phone logged it off-grid; #838: or any other device of
+ * this station's) goes to the same external loggers a live QSO does.
+ * lib/cloud-ipc.js decides which QSOs qualify. `only` = a retry of the
+ * destinations that refused it (#838); Club Log is queued on the first send
+ * only, its outbox retries by itself.
  */
-async function forwardPulledQsoToLoggers(fields) {
+async function forwardPulledQsoToLoggers(fields, { only } = {}) {
   const qsoData = rawQsoToQsoData(fields);
-  sendCatLog(`[Cloud] ${qsoData.callsign} ${qsoData.qsoDate} ${qsoData.timeOn} came in by Cloud sync (logged on the phone off-line): forwarding to the external loggers`);
-  await LoggerForward.forwardToLoggers(qsoData, settings, loggerForwardDeps());
-  LoggerForward.queueClublog(qsoData, settings, loggerForwardDeps());
+  const retry = Array.isArray(only);
+  sendCatLog(`[Cloud] ${qsoData.callsign} ${qsoData.qsoDate} ${qsoData.timeOn} came in by Cloud sync (logged on another device): ${retry ? 'trying again: ' + only.join(', ') : 'forwarding to the external loggers'}`);
+  const result = await LoggerForward.forwardToLoggers(qsoData, settings, loggerForwardDeps(), retry ? { only } : {});
+  if (!retry) LoggerForward.queueClublog(qsoData, settings, loggerForwardDeps());
+  return result;
 }
 
 function forwardToLogbook(qsoData, s = settings) {
@@ -44765,6 +45171,30 @@ function jtcatAnyTxActive() {
   return false;
 }
 
+// #1041, the transmit guard's "when": is the station transmitting, by any
+// means POTACAT knows of. Read only: nothing here keys, unkeys or sets the
+// radio. The main window asks before every operator sound (renderer/sounds.js)
+// and lib/sound-guard.js holds or drops the sound while this is true.
+function soundTxActive() {
+  if (_isEffectivelyTransmitting()) return true; // PTT from any surface, FT8, SSTV, voice macros, CW text, TCI
+  if (rigPresetTransmitting()) return true;      // every key-down sent over the CAT link (an external tuner's carrier, FreeDV), and TX the radio reports itself (a hand key, the mic's PTT)
+  if (jtcatAnyTxActive()) return true;           // JTCAT, every slice
+  if (_jtcatTuneTxActive) return true;           // the JTCAT Tune tone
+  if (_atuSweeping || _atuTuneEpisode) return true; // an antenna tuner cycle
+  return false;
+}
+
+// The guard's "where": every output POTACAT sends transmit audio to. The
+// radio's sound card of every saved rig counts, not only the active one.
+function soundTxDevices() {
+  const ids = new Set();
+  if (settings.remoteAudioOutput) ids.add(String(settings.remoteAudioOutput));
+  for (const r of Array.isArray(settings.rigs) ? settings.rigs : []) {
+    if (r && r.remoteAudioOutput) ids.add(String(r.remoteAudioOutput));
+  }
+  return [...ids];
+}
+
 function sstvHaltTxNow({ keepWait = false } = {}) {
   if (!keepWait) sstvQuietCancel('halt'); // a picture still waiting for a quiet frequency is dropped too (#326)
   // SCU-LAN10: HALT also stops the picture on the wire, and gives the LAN
@@ -46536,8 +46966,9 @@ app.whenReady().then(() => {
       // its own settings file.
       getActiveProfile: () => settings.activeProfile || '',
       // GitHub #267: this station's QSOs that a paired phone logged off-grid
-      // reach the external loggers when the pull brings them in.
-      forwardPulledQso: (fields) => forwardPulledQsoToLoggers(fields),
+      // reach the external loggers when the pull brings them in (#838: from
+      // any device, and a refused send is tried again).
+      forwardPulledQso: (fields, opt) => forwardPulledQsoToLoggers(fields, opt),
       hasPairedDevice: () => Array.isArray(settings.pairedDevices) && settings.pairedDevices.length > 0,
       listProfiles: () => listProfiles().map((call) => ({ call, owner: cloudIpc ? cloudIpc.ownerIdFor(operatorSettingsFor(call)) : null })),
       sendToRenderer: (channel, data) => {
@@ -48345,38 +48776,13 @@ function cloudShackNotice(text, kind) {
         nodeIntegration: false,
       },
     });
-    const saved = settings.bandspreadPopoutBounds;
-    if (saved && saved.width > 300 && saved.height > 120 && isOnScreen(saved)) {
-      bandspreadPopoutWin.setBounds(clampToWorkArea(saved));
-    }
+    // #252: the same rule as the Band Scope. Its own code never saved while
+    // maximized, so the monitor it was maximized on was forgotten.
+    rememberWindowPlace(bandspreadPopoutWin, 'bandspreadPopoutBounds', { minWidth: 480, minHeight: 240 });
     bandspreadPopoutWin.show();
     bandspreadPopoutWin.setMenuBarVisibility(false);
     bandspreadPopoutWin.loadFile(path.join(__dirname, 'renderer', 'bandspread-popout.html'), { query: themeQuery() });
 
-    // Persist bounds on resize/move as well as close, so the last known position
-    // survives unclean exits (task-manager kill, power loss, etc.).
-    let bandspreadBoundsSaveTimer = null;
-    const saveBandspreadBounds = () => {
-      if (!bandspreadPopoutWin || bandspreadPopoutWin.isDestroyed()) return;
-      if (bandspreadPopoutWin.isMaximized() || bandspreadPopoutWin.isMinimized()) return;
-      if (bandspreadBoundsSaveTimer) clearTimeout(bandspreadBoundsSaveTimer);
-      bandspreadBoundsSaveTimer = setTimeout(() => {
-        if (!bandspreadPopoutWin || bandspreadPopoutWin.isDestroyed()) return;
-        settings.bandspreadPopoutBounds = bandspreadPopoutWin.getBounds();
-        saveSettings(settings);
-      }, 400);
-    };
-    bandspreadPopoutWin.on('resize', saveBandspreadBounds);
-    bandspreadPopoutWin.on('move', saveBandspreadBounds);
-    bandspreadPopoutWin.on('close', () => {
-      if (bandspreadBoundsSaveTimer) clearTimeout(bandspreadBoundsSaveTimer);
-      if (bandspreadPopoutWin && !bandspreadPopoutWin.isDestroyed()) {
-        if (!bandspreadPopoutWin.isMaximized() && !bandspreadPopoutWin.isMinimized()) {
-          settings.bandspreadPopoutBounds = bandspreadPopoutWin.getBounds();
-          saveSettings(settings);
-        }
-      }
-    });
     bandspreadPopoutWin.on('closed', () => {
       bandspreadPopoutWin = null;
       if (yaesuScopeBandspreadWants) {
@@ -49371,7 +49777,7 @@ function cloudShackNotice(text, kind) {
       // clock banner (the monitor runs before this window opens), the shared
       // RX-gain level, and the waterfall spectrum loop.
       if (jtcatLastClock) js8PopoutWin.webContents.send('jtcat-clock', jtcatLastClock);
-      if (typeof settings.jtcatRxGain === 'number') js8PopoutWin.webContents.send('jtcat-set-rx-gain', settings.jtcatRxGain);
+      if (typeof settings.jtcatRxGain === 'number') js8PopoutWin.webContents.send('jtcat-set-rx-gain', clampJtcatRxGain(settings.jtcatRxGain));
       startJs8Spectrum();
       // Open = start, exactly like the JTCAT popout (Casey 2026-08-10: JS8's
       // manual Start didn't feel "easy"). Auto-start decoding when the window
@@ -50818,8 +51224,8 @@ function cloudShackNotice(text, kind) {
   // The SSTV window's tuner button and the trip banner's Tune ATU: the same
   // rig-control action every other surface uses, so the SWR guard's
   // match-awaiting episode (setAtu wrapper) applies here too.
-  ipcMain.handle('sstv-atu-tune', async () => {
-    try { await applyRigControl({ action: 'atu-tune' }, 'sstv'); return { ok: true }; }
+  ipcMain.handle('sstv-atu-tune', async (_e) => {
+    try { await applyRigControl({ action: 'atu-tune' }, 'sstv', { sender: _e && _e.sender }); return { ok: true }; }
     catch (err) { return { ok: false, error: err.message || String(err) }; }
   });
   ipcMain.on('sstv-rig-state-get', () => pushSstvRigState());
@@ -51110,19 +51516,13 @@ function cloudShackNotice(text, kind) {
         nodeIntegration: false,
       },
     });
-    const saved = settings.scopePopoutBounds;
-    if (saved && saved.width > 400 && saved.height > 300 && isOnScreen(saved)) {
-      scopePopoutWin.setBounds(clampToWorkArea(saved));
-    }
+    // #252: opens where it was, on the monitor it was on, and saves on move and
+    // resize. Its own code saved only at close and never while maximized, so a
+    // scope kept maximized on a second or third monitor came back on the first.
+    rememberWindowPlace(scopePopoutWin, 'scopePopoutBounds', { minWidth: 480, minHeight: 300 });
     scopePopoutWin.show();
     scopePopoutWin.setMenuBarVisibility(false);
     scopePopoutWin.loadFile(path.join(__dirname, 'renderer', 'scope-popout.html'), { query: themeQuery() });
-    scopePopoutWin.on('close', () => {
-      if (scopePopoutWin && !scopePopoutWin.isDestroyed() && !scopePopoutWin.isMaximized() && !scopePopoutWin.isMinimized()) {
-        settings.scopePopoutBounds = scopePopoutWin.getBounds();
-        saveSettings(settings);
-      }
-    });
     scopePopoutWin.on('closed', () => {
       scopePopoutWin = null;
       if (!yaesuScopeWanted()) stopYaesuScope('scope window closed');
@@ -53082,8 +53482,7 @@ function cloudShackNotice(text, kind) {
         // only when no external tuner is configured on the active rig.
         const rig = (settings.rigs || []).find(r => r.id === settings.activeRigId);
         if (rig && rig.externalAtu === 'rf-sense') {
-          noteAtuTuneStarted();
-          runExternalAtuTune(); // async fire-and-forget
+          extAtuTuneRequest(rig, data, source, meta);
           break;
         }
         if (flexNeedsApi) { sendCatLog('ATU requires SmartSDR API — not connected'); break; }
@@ -53824,12 +54223,14 @@ function cloudShackNotice(text, kind) {
       remoteClient.sendRaw({ type: 'rig-control', data });
       return { ok: true, remote: true };
     }
-    return applyRigControl(data, 'desktop');
+    return applyRigControl(data, 'desktop', { sender: _e.sender });
   });
 
   ipcMain.on('refresh', () => { markUserActive(); refreshSpots(); });
 
   ipcMain.on('app-relaunch', () => { app.relaunch(); app.exit(0); });
+  // #1041: the transmit guard asks before every operator sound. Read only.
+  ipcMain.handle('sound-tx-state', () => ({ tx: soundTxActive(), txDevices: soundTxDevices() }));
   // themeNow: the theme in force (Appearance System decided here), for a
   // window that reads the theme from the settings (#376).
   ipcMain.handle('get-settings', () => ({ ...settings, appVersion: getAppDisplayVersion(), remoteShack: isRemoteMode(), shackGrid: isRemoteMode() ? remoteShackGrid : '', themeNow: themeQuery() }));
@@ -55842,6 +56243,8 @@ function cloudShackNotice(text, kind) {
     delete newSettings.jtcatRxSource;
     stampSstvTemplatesPatch(newSettings);
     setImmediate(() => afterSstvSettingsSaved(newSettings));
+    // The own-power tune answer has one writer too (extAtuRememberOwnPower / -forget).
+    if (newSettings) delete newSettings.extAtuOwnPowerOk;
     // #279 Transmit power for SSTV: watts or null; every device and the SSTV window follow.
     if (newSettings && 'sstvTxPowerW' in newSettings) {
       newSettings.sstvTxPowerW = SstvTxPower.parseWatts(newSettings.sstvTxPowerW);
@@ -56560,6 +56963,10 @@ function cloudShackNotice(text, kind) {
     } else {
       extraUdpBridge.stop();
     }
+
+    // #838: logger settings may just have been fixed (host, port, the logger
+    // started): try now what a logger refused from the Cloud pull.
+    if (cloudIpc && cloudIpc.drainForwardRetries) cloudIpc.drainForwardRetries({ force: true }).catch(() => {});
 
     // Auto-parse ADIF and send DXCC data if enabled
     if (settings.enableDxcc) {
@@ -57861,6 +58268,8 @@ function cloudShackNotice(text, kind) {
     if (ft8Engine) ft8Engine._txEnabled = enabled;
   });
   ipcMain.on('jtcat-halt-tx', () => { jtcatHaltTxNow('Halt TX (JTCAT window)'); });
+  // Options > Sounds, the Test buttons: the same path a real chime takes.
+  ipcMain.on('jtcat-chime-test', (_e, sound) => { if (JtcatChimes.isChimeSound(sound)) jtcatSendChime(String(sound)); });
 
   // KD2TJU: WSJT-X-style Tune button — keys PTT and plays a steady tone
   // through the rig USB CODEC for up to 90s, so the user can dial in TX
@@ -58284,6 +58693,8 @@ function cloudShackNotice(text, kind) {
           const timeStr = jtcatPeriodUtc(data.mode);
           remoteServer.broadcastJtcatDecode({ ...data, sliceId: s.sliceId, band: s.band, time: timeStr });
         }
+        // "Chime when a station calls me" (one per period across the slices).
+        jtcatChimeCallers(data);
         // Advance QSO state machine from this slice's decodes
         // (same logic as single-engine path in startJtcat)
         jtcatFullAutoCqWatchdog();
