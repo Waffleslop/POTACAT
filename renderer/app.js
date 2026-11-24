@@ -23886,7 +23886,7 @@ catLogClearBtn.addEventListener('click', () => {
       s.enablePota && 'POTA', s.enableSota && 'SOTA', s.enableWwff && 'WWFF', s.enableLlota && 'LLOTA', s.enableWwbota && 'WWBOTA',
       s.enableCluster && 'DX-Cluster', s.enableCwSpots && 'CW-Spots', s.enableRbn && 'RBN',
       s.enablePskr && 'PSKR', s.enableDxcc && 'DXCC', s.enableFreedv && 'FreeDV',
-      s.enableAutoSstv && 'Auto-SSTV',
+      s.enableAutoSstv && ('Idle Mode ' + String(s.idleRxMode || 'sstv').toUpperCase()),
     ].filter(Boolean).join(', ') || '(none)';
     // Setup notes for the reported rig, and which the operator ticked — answers
     // "did you set PC KEYING?" before anyone has to ask.
@@ -29121,10 +29121,11 @@ async function checkFirstRun(force = false) {
       if (s.distUnit) document.getElementById('welcome-dist-unit').value = s.distUnit;
       if (s.licenseClass) document.getElementById('welcome-license-class').value = s.licenseClass;
       document.getElementById('welcome-hide-oob').checked = s.hideOutOfBand === true;
-      // Auto-SSTV default is ON for fresh installs (the HTML `checked`
-      // attribute handles that); on re-open we reflect whatever the user
-      // has saved — `!== false` so undefined stays ON.
-      document.getElementById('welcome-enable-auto-sstv').checked = s.enableAutoSstv !== false;
+      // Idle Mode is OFF for new installs (#1051, Casey 2026-11-24: the box
+      // is unticked in the HTML). On re-open it shows what is saved, and unset
+      // reads off, as it runs (startAutoSstvTimer): reopening the welcome
+      // never turns it on for anyone.
+      document.getElementById('welcome-enable-auto-sstv').checked = s.enableAutoSstv === true;
       // Telemetry: a new install's settings carry enableTelemetry: true; an
       // older install that never chose has it unset, which stays unticked.
       { const t = document.getElementById('welcome-enable-telemetry'); if (t) t.checked = s.enableTelemetry === true; }

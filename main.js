@@ -519,6 +519,7 @@ const PacketRigMode = require('./lib/packet-rig-mode');
 const AprsListen = require('./lib/aprs-listen');           // APRS phase 2: when "Listen on my radio" may start, and why not
 const AprsRxFilter = require('./lib/aprs-rx-filter');      // #840: 30 m listening widens a narrow Flex receive filter and puts it back
 const IdleRadioUse = require('./lib/idle-radio-use');      // Idle Mode yields to anyone using the radio, APRS listening included
+const IdleRadioReturn = require('./lib/idle-radio-return'); // #1051: every idle mode puts the radio back where it found it
 const RadioTuneRoute = require('./lib/radio-tune-route'); // the path tuneRadio drives the radio on: TCI, Flex Direct, CAT, or none
 const IcomNetworkDataMod = require('./lib/icom-network-data-mod'); // #853: which DATA MOD item gets LAN over the network (DATA1/2/3 on an IC-7610)
 const IcomUsbDataMod = require('./lib/icom-usb-data-mod'); // sweep 1a: DATA MOD to USB for a data session over USB, put back after
@@ -987,6 +988,8 @@ const GLOBAL_KEYS = new Set([
   'aprsRfBeaconLastAt', // when this station last beaconed over its radio (confirmed): the radio timer counts from it after a restart
   'aprsListenReturn',  // {freqHz, mode, rigId, listenHz, state}: where the radio was before APRS
                        // listening tuned it (lib/aprs-radio-return.js) — this machine's radio
+  'idleRxReturn',      // {home, rigId, dials, state}: where the radio was before an idle session
+                       // moved it (lib/idle-radio-return.js, #1051) — this machine's radio
   'extAtuOwnPowerOk',  // { rigId: {at, by, radio} }: the operator agreed to an RF-sense tune at the radio's own
                        // power on a radio POTACAT cannot set the power of (lib/tx-power-control.js) — this machine's rigs
   'sstvTxPowerW',      // #279: Transmit power for SSTV in W (null = the radio's own power) — this machine's radio
@@ -1226,7 +1229,7 @@ function loadSettingsFromDisk() {
     // mode is WSPR (Casey 2026-09-25). Written here, not as read-side
     // fallbacks, so installs that never chose keep what they were looking at:
     // the theme migration maps them once, idle stays SSTV.
-    return { grid: 'FN20jb', catTarget: null, enablePota: true, enableSota: false, enableRbn: true, enablePskrMap: true, firstRun: true, watchlist: 'K3SBP', ...AppTheme.DEFAULTS, idleRxMode: 'wspr', enableTelemetry: true, jtcatFakeIt: FakeIt.NEW_SETUP_DEFAULT };
+    return { grid: 'FN20jb', catTarget: null, enablePota: true, enableSota: false, enableRbn: true, enablePskrMap: true, firstRun: true, watchlist: 'K3SBP', ...AppTheme.DEFAULTS, idleRxMode: 'wspr', enableAutoSstv: false, enableTelemetry: true, jtcatFakeIt: FakeIt.NEW_SETUP_DEFAULT };
   }
   // Migration path: legacy settings.json (no activeProfile) gets migrated
   // when it has a myCallsign. We do this lazily on first save rather than
@@ -5123,6 +5126,7 @@ function sendCatFrequency(hz) {
   sendN1mmRadioInfo();
   aprsRadioReturnOnDial(hz); // a return a crash or a quit left unfinished (APRS listening)
   aprsListenOnDial(); // listening pauses when the radio moves off the APRS frequency
+  if (!(sdrHoldsDial() && hz === listenSdr.hz)) idleRxOnDial(hz); // #1051: outside tuning is activity; an idle return left unfinished
 }
 
 // Tokens that are never a mode, whatever codec produced them. See the same
@@ -5167,6 +5171,7 @@ function sendCatMode(mode) {
   if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) jtcatPopoutWin.webContents.send('cat-mode', mode);
   _currentMode = mode; // keep real mode internally for CAT
   _lastModeReadback = { mode, at: Date.now() };
+  idleRxNoteActivity(0, mode); // #1051: a mode change is someone using the radio
   rigPresetOnMode(mode); // the one mode sink: a family change may apply a rig preset
   // Don't clear mode suppress — handleRemotePtt sets a long suppress during
   // SSB-over-DATA transitions to prevent ECHOCAT from seeing transient DATA modes
@@ -24465,7 +24470,7 @@ function startJtcat(mode) {
   // session opened that window — cancelling here closed the window, whose
   // close=stop killed the engine, and the 30s idle tick reopened it: a
   // once-a-minute quarter-second window flash, forever. Casey's machine.)
-  if (autoSstvActive && !autoIdleJtcatActive && !autoIdleJs8Active) cancelAutoSstv();
+  if (autoSstvActive && !autoIdleJtcatActive && !autoIdleJs8Active) cancelAutoSstv({ operatorTook: 'JTCAT started' });
   if (sstvPopoutWin && !sstvPopoutWin.isDestroyed()) {
     sendCatLog('[JTCAT] Closing SSTV popout — JTCAT and SSTV can\'t share the audio input');
     try { sstvPopoutWin.close(); } catch {}
@@ -31573,14 +31578,13 @@ function connectRemote() {
     // number is recalled on the radio instead (#308). Older apps send no
     // channelId and are tuned by frequency, as before.
     if (channelId && channelMemoryOf(String(channelId)) != null && cat && cat.connected && cat.canRecallMemory) {
-      markUserActive();
+      markUserActive({ operatorTook: 'a channel from ECHOCAT' });
       channelGo(String(channelId), 'ECHOCAT');
       return;
     }
     // The operator is back, from their mobile device: an idle-RX session ends
-    // BEFORE the tune (its cancel restores the pre-idle frequency, which must
-    // not land after this one).
-    markUserActive();
+    // BEFORE the tune, and with no return over this tune (#1051).
+    markUserActive({ operatorTook: 'a tune from ECHOCAT' });
     console.log('[Echo CAT] Tune request:', freqKhz, 'kHz, mode:', mode || '(keep)');
     // Dead rig link must be VISIBLE on the mobile device (K6RBJ tuned a dead
     // COM port for weeks with no error). Reuse the tune-blocked channel the
@@ -31699,7 +31703,7 @@ function connectRemote() {
     // in main, with the phone's filters; the desktop's own scan stops first.
     if (action === 'start' && filters && !isRemoteMode()) {
       if (desktopScanning && win && !win.isDestroyed()) win.webContents.send('remote-scan-control', { action: 'stop' });
-      markUserActive();
+      markUserActive({ operatorTook: 'a scan started from ECHOCAT' });
       // #961: who started it, so the end of a Guest Pass stops a guest's scan only.
       phoneScanRun().start({ filters, dwellSec, fromFreqKhz, by: guest ? 'guest' : 'owner' });
       return;
@@ -33387,7 +33391,7 @@ function connectRemote() {
     // An idle receive (WSPR, PSK31, JTTY) is nobody's session: taking it is
     // not taking FT8 from the shack, so no takeover notices for it.
     const fromIdle = autoRxKind() && autoIdleJtcatActive;
-    markUserActive();
+    markUserActive({ operatorTook: 'FT8 started from ECHOCAT' });
     // Close JTCAT popout if open — only one platform at a time
     if (fromIdle && jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
       sendCatLog(`[JTCAT] ECHOCAT took the engine from the shack's idle receive`);
@@ -33851,7 +33855,7 @@ function connectRemote() {
 
   remoteServer.on('jtcat-set-mode', ({ mode }) => {
     if (!ft8Engine) return;
-    markUserActive(); // choosing a mode is the operator, not the idle session
+    markUserActive({ operatorTook: 'a JTCAT mode chosen on ECHOCAT' }); // choosing a mode is the operator, not the idle session
     // Same family-switch rule as the popout's jtcat-set-mode: PSK31, JS8 and
     // JTTY are different engine classes and Ft8Engine.setMode coerces unknown
     // strings to FT8, so crossing families rebuilds the slice.
@@ -35096,6 +35100,9 @@ function txNoteRadioPtt(controller, on) {
   // Ours: a PTT POTACAT asserted, a CW envelope, the external-ATU carrier, a test transmit, the radio's own ATU tune.
   if (_isEffectivelyTransmitting() || controller._pttCommanded || controller._cwHoldTimer || _externalAtuActive || _stationSetupTxTest || _stationSetupTxBusy) return;
   if (_atuTuneEpisode) return;
+  // #1051: the radio keyed at the radio (hand mic, footswitch) during idle: the
+  // operator is there. Idle ends, and the radio is not retuned under them.
+  idleRxOperatorTook('the radio was keyed at the radio');
   _txUnsolicitedSince = Date.now();
   const tr = controller._transport || {};
   const lines = tr._lastPinState ? { dtr: tr._lastPinState.dtr, rts: tr._lastPinState.rts } : (typeof tr.setPin === 'function' ? {} : null);
@@ -35270,6 +35277,9 @@ function handleRemotePtt(state, opts = {}) {
   // key, and the shack runs its own SWR guard and PTT watchdog.
   if (isRemoteMode()) { keyRemoteShack(state); return; }
   if (state) noteOwnerActivity('ptt'); // every key-down is owner use while the owner holds a lent radio (#200)
+  // #1051: a key-down during idle is the operator: idle ends, and the radio is
+  // never retuned under a transmission.
+  if (state) idleRxOperatorTook('a transmit started');
   // SWR-guard latch backstop — covers every PTT source (voice macros, mobile
   // device PTT, naked PTT) in one place. Releases (state=false) always pass.
   if (state && _swrTripped) {
@@ -44290,7 +44300,10 @@ function markUserActive(opts) {
   // "[Auto-RX] Deferred" forever. K3SBP 2026-08-05: "the radio is QSYd to a
   // WSPR frequency but I don't see proof of it decoding." Actions that ARE
   // the session must not read as the operator returning.
-  if (autoSstvActive && !(opts && opts.selfDriven)) cancelAutoSstv();
+  // #1051: an action that takes the radio itself (a spot click, a transmit, a
+  // knob turn, a mode started) says so in opts.operatorTook: idle ends and the
+  // radio stays where the operator is taking it. Anything else puts it back.
+  if (autoSstvActive && !(opts && opts.selfDriven)) cancelAutoSstv({ operatorTook: opts && opts.operatorTook });
   // If CAT polling was paused for inactivity, resume it now — user is back
   if (idlePolePaused && cat && cat.resumePolling) {
     cat.resumePolling();
@@ -44333,6 +44346,10 @@ function startIdlePauseTimer() {
   idlePauseTimer = setInterval(() => {
     if (idlePolePaused) return;
     if (!cat || !cat.pausePolling || !cat.connected) return;
+    // An idle session is using the radio, and its return needs the radio's own
+    // readback to see whether the operator moved it (#1051). Nor while Idle
+    // Mode reads the radio once more before it starts.
+    if (autoSstvActive || _idleRxCheckingRadio) return;
     // Never pause while someone is WATCHING the VFO. The poll is the only
     // thing that notices radio-side dial changes, and a dial spin cannot pet
     // the idle clock — the pause kills the very poll that would see it. So
@@ -44398,6 +44415,39 @@ let autoIdleRxLabel = null; // 'WSPR' | 'PSK31' | 'JTTY' | 'JS8' | 'APRS' — na
 let autoIdleAprsActive = false;
 let autoIdleAprsOwnsListen = false;
 let autoIdleJttyBand = null; // the band an idle JTTY session is on ('20m' day / '40m' night)
+
+// #1051: every idle mode that moves the radio puts it back where it found it
+// (frequency, mode; filter width on a CAT radio), through this one return
+// (lib/idle-radio-return.js). Only if the radio is still on a frequency the
+// session put it on: anywhere else the operator moved it, and it stays. APRS on
+// idle goes back through APRS listening's own return (aprsReturn), same rules.
+let _idleReturnAt = 0;
+let _idleRxCheckingRadio = false; // the idle pause let go of the poll so Idle Mode can read the radio before it starts
+const idleReturn = IdleRadioReturn.createIdleReturn({
+  load: () => settings.idleRxReturn || null,
+  save: (m) => {
+    if (m) settings.idleRxReturn = m; else delete settings.idleRxReturn;
+    try { saveSettings(settings); } catch (e) { sendCatLog(`[Auto-RX] could not save the radio's place: ${e.message}`); }
+  },
+  tune: (place) => {
+    _idleReturnAt = Date.now();
+    try { tuneRadio(place.freqHz / 1000, place.mode || undefined, undefined, { origin: 'Idle Mode: the radio goes back', purpose: 'idle-restore' }); } catch {}
+    // The width the radio had, put back only if the return left it different.
+    // CAT radios only: on a Flex the slice keeps its own width for each mode.
+    if (place.filterWidth > 0) {
+      setTimeout(() => {
+        try {
+          if (_currentFilterWidth !== place.filterWidth && radioTuneRoute() === 'cat' && !(smartSdr && smartSdr.connected)) {
+            applyRigControl({ action: 'set-filter-width', value: place.filterWidth }, 'idle-restore');
+          }
+        } catch {}
+      }, 800);
+    }
+  },
+  log: (s) => sendCatLog('[Auto-RX] ' + s),
+});
+const _idleDialActivity = IdleRadioReturn.createDialActivity();
+let _idleActivityLoggedAt = 0;
 
 // Which idle-RX session is running, or null. `autoSstvActive` is the flag
 // for EVERY idle mode (the name predates WSPR/PSK31/JS8), so anything that
@@ -44658,7 +44708,21 @@ function startAutoSstvTimer() {
     if (remoteWatching && !autoSstvActive) lastActivityTime = Date.now();
     const idle = Date.now() - lastActivityTime;
     if (!autoSstvActive && idle >= thresholdMs) {
-      triggerAutoSstv();
+      if (idlePolePaused && cat && cat.resumePolling && !_idleRxCheckingRadio) {
+        // #1051: polling paused for inactivity cannot see a knob turn, so the
+        // radio is read again first: a dial that moved since is someone at the
+        // radio (idleRxNoteActivity) and the countdown starts again. The next
+        // tick starts Idle Mode only if nothing changed.
+        cat.resumePolling();
+        idlePolePaused = false;
+        _idleRxCheckingRadio = true;
+        sendCatLog('[IdlePause] CAT polling resumed: Idle Mode reads the radio before it starts');
+      } else {
+        _idleRxCheckingRadio = false;
+        triggerAutoSstv();
+      }
+    } else if (idle < thresholdMs) {
+      _idleRxCheckingRadio = false;
     }
     // If SSTV is already active, check for band change at sunrise/sunset.
     // (WSPR-on-idle manages its own bands via the hop scheduler — skip.
@@ -44671,6 +44735,7 @@ function startAutoSstvTimer() {
       const newBand = getSstvAutoFreq();
       if (newBand && newBand.freqKhz !== autoSstvCurrentFreq) {
         autoSstvCurrentFreq = newBand.freqKhz;
+        idleReturn.noteDial(newBand.freqKhz * 1000);
         if (cat && cat.connected) cat.tune(newBand.freqKhz * 1000, newBand.mode);
         console.log('[Auto-SSTV] Band switch to ' + newBand.freqKhz + ' kHz');
       }
@@ -44734,6 +44799,8 @@ function triggerAutoSstv() {
     pushActivityState();
     return;
   }
+  // Every other mode moves the radio: its place is on disk first (#1051).
+  idleRxBegin(idleMode.toUpperCase());
   if (idleMode === 'js8') {
     // JS8-on-idle: the JS8 window owns everything — opening it auto-starts
     // the engine and QSYs to the day/night calling frequency (open = start).
@@ -44815,6 +44882,7 @@ function triggerAutoSstv() {
     sendCatLog('[Auto-SSTV] Activated — not tuned: the radio is not set up for 20 m or 40 m');
   } else {
     autoSstvCurrentFreq = autoSstvBand.freqKhz;
+    idleReturn.noteDial(autoSstvBand.freqKhz * 1000);
     if (cat && cat.connected) cat.tune(autoSstvBand.freqKhz * 1000, autoSstvBand.mode);
     // Hand the window the band chosen here: it tunes to its own selection on
     // open (14.230 by default), which put a night session back on 20 m.
@@ -44827,9 +44895,10 @@ function triggerAutoSstv() {
   pushActivityState();
 }
 
-function cancelAutoSstv() {
+function cancelAutoSstv(opts) {
   if (!autoSstvActive) return;
   autoSstvActive = false;
+  const operatorTook = (opts && opts.operatorTook) || '';
   // Kept a few seconds: the switch that ends an idle session then listens to APRS (lib/idle-radio-use.js).
   idleRxLast = idleRxHome ? { ...idleRxHome, endedAt: Date.now(), endedHz: Number(_currentFreqHz) || 0 } : null;
   idleRxHome = null;
@@ -44839,12 +44908,20 @@ function cancelAutoSstv() {
     autoIdleAprsActive = false;
     const owned = autoIdleAprsOwnsListen;
     autoIdleAprsOwnsListen = false;
+    // #1051: the operator taking the radio (a spot click, a transmit) wins:
+    // no return under it. Otherwise listening stopping puts the radio back.
+    if (owned && operatorTook) {
+      aprsReturn.drop();
+      aprsLog(`the radio stays on ${(Number(_currentFreqHz) / 1e6).toFixed(4)} MHz: ${operatorTook}`);
+    }
     if (owned) aprsListenStop('the radio was used');
     sendCatLog('[Auto-RX] APRS receive stopped');
     autoIdleRxLabel = null;
     pushActivityState();
     return;
   }
+  // #1051: the operator is taking the radio from here: no return over it.
+  if (operatorTook) idleReturn.operatorTook(operatorTook, _currentFreqHz);
   if (autoIdleJs8Active) {
     // JS8-on-idle teardown: close the window only if WE opened it — close =
     // stop frees the radio (and the close handler already spares a session a
@@ -44855,6 +44932,7 @@ function cancelAutoSstv() {
     }
     autoIdleJs8OpenedPopout = false;
     sendCatLog('[Auto-RX] JS8 receive stopped');
+    idleRxRestore();
     autoIdleRxLabel = null;
     pushActivityState();
     return;
@@ -44882,6 +44960,8 @@ function cancelAutoSstv() {
     }
     autoIdleJtcatOpenedPopout = false;
     sendCatLog('[Auto-RX] ' + (autoIdleRxLabel || 'WSPR') + ' receive stopped');
+    // The window's own frequency and DIGU go: back where the session found the radio.
+    idleRxRestore();
     autoIdleRxLabel = null;
     autoIdleJttyBand = null;
     autoSstvPrevFreq = null;
@@ -44889,10 +44969,10 @@ function cancelAutoSstv() {
     pushActivityState();
     return;
   }
-  if (autoSstvPrevFreq && cat && cat.connected) {
-    cat.tune(autoSstvPrevFreq, autoSstvPrevMode || 'USB');
-  }
-  sendCatLog('[Auto-SSTV] Cancelled — restored ' + (autoSstvPrevFreq ? (autoSstvPrevFreq / 1000) + ' kHz' : 'previous frequency'));
+  // The same return as every idle mode (it used to be a CAT-only retune here,
+  // which never reached a Flex Direct slice and snapped over a knob turn).
+  sendCatLog('[Auto-SSTV] Cancelled');
+  idleRxRestore();
   // Close the SSTV window only if Auto-SSTV opened it and nobody took it
   // over; its closed handler stops the decoder and pushes
   // sstv-decoder-state {running:false, windowOpen:false} (#525).
@@ -44908,6 +44988,77 @@ function cancelAutoSstv() {
   autoSstvPrevFreq = null;
   autoSstvPrevMode = null;
   pushActivityState();
+}
+
+/** #1051: where the radio is, saved before an idle session moves it (every mode but APRS). */
+function idleRxBegin(label) {
+  const route = radioTuneRoute();
+  // The route's own form of the mode, as APRS listening saves it: the Flex
+  // slice's, or an Icom's USB + DATA as DIGU over CAT (lib/radio-tune-route.js).
+  const ptt = pttModeReport();
+  const icomData = !!(ptt && ptt.data && cat && cat._codec && cat._codec._dataReportAt);
+  const here = RadioTuneRoute.placeBefore({ route, freqHz: route ? _currentFreqHz : 0, mode: _currentMode, catDataForm: icomData ? PttModeSwap.dataFormOf(_currentMode || '') : '' });
+  const filterWidth = (route === 'cat' && !(smartSdr && smartSdr.connected)) ? (Number(_currentFilterWidth) || 0) : 0;
+  const m = idleReturn.begin({ home: { freqHz: here.freqHz, mode: here.mode, filterWidth }, rigId: settings.activeRigId || null, label });
+  if (m && m.home) sendCatLog(`[Auto-RX] the radio goes back to ${(m.home.freqHz / 1e6).toFixed(4)} MHz${m.home.mode ? ' ' + m.home.mode : ''} when Idle Mode ends, if it is still where Idle Mode put it`);
+  // Polling paused for inactivity would hide a knob turn during the session.
+  if (idlePolePaused && cat && cat.resumePolling) {
+    cat.resumePolling();
+    idlePolePaused = false;
+    sendCatLog('[IdlePause] CAT polling resumed (Idle Mode is using the radio)');
+  }
+}
+
+/** #1051: idle ended. The one return: back home if the radio is still where idle put it. */
+function idleRxRestore() {
+  return idleReturn.end({ nowHz: _currentFreqHz, nowMode: _currentMode, connected: radioTuneRoute() !== '' });
+}
+
+/** #1051: the operator took the radio (a transmit, a knob turn): idle ends, the radio stays. */
+function idleRxOperatorTook(why) {
+  if (!autoSstvActive) return;
+  markUserActive({ operatorTook: why });
+}
+
+/**
+ * #1051: a change of the radio's frequency or mode is someone using it (the
+ * knob, SmartSDR, a logger, POTACAT itself): the idle countdown starts again,
+ * so Idle Mode never QSYs a radio someone is operating outside POTACAT.
+ */
+function idleRxNoteActivity(hz, mode) {
+  if (isRemoteMode()) return;
+  if (!_idleDialActivity.note(hz, mode)) return;
+  if (autoSstvActive) return; // a running session has its own watch (idleRxOnDial)
+  lastActivityTime = Date.now();
+  if (settings.enableAutoSstv && Date.now() - _idleActivityLoggedAt > 30 * 60000) {
+    _idleActivityLoggedAt = Date.now();
+    sendCatLog("[Auto-RX] the radio's frequency or mode changed: the Idle Mode countdown starts again (this line at most every 30 min)");
+  }
+}
+
+/** #1051: every dial readback (sendCatFrequency). */
+function idleRxOnDial(hz) {
+  if (!(hz > 0) || isRemoteMode()) return;
+  idleRxNoteActivity(hz, _currentMode);
+  if (autoSstvActive) {
+    if (autoIdleAprsActive) return; // APRS listening watches its own frequency
+    // Moved outside POTACAT (the knob, SmartSDR) during idle: the operator is
+    // back. Idle ends and the radio stays where they put it.
+    if (idleReturn.watch(hz) === 'moved') idleRxOperatorTook(`the radio was tuned to ${(hz / 1e6).toFixed(4)} MHz outside POTACAT`);
+    return;
+  }
+  // A return a disconnect, a crash or a quit left: decided by this readback.
+  if (!settings.idleRxReturn || Date.now() - _idleReturnAt < 1000) return;
+  setTimeout(() => { try { idleReturn.onReadback(hz, { rigId: settings.activeRigId || null, active: autoSstvActive, mode: _currentMode }); } catch {} }, 0);
+}
+
+/** #1051: quit during idle: the radio goes back while the CAT link is still open. */
+function idleRxEndAtQuit() {
+  if (!autoSstvActive || autoIdleAprsActive) return; // APRS: aprsListenStop('quit')
+  autoSstvActive = false;
+  if (autoIdleJtcatActive && autoIdlePrevJtcatMode) settings.jtcatLastMode = autoIdlePrevJtcatMode;
+  sendCatLog('[Auto-RX] ' + (autoIdleRxLabel || 'SSTV') + ' receive stopped (POTACAT closing)');
+  idleRxRestore();
 }
 
 function generateTelemetryId() {
@@ -45740,6 +45891,13 @@ function tuneRadio(freqKhz, mode, brng, { clearXit, origin, purpose } = {}) {
   }
   _lastTuneFreq = freqHz;
   _lastTuneTime = now;
+  // #1051: a tune while an idle session runs is the session's own (every
+  // operator action ends the session first, in markUserActive). It is a place
+  // the session put the radio, and it is receive only: no band-change ATU carrier.
+  if (autoSstvActive && !autoIdleAprsActive) {
+    idleReturn.noteDial(freqHz);
+    if (!purpose) purpose = 'idle-rx';
+  }
   if (settings.audioSource === 'icom-network' && settings.catTarget && settings.catTarget.type === 'icom-network') {
     resetIcomNetworkJtcatUiBuffer();
     resetIcomNetworkRxPacer(`CAT tune ${freqHz}Hz`);
@@ -46134,6 +46292,9 @@ function bandChangeAtuTune(freqMhz, { purpose, origin } = {}, start) {
     lastBand: _lastTuneBand,
     wsprHop: purpose === 'wspr-hop',
     beaconTx: wsprBeaconWillTransmit(),
+    // #1051: Idle Mode's own tunes are receive only, and its return never keys.
+    receiveOnly: purpose === 'idle-rx',
+    restore: purpose === 'idle-restore',
   });
   if (d.action === 'none') return;
   const linkAtu = TuneLinkGuard.tuneLinkAutoAtu({ origin, action: d.action });
@@ -46146,7 +46307,9 @@ function bandChangeAtuTune(freqMhz, { purpose, origin } = {}, start) {
   _lastTuneBand = d.lastBand;
   _atuOwedTune = d.owedBand ? { band: d.owedBand, start } : null;
   if (d.action === 'skip') {
-    sendCatLog(`[ATU] WSPR hop to ${d.owedBand}: the beacon is not set to transmit, so no band-change tune (receive only)`);
+    if (purpose === 'idle-restore') sendCatLog(`[ATU] Idle Mode put the radio back on ${d.owedBand}: no band-change tune (nothing transmits by itself)`);
+    else if (purpose === 'idle-rx') sendCatLog(`[ATU] Idle Mode receive on ${d.owedBand}: no band-change tune (receive only)`);
+    else sendCatLog(`[ATU] WSPR hop to ${d.owedBand}: the beacon is not set to transmit, so no band-change tune (receive only)`);
     return;
   }
   // Delay ATU trigger to let the radio settle on the new frequency first
@@ -49795,6 +49958,13 @@ function cloudShackNotice(text, kind) {
     });
   };
   ipcMain.on('jtcat-popout-open', (_e, mode) => {
+    // #1051: the operator asked for JTCAT while idle runs in that window: idle
+    // ends here, before the window changes mode, and the radio is theirs (the
+    // window tunes to the mode they picked, never back home over it).
+    if (autoIdleJtcatActive) {
+      autoIdleJtcatOpenedPopout = false;
+      markUserActive({ operatorTook: 'the operator opened JTCAT' });
+    }
     // A More-menu pick (PSK31 / JTTY) names its mode. A fresh window reads
     // settings.jtcatLastMode (saved by the renderer first, IPC is ordered);
     // an already-open window must be TOLD, or it stays in whatever it was.
@@ -53612,8 +53782,10 @@ function cloudShackNotice(text, kind) {
 
   ipcMain.on('tune', (_e, { frequency, mode, bearing, slicePort, origin, pickSideband }) => {
     // The idle-RX session's own QSY (including WSPR band hops) must not read
-    // as the operator returning — see markUserActive().
-    markUserActive({ selfDriven: isIdleRxSelfAction(_e.sender) });
+    // as the operator returning — see markUserActive(). The operator's tune (a
+    // spot click, a band button, the VFO window) ends idle with no return over
+    // it (#1051); with the VFO locked the tune is refused, so the radio goes back.
+    markUserActive(isIdleRxSelfAction(_e.sender) ? { selfDriven: true } : (_vfoLocked ? undefined : { operatorTook: 'the operator tuned the radio in POTACAT' }));
     if (!isIdleRxSelfAction(_e.sender)) noteOwnerActivity('tune');
     if (_vfoLocked) {
       _e.sender.send('tune-blocked', 'VFO Locked — Unlock VFO to change frequency');
@@ -58907,7 +59079,7 @@ function cloudShackNotice(text, kind) {
     stopJtcat();
     // Same audio-device contention fix as startJtcat: tear down SSTV
     // first so it doesn't hold the input device away from JTCAT.
-    cancelAutoSstv();
+    cancelAutoSstv({ operatorTook: 'JTCAT started' });
     if (sstvPopoutWin && !sstvPopoutWin.isDestroyed()) {
       sendCatLog('[JTCAT] Closing SSTV popout — JTCAT and SSTV can\'t share the audio input');
       try { sstvPopoutWin.close(); } catch {}
@@ -60190,6 +60362,9 @@ function gracefulCleanup() {
   // marker stays on disk until a readback confirms it, so a lost command is
   // finished at the next start).
   try { aprsListenStop('quit'); } catch {}
+  // Idle Mode: the radio goes back the same way, while CAT is up (#1051; the
+  // place stays on disk until a readback confirms it, as for APRS).
+  try { idleRxEndAtQuit(); } catch {}
   try { stopModemBridge('quit'); } catch {}
   // A WSPR beacon armed at quit must give the radio its power back NOW, while
   // the CAT/SmartSDR links below are still open — stopJtcat() runs after they
