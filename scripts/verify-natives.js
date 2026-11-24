@@ -2,8 +2,13 @@
 'use strict';
 /**
  * Pre-dist gate: refuse to package a build whose native addons were never
- * compiled. Runs from the npm predist:* hooks (NOT in release CI, which
- * calls electron-builder directly and has its own per-arch verify steps).
+ * compiled. Runs from the npm predist:* hooks only. Release CI calls
+ * electron-builder directly, so this never runs there; instead every release
+ * job (Windows, macOS arm64 and x64, Linux x64 and arm64) fails unless
+ * ft8_native and js8_native exist and are the right arch: macOS with lipo,
+ * Windows and Linux with scripts/check-required-natives.js, which also loads
+ * them, before packaging and again in the packaged app. build-natives itself
+ * exits 1 when either of them fails to compile.
  *
  * Why (G6INI 2026-08-18): the README's from-source path was `npm install`
  * then `npm run dist:mac` — but nothing in that sequence builds the

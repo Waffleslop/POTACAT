@@ -491,6 +491,7 @@ const TESTS = [
   'test/wspr-beacon-power-test.js', // #268: the beacon keeps the operator's RF power; rigctld reports the radio's power
   'test/wspr-reported-dbm-test.js', // #268: the beacon reports the power it runs at (5 W = 37 dBm), or the operator's fixed pick, 0..60 dBm
   'test/js8-native-test.js',
+  'test/check-required-natives-test.js', // release gate: ft8_native/js8_native exist, right arch (PE/ELF/Mach-O header), load
   'test/rade-native-test.js',
   'test/freedv-playback-test.js',
   'test/js8-varicode-test.js',
