@@ -785,7 +785,11 @@
   var WCAT = window.WinlinkCatalog;
   var cat = null;               // main's answer: { items (the full catalog, or none), picks, pending, ... }
   var catView = WCAT.mergeCatalog(null);
-  var catTicked = {};           // item ID -> true
+  var catTicked = {};           // '$' + item ID -> true (the prefix keeps an ID such as __proto__ an ordinary key)
+  function catIsTicked(id) { return catTicked['$' + id] === true; }
+  function catTick(id, on) { if (on) catTicked['$' + id] = true; else delete catTicked['$' + id]; }
+  var catAgain = false;         // the full catalog is being asked for a second time (Request again)
+  var catLoadFailed = false;
   var catOpen = {};             // category code -> true / false once the operator opened or closed it
   var catBusy = false;          // a request is on its way into the Outbox
   var catStamp = '';
@@ -793,12 +797,12 @@
   function catPanelOpen() { return !$('wl-form-catalog').hidden; }
   function catStampOf(s) {
     var c = (s && s.catalog) || {};
-    return [(s && s.mycall) || '', s && s.remoteShack ? 1 : 0, s && s.shackLacksCatalog ? 1 : 0, c.count || 0, c.readAt || 0, c.requestedAt || 0, c.unreadable ? 1 : 0].join('|');
+    return [(s && s.mycall) || '', s && s.remoteShack ? 1 : 0, s && s.shackLacksCatalog ? 1 : 0, c.count || 0, c.readAt || 0, c.requestedAt || 0, c.pendingKind || '', c.unreadable ? 1 : 0, c.offerMid || '', c.picksAt || 0].join('|');
   }
   function catErr(t) { $('wl-cat-err').textContent = t || ''; }
   function catClear(el) { while (el.firstChild) el.removeChild(el.firstChild); }
   function catSpan(cls, text) { var e = document.createElement('span'); e.className = cls; e.textContent = text; return e; }
-  function catTickedItems() { return catView.items.filter(function (i) { return catTicked[i.id] === true; }); }
+  function catTickedItems() { return catView.items.filter(function (i) { return catIsTicked(i.id); }); }
   function catSame(el, attr, value) { return el.getAttribute(attr) === value; }
 
   function catRow(item, inPicks) {
@@ -811,7 +815,7 @@
     var box = document.createElement('input');
     box.type = 'checkbox';
     box.className = 'wl-sel';
-    box.checked = catTicked[item.id] === true;
+    box.checked = catIsTicked(item.id);
     box.setAttribute('data-id', item.id);
     box.setAttribute('aria-label', 'Request ' + label);
     pick.appendChild(box);
@@ -862,9 +866,29 @@
     $('wl-cat-get').textContent = row.button;
     $('wl-cat-get').hidden = !row.button;
     $('wl-cat-get').disabled = catBusy;
-    if (!row.button) { $('wl-cat-confirm').hidden = true; $('wl-cat-source').hidden = false; }
+    $('wl-cat-get').classList.toggle('primary', row.kind === 'offer');
+    $('wl-cat-get2').textContent = row.button2;
+    $('wl-cat-get2').hidden = !row.button2;
+    $('wl-cat-get2').disabled = catBusy;
+    if (row.kind === 'offer' || (!row.button && !row.button2)) { $('wl-cat-confirm').hidden = true; $('wl-cat-source').hidden = false; }
+  }
+  // The rows are drawn again on every change: whatever had the focus (a box, a star, a group head) gets it back.
+  function catFocusKey() {
+    var a = document.activeElement;
+    if (!a || !a.getAttribute || !$('wl-form-catalog').contains(a)) return null;
+    var k = { star: a.getAttribute('data-star'), id: a.getAttribute('data-id'), group: a.getAttribute('data-group'), picks: !!a.closest('#wl-cat-picks') };
+    return k.star !== null || k.id !== null || k.group !== null ? k : null;
+  }
+  function catRefocus(k) {
+    if (!k) return;
+    var all = Array.prototype.filter.call($('wl-form-catalog').querySelectorAll('.wl-cat-star, .wl-sel, .wl-cat-head'), function (b) {
+      return (k.star !== null && catSame(b, 'data-star', k.star)) || (k.id !== null && catSame(b, 'data-id', k.id)) || (k.group !== null && catSame(b, 'data-group', k.group));
+    });
+    var best = all.filter(function (b) { return !!b.closest('#wl-cat-picks') === k.picks; })[0] || all[0];
+    if (best) best.focus();
   }
   function renderCatalogList() {
+    var focusKey = catFocusKey();
     var q = $('wl-cat-find').value.trim();
     var finding = !!q;
     var found = finding ? WCAT.searchItems(catView.items, q, WCAT.SEARCH_LIMIT + 1) : catView.items;
@@ -908,7 +932,7 @@
     if (finding && !found.length) {
       msg.appendChild(document.createTextNode(WCAT.TEXT.findNone + (catView.full ? '' : ' ' + WCAT.TEXT.findNoneStarter)));
       var src = catSourceRow();
-      if (!catView.full && src.button) {
+      if (!catView.full && src.button && src.kind !== 'offer') {
         var get = document.createElement('button');
         get.type = 'button';
         get.className = 'wl-btn';
@@ -919,6 +943,7 @@
     } else if (more) {
       msg.textContent = WCAT.TEXT.findMore;
     }
+    catRefocus(focusKey);
   }
   function renderCatalog() {
     var gated = catGated();
@@ -940,23 +965,25 @@
     cat = r;
     catView = WCAT.mergeCatalog(r.items);
     var have = {};
-    catView.items.forEach(function (i) { if (catTicked[i.id] === true) have[i.id] = true; });
+    catView.items.forEach(function (i) { if (catIsTicked(i.id)) have['$' + i.id] = true; });
     catTicked = have;            // a tick for an item this list does not hold is dropped
   }
   function loadCatalog() {
     var who = (state && state.mycall) || '';
     if (who !== catFor) { catFor = who; catTicked = {}; catOpen = {}; }   // another operator: nothing carried over
     if (catGated()) { cat = null; renderCatalog(); return; }
-    window.api.catalogGet().then(function (r) {
-      if (!r || !r.ok) {
-        // No answer: the short list still shows, with the reason.
-        catApply({ items: [], picks: (cat && cat.picks) || null, pending: false });
-        catErr((r && r.error) || WCAT.TEXT.noAnswer);
-      } else {
-        catApply(r);
-      }
+    // A reload that fails changes nothing: the list as it was and every tick stay, and one line says why.
+    var failed = function (why) {
+      catLoadFailed = true;
+      catErr(why || WCAT.TEXT.noAnswer);
       if (catPanelOpen()) renderCatalog();
-    }, function () { catErr(WCAT.TEXT.noAnswer); });
+    };
+    window.api.catalogGet().then(function (r) {
+      if (!r || !r.ok) { failed(r && r.error); return; }
+      if (catLoadFailed) { catLoadFailed = false; catErr(''); }
+      catApply(r);
+      if (catPanelOpen()) renderCatalog();
+    }, function () { failed(''); });
   }
   function catalogStateChanged() {
     var st = catStampOf(state);
@@ -989,7 +1016,7 @@
     var box = e.target;
     if (!box.classList || !box.classList.contains('wl-sel')) return;
     var id = box.getAttribute('data-id');
-    if (box.checked) catTicked[id] = true; else delete catTicked[id];
+    catTick(id, box.checked);
     Array.prototype.forEach.call($('wl-form-catalog').querySelectorAll('.wl-sel'), function (b) { if (catSame(b, 'data-id', id)) b.checked = box.checked; });
     catErr('');
     renderCatalogBar();
@@ -1019,7 +1046,7 @@
       if (h) h.focus();
       return;
     }
-    if (e.target.closest('[data-cat-get]')) catGetFull();
+    if (e.target.closest('[data-cat-get]')) catGetFull(false);
   });
 
   // Get / Update the full catalog: one LIST request in the Outbox. Over the
@@ -1036,10 +1063,11 @@
       if (!r || !r.ok) { if (!(r && r.busy)) catErr((r && r.error) || WCAT.TEXT.sendFailed); if (catPanelOpen()) renderCatalog(); return; }
       loadCatalog();
     };
-    window.api.catalogRequestList().then(done, function () { done(null); });
+    window.api.catalogRequestList(catAgain).then(done, function () { done(null); });
   }
-  function catGetFull() {
+  function catGetFull(again) {
     if (catBusy) return;
+    catAgain = again === true;
     catErr('');
     if (!(state && state.mycall)) { catErr(WCAT.TEXT.noCallsign); return; }
     if (WCAT.isRadioMode(currentMode().id)) {
@@ -1050,7 +1078,21 @@
     }
     catRequestList();
   }
-  $('wl-cat-get').addEventListener('click', catGetFull);
+  // A catalog message nobody asked for: it is used only when the operator says so.
+  function catOffer(use) {
+    if (catBusy) return;
+    catBusy = true;
+    catErr('');
+    renderCatalogSource();
+    var done = function (r) {
+      catBusy = false;
+      if (!r || !r.ok) catErr((r && r.error) || WCAT.TEXT.noAnswer);
+      loadCatalog();
+    };
+    window.api.catalogOffer(use).then(done, function () { done(null); });
+  }
+  $('wl-cat-get').addEventListener('click', function () { if (catSourceRow().kind === 'offer') catOffer(true); else catGetFull(false); });
+  $('wl-cat-get2').addEventListener('click', function () { if (catSourceRow().kind === 'offer') catOffer(false); else catGetFull(true); });
   $('wl-cat-confirm-yes').addEventListener('click', catRequestList);
   $('wl-cat-confirm-no').addEventListener('click', function () {
     $('wl-cat-confirm').hidden = true;
@@ -1072,13 +1114,15 @@
       catBusy = false;
       r = r || { ok: false, error: WCAT.TEXT.sendFailed };
       var queued = Array.isArray(r.queued) ? r.queued : [];
-      queued.forEach(function (id) { delete catTicked[id]; });   // what is in the Outbox is no longer ticked
+      queued.forEach(function (id) { catTick(id, false); });   // what is in the Outbox is no longer ticked
       if (r.picks && cat) cat.picks = r.picks;
       if (!r.ok) {
         if (!r.busy) catErr(queued.length ? WCAT.partialText(queued.length, catTickedItems().length, r.error) : (r.error || WCAT.TEXT.sendFailed));
         if (catPanelOpen()) renderCatalog();
         return;
       }
+      // More than 200 were ticked: the first 200 went, the rest stay ticked for the next press.
+      if (r.over > 0 && catTickedItems().length) { catErr(WCAT.overText(queued.length, catTickedItems().length)); if (catPanelOpen()) renderCatalog(); return; }
       // Still on the panel: say what happens next. Closed meanwhile: the Outbox count says it.
       if (catPanelOpen()) showReader('<div class="wl-empty">' + esc(WCAT.queuedText(queued.length)) + '</div>');
     };

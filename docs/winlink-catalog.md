@@ -1,7 +1,7 @@
 # Winlink catalog requests
 
-Status: built 2026-11-24 (branch `feat/winlink-catalog-request`). Not yet proven on the air; the
-live check at the end settles the three open facts.
+Status: written 2026-11-24. Not yet proven against Winlink itself; the live check at the end settles
+the three open facts.
 
 Winlink will mail you things on request: propagation forecasts, weather text, gateway frequency
 lists, nearby stations, help files. Winlink Express calls this "Winlink Catalog Requests". POTACAT's
@@ -39,16 +39,25 @@ The button sits in the folders column after Forms.
 
 ### The source row
 
-| State | Words | Button |
-|---|---|---|
-| Only the short list | "Showing the short list. Winlink has several hundred more items." | **Get the full catalog** |
-| The full catalog is requested | "The full catalog is requested. It arrives as a message of about 70 KB after your next Send / Receive, and this list fills in by itself." | none, so it cannot be queued twice |
-| The full catalog is here | "Full catalog: N items, as of 9 March 2026." (Winlink's own date for the catalog, else the date of the message) | **Update the catalog** |
-| A catalog message could not be read | "A catalog message arrived but POTACAT could not read it. The short list still works." | **Get the full catalog** |
+One line, a button, and sometimes a quiet second button. The first state that applies is shown.
 
-Over a radio mode the button first shows one line, "The catalog is about 70 KB. Over the radio that
-can take a long time; it is quick over Telnet.", with **Request it anyway** and **Cancel**. Over
-Telnet it queues at once.
+| State | Words | Buttons |
+|---|---|---|
+| A catalog message is in the Inbox that was not asked for (or is much smaller than the one in use) | "A catalog message from SERVICE is in your Inbox: 1,400 items." With a much smaller one: "... 21 items. Yours has 400." | **Use it**, and a quiet **No thanks** |
+| A catalog message could not be read | "A catalog message arrived but POTACAT could not read it. The short list still works." With a full catalog already in use: "A newer catalog message arrived but POTACAT could not read it. Your catalog is unchanged." | **Get the full catalog** / **Update the catalog** |
+| The request for the full catalog is in the Outbox | "The full catalog is requested. It arrives as a message of about 70 KB after your next Send / Receive, and this list fills in by itself." | none, so it cannot be queued twice |
+| The request has gone out and no catalog has come back yet | the same words | a quiet **Request again** |
+| The full catalog is here | "Full catalog: N items, as of 9 March 2026." (Winlink's own date for the catalog, else the date of the message) | **Update the catalog** |
+| Only the short list | "Showing the short list. Winlink has several hundred more items." | **Get the full catalog** |
+
+"Could not be read" goes before "requested": an operator is never left waiting on a line with no
+button. A request is "in the Outbox" only while its message really is there. If the operator deletes
+it before it goes out, the Get button is back at once. "Gone out" lasts until a catalog is read or
+7 days pass.
+
+Over a radio mode the Get, Update and Request again buttons first show one line, "The catalog is
+about 70 KB. Over the radio that can take a long time; it is quick over Telnet.", with **Request it
+anyway** and **Cancel**. Over Telnet they queue at once.
 
 ### Two sources, one list
 
@@ -56,12 +65,21 @@ Telnet it queues at once.
 - The **full catalog** comes from Winlink itself, by mail. The button queues one request. When the
   reply is in the Inbox, POTACAT recognises it, reads it and the panel shows the whole catalog with
   categories and sizes. There is no file to save and nothing to import.
-- POTACAT recognises a catalog reply wherever it came from: one requested from another program, or
-  months ago, is used as well. It is recognised by its table, not by its sender or subject.
+- A catalog is recognised by its table, not by its sender or subject (neither is verified,
+  section 3). That is why it is taken **by itself only when the operator asked for one**: a request
+  is pending. Even then, one with fewer than half the items of the catalog in use is not taken.
+- **Any other catalog message is offered, never taken.** One requested from another program, or
+  months ago, or sent by anyone at all, gets the line "A catalog message from <sender> is in your
+  Inbox: N items." and a **Use it** button. The operator's list changes only on that click. The
+  sender is shown as plain text.
+- An offer the operator answered (either way), or that a newer catalog superseded, is remembered
+  by its message and does not come back.
 - The message itself is the operator's mail. POTACAT reads it and leaves it as it is: not marked
   read, not moved, not deleted.
 - With the full catalog, the starter list's wording stays as the name of the items it covers; every
   other item shows Winlink's own subject line.
+- Every time a catalog is taken or offered, one log line names the sender and the item count.
+  No message text is ever written to the log.
 
 ### Groups
 
@@ -70,8 +88,9 @@ holding one of the operator's picks starts open; the rest show their head and co
 every group with a match is open.
 
 Friendly category names: `PROPAGATION` "Propagation", `WL2K_RMS` "Gateway lists", `WL2K_USERS`
-"Stations", `WL2K_HELP` "Help". A category that starts with `WX_` reads "Weather: " and the rest
-with spaces (`WX_US_TX` is "Weather: US TX"). Any other category shows Winlink's code as it is.
+"Stations", `WL2K_HELP` "Help". A US state's weather category reads "Weather: " and the state's name (`WX_US_TX` is
+"Weather: Texas"), so typing "texas" in Find finds the Texas items. Any other category that starts
+with `WX_` reads "Weather: " and the rest with spaces. Anything else shows Winlink's code as it is.
 
 ### Size advice
 
@@ -88,7 +107,8 @@ is one plain line in the action bar. It never blocks: the operator may be on a f
 | A ticked item whose size is not known | the total reads "3 items" with no figure, and there is no line about time |
 
 The 15 KB and 60 KB thresholds are POTACAT's own judgement, not Winlink's. They are named constants
-(`ADVICE_NOTE_BYTES`, `ADVICE_SLOW_BYTES`). The 120 KB line follows Winlink's message size limit,
+(`ADVICE_NOTE_BYTES`, `ADVICE_SLOW_BYTES`) and are compared on the figure that is shown, so "About
+15 KB" never appears without its line. The "large" tag follows the same rule. The 120 KB line follows Winlink's message size limit,
 which is measured on the compressed message, so POTACAT cannot know whether a large item fits.
 
 ### After Put in Outbox
@@ -108,6 +128,9 @@ one part way, the panel says how many items are in the Outbox and keeps the rest
 | No callsign set | "Set your callsign in Settings > Station first" (the POTA spot form's words). |
 | Pat refuses the message | Its error shows in the panel's error line. The ticks stay. |
 | A second click on Put in Outbox | Nothing. One request at a time, in the window and in main. |
+| More than 200 items ticked | The first 200 go in the Outbox and the line says "200 of the 230 items are in the Outbox. The other 30 are still ticked." Press again for the rest. |
+| The list cannot be loaded again (the shack did not answer, for one) | The list as it was and every tick stay; the error line says why. |
+| A star or a request made on another open surface | The panel refreshes by itself. |
 | Another operator profile is chosen | The picks and the pending request are that operator's; ticks are not carried over. |
 | Typing `INQUIRY` in To of a new message | The compose hint says "This is a Winlink catalog request. The Catalog button builds it for you." |
 
@@ -118,6 +141,8 @@ one part way, the panel says how many items are in the Outbox and keeps the rest
   carries it, like every other message.
 - It never refreshes the catalog on its own.
 - It never changes the message the catalog came in.
+- It never replaces the operator's catalog with one that was not asked for.
+- It never asks Winlink for an item that is not in the catalog in force.
 
 ### Keyboard
 
@@ -196,8 +221,12 @@ POTACAT's. The test fixture is written by hand in the documented shape; its subj
 - Body: the item IDs, one per line, in the order ticked, no line after the last. `composeFields`
   makes the line ends CRLF.
 - At most 10 IDs in a message; at most 200 IDs (20 messages) in one press.
-- An ID is one word of letters, digits, dot, underscore and hyphen, at most 40 characters. Anything
-  else is dropped, never repaired. IDs go out exactly as written.
+- An ID is one word of letters, digits, dot, underscore and hyphen, at most 40 characters. IDs go
+  out exactly as written.
+- Only items of the catalog in force may be asked for (`checkRequest`): the full catalog's items,
+  or the starter list when there is none. One ID that is not among them refuses the whole request.
+  The command words `LIST` and `UPDATE_CAT` are never items: they are not listed even when a
+  catalog names them, and are refused as an item. The window and the remote wire share this check.
 - The full catalog: the same address and subject, body `LIST`.
 
 ### The parser contract (`parseCatalogList`)
@@ -208,10 +237,12 @@ throws.
 1. The header is the first line holding `CATEGORY`, `INQUIRY_ID` and `SUBJECT` in that order, in any
    case. No header: `ok: false`, `reason: 'no-header'`.
 2. `Global_Modified: YYYY/MM/DD HH:MM` anywhere above the table becomes `modified`.
-3. A row is `CATEGORY  ID  "Subject"  SIZE  YYYY/MM/DD HH:MM  [G]`. The line is split on its first
-   and last double quote. The left part must be exactly two words (category, ID), each of letters,
-   digits, dot, underscore and hyphen. The quoted part is the subject. The right part starts with a
-   whole-number size when there is one.
+3. A row is `CATEGORY  ID  "Subject"  SIZE  YYYY/MM/DD HH:MM  [G]`. The part before the first double
+   quote must be exactly two words (category, ID), each of letters, digits, dot, underscore and
+   hyphen. The subject ends at the first later quote that is followed by the end of the row, or by
+   blank space and then a size, a date or a flag. So a subject may hold quotes of its own, and a
+   quote in a later column does not stretch it. A line with no such closing quote is not a row. A
+   size is a whole number, with or without thousands separators (`1,234`).
 4. Tolerated: tabs or runs of spaces, a missing size (`size: null`), a missing date, a missing flag,
    CRLF, trailing spaces, blank lines. A line that is not a row is skipped and counted in `skipped`.
 5. It is a catalog only when at least 20 rows parse and they are at least 80% of the non-blank
@@ -233,31 +264,61 @@ Catalog text arrives in mail, so it is untrusted. Categories and IDs are held to
 above. A subject is plain text: the window builds every row from DOM nodes and `textContent`, never
 from an HTML string, and a guard test fails if `innerHTML` appears in the catalog code.
 
-### Reading the Inbox (`main.js`)
+### Reading the Inbox
 
-After the Inbox list is refreshed, `winlinkCatalogScan` looks at messages not yet examined in this
-run, newest first, at most 200 in a pass (`toExamine`): not the message the stored catalog came
-from, and not messages older than it. Each is fetched from Pat and checked with `looksLikeCatalog`,
-then parsed. The first catalog found is the newest, so the pass stops there. Nothing is marked read.
+Every decision is a pure function in `lib/winlink-catalog.js`; `main.js` supplies Pat and applies
+the result.
 
-A message that looks like the catalog but whose table cannot be read sets the "could not read it"
-line and writes one log line with the first table line seen, and nothing else of the message.
+When the Inbox is looked at:
+- while a request for the full catalog is pending, after each refresh of the Inbox;
+- once when the Catalog panel is first opened in a run (this is what finds an older reply);
+- when Get, Update or Request again is pressed.
+
+Never the whole Inbox on every launch. A high-water mark (the date of the newest message examined,
+kept per operator profile) means no message is fetched twice across launches. Reads are one at a
+time, newest first, at most 200 in a pass (`toExamine`, `scanInbox`).
+
+What happens to one message (`decideMessage`):
+
+| The message | Result |
+|---|---|
+| Not over 5,000 characters, or no `INQUIRY_ID` in it, or no header line | Not a catalog. Nothing is flagged or logged. |
+| Header found, the table does not parse, and fewer than 5 rows read while nothing is pending | Not a catalog. A mail that merely mentions the column names lands here. |
+| Header found, the table does not parse, and a request is pending or at least 5 rows read | "Could not read it": the flag is set, a pending request is cleared, and one log line gives the sender and the row counts. |
+| A catalog, and a request is pending, and it has at least half the items of the catalog in use | Taken. The pending request is cleared. |
+| A catalog in any other case | Offered. The operator's list is unchanged until **Use it**. |
+| A catalog from a message already answered or superseded | Passed over. |
+
+The first catalog found is the newest, so the pass ends there.
+
+A message counts as examined only on a clean answer (not a catalog, could not read it, offered) or
+after its catalog was written to disk. A read that fails, a Pat that does not answer, or a write
+that is refused (the settings write gate during a profile switch) leaves it unexamined: nothing is
+set in memory, no success is logged, the mark does not move, and the next pass asks again.
 
 ## 6. Data files and settings
 
 | What | Where | Notes |
 |---|---|---|
-| The full catalog | `winlink-catalog.json` in POTACAT's user data folder | `{ modified, readAt, sourceMid, sourceDate, items }`. One file for every operator profile: the catalog is the same for everyone. Written atomically. Never synced to the cloud. Deleting it brings back the short list. |
-| Picks | setting `winlinkCatalogPicks` | Per operator profile: `{ starred: [ids], recent: [ids] }`, at most 50 and 8. Not a secret. |
-| Pending request | setting `winlinkCatalogRequestedAt` | Per operator profile: when the `LIST` request was queued. Cleared when a catalog is read, or after 7 days. |
+| The full catalog | `winlink-catalog.json` in POTACAT's user data folder | `{ modified, readAt, sourceMid, sourceDate, sourceFrom, items }`. One file for every operator profile: the catalog is the same for everyone. Written atomically. Never synced to the cloud. Deleting it brings back the short list. |
+| Picks | settings `winlinkCatalogPicks`, `winlinkCatalogPicksAt` | Per operator profile: `{ starred: [ids], recent: [ids] }`, at most 50 and 8, and when they last changed. |
+| Pending request | setting `winlinkCatalogRequest` | Per operator profile: `{ at, mid }`, when the `LIST` request was queued and which Outbox message it is. Removed when it is no longer waited for (`pendingState`). |
+| An offer | setting `winlinkCatalogOffer` | Per operator profile: `{ mid, from, date, count, have }` of a catalog message waiting for **Use it**. The items are read from the message again on the click. |
+| Answered offers | setting `winlinkCatalogDeclined` | Per operator profile: the last 50 message IDs not to offer again. |
+| High-water mark | setting `winlinkCatalogScannedTo` | Per operator profile: the date of the newest Inbox message examined. |
 
-The pending request is a time stamp, not a watch on the Outbox: if the operator deletes the `LIST`
-message from the Outbox before it goes out, the button returns after 7 days.
+None of these is a secret.
+
+Where a request stands (`pendingState`): **queued** while its message is in the Outbox; **sent**
+once it is in Sent, until a catalog is read after it or 7 days pass; **none** otherwise, which
+includes the operator deleting it from the Outbox. Before the folders are listed, a request stays
+as it was. A request whose message could not be identified counts as sent, so there is always a
+button.
 
 Window calls (the Winlink window's preload): `catalogGet`, `catalogRequest(ids)`,
-`catalogRequestList`, `catalogStar(id, on)`, `onCatalogUpdated`. Channels: `winlink-catalog-get`,
-`winlink-catalog-request`, `winlink-catalog-request-list`, `winlink-catalog-star`, and the push
-`winlink-catalog-updated`.
+`catalogRequestList(again)`, `catalogStar(id, on)`, `catalogOffer(use)`, `onCatalogUpdated`. Channels:
+`winlink-catalog-get`, `winlink-catalog-request`, `winlink-catalog-request-list`,
+`winlink-catalog-star`, `winlink-catalog-offer`, and the push `winlink-catalog-updated`.
 
 Sending uses `winlinkSend`, the path every message takes, so the Winlink notice gate, the Outbox
 count and every other rule apply unchanged.
@@ -266,16 +327,19 @@ count and every other rule apply unchanged.
 
 The shack holds the catalog, the picks and the pending request, as it holds the mailbox.
 
-- A desktop driving a remote shack: the four window calls go to the shack over the existing link
+- A desktop driving a remote shack: the five window calls go to the shack over the existing link
   (`lib/winlink-remote-shack.js`), so the panel shows the shack's catalog and the request goes into
   the shack's Outbox. A shack that predates the catalog (no `winlink-catalog` in its hello) is
   named at once: the panel says "The POTACAT on the shack PC is older and has no catalog yet.
   Update POTACAT on the shack PC, then open Catalog again." and offers nothing that would not work.
 - ECHOCAT devices can ask for the same with the wire messages `winlink-catalog-get`,
-  `winlink-catalog-request`, `winlink-catalog-request-list` and `winlink-catalog-star`
-  (`docs/echocat-protocol.md`). A Guest Pass is refused, as for all Winlink messages.
-- `winlink-state.catalog` is a small stamp (`count`, `readAt`, `requestedAt`, `unreadable`). A
-  surface asks for the catalog again when it changes; that is how the list "fills in by itself"
+  `winlink-catalog-request`, `winlink-catalog-request-list`, `winlink-catalog-star` and
+  `winlink-catalog-offer` (`docs/echocat-protocol.md`). The `winlink-catalog` reply carries the
+  whole item list in one frame (about 150 kB for 1,400 items), so a device asks for it when its
+  panel opens or the stamp changes, never on a timer. A Guest Pass is refused, as for all Winlink messages.
+- `winlink-state.catalog` is a small stamp (`count`, `readAt`, `requestedAt`, `pendingKind`,
+  `unreadable`, `offerMid`, `picksAt`). A surface asks for the catalog again when it changes (a
+  star or a request on another surface included); that is how the list "fills in by itself"
   on every surface.
 - ECHOCAT Web has no Catalog panel yet, as it has no Forms panel.
 
@@ -305,11 +369,22 @@ U3 are settled by this, and sections 2 and 3 are then updated.
 
 ## 9. Tests
 
-- `test/winlink-catalog-test.js`: the parser against the hand-written fixture and its hostile
-  variants (tabs, no sizes, an apostrophe, two spaces in a subject, CRLF, a truncated last line, 30
-  lines of preamble, a message that only mentions INQUIRY_ID, markup, huge input); the request
-  messages for 1, 10, 11 and 25 IDs and the exact bytes Pat is given; search and grouping; size
-  advice per mode and threshold; the picks and their limits; the stored catalog; every sentence.
+- `test/winlink-catalog-test.js`, all executed against the rules:
+  - the parser against the hand-written fixture and its hostile variants (tabs, no sizes, an
+    apostrophe, two spaces in a subject, quotes inside and after the subject, thousands separators,
+    CRLF, a truncated last line, 30 lines of preamble, a message that only mentions INQUIRY_ID,
+    markup, huge input, lines built to be slow);
+  - what to do with one message: not a catalog, could not read it, taken, offered, the shrink rule,
+    a forged 21-row mail in each state;
+  - the pass over the Inbox with a stand-in for Pat: newest wins, a failed read, a refused or
+    failing write, pending cleared on read, pending plus an unreadable reply, the mark, the cap;
+  - where a request stands: queued, deleted, sent, expired, answered;
+  - which IDs may be asked for, the command words, more than 200;
+  - the request messages for 1, 10, 11 and 25 IDs and the exact bytes Pat is given; search and
+    grouping; size advice per mode and threshold; the picks; the source row in every combination;
+    every sentence;
+  - when a Pat binary is present (`assets/pat`, or `POTACAT_TEST_PAT`): a real Pat, offline. Where
+    there is none the check is skipped and says so.
 - `test/winlink-catalog-wiring-test.js`: the button and panel, the preload methods and channels,
-  `hideForms`, the one send path, no connect, the Inbox message never changed, no `innerHTML` with
-  catalog text, the remote link's rows and wire messages.
+  `hideForms`, the one send path, no connect, the glue making no decision of its own, the Inbox
+  message never changed, no `innerHTML` with catalog text, the remote link's rows and wire messages.

@@ -69,6 +69,7 @@ test('the panel is a .wl-form in the reading pane with a pinned action bar', () 
   assert.ok(new RegExp('id="wl-cat-close">' + C.TEXT.close + '</button><button type="button" class="wl-btn primary" id="wl-cat-send" disabled>' + C.TEXT.send + '</button>').test(panel), 'Close, then the primary Put in Outbox, disabled until something is ticked');
   assert.ok(panel.includes('placeholder="' + C.TEXT.findPlaceholder + '"') && /id="wl-cat-find"[^>]*aria-label="Find in the catalog"/.test(panel));
   assert.ok(/id="wl-cat-source-text"/.test(panel) && /id="wl-cat-get"/.test(panel));
+  assert.ok(/<button type="button" class="wl-link" id="wl-cat-get2" hidden><\/button>/.test(panel), 'the quiet second button: Request again / No thanks');
   assert.ok(panel.includes('id="wl-cat-confirm-yes">' + C.TEXT.radioConfirmYes + '<') && panel.includes('id="wl-cat-confirm-no">' + C.TEXT.radioConfirmNo + '<'));
   assert.ok(panel.includes('>' + C.TEXT.picksHead + '<'));
 });
@@ -110,13 +111,32 @@ test('rows: a checkbox and a star, both labelled, both reached by Tab', () => {
 });
 test('the request leaves through main only: no send of its own, no connect, no network call', () => {
   const s = catalogSection();
-  assert.ok(/window\.api\.catalogRequest\(/.test(s) && /window\.api\.catalogRequestList\(\)/.test(s));
+  assert.ok(/window\.api\.catalogRequest\(/.test(s) && /window\.api\.catalogRequestList\(catAgain\)/.test(s) && /window\.api\.catalogOffer\(use\)/.test(s));
   assert.ok(!/window\.api\.send\(|window\.api\.connect\(|fetch\(|XMLHttpRequest|WebSocket|127\.0\.0\.1/.test(s));
 });
 test('a second click cannot queue the request twice', () => {
   const s = catalogSection();
   assert.ok(/if \(catBusy\) return;/.test(s), 'one request at a time');
   assert.ok(/\$\('wl-cat-send'\)\.disabled = /.test(s));
+});
+test('a reload that fails keeps the list and the ticks, and never leaves the loading line', () => {
+  const load = fnBody(js, 'loadCatalog');
+  const fail = load.slice(load.indexOf('var failed = function'), load.indexOf('window.api.catalogGet()'));
+  assert.ok(/catErr\(why \|\| WCAT\.TEXT\.noAnswer\)/.test(fail) && /renderCatalog\(\)/.test(fail), 'the error line, and the row drawn again');
+  assert.ok(!/catApply|catTicked|cat = /.test(fail), 'nothing is replaced');
+  assert.ok(/\}, function \(\) \{ failed\(''\); \}\);/.test(load), 'a rejected call is a failed reload too');
+});
+test('ticks are keyed safely; the focus survives a redraw', () => {
+  const s = catalogSection();
+  assert.ok(/catTicked\['\$' \+ id\]/.test(s) && !/catTicked\[(id|item\.id|i\.id)\]/.test(s), 'an item called __proto__ is an ordinary key');
+  assert.ok(/catRefocus\(focusKey\);/.test(fnBody(js, 'renderCatalogList')));
+});
+test('a catalog nobody asked for is used only on the operator\'s click; over 200 ticked says so', () => {
+  const s = catalogSection();
+  assert.ok(/if \(catSourceRow\(\)\.kind === 'offer'\) catOffer\(true\); else catGetFull\(false\);/.test(s));
+  assert.ok(/if \(catSourceRow\(\)\.kind === 'offer'\) catOffer\(false\); else catGetFull\(true\);/.test(s), 'No thanks, or Request again');
+  assert.ok(/WCAT\.overText\(queued\.length, catTickedItems\(\)\.length\)/.test(s));
+  assert.ok(/c\.pendingKind/.test(fnBody(js, 'catStampOf')) && /c\.offerMid/.test(fnBody(js, 'catStampOf')) && /c\.picksAt/.test(fnBody(js, 'catStampOf')), 'a star on another surface is a new stamp');
 });
 test('the full catalog over the radio asks first; over Telnet it queues at once', () => {
   const s = catalogSection();
@@ -138,68 +158,87 @@ test('typing INQUIRY in To shows the hint, through the compose hint line', () =>
 });
 
 console.log('the preload');
-test('five methods, five channels', () => {
+test('six methods, six channels', () => {
   assert.ok(/catalogGet: \(\) => ipcRenderer\.invoke\('winlink-catalog-get'\)/.test(preload));
   assert.ok(/catalogRequest: \(ids\) => ipcRenderer\.invoke\('winlink-catalog-request', ids\)/.test(preload));
-  assert.ok(/catalogRequestList: \(\) => ipcRenderer\.invoke\('winlink-catalog-request-list'\)/.test(preload));
+  assert.ok(/catalogRequestList: \(again\) => ipcRenderer\.invoke\('winlink-catalog-request-list', again === true\)/.test(preload));
+  assert.ok(/catalogOffer: \(use\) => ipcRenderer\.invoke\('winlink-catalog-offer', use === true\)/.test(preload));
   assert.ok(/catalogStar: \(id, on\) => ipcRenderer\.invoke\('winlink-catalog-star', \{ id, on \}\)/.test(preload));
   assert.ok(/onCatalogUpdated: \(cb\) => ipcRenderer\.on\('winlink-catalog-updated', \(\) => cb\(\)\)/.test(preload));
 });
 
 console.log('main.js');
-test('the four handlers are thin', () => {
+const CAT_FNS = ['winlinkCatalogGet', 'winlinkCatalogQueue', 'winlinkCatalogRequest', 'winlinkCatalogRequestList', 'winlinkCatalogStar', 'winlinkCatalogOfferAnswer', 'winlinkCatalogScan', 'winlinkCatalogWrite', 'winlinkCatalogPending'];
+test('the five handlers are thin', () => {
   assert.ok(/ipcMain\.handle\('winlink-catalog-get', \(\) => winlinkCatalogGet\(\)\);/.test(main));
   assert.ok(/ipcMain\.handle\('winlink-catalog-request', \(_e, ids\) => winlinkCatalogRequest\(ids\)\);/.test(main));
-  assert.ok(/ipcMain\.handle\('winlink-catalog-request-list', \(\) => winlinkCatalogRequestList\(\)\);/.test(main));
+  assert.ok(/ipcMain\.handle\('winlink-catalog-request-list', \(_e, again\) => winlinkCatalogRequestList\(again === true\)\);/.test(main));
   assert.ok(/ipcMain\.handle\('winlink-catalog-star', \(_e, o = \{\}\) => winlinkCatalogStar\(o\.id, o\.on\)\);/.test(main));
+  assert.ok(/ipcMain\.handle\('winlink-catalog-offer', \(_e, use\) => winlinkCatalogOfferAnswer\(use === true\)\);/.test(main));
 });
-test('a request is built by the rules and queued by winlinkSend, the path every message takes', () => {
+test('a request is checked and built by the rules and queued by winlinkSend, the path every message takes', () => {
   const q = fnBody(main, 'winlinkCatalogQueue');
   assert.ok(/await winlinkSend\(\{ to: m\.to, subject: m\.subject, body: m\.body \}\)/.test(q));
   assert.ok(!/patClient\.send\(|winlinkSendOne\(/.test(q), 'never around winlinkSend (the notice gate, the Outbox refresh)');
-  assert.ok(/WinlinkCatalog\.buildRequests\(ids\)/.test(fnBody(main, 'winlinkCatalogRequest')));
+  const r = fnBody(main, 'winlinkCatalogRequest');
+  assert.ok(/const chk = WinlinkCatalog\.checkRequest\(ids, \(winlinkCatalogStored\(\) \|\| \{\}\)\.items\);\n  if \(!chk\.ok\) return/.test(r), 'only IDs of the catalog in force; the window and the wire share this');
+  assert.ok(/WinlinkCatalog\.buildRequests\(chk\.ids\)/.test(r) && !/buildRequests\(ids\)/.test(r));
   assert.ok(/WinlinkCatalog\.listRequest\(\)/.test(fnBody(main, 'winlinkCatalogRequestList')));
 });
 test('nothing in the catalog code connects, and LIST is queued only from the operator\'s request', () => {
-  for (const f of ['winlinkCatalogGet', 'winlinkCatalogQueue', 'winlinkCatalogRequest', 'winlinkCatalogRequestList', 'winlinkCatalogStar', 'winlinkCatalogScan', 'winlinkCatalogExamine']) {
-    assert.ok(!/winlinkStartSession\(|\.connect\(/.test(fnBody(main, f)), f + ' starts no session');
-  }
-  const callers = main.split('\n').filter((l) => /winlinkCatalogRequestList\(\)/.test(l) && !/function winlinkCatalogRequestList/.test(l));
+  for (const f of CAT_FNS) assert.ok(!/winlinkStartSession\(|\.connect\(/.test(fnBody(main, f)), f + ' starts no session');
+  const callers = main.split('\n').filter((l) => /winlinkCatalogRequestList\(/.test(l) && !/function winlinkCatalogRequestList/.test(l));
   assert.strictEqual(callers.length, 2, 'the window\'s handler and the ECHOCAT request: ' + callers.join(' | '));
-  assert.ok(callers.every((l) => /ipcMain\.handle\('winlink-catalog-request-list'|case 'winlink-catalog-request-list'/.test(l) || /reply\(\{ type: 'winlink-catalog-queued'/.test(l)), callers.join(' | '));
+  assert.ok(callers.every((l) => /ipcMain\.handle\('winlink-catalog-request-list'/.test(l) || /reply\(\{ type: 'winlink-catalog-queued'/.test(l)), callers.join(' | '));
   assert.ok(!/setInterval|setTimeout/.test(fnBody(main, 'winlinkCatalogRequestList')), 'no timer asks for it');
 });
-test('LIST is not queued twice while one is pending', () => {
+test('LIST is never queued twice while one is in the Outbox; again only after it has gone out', () => {
   const b = fnBody(main, 'winlinkCatalogRequestList');
-  assert.ok(/WinlinkCatalog\.pendingActive\(settings\.winlinkCatalogRequestedAt, Date\.now\(\)\)/.test(b) && /already: true/.test(b));
-  assert.ok(/settings\.winlinkCatalogRequestedAt = Date\.now\(\);/.test(b));
+  assert.ok(/if \(kind === 'queued' \|\| \(kind === 'sent' && again !== true\)\) return \{ ok: true, already: true/.test(b));
+  assert.ok(/settings\.winlinkCatalogRequest = \{ at: Date\.now\(\), mid: WinlinkCatalog\.newRequestMid\(before, winlinkState\.list\('out'\)\) \};/.test(b), 'the pending request is tied to its message');
+  assert.ok(/WinlinkCatalog\.pendingState\(\{/.test(fnBody(main, 'winlinkCatalogPending')) && /winlinkState\.list\('out'\)/.test(fnBody(main, 'winlinkCatalogPending')) && /winlinkState\.list\('sent'\)/.test(fnBody(main, 'winlinkCatalogPending')));
 });
-test('the Inbox is examined after a refresh; the message is read, never marked or moved', () => {
-  assert.ok(/winlinkCatalogScan\(\);/.test(fnBody(main, 'winlinkRefreshMailboxes')), 'after the Inbox list is refreshed');
-  const ex = fnBody(main, 'winlinkCatalogExamine');
-  assert.ok(/await patClient\.message\('in', mid\)/.test(ex));
-  assert.ok(/WinlinkCatalog\.looksLikeCatalog\(msg\)/.test(ex) && /WinlinkCatalog\.parseCatalogList\(msg\.body\)/.test(ex), 'the cheap check first, then the parse');
-  for (const f of ['winlinkCatalogScan', 'winlinkCatalogExamine']) {
-    assert.ok(!/markRead|winlinkRead\(|winlinkDelete\(|winlinkMove\(|\.del\(|\.move\(/.test(fnBody(main, f)), f + ' leaves the operator\'s mail alone');
+test('the Inbox is looked at only while a request is pending or the panel asked; the rules decide, main only applies', () => {
+  const refresh = fnBody(main, 'winlinkRefreshMailboxes');
+  assert.ok(/if \(boxes\.includes\('in'\)\) winlinkCatalogScan\('mail'\);/.test(refresh));
+  const scan = fnBody(main, 'winlinkCatalogScan');
+  assert.ok(/if \(!pending && !_winlinkCatalogWantScan\) return;/.test(scan), 'never the whole Inbox on every launch');
+  assert.ok(/await WinlinkCatalog\.scanInbox\(\{/.test(scan) && /WinlinkCatalog\.applyScan\(/.test(scan));
+  assert.ok(/mark: settings\.winlinkCatalogScannedTo/.test(scan), 'the high-water mark is kept across launches');
+  assert.ok(/return pat\.message\('in', mid\);/.test(scan), 'read, one at a time');
+  assert.ok(!/parseCatalogList|looksLikeCatalog|decideMessage|\.items\.length/.test(scan), 'no decision is made in the glue');
+  assert.ok(/\} catch \(e\) \{\n    winlinkLog\(`catalog: could not look through the Inbox: \$\{e\.message\}`\);/.test(scan), 'it cannot raise an unhandled rejection');
+  assert.ok(/_winlinkCatalogOpened = true; winlinkCatalogScan\('opened'\)/.test(fnBody(main, 'winlinkCatalogGet')) && /winlinkCatalogScan\('asked'\)/.test(fnBody(main, 'winlinkCatalogRequestList')));
+});
+test('the operator\'s mail is never marked, moved or deleted, and none of it is written to the log', () => {
+  for (const f of ['winlinkCatalogScan', 'winlinkCatalogOfferAnswer']) {
+    assert.ok(!/markRead|winlinkRead\(|winlinkDelete\(|winlinkMove\(|\.del\(|\.move\(|\.delete\(/.test(fnBody(main, f)), f + ' leaves the operator\'s mail alone');
+    assert.ok(!/firstLine|\.body|\.subject/.test(fnBody(main, f)), f + ' logs no message text');
   }
-  assert.ok(/WinlinkCatalog\.toExamine\(/.test(fnBody(main, 'winlinkCatalogScan')));
 });
-test('a catalog that cannot be read logs its first table line and nothing else of the message', () => {
-  const ex = fnBody(main, 'winlinkCatalogExamine');
-  assert.ok(/winlinkLog\(`catalog: a message looks like the Winlink catalog but its table could not be read; first line: \$\{JSON\.stringify\(p\.firstLine\)\}`\)/.test(ex));
-  assert.ok(!/msg\.body\.slice|msg\.subject|msg\.from/.test(ex));
+test('a write the profile-switch gate refuses is not a catalog: nothing is set in memory', () => {
+  const w = fnBody(main, 'winlinkCatalogWrite');
+  assert.ok(/_writeJsonAtomic\(p, stored\);\n  const st = _settingsWriteStatus\.get\(p\);\n  if \(!\(st && st\.ok && st\.at >= t\)\) return false;\n  _winlinkCatalog = stored;\n  return true;/.test(w));
+  assert.ok(/store: \(stored\) => winlinkCatalogBox\(\) === box && winlinkCatalogWrite\(stored\)/.test(fnBody(main, 'winlinkCatalogScan')));
 });
-test('the catalog is one file in userData, written atomically; picks and the pending stamp are per profile', () => {
+test('the catalog is one file in userData; everything else is per profile, not a secret, never synced', () => {
   assert.ok(/function winlinkCatalogPath\(\) \{ return path\.join\(app\.getPath\('userData'\), 'winlink-catalog\.json'\); \}/.test(main));
-  assert.ok(/_writeJsonAtomic\(winlinkCatalogPath\(\), /.test(fnBody(main, 'winlinkCatalogExamine')));
   const g = main.slice(main.indexOf('const GLOBAL_KEYS = new Set(['), main.indexOf(']);', main.indexOf('const GLOBAL_KEYS = new Set([')));
   assert.ok(!/winlinkCatalog/.test(g), 'not machine-wide settings');
   assert.ok(!/winlinkCatalog/.test(read('lib/settings-secrets.js')), 'not secrets');
   assert.ok(!/winlink-catalog\.json|winlinkCatalogPath/.test(read('lib/cloud-sync.js')), 'never synced to the cloud');
 });
-test('every surface learns of a change from winlink-state; the window is also told at once', () => {
+test('every surface learns of a change from winlink-state, a star and a new pick included; the window is also told at once', () => {
   assert.ok(/catalog: winlinkCatalogStamp\(\),/.test(fnBody(main, 'winlinkPayload')));
-  assert.ok(/winlinkPopoutSend\('winlink-catalog-updated'\)/.test(main));
+  assert.ok(/winlinkPopoutSend\('winlink-catalog-updated'\);\n  winlinkPush\(\);/.test(fnBody(main, 'winlinkCatalogChanged')));
+  for (const f of ['winlinkCatalogStar', 'winlinkCatalogRequest']) assert.ok(/settings\.winlinkCatalogPicksAt = Date\.now\(\);/.test(fnBody(main, f)) && /winlinkPush\(\);/.test(fnBody(main, f)), f);
+});
+test('a catalog on offer is stored only from the operator\'s answer, and that message is not offered again', () => {
+  const o = fnBody(main, 'winlinkCatalogOfferAnswer');
+  assert.ok(/WinlinkCatalog\.useOffer\(await patClient\.message\('in', offer\.mid\), offer, Date\.now\(\)\)/.test(o));
+  assert.ok(/settings\.winlinkCatalogDeclined = WinlinkCatalog\.addDeclined\(settings\.winlinkCatalogDeclined, offer\.mid\);/.test(o));
+  const callers = main.split('\n').filter((l) => /winlinkCatalogOfferAnswer\(/.test(l) && !/function winlinkCatalogOfferAnswer/.test(l));
+  assert.strictEqual(callers.length, 2);
 });
 test('a new operator profile starts with nothing examined', () => {
   assert.ok(/_winlinkCatalogSeenFor/.test(fnBody(main, 'winlinkCatalogScan')));
@@ -214,6 +253,10 @@ test('driving a remote shack: the four requests go to the shack over the wire', 
   assert.deepStrictEqual(RS.INVOKES['winlink-catalog-request']([null]).send, { type: 'winlink-catalog-request', ids: [] });
   assert.deepStrictEqual(RS.INVOKES['winlink-catalog-request-list']([]).send, { type: 'winlink-catalog-request-list' });
   assert.deepStrictEqual(RS.INVOKES['winlink-catalog-star']([{ id: 'PROP_WWV', on: true }]).send, { type: 'winlink-catalog-star', id: 'PROP_WWV', on: true });
+  assert.deepStrictEqual(RS.INVOKES['winlink-catalog-request-list']([true]).send, { type: 'winlink-catalog-request-list', again: true });
+  assert.deepStrictEqual(RS.INVOKES['winlink-catalog-offer']([true]).send, { type: 'winlink-catalog-offer', use: true });
+  assert.deepStrictEqual(RS.INVOKES['winlink-catalog-offer']([]).send, { type: 'winlink-catalog-offer', use: false });
+  assert.deepStrictEqual(RS.reply('winlink-catalog-offer', { type: 'winlink-result', op: 'catalog-offer', ok: false, error: 'gone' }, []), { ok: false, error: 'gone' });
 });
 test('the shack\'s answers come back as what the window\'s calls return', () => {
   const cat = RS.reply('winlink-catalog-get', { type: 'winlink-catalog', reqId: 'r1', ok: true, items: [{ category: 'A', id: 'B', subject: 'c', size: 1 }], count: 1, pending: false, picks: { starred: [], recent: [] } }, []);
@@ -231,7 +274,7 @@ test('a shack without the catalog is named, so the window says so instead of wai
   assert.ok(/shackLacksCatalog/.test(catalogSection()) && /WCAT\.TEXT\.shackOlder/.test(catalogSection()));
 });
 test('the wire messages are declared, owner-only, routed, and announced in the hello', () => {
-  const c2s = ['winlink-catalog-get', 'winlink-catalog-request', 'winlink-catalog-request-list', 'winlink-catalog-star'];
+  const c2s = ['winlink-catalog-get', 'winlink-catalog-request', 'winlink-catalog-request-list', 'winlink-catalog-star', 'winlink-catalog-offer'];
   for (const t of c2s) {
     assert.ok(P.MESSAGES[t] && P.MESSAGES[t].dir === P.Dir.C2S && P.MESSAGES[t].feature === 'winlink', t);
     assert.ok(require('../lib/guest-pass-authority').GUEST_REFUSED_INSIDE.has(t), t + ' is refused to a Guest Pass');
@@ -255,6 +298,7 @@ test('the public design doc covers the contract and names nothing private', () =
   for (const h of ['What the operator sees', 'Facts', 'Not verified', 'The parser contract', 'Data files and settings', 'Out of scope', 'Live check']) assert.ok(doc.includes(h), 'section: ' + h);
   assert.ok(/https:\/\/winlink\.org\//.test(doc) && /https:\/\/github\.com\/la5nta\/pat\/issues\/286/.test(doc), 'public sources');
   assert.ok(!/[A-Za-z]:\\|scratchpad|handoff|Discord|docs\/briefs/i.test(doc), 'no private path, file or channel');
+  assert.ok(!/feat\/|\bbranch\b|not yet merged/i.test(doc), 'nothing that goes stale on merge');
   for (const s of C.STARTER) assert.ok(doc.includes('`' + s.id + '`'), s.id + ' is in the doc\'s starter table');
   assert.ok(!/[^\x00-\x7F]/.test(doc.replace(/[—–]/g, '')) || true);
 });
