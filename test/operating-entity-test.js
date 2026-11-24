@@ -38,7 +38,9 @@ t('every lookup in main.js goes through it (the module function is imported unde
   assert.ok(main.includes("resolveCallsign: resolveCallsignByPrefix, resolveOperatingCall"));
 });
 t('QRZ: the DXCC entity (<land>) is read and logged ahead of the mailing country', () => {
-  assert.ok(qrzSrc.includes("land: extractTag(xml, 'land') || '',"));
+  assert.ok(qrzSrc.includes("land: t('land'),"), 'parseQrzCallsign keeps <land>');
+  const r = require('../lib/qrz').parseQrzCallsign('<Callsign><call>KL7AA</call><country>United States</country><land>Alaska</land></Callsign>');
+  assert.strictEqual(r.land, 'Alaska');
   assert.ok(main.includes("country: q.land || q.country || '',"));
 });
 console.log('\noperating entity: ' + pass + ' passed, ' + fail + ' failed');

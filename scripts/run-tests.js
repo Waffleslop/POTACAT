@@ -248,6 +248,10 @@ const TESTS = [
   'test/jtcat-map-popup-test.js',
   'test/worked-matrix-test.js',
   'test/prior-contacts-test.js', // #154: Prior contacts card from the hunter table and FT8 decode list right-click; check mark hover
+  'test/qrz-detail-parse-test.js', // Contact details (Jump 2026-11-23): QRZ address, photo, QSL flags, class, aliases, time zone parsed from a fixture; older cached records refreshed once
+  'test/contact-card-test.js', // Contact details: view model (worked/confirmed line, SP/LP bearing, distance in the operator's units, local time, address, missing fields hidden)
+  'test/contact-weather-test.js', // Contact details: Open-Meteo weather at the grid-square centre, 30 min cache per square, stubbed fetch
+  'test/contact-card-wiring-test.js', // Contact details: Logbook row Details and Log QSO Details open one themed window by call + QSO identity; it never writes the log
   'test/prefix-overlay-test.js',
   'test/dxpedition-dials-test.js',
   'test/renderer-global-api-test.js',

@@ -379,6 +379,9 @@ const { CommanderCodec, commanderModel, probeCommander } = require('./lib/codecs
 const CommanderSequences = require('./lib/commander-sequences');
 const { getTuneQuirks, resolveSerialHandshake, holdSerialLinesLow } = require('./lib/rig-models');
 const { gridToLatLon, latLonToGrid, haversineDistanceMiles, bearing } = require('./lib/grid');
+const ContactCard = require('./lib/contact-card'); // the Contact details window (Discord "Jump", 2026-11-23)
+const { createWeatherClient } = require('./lib/contact-weather');
+const contactWeather = createWeatherClient(); // Open-Meteo, only when settings.contactWeather is on
 const ActivationMapData = require('./lib/activation-map-data');
 const LogFreq = require('./lib/log-freq');
 const LogFreqField = require('./lib/log-freq-field'); // kHz to the hertz (#794)
@@ -1762,6 +1765,9 @@ function pushSstvDecoderState({ force = false } = {}) {
 let scopePopoutWin = null;   // pop-out Band Scope window (the FT-710's own spectrum over USB)
 let bandspreadPopoutWin = null; // pop-out bandspread window
 let logPopoutWin = null;     // pop-out Log QSO window (W9TEF "ragchew logger" feature)
+let contactCardWin = null;   // Contact details: Details in the Logbook and in Log QSO (lib/contact-card.js)
+let contactCardReq = null;   // what it shows: { call, idx, identity }
+let contactCardSeq = 0;      // the newest request wins when two answers race
 let lastMergedSpots = [];        // most recent dedupe'd spot list, cached so the
                                  // bandspread-popout-push handler can substitute
                                  // the renderer's table-filtered payload with the
@@ -38016,6 +38022,12 @@ function adifRef(rec) {
   return '';
 }
 
+/** Confirmations on an ADIF record as letters: L LoTW, P paper card, E eQSL (Contact details). */
+function qslLetters(rec) {
+  const yes = (v) => /^[YV]$/i.test(String(v || '').trim());
+  return (yes(rec.LOTW_QSL_RCVD) ? 'L' : '') + (yes(rec.QSL_RCVD) ? 'P' : '') + (yes(rec.EQSL_QSL_RCVD) ? 'E' : '');
+}
+
 /** Convert ADIF FREQ (MHz string) to integer kHz, e.g. "14.074" → 14074. */
 function adifFreqToKhz(freq) {
   if (!freq) return null;
@@ -38042,6 +38054,14 @@ function buildQsoDetailsIndex() {
         band: rec.BAND || '',
         comment: rec.COMMENT || '',
         ref: adifRef(rec),
+        // For Contact details: confirmed or not, and what the log knows of the station.
+        qsl: qslLetters(rec),
+        rstSent: rec.RST_SENT || '',
+        rstRcvd: rec.RST_RCVD || '',
+        name: rec.NAME || '',
+        qth: rec.QTH || '',
+        state: rec.STATE || '',
+        grid: rec.GRIDSQUARE || '',
       };
       if (!qsoDetails.has(key)) qsoDetails.set(key, []);
       qsoDetails.get(key).push(entry);
@@ -38075,6 +38095,9 @@ function appendToQsoDetailsIndex(qsoData) {
     band: qsoData.band || '',
     comment: qsoData.comment || '',
     ref,
+    rstSent: qsoData.rstSent || '',
+    rstRcvd: qsoData.rstRcvd || '',
+    grid: qsoData.gridsquare || qsoData.grid || '',
   };
   if (!qsoDetails.has(key)) qsoDetails.set(key, []);
   // Insert at front (newest-first invariant).
@@ -38086,6 +38109,112 @@ function lookupPastQsos(call, limit) {
   const key = normalizeCallForIndex(call);
   const list = qsoDetails.get(key) || [];
   return limit ? list.slice(0, limit) : list.slice();
+}
+
+// --- Contact details (Discord "Jump", 2026-11-23) ---
+// One window for the station behind a call: Details on a Logbook row (that
+// QSO, by its identity, #988) and Details beside the Log QSO call field. It
+// shows; it never writes the log. QRZ through the existing client (one more
+// lookup at most, for a record cached before the detail fields), the log's
+// own history, cty.dat for the prefix, and Open-Meteo weather only when the
+// operator turned it off (settings.contactWeather === false; on to begin with,
+// Casey 2026-11-23). Open-Meteo gets the grid-square centre, never the call.
+
+/** What cty.dat says about a call: entity, DXCC number, zones and a centre. */
+function contactPrefixInfo(call) {
+  if (!ctyDb) return null;
+  const op = resolveOperatingCall(call, ctyDb);
+  const ent = op && op.entity;
+  if (!ent) return null;
+  const z = resolveZones(call, ctyDb) || {};
+  const area = getCallAreaCoords(call, ent.name);
+  return {
+    entity: ent.name, dxcc: dxccCodeForEntity(ent.name) || null,
+    cqZone: z.cqZone != null ? z.cqZone : ent.cqZone, ituZone: z.ituZone != null ? z.ituZone : ent.ituZone,
+    lat: area ? area.lat : ent.lat, lon: area ? area.lon : ent.lon, source: area ? 'callarea' : 'cty',
+  };
+}
+
+async function contactCardData(req, opts) {
+  const call = req.call;
+  const qrzOn = !!(qrz.configured && settings.enableQrz);
+  let q = null;
+  if (qrzOn) { try { q = await qrz.lookupDetails(JtcatParser.baseCall(call)); } catch { q = null; } }
+  const qrzState = !qrzOn ? 'off' : qrz._loginFailed ? 'login-failed' : (qrz.isSubscriber ? 'subscriber' : 'no-subscription');
+  // The clicked Logbook QSO, read the way the Logbook read it (get-all-qsos).
+  let record = null;
+  if (req.identity) {
+    const logPath = settings.adifLogPath || path.join(app.getPath('userData'), 'potacat_qso_log.adi');
+    try { if (fs.existsSync(logPath)) record = ContactCard.recordFor(parseAllRawQsos(logPath), req); } catch { record = null; }
+  }
+  const input = {
+    call, qrz: q, qrzState, history: lookupPastQsos(call), record,
+    ownGrid: settings.grid || '', distUnit: settings.distUnit === 'km' ? 'km' : 'mi',
+    prefix: contactPrefixInfo(call), now: Date.now(), weather: null,
+  };
+  const weatherOn = settings.contactWeather !== false; // on unless turned off (Casey, 2026-11-23)
+  if (weatherOn && opts && opts.withWeather) {
+    try { input.weather = await contactWeather.current(ContactCard.where(input)); } catch { input.weather = null; }
+  }
+  const vm = ContactCard.build(input);
+  vm.weatherOn = weatherOn;
+  vm.weatherPending = weatherOn && !(opts && opts.withWeather) && !!ContactCard.where(input);
+  return vm;
+}
+
+/** Fill the window: everything at once, then again with the weather when it is on. */
+async function contactCardRefresh(opts) {
+  const req = contactCardReq;
+  if (!req || !contactCardWin || contactCardWin.isDestroyed()) return;
+  // Refresh: ask QRZ again for this call (the log is read fresh every time).
+  if (opts && opts.fresh) qrz.forget(JtcatParser.baseCall(req.call));
+  const seq = ++contactCardSeq;
+  const send = (vm) => {
+    if (seq !== contactCardSeq || !contactCardWin || contactCardWin.isDestroyed()) return;
+    contactCardWin.setTitle(vm.call + ' - Contact details');
+    contactCardWin.webContents.send('contact-card-show', vm);
+  };
+  contactCardWin.webContents.send('contact-card-loading', req.call);
+  try {
+    const vm = await contactCardData(req);
+    send(vm);
+    if (vm.weatherPending) send(await contactCardData(req, { withWeather: true }));
+  } catch (err) {
+    sendCatLog('[Contact details] ' + ((err && err.message) || err));
+  }
+}
+
+function openContactCard(msg) {
+  const req = ContactCard.openRequest(msg);
+  if (!req) return;
+  contactCardReq = req;
+  if (contactCardWin && !contactCardWin.isDestroyed()) {
+    if (contactCardWin.isMinimized()) contactCardWin.restore();
+    contactCardWin.show();
+    contactCardWin.focus();
+    contactCardRefresh();
+    return;
+  }
+  contactCardWin = new BrowserWindow({
+    minWidth: 520, minHeight: 480, // the cards stack below 900 px wide (renderer/contact-popout.html)
+    width: 1120, height: 860, title: 'Contact details',
+    backgroundColor: getThemeWindowBg(),
+    show: false,
+    ...windowFrame(),
+    icon: getIconPath(),
+    webPreferences: { preload: path.join(__dirname, 'preload-contact-popout.js'), contextIsolation: true, nodeIntegration: false },
+  });
+  rememberWindowPlace(contactCardWin, 'contactCardBounds', { minWidth: 520, minHeight: 480 });
+  contactCardWin.setMenuBarVisibility(false);
+  contactCardWin.loadFile(path.join(__dirname, 'renderer', 'contact-popout.html'), { query: themeQuery() });
+  contactCardWin.once('ready-to-show', () => { if (contactCardWin && !contactCardWin.isDestroyed()) contactCardWin.show(); });
+  // ready-to-show is not guaranteed on Windows after a GPU-heavy session (K4PEZ, the Logbook).
+  const fallback = setTimeout(() => { if (contactCardWin && !contactCardWin.isDestroyed() && !contactCardWin.isVisible()) contactCardWin.show(); }, 1500);
+  contactCardWin.on('closed', () => { clearTimeout(fallback); contactCardWin = null; contactCardReq = null; });
+  contactCardWin.webContents.on('did-finish-load', () => contactCardRefresh());
+  contactCardWin.webContents.on('before-input-event', (_e, input) => {
+    if (input.key === 'F12' && input.type === 'keyDown' && contactCardWin) contactCardWin.webContents.toggleDevTools();
+  });
 }
 
 // --- Call Roster "needed" sets ---
@@ -54986,8 +55115,25 @@ function cloudShackNotice(text, kind) {
     const pastQsos = limit ? all.slice(0, limit) : all;
     // The bands and modes already worked with this call (#108, AE5JE).
     const workedMatrix = WorkedMatrix.buildWorkedMatrix(WorkedMatrix.entriesForCall(workedQsos, trimmed, JtcatParser.baseCall));
-    return { qrz: qrzInfo, pastQsos, totalQsos: all.length, workedMatrix };
+    // The one line under the call field (Contact details): name, town, beam, distance, worked.
+    const summary = ContactCard.summaryLine({
+      call: trimmed, qrz: qrzInfo, qrzState: qrzInfo ? 'subscriber' : 'off', history: all,
+      ownGrid: settings.grid || '', distUnit: settings.distUnit === 'km' ? 'km' : 'mi', prefix: contactPrefixInfo(trimmed),
+    });
+    return { qrz: qrzInfo, pastQsos, totalQsos: all.length, workedMatrix, summary };
   });
+
+  // Contact details: Details on a Logbook row and beside the Log QSO call field.
+  ipcMain.on('contact-card-open', (_e, req) => openContactCard(req));
+  // The window's own switch for weather (the same setting as Settings > Station).
+  ipcMain.on('contact-card-weather', (_e, on) => {
+    settings.contactWeather = on === true;
+    saveSettings(settings);
+    contactCardRefresh();
+  });
+  ipcMain.on('contact-card-refresh', () => contactCardRefresh({ fresh: true }));
+  ipcMain.on('contact-card-minimize', () => { if (contactCardWin && !contactCardWin.isDestroyed()) contactCardWin.minimize(); });
+  ipcMain.on('contact-card-close', () => { if (contactCardWin && !contactCardWin.isDestroyed()) contactCardWin.close(); });
 
   // Prior contacts card (#154): the hunter table's and the FT8 decode list's
   // right-click item. The log index and the worked grid only, never QRZ. Both

@@ -73,9 +73,15 @@
     #lp-qrz-link { padding: 5px 10px; font-size: 12px; font-weight: 600; background: var(--accent-blue, #4fc3f7); color: #000; border: none; border-radius: 3px; cursor: pointer; opacity: 0.5; pointer-events: none; transition: opacity 0.15s; }
     #lp-qrz-link.active { opacity: 1; pointer-events: auto; }
     #lp-qrz-link:hover.active { filter: brightness(1.1); }
+    /* + More info: the Contact details window for the call in the field. */
+    #lp-contact-details { padding: 5px 10px; font-size: 12px; font-weight: 600; background: var(--accent-red, #e94560); color: var(--on-accent-red, #fff); border: none; border-radius: 3px; cursor: pointer; opacity: 0.5; pointer-events: none; }
+    #lp-contact-details.active { opacity: 1; pointer-events: auto; }
+    #lp-contact-details:hover.active { filter: brightness(1.1); }
 
     /* Identity row (Name · Country/State · Beam 087°) */
-    #lp-identity { font-size: 12px; color: var(--accent-green, #4ecca3); min-height: 16px; margin-top: 4px; padding-left: 2px; }
+    /* The one-line summary under the call (Contact details): name, town, beam, distance, worked. */
+    #lp-identity { font-size: 13px; color: var(--text-primary); margin-top: 6px; padding: 6px 9px; background: var(--bg-secondary); border-radius: 4px; }
+    #lp-identity:empty { display: none; }
     #lp-identity .lp-loc { color: var(--text-secondary); margin-left: 4px; }
     #lp-identity .lp-beam { color: var(--accent-blue, #4fc3f7); margin-left: 6px; font-variant-numeric: tabular-nums; }
 
@@ -159,6 +165,7 @@
         <input type="text" id="lp-name" readonly tabindex="-1">
       </label>
       <button id="lp-qrz-link" type="button" title="Open QRZ.com page">QRZ&#8599;</button>
+      <button id="lp-contact-details" type="button" title="Contact details: photo, mailing address, beam heading, local time and weather">+ More info</button>
     </div>
     <div id="lp-identity"></div>
     <div id="lp-worked-matrix"></div><!-- bands/modes already worked with this call (lib/worked-matrix.js, #108) -->

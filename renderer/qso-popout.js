@@ -442,6 +442,12 @@ const _virt = {
     }
 
     const tdDel = document.createElement('td');
+    // Contact details for this QSO's station (lib/contact-card.js).
+    const info = document.createElement('button');
+    info.className = 'log-details-btn';
+    info.textContent = 'Details';
+    info.title = 'Contact details for ' + (q.CALL || 'this station');
+    tdDel.appendChild(info);
     const btn = document.createElement('button');
     btn.className = 'log-delete-btn';
     btn.textContent = '\u00D7';
@@ -539,8 +545,8 @@ function renderHead() {
   // Trailing delete-button column — not arrangeable, not hideable.
   const thDel = document.createElement('th');
   thDel.className = 'col-actions';
-  // Wide enough for "Sure?" — at 34 px the confirmation was clipped to a
-  // sliver (GitHub #94).
+  // Wide enough for Details and "Sure?" — at 34 px the confirmation was
+  // clipped to a sliver (GitHub #94).
   thDel.style.width = ACTIONS_COL_PX + 'px';
   headRow.appendChild(thDel);
   syncTableWidth();
@@ -552,7 +558,7 @@ function renderHead() {
  *  shares the extra among them in proportion, so a maximized Logbook fills
  *  with content instead of black space (Casey 2026-11-02). Saved widths stay
  *  as they are; a narrow window still scrolls sideways. */
-const ACTIONS_COL_PX = 64;
+const ACTIONS_COL_PX = 128;
 function totalColumnsWidth() {
   return visibleColumns().reduce((n, c) => n + colWidth(c), 0) + ACTIONS_COL_PX;
 }
@@ -974,8 +980,8 @@ tbody.addEventListener('dblclick', (e) => {
 
 // --- Row selection (click / ctrl+click / shift+click) ---
 tbody.addEventListener('click', (e) => {
-  // Skip clicks on delete buttons, editable inputs, or inline-edit cells being edited
-  if (e.target.closest('.log-delete-btn') || e.target.closest('input')) return;
+  // Skip clicks on the row buttons, editable inputs, or inline-edit cells being edited
+  if (e.target.closest('.log-delete-btn') || e.target.closest('.log-details-btn') || e.target.closest('input')) return;
   const tr = e.target.closest('tr');
   if (!tr || tr.dataset.idx == null) return;
   const idx = parseInt(tr.dataset.idx, 10);
@@ -1008,6 +1014,19 @@ tbody.addEventListener('click', (e) => {
     lastClickedIdx = idx;
   }
   updateResendLabel();
+});
+
+// --- Contact details (Details button) ---
+// Opens the Contact details window for this row's station. The QSO is named by
+// its identity, so a stale row number can never show another contact (#988).
+tbody.addEventListener('click', (e) => {
+  const btn = e.target.closest('.log-details-btn');
+  if (!btn) return;
+  const tr = btn.closest('tr');
+  const idx = parseInt(tr.dataset.idx, 10);
+  const qso = allQsos.find((q) => q.idx === idx);
+  if (!qso || !qso.CALL || !window.api.openContactCard) return;
+  window.api.openContactCard({ call: qso.CALL, idx, identity: QsoIdentity.of(qso) });
 });
 
 // --- Delete (two-click) ---

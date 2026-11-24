@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <script src="popout-theme-boot.js"></script>
+  <!-- The photo is the only thing loaded from outside, and only from QRZ. Main fetches everything else. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' https://*.qrz.com https://qrz.com; style-src 'self' 'unsafe-inline'; script-src 'self';">
+  <title>Contact details</title>
+  <script src="popout-theme-bootstrap.js"></script>
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    /* Layout approved by Casey 2026-11-23 (Contact details mockup). Colours
+       come only from theme tokens, so every theme works. */
+    html, body { margin: 0; padding: 0; height: 100%; }
+    body { display: flex; flex-direction: column; overflow: hidden; background: var(--bg-primary); color: var(--text-primary);
+      font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; font-size: 14px; }
+    .cd-muted { color: var(--text-secondary); }
+
+    .cd-head { flex-shrink: 0; min-height: 76px; box-sizing: border-box; padding: 10px 24px; display: flex; align-items: center; gap: 16px;
+      flex-wrap: wrap; border-bottom: 1px solid var(--border-primary); }
+    .cd-call { font-size: 32px; font-weight: 700; letter-spacing: 1px; }
+    .cd-pill { font-weight: 600; font-size: 13px; padding: 5px 12px; border-radius: 14px; }
+    .cd-pill.confirmed { background: var(--accent-green, #4ecca3); color: var(--on-accent-green, #10241c); }
+    .cd-pill.worked { background: var(--accent-blue, #4fc3f7); color: var(--on-accent-blue, #0b1a24); }
+    .cd-headline { font-size: 15px; color: var(--text-primary); }
+    .cd-spacer { flex-grow: 1; }
+    .cd-hbtn { height: 38px; box-sizing: border-box; background: var(--bg-secondary); color: var(--text-primary); border: 1px solid var(--border-secondary);
+      border-radius: 6px; padding: 0 14px; font-size: 14px; cursor: pointer; }
+    .cd-hbtn.link { color: var(--accent-blue, #4fc3f7); }
+    .cd-hbtn:hover { background: var(--bg-hover); }
+
+    .cd-body { flex-grow: 1; overflow-y: auto; padding: 20px 24px; }
+    .cd-loading { color: var(--text-secondary); font-size: 15px; }
+    .cd-grid { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); grid-auto-rows: auto; gap: 16px; }
+    .cd-card { background: var(--bg-secondary); border: 1px solid var(--border-primary); border-radius: 10px; padding: 18px; display: flex;
+      flex-direction: column; gap: 12px; min-width: 0; box-sizing: border-box; }
+    .cd-h { font-size: 12px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 1px; }
+    .cd-fill { flex-grow: 1; }
+    .s6 { grid-column: span 6; } .s3 { grid-column: span 3; } .s7 { grid-column: span 7; } .s5 { grid-column: span 5; } .s12 { grid-column: span 12; }
+    .cd-row1 { min-height: 236px; } .cd-row2 { min-height: 176px; }
+
+    /* Operator */
+    .cd-op { flex-direction: row; gap: 18px; }
+    .cd-photo { width: 198px; height: 198px; flex-shrink: 0; border-radius: 8px; background: var(--bg-primary); border: 1px solid var(--border-primary);
+      display: flex; align-items: center; justify-content: center; color: var(--text-secondary); font-size: 13px; text-align: center; overflow: hidden; }
+    .cd-photo img { width: 100%; height: 100%; object-fit: cover; }
+    .cd-photo.none, .cd-dashed { border-style: dashed; border-color: var(--border-secondary); }
+    .cd-op-text { display: flex; flex-direction: column; gap: 8px; min-width: 0; flex-grow: 1; }
+    .cd-name { font-size: 20px; font-weight: 600; line-height: 1.3; overflow-wrap: anywhere; }
+    .cd-town { color: var(--text-primary); }
+    .cd-pills { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 4px; }
+    .cd-chip { background: var(--bg-primary); border: 1px solid var(--border-primary); border-radius: 12px; padding: 3px 10px; font-size: 13px; }
+    .cd-chip.grid { color: var(--accent-green, #4ecca3); }
+    .cd-small { font-size: 13px; color: var(--text-secondary); }
+
+    /* Path from you / At their end */
+    .cd-big { font-size: 30px; font-weight: 700; line-height: 1.1; font-variant-numeric: tabular-nums; }
+    .cd-compass { display: flex; align-items: center; gap: 14px; }
+    .cd-compass svg circle.ring { stroke: var(--border-secondary); }
+    .cd-compass svg text { fill: var(--text-secondary); }
+    .cd-compass svg line { stroke: var(--accent-red, #e94560); }
+    .cd-compass svg circle.hub { fill: var(--text-primary); }
+    .cd-kv { display: flex; justify-content: space-between; gap: 8px; }
+    .cd-kv.first { border-top: 1px solid var(--border-primary); padding-top: 10px; }
+    .cd-kv .v { font-weight: 600; text-align: right; }
+    .cd-linkbtn { background: none; border: 0; padding: 0; color: var(--accent-blue, #4fc3f7); font-size: 12px; cursor: pointer; text-decoration: underline; }
+
+    /* Station */
+    .cd-fields { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px 16px; }
+    .cd-field { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+    .cd-field .l { font-size: 12px; color: var(--text-secondary); }
+    .cd-field .v { font-weight: 600; overflow-wrap: anywhere; user-select: text; }
+
+    /* QSL */
+    .cd-qsl-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+    .cd-address { white-space: pre-line; line-height: 1.45; user-select: text; }
+    .cd-email { color: var(--accent-blue, #4fc3f7); user-select: text; overflow-wrap: anywhere; }
+    .cd-copy { align-self: flex-start; height: 36px; background: var(--accent-red, #e94560); color: var(--on-accent-red, #fff); border: 0; border-radius: 6px;
+      padding: 0 14px; font-size: 14px; font-weight: 600; cursor: pointer; }
+    .cd-copy:disabled { opacity: .45; cursor: default; }
+    .cd-copy.done { background: var(--accent-green, #4ecca3); color: var(--on-accent-green, #10241c); }
+
+    /* Your contacts */
+    .cd-table { display: grid; grid-template-columns: 1.2fr 0.8fr 0.8fr 1.2fr 1fr 1fr; gap: 8px 16px; font-variant-numeric: tabular-nums; }
+    .cd-table .th { font-size: 12px; color: var(--text-secondary); }
+    .cd-table .current { font-weight: 700; }
+    .cd-ok { color: var(--accent-green, #4ecca3); }
+    .cd-worked { color: var(--accent-blue, #4fc3f7); }
+
+    .cd-foot { flex-shrink: 0; min-height: 30px; border-top: 1px solid var(--border-primary); padding: 6px 24px; box-sizing: border-box;
+      display: flex; align-items: center; color: var(--text-secondary); font-size: 12px; }
+
+    /* A narrow window: the cards stack, two small ones side by side. */
+    @media (max-width: 900px) {
+      .s6, .s7, .s5 { grid-column: span 12; }
+      .s3 { grid-column: span 6; }
+      .cd-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+    @media (max-width: 560px) {
+      .s3 { grid-column: span 12; }
+      .cd-op { flex-direction: column; }
+    }
+    [hidden] { display: none !important; }
+  </style>
+</head>
+<body>
+  <div class="titlebar">
+    <div class="titlebar-title">Contact details</div>
+    <div class="titlebar-controls">
+      <button class="titlebar-btn" id="tb-min" title="Minimize">&#x2014;</button>
+      <button class="titlebar-btn titlebar-close" id="tb-close" title="Close">&#x2715;</button>
+    </div>
+  </div>
+
+  <div class="cd-head" id="cd-head" hidden>
+    <span class="cd-call" id="cd-call"></span>
+    <span class="cd-pill" id="cd-pill" hidden></span>
+    <span class="cd-headline" id="cd-headline"></span>
+    <span class="cd-spacer"></span>
+    <button type="button" class="cd-hbtn link" id="cd-qrz" hidden>Open QRZ page</button>
+    <button type="button" class="cd-hbtn" id="cd-refresh">Refresh</button>
+  </div>
+
+  <div class="cd-body">
+    <div class="cd-loading" id="cd-loading">Looking up the station...</div>
+    <div class="cd-grid" id="cd-grid" hidden>
+      <section class="cd-card cd-op s6 cd-row1" aria-label="Operator">
+        <div class="cd-photo" id="cd-photo"></div>
+        <div class="cd-op-text">
+          <span class="cd-h">Operator</span>
+          <span class="cd-name" id="cd-name"></span>
+          <span class="cd-town" id="cd-town"></span>
+          <div class="cd-pills" id="cd-pills"></div>
+          <span class="cd-fill"></span>
+          <div id="cd-notes"></div>
+        </div>
+      </section>
+
+      <section class="cd-card s3 cd-row1" aria-label="Path from you">
+        <span class="cd-h">Path from you</span>
+        <div id="cd-path"></div>
+      </section>
+
+      <section class="cd-card s3 cd-row1" aria-label="At their end">
+        <span class="cd-h">At their end</span>
+        <div id="cd-end" style="display:flex;flex-direction:column;gap:12px;flex-grow:1;"></div>
+      </section>
+
+      <section class="cd-card s7 cd-row2" aria-label="Station">
+        <span class="cd-h">Station</span>
+        <div class="cd-fields" id="cd-fields"></div>
+        <span class="cd-fill"></span>
+        <span class="cd-small" id="cd-station-note" hidden></span>
+      </section>
+
+      <section class="cd-card s5 cd-row2" id="cd-qsl-card" aria-label="QSL">
+        <div class="cd-qsl-head">
+          <span class="cd-h">QSL</span>
+          <span id="cd-via" style="font-size:13px;" hidden><span class="cd-muted">Via</span> <strong id="cd-via-v"></strong></span>
+        </div>
+        <span class="cd-address" id="cd-address" hidden></span>
+        <span class="cd-email" id="cd-email" hidden></span>
+        <span class="cd-small" id="cd-qsl-note" hidden></span>
+        <span class="cd-fill"></span>
+        <button type="button" class="cd-copy" id="cd-copy" title="Copies the address to the clipboard, for a QSL card. Nothing goes into your log.">Copy mailing address</button>
+      </section>
+
+      <section class="cd-card s12" aria-label="Your contacts">
+        <span class="cd-h" id="cd-contacts-h"></span>
+        <div class="cd-table" id="cd-contacts"></div>
+      </section>
+    </div>
+  </div>
+
+  <div class="cd-foot" id="cd-foot"></div>
+
+  <script src="contact-popout.js"></script>
+</body>
+</html>

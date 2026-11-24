@@ -62,7 +62,8 @@ test('Log QSO window: container, script, drawn on open and as the call is typed'
 });
 test('log pop-out: main returns the grid with the callsign lookup and the window draws it', () => {
   const main = read('main.js');
-  assert.ok(/return \{ qrz: qrzInfo, pastQsos, totalQsos: all\.length, workedMatrix \};/.test(main));
+  // The answer also carries the Contact details summary line (2026-11-23).
+  assert.ok(/return \{ qrz: qrzInfo, pastQsos, totalQsos: all\.length, workedMatrix(, summary)? \};/.test(main));
   assert.ok(read('renderer/log-popout.html').includes('<div id="lp-worked-matrix"></div>'));
   assert.ok(read('renderer/log-popout.html').includes('<script src="../lib/worked-matrix.js"></script>'));
   assert.ok(/renderWorkedMatrix\(result\.workedMatrix\)/.test(read('renderer/log-popout.js')));
