@@ -40974,14 +40974,19 @@ ${record}
 
 /**
  * GitHub #267: a QSO of this station's that reached this PC only through the
- * Cloud pull (a paired phone logged it off-grid) goes to the same external
- * loggers a live QSO does. lib/cloud-ipc.js decides which QSOs qualify.
+ * Cloud pull (a paired phone logged it off-grid; #838: or any other device of
+ * this station's) goes to the same external loggers a live QSO does.
+ * lib/cloud-ipc.js decides which QSOs qualify. `only` = a retry of the
+ * destinations that refused it (#838); Club Log is queued on the first send
+ * only, its outbox retries by itself.
  */
-async function forwardPulledQsoToLoggers(fields) {
+async function forwardPulledQsoToLoggers(fields, { only } = {}) {
   const qsoData = rawQsoToQsoData(fields);
-  sendCatLog(`[Cloud] ${qsoData.callsign} ${qsoData.qsoDate} ${qsoData.timeOn} came in by Cloud sync (logged on the phone off-line): forwarding to the external loggers`);
-  await LoggerForward.forwardToLoggers(qsoData, settings, loggerForwardDeps());
-  LoggerForward.queueClublog(qsoData, settings, loggerForwardDeps());
+  const retry = Array.isArray(only);
+  sendCatLog(`[Cloud] ${qsoData.callsign} ${qsoData.qsoDate} ${qsoData.timeOn} came in by Cloud sync (logged on another device): ${retry ? 'trying again: ' + only.join(', ') : 'forwarding to the external loggers'}`);
+  const result = await LoggerForward.forwardToLoggers(qsoData, settings, loggerForwardDeps(), retry ? { only } : {});
+  if (!retry) LoggerForward.queueClublog(qsoData, settings, loggerForwardDeps());
+  return result;
 }
 
 function forwardToLogbook(qsoData, s = settings) {
@@ -46481,8 +46486,9 @@ app.whenReady().then(() => {
       // its own settings file.
       getActiveProfile: () => settings.activeProfile || '',
       // GitHub #267: this station's QSOs that a paired phone logged off-grid
-      // reach the external loggers when the pull brings them in.
-      forwardPulledQso: (fields) => forwardPulledQsoToLoggers(fields),
+      // reach the external loggers when the pull brings them in (#838: from
+      // any device, and a refused send is tried again).
+      forwardPulledQso: (fields, opt) => forwardPulledQsoToLoggers(fields, opt),
       hasPairedDevice: () => Array.isArray(settings.pairedDevices) && settings.pairedDevices.length > 0,
       listProfiles: () => listProfiles().map((call) => ({ call, owner: cloudIpc ? cloudIpc.ownerIdFor(operatorSettingsFor(call)) : null })),
       sendToRenderer: (channel, data) => {
@@ -56505,6 +56511,10 @@ function cloudShackNotice(text, kind) {
     } else {
       extraUdpBridge.stop();
     }
+
+    // #838: logger settings may just have been fixed (host, port, the logger
+    // started): try now what a logger refused from the Cloud pull.
+    if (cloudIpc && cloudIpc.drainForwardRetries) cloudIpc.drainForwardRetries({ force: true }).catch(() => {});
 
     // Auto-parse ADIF and send DXCC data if enabled
     if (settings.enableDxcc) {
