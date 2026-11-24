@@ -414,7 +414,8 @@ const TESTS = [
   'test/rsba1-transport.test.js',
   'test/activation-log-test.js',
   'test/activation-program-test.js',
-  'test/adif-mode-test.js', // #381: MFSK submodes (JS8, JTTY, FT4, FT2) read by name everywhere; FT4/FT2 still written bare
+  'test/adif-mode-test.js', // #381: MFSK submodes (JS8, JTTY, FT4, FT2) read by name everywhere
+  'test/adif-ft4-mfsk-test.js', // #381: FT4/FT2 written as MFSK + SUBMODE; old records read both ways, LoTW batch + ADIF export copies mapped
   'test/qso-edit-test.js', // #509: My Park edit sets MY_SIG so Past Activations finds the QSO
   'test/activation-auto-end-test.js', // #147: a forgotten activation ends at the UTC day change or after 6 h with no contacts
   'test/activation-tune-ask-test.js', // #146: a device's activation start asks before the radio moves, never retunes silently

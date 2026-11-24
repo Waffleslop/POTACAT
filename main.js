@@ -551,7 +551,7 @@ const WinlinkTxLevel = require('./lib/winlink-tx-level'); // #300: Winlink's own
 const ModemAudioServerMod = require('./lib/modem-audio-server');
 const { ModemAudioLane } = require('./lib/modem-audio-lane-client'); // the modem's audio, off the main process (#187)
 const { buildAdifFields, buildAdifRecord, sqliteQsoToAdifFields, ADIF_HEADER, adifField } = require('./lib/adif-writer');
-const { adifAppMode, adifModeSubmode } = require('./lib/adif-mode');
+const { adifAppMode, adifModeSubmode, adifExportRecord } = require('./lib/adif-mode');
 const { PassQsoOutbox } = require('./lib/pass-qso-outbox');
 const { ClublogOutbox } = require('./lib/clublog-outbox');
 const QsoLog = require('./lib/qso-log');
@@ -56928,7 +56928,8 @@ function cloudShackNotice(text, kind) {
       let content = ADIF_HEADER;
       for (const q of qsos) {
         const parts = [];
-        for (const [key, value] of Object.entries(q)) {
+        // The writer's MODE/SUBMODE: an old MODE=FT4 goes out as MFSK/FT4 (#381).
+        for (const [key, value] of Object.entries(adifExportRecord(q))) {
           if (key === 'idx') continue;
           if (value != null && value !== '') parts.push(adifField(key, value));
         }
