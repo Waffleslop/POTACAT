@@ -8,12 +8,14 @@ const { readSrc } = require('./_src');
 // and the wattmeter of the day mis-read dBm as watts — weeks of unanswered
 // FT8 CQs at 1 W with nothing on screen saying so. These tests pin the
 // decisions: what gets remembered, when it is restored, and when the marker
-// is cleared (only by a readback above the cap, never by a command sent).
+// is cleared (only by a readback, never by a command sent). Since #521 the
+// memory works per frame and both ways (a beacon level above the radio's is
+// put back too).
 
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
-const { markerUsable, rememberPreCapPower, decideRestore, decideReconcile } = require('../lib/wspr-power-memory');
+const { markerUsable, rememberPreBeaconPower, decideRestore, decideReconcile, markerBeaconW } = require('../lib/wspr-power-memory');
 
 let passed = 0, failed = 0;
 function t(name, fn) {
@@ -21,85 +23,111 @@ function t(name, fn) {
   catch (e) { failed++; console.log('  FAIL ' + name + '\n       ' + (e && e.message)); }
 }
 
-const CAP = 1;
-
-console.log('rememberPreCapPower');
-t('a radio above the cap is remembered, with the rig id and a timestamp', () => {
-  const r = rememberPreCapPower({ current: 80, prior: null, rigId: 'r1', cap: CAP, now: 123 });
-  assert.deepStrictEqual(r.marker, { watts: 80, rigId: 'r1', at: 123 });
+// Since #521 the marker is written before each frame that changes the power
+// (not once at arm) and carries the level the frame set (beaconW).
+console.log('rememberPreBeaconPower');
+t('the radio\'s level is remembered with the beacon level, the rig id and a timestamp', () => {
+  const r = rememberPreBeaconPower({ current: 80, prior: null, rigId: 'r1', beaconW: 5, now: 123 });
+  assert.deepStrictEqual(r.marker, { watts: 80, beaconW: 5, rigId: 'r1', at: 123 });
   assert.strictEqual(r.restoreWatts, 80);
   assert.strictEqual(r.changed, true);
 });
-t('re-arming while already at the cap KEEPS the prior marker instead of remembering 1 W', () => {
-  const prior = { watts: 80, rigId: 'r1', at: 1 };
-  const r = rememberPreCapPower({ current: 1, prior, rigId: 'r1', cap: CAP });
+t('a radio BELOW the beacon level is remembered too (#521: a 2 W radio, a 5 W beacon, never put back)', () => {
+  const r = rememberPreBeaconPower({ current: 2, prior: null, rigId: 'r1', beaconW: 5, now: 1 });
+  assert.strictEqual(r.restoreWatts, 2);
+  assert.strictEqual(r.marker.watts, 2);
+});
+t('a radio still at the beacon level (a restore that never landed) KEEPS the prior marker', () => {
+  const prior = { watts: 80, beaconW: 5, rigId: 'r1', at: 1 };
+  const r = rememberPreBeaconPower({ current: 5, prior, rigId: 'r1', beaconW: 5 });
   assert.strictEqual(r.marker, prior);
   assert.strictEqual(r.restoreWatts, 80);
   assert.strictEqual(r.changed, false);
 });
-t('unknown power (0) with no prior = nothing to restore, nothing written', () => {
-  const r = rememberPreCapPower({ current: 0, prior: null, rigId: 'r1', cap: CAP });
+t('unknown power (0) keeps a usable prior, and with none there is nothing to restore', () => {
+  const prior = { watts: 80, beaconW: 5, rigId: 'r1', at: 1 };
+  assert.strictEqual(rememberPreBeaconPower({ current: 0, prior, rigId: 'r1', beaconW: 5 }).restoreWatts, 80);
+  const r = rememberPreBeaconPower({ current: 0, prior: null, rigId: 'r1', beaconW: 5 });
   assert.strictEqual(r.restoreWatts, 0);
   assert.strictEqual(r.changed, false);
 });
-t('a new level above the cap overwrites a stale marker', () => {
-  const r = rememberPreCapPower({ current: 20, prior: { watts: 80, rigId: 'r1', at: 1 }, rigId: 'r1', cap: CAP, now: 5 });
+t('a level the operator set since (not the beacon level) replaces a stale marker', () => {
+  const r = rememberPreBeaconPower({ current: 20, prior: { watts: 80, beaconW: 5, rigId: 'r1', at: 1 }, rigId: 'r1', beaconW: 5, now: 5 });
   assert.strictEqual(r.marker.watts, 20);
   assert.strictEqual(r.changed, true);
 });
 t('a prior marker from another rig is not offered as the restore level', () => {
-  const r = rememberPreCapPower({ current: 1, prior: { watts: 80, rigId: 'other', at: 1 }, rigId: 'r1', cap: CAP });
+  const r = rememberPreBeaconPower({ current: 0, prior: { watts: 80, rigId: 'other', at: 1 }, rigId: 'r1', beaconW: 5 });
   assert.strictEqual(r.restoreWatts, 0);
 });
+t('a marker from before #521 (no beaconW) counts its beacon level as the old 1 W cap', () => {
+  assert.strictEqual(markerBeaconW({ watts: 80 }), 1);
+  const r = rememberPreBeaconPower({ current: 1, prior: { watts: 80, rigId: 'r1' }, rigId: 'r1', beaconW: 5 });
+  assert.strictEqual(r.restoreWatts, 80);
+  assert.strictEqual(r.marker.beaconW, 5);
+});
 t('markers without a rig id (single-rig installs) are trusted', () => {
-  assert.strictEqual(markerUsable({ watts: 50 }, 'r1', CAP), true);
-  assert.strictEqual(markerUsable({ watts: 50, rigId: 'r1' }, null, CAP), true);
-  assert.strictEqual(markerUsable({ watts: 1, rigId: 'r1' }, 'r1', CAP), false);
+  assert.strictEqual(markerUsable({ watts: 50 }, 'r1'), true);
+  assert.strictEqual(markerUsable({ watts: 50, rigId: 'r1' }, null), true);
+  assert.strictEqual(markerUsable({ watts: 0, rigId: 'r1' }, 'r1'), false);
 });
 
 console.log('decideRestore');
 t('no marker = none', () => {
-  assert.strictEqual(decideRestore({ marker: null, rigId: 'r1', cap: CAP }).action, 'none');
-  assert.strictEqual(decideRestore({ marker: { watts: 1 }, rigId: 'r1', cap: CAP }).action, 'none');
+  assert.strictEqual(decideRestore({ marker: null, rigId: 'r1' }).action, 'none');
+  assert.strictEqual(decideRestore({ marker: { watts: 0 }, rigId: 'r1' }).action, 'none');
 });
 t('a marker for another rig is forgotten, not applied to this radio', () => {
-  assert.strictEqual(decideRestore({ marker: { watts: 80, rigId: 'other' }, rigId: 'r1', cap: CAP }).action, 'forget-rig-mismatch');
+  assert.strictEqual(decideRestore({ marker: { watts: 80, rigId: 'other' }, rigId: 'r1' }).action, 'forget-rig-mismatch');
 });
-t('mid-WSPR-frame the restore DEFERS (the cap exists for exactly that frame)', () => {
-  assert.strictEqual(decideRestore({ marker: { watts: 80, rigId: 'r1' }, rigId: 'r1', cap: CAP, txActiveWspr: true }).action, 'defer');
+t('mid-WSPR-frame the restore DEFERS (the level exists for exactly that frame)', () => {
+  assert.strictEqual(decideRestore({ marker: { watts: 80, rigId: 'r1' }, rigId: 'r1', txActiveWspr: true }).action, 'defer');
 });
-t('immediate (engine stop / app quit) restores even if the engine still says TX', () => {
-  const d = decideRestore({ marker: { watts: 80, rigId: 'r1' }, rigId: 'r1', cap: CAP, txActiveWspr: true, immediate: true });
+t('immediate (frame end / engine stop / app quit) restores even if the engine still says TX', () => {
+  const d = decideRestore({ marker: { watts: 80, rigId: 'r1' }, rigId: 'r1', txActiveWspr: true, immediate: true });
   assert.strictEqual(d.action, 'command');
   assert.strictEqual(d.watts, 80);
 });
+t('a level below the beacon\'s is restored too', () => {
+  const d = decideRestore({ marker: { watts: 2, beaconW: 5, rigId: 'r1' }, rigId: 'r1', immediate: true });
+  assert.deepStrictEqual(d, { action: 'command', watts: 2 });
+});
 t('gives up after maxAttempts so a radio that rejects the level cannot loop forever', () => {
-  assert.strictEqual(decideRestore({ marker: { watts: 80 }, cap: CAP, attempts: 3, maxAttempts: 3 }).action, 'give-up');
-  assert.strictEqual(decideRestore({ marker: { watts: 80 }, cap: CAP, attempts: 2, maxAttempts: 3 }).action, 'command');
+  assert.strictEqual(decideRestore({ marker: { watts: 80 }, attempts: 3, maxAttempts: 3 }).action, 'give-up');
+  assert.strictEqual(decideRestore({ marker: { watts: 80 }, attempts: 2, maxAttempts: 3 }).action, 'command');
 });
 
 console.log('decideReconcile (every power readback)');
+const MK = { watts: 80, beaconW: 5, rigId: 'r1' };
 t('no marker = skip', () => {
-  assert.strictEqual(decideReconcile({ marker: null, watts: 1, cap: CAP }), 'skip');
+  assert.strictEqual(decideReconcile({ marker: null, watts: 1 }), 'skip');
 });
-t('while the beacon is armed the 1 W readback is the cap doing its job — skip', () => {
-  assert.strictEqual(decideReconcile({ marker: { watts: 80 }, armed: true, watts: 1, cap: CAP }), 'skip');
+t('while a beacon frame is on the air its level is the frame doing its job: skip', () => {
+  assert.strictEqual(decideReconcile({ marker: MK, frameActive: true, watts: 5 }), 'skip');
 });
-t('while a deferred restore is pending — skip (it will fire when the frame ends)', () => {
-  assert.strictEqual(decideReconcile({ marker: { watts: 80 }, retryPending: true, watts: 1, cap: CAP }), 'skip');
+t('while a deferred restore is pending, or just after a power command: skip', () => {
+  assert.strictEqual(decideReconcile({ marker: MK, retryPending: true, watts: 5 }), 'skip');
+  assert.strictEqual(decideReconcile({ marker: MK, recentCommand: true, watts: 5 }), 'skip');
 });
-t('a readback ABOVE the cap is the confirmation that clears the marker', () => {
-  assert.strictEqual(decideReconcile({ marker: { watts: 80 }, watts: 80, cap: CAP }), 'forget');
-  // ...including when the operator raised it by hand to something else
-  assert.strictEqual(decideReconcile({ marker: { watts: 80 }, watts: 20, cap: CAP }), 'forget');
+t('a readback at the remembered level is the confirmation that clears the marker', () => {
+  assert.strictEqual(decideReconcile({ marker: MK, watts: 80 }), 'forget');
+  assert.strictEqual(decideReconcile({ marker: { watts: 2, beaconW: 5 }, watts: 2 }), 'forget');
 });
-t('a readback still AT the cap with nobody beaconing = a restore that never landed (crash / quit / old build) — restore', () => {
-  assert.strictEqual(decideReconcile({ marker: { watts: 80 }, watts: 1, cap: CAP }), 'restore');
-  assert.strictEqual(decideReconcile({ marker: { watts: 80 }, watts: 0.5, cap: CAP }), 'restore');
+t('a readback at some other level is the operator\'s: forget, never fight it', () => {
+  assert.strictEqual(decideReconcile({ marker: MK, watts: 20 }), 'forget');
+});
+t('a readback still at the beacon level between frames = a restore that never landed: restore', () => {
+  assert.strictEqual(decideReconcile({ marker: MK, watts: 5 }), 'restore');
+  assert.strictEqual(decideReconcile({ marker: { watts: 2, beaconW: 5 }, watts: 5 }), 'restore');
+});
+t('a marker from before #521 keeps its old rule: above the 1 W cap forgets, at or below restores', () => {
+  assert.strictEqual(decideReconcile({ marker: { watts: 80 }, watts: 20 }), 'forget');
+  assert.strictEqual(decideReconcile({ marker: { watts: 80 }, watts: 1 }), 'restore');
+  assert.strictEqual(decideReconcile({ marker: { watts: 80 }, watts: 0.5 }), 'restore');
 });
 t('a garbage readback is ignored', () => {
-  assert.strictEqual(decideReconcile({ marker: { watts: 80 }, watts: NaN, cap: CAP }), 'skip');
-  assert.strictEqual(decideReconcile({ marker: { watts: 80 }, watts: -1, cap: CAP }), 'skip');
+  assert.strictEqual(decideReconcile({ marker: MK, watts: NaN }), 'skip');
+  assert.strictEqual(decideReconcile({ marker: MK, watts: -1 }), 'skip');
 });
 
 console.log('main.js wiring (source-text guards)');
@@ -107,10 +135,17 @@ const main = readSrc(path.join(__dirname, '..', 'main.js'));
 t('wsprPreCapPower is a GLOBAL_KEY (it describes this machine\'s radio, not a profile)', () => {
   assert.ok(/^\s*'wsprPreCapPower',/m.test(main), 'missing from GLOBAL_KEYS');
 });
-t('the arm path remembers BEFORE it caps', () => {
-  const arm = main.indexOf('const restoreWatts = wsprRememberPreCapPower();');
-  const cap = main.indexOf('const capped = wsprForcePowerCap();');
-  assert.ok(arm > 0 && cap > 0 && arm < cap, 'remember must precede wsprForcePowerCap in setWsprBeacon');
+t('arming changes nothing on the radio; each frame remembers BEFORE it sets, and tx-end restores (#521)', () => {
+  const arm = main.slice(main.indexOf('function setWsprBeacon('), main.indexOf('function applyWsprBeaconControl('));
+  assert.ok(!arm.includes('wsprRememberPreCapPower(') && !arm.includes('wsprSetFramePower('), 'arm must not touch the power');
+  const set = main.slice(main.indexOf('function wsprSetFramePower()'), main.indexOf('function wsprBeaconWatts()'));
+  const rem = set.indexOf('wsprRememberPreCapPower(plan.watts)');
+  const cmd = set.indexOf('wsprCommandTxPower(plan.watts)');
+  assert.ok(rem > 0 && cmd > rem, 'remember must precede the command');
+  const end = main.indexOf('const wsprFrameSetPower = !!(_wsprFrameRf && _wsprFrameRf.commanded);');
+  const restore = main.indexOf("if (wsprFrameSetPower && settings.wsprPreCapPower) wsprRestorePreCapPower('frame done', { immediate: true });", end);
+  const rel = main.indexOf('handleRemotePtt(false);', end);
+  assert.ok(end > 0 && rel > end && restore > rel && restore - end < 3000, 'tx-end must restore, after the PTT release');
 });
 t('the disarm path restores instead of leaving the cap ("raise it in your radio" is gone)', () => {
   assert.ok(!main.includes('TX power left at the ~1 W cap — raise it in your radio for other modes'), 'old one-way disarm copy still present');
@@ -139,12 +174,13 @@ t('every JTCAT tx-start logs the RF power and warns at the cap in a non-WSPR mod
   assert.ok(main.includes('jtcatNoteTxPowerForMode(modeForTx, data.message, data.freq'));
   assert.ok(main.includes("mode === 'WSPR'"), 'WSPR itself must not warn about its own cap');
 });
-t('the beacon cap goes through gatedSetTxPower (rigctld takes a fraction: a bare 1 was full power, WZ1H)', () => {
-  const fn = main.indexOf('function wsprForcePowerCap()');
-  const end = main.indexOf('\n}\n', fn);
-  const body = main.slice(fn, end);
-  assert.ok(body.includes('gatedSetTxPower(beaconW, { rigType: detectRigType() })'));
-  assert.ok(!/cat\.setTxPower\((JTCAT_WSPR_MAX_WATTS|beaconW)\)/.test(body), 'raw cat.setTxPower(1) is L RFPOWER 1.000 on rigctld');
+t('the beacon\'s power goes through gatedSetTxPower / gatedSmartSdrTxPower (rigctld takes a fraction: a bare 1 was full power, WZ1H)', () => {
+  const fn = main.indexOf('function wsprCommandTxPower(watts)');
+  const body = main.slice(fn, main.indexOf('\n}\n', fn));
+  assert.ok(body.includes('gatedSmartSdrTxPower(watts)'));
+  assert.ok(body.includes('gatedSetTxPower(watts, { rigType: detectRigType() })'));
+  assert.ok(!/cat\.setTxPower\(/.test(body), 'raw cat.setTxPower is L RFPOWER <watts> on rigctld');
+  assert.ok(!main.includes('function wsprForcePowerCap('), 'the 1 W cap is gone');
 });
 
 console.log(`\nWSPR power memory: ${passed} passed, ${failed} failed`);

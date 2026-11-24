@@ -502,6 +502,7 @@ const TESTS = [
   'test/wspr-scheduler-test.js', // #268: a beacon never keys two slots in a row unless TX % is over 50
   'test/wspr-hop-atu-test.js', // #747: a receive-only WSPR hop runs no band-change ATU tune
   'test/wspr-beacon-power-test.js', // #268: the beacon keeps the operator's RF power; rigctld reports the radio's power
+  'test/wspr-beacon-power-scale-test.js', // #521: the beacon's level on each rig's scale (KX3, G90, Icom, Yaesu, Flex), never above the entry; none entered = power left alone
   'test/wspr-reported-dbm-test.js', // #268: the beacon reports the power it runs at (5 W = 37 dBm), or the operator's fixed pick, 0..60 dBm
   'test/js8-native-test.js',
   'test/check-required-natives-test.js', // release gate: ft8_native/js8_native exist, right arch (PE/ELF/Mach-O header), load
