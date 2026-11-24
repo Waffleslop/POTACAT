@@ -733,6 +733,7 @@ const TESTS = [
   'test/adif-clean-test.js',
   'test/cloud-tab-ui-test.js',
   'test/jtcat-slider-wheel-test.js',
+  'test/jtcat-rx-slider-range-test.js',
   'test/cloud-phase2-ui-test.js',
   'test/onair-callsign-test.js',
   'test/activated-parks-test.js',
