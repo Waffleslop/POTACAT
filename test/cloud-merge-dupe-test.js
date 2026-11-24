@@ -4,8 +4,10 @@
 // desktop log twice — once enriched via the log-qso WS path (desktop-minted
 // UUID) and once sparse via cloud sync (phone-minted UUID). mergePulledQsos
 // must absorb the second copy instead of appending it, remember the alias,
-// tombstone the duplicate in the cloud journal, and NOT delete the surviving
-// record when that tombstone echoes back on a later pull.
+// and NOT delete the surviving record if that uuid comes back deleted on a
+// later pull. Since #245 it never tombstones the other copy in the Cloud: a
+// live Cloud row can be the only copy left, and two logs doing this to each
+// other deleted both.
 //
 // Runs registerCloudIpc against a stubbed electron so the REAL merge code is
 // under test.
@@ -83,10 +85,9 @@ check('phone copy with unknown uuid is absorbed, not appended', () => {
   assert.strictEqual(qsos[0].APP_POTACAT_MERGED_UUIDS, 'uuid-B', 'alias recorded');
 });
 
-check('duplicate is tombstoned in the cloud journal', () => {
-  const ops = cloud.journal.length ? cloud.journal : null;
-  // SyncJournal API: read entries via its file — fall back to length check.
-  assert(cloud.journal.length >= 1, 'journal should contain the delete op');
+check('the duplicate is NOT deleted in the Cloud (#245): alias only', () => {
+  const dels = cloud.journal.getAll().filter((e) => e.action === 'delete');
+  assert.strictEqual(dels.length, 0, 'no delete journaled for a live Cloud row');
 });
 
 check('tombstone echo does NOT delete the surviving record', () => {

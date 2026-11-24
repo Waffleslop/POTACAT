@@ -537,6 +537,7 @@ const TESTS = [
   'test/launch-origin-test.js',
   'test/cloud-merge-dupe-test.js',
   'test/cloud-pull-per-profile-test.js', // #245: profiles sharing one account: each pulls only its own QSOs; the dupe guard and journal stay per profile
+  'test/cloud-delete-guard-test.js', // #245: delete pushes held (another profile's QSOs, or over 25 an hour) until the operator confirms; dupe guard keeps station callsigns apart
   'test/cloud-pull-forward-test.js', // #267: a phone's off-grid QSOs of this station reach MacLoggerDX etc. via the pull, once; never another PC's or the history
   'test/swr-guard-test.js',
   'test/atu-wizard-test.js',         // Flex ATU Calibration Wizard: plan vs privileges, classifier, run loop on a fake Flex, wiring
