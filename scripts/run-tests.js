@@ -270,6 +270,7 @@ const TESTS = [
   'test/event-progress-test.js',
   'test/event-registry-test.js',
   'test/events-catalog-test.js',
+  'test/event-phone-sync-test.js', // #1030: event tracking changes reach the phone
   'test/hunted-park-test.js',
   'test/nfer-refs-test.js', // an n-fer's other parks, read from the activator's own spot comment (#353)
   'test/js8-audio-feed-test.js',

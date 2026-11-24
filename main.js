@@ -42908,6 +42908,7 @@ function setEventOptIn(eventId, optedIn, dismissed) {
   if (dismissed !== undefined) settings.events[eventId].dismissed = dismissed;
   saveSettings(settings);
   pushEventsToRenderer();
+  updateRemoteSettings(); // the phone alerts from eventSubscriptions; send it the change (#1030)
 }
 
 // The banner at the top of the main window, per event. A year-long event
@@ -43057,6 +43058,7 @@ function markEventRegion(eventId, region, qsoData) {
   };
   saveSettings(settings);
   pushEventsToRenderer();
+  updateRemoteSettings(); // progress rides eventSubscriptions to the phone (#1030)
 }
 
 // Union of log-derived progress (state.progress, rebuilt from the ADIF log by
