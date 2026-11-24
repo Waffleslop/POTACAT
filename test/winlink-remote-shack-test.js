@@ -44,7 +44,8 @@ const sample = {
   // Winlink catalog requests (docs/winlink-catalog.md): the shack's catalog, picks and Outbox.
   'winlink-catalog-get': [],
   'winlink-catalog-request': [['PROP_3DAY', 'PROP_WWV']],
-  'winlink-catalog-request-list': [],
+  'winlink-catalog-request-list': [true],
+  'winlink-catalog-offer': [true],
   'winlink-catalog-star': [{ id: 'PROP_WWV', on: true }],
 };
 

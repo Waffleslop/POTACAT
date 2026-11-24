@@ -12281,8 +12281,10 @@ async function winlinkRefreshMailboxes(boxes = WinlinkStateLib.FOLDERS) {
     }
   }
   winlinkPush();
-  // A catalog reply in the Inbox is recognised by itself (docs/winlink-catalog.md); the message is left as it is.
-  if (boxes.includes('in')) winlinkCatalogScan();
+  // Winlink catalog (docs/winlink-catalog.md): the Outbox and Sent say where a request stands; new Inbox mail is
+  // looked at only while one is pending or the panel asked. The scan catches its own errors.
+  if (boxes.includes('out') && boxes.includes('sent')) _winlinkCatalogListsFor = winlinkCatalogBox();
+  if (boxes.includes('in')) winlinkCatalogScan('mail');
 }
 
 /**
@@ -17558,22 +17560,27 @@ function winlinkTemplate(op, t) {
 }
 
 // ── Winlink catalog requests (docs/winlink-catalog.md) ──────────────────────
-// The rules are lib/winlink-catalog.js. Here: the stored catalog (one file for
-// every profile: the catalog is the same for everyone), the operator's picks
-// and the pending LIST request (settings, per profile), and reading a catalog
-// reply out of the Inbox. Nothing here starts a session, and a request is
-// queued only by the operator's click (the window's handlers, an ECHOCAT
-// device's winlink-catalog-* messages).
+// Every decision is in lib/winlink-catalog.js (and tested there): what to do
+// with an Inbox message, whether a request is still pending, which IDs may be
+// asked for. Here: the stored catalog (one file for every profile), what is
+// kept per profile in settings (picks, the pending request and its message,
+// an offer, declined offers, the scan's high-water mark), and Pat. Nothing
+// here starts a session, and a request is queued only by the operator's click
+// (the window's handlers, an ECHOCAT device's winlink-catalog-* messages).
 
 let _winlinkCatalog; // the stored catalog, or null; undefined until first asked for
 const _winlinkCatalogSeen = new Set(); // Inbox messages already looked at, this run
 let _winlinkCatalogSeenFor = ''; // the mailbox they belong to (another profile starts again)
+let _winlinkCatalogListsFor = ''; // the mailbox whose Outbox and Sent are listed
 let _winlinkCatalogUnreadable = false;
+let _winlinkCatalogWantScan = false; // the panel was opened or the catalog asked for: look at new Inbox mail once
+let _winlinkCatalogOpened = false;
 let _winlinkCatalogScanning = false;
 let _winlinkCatalogScanAgain = false;
 let _winlinkCatalogBusy = false;
 
 function winlinkCatalogPath() { return path.join(app.getPath('userData'), 'winlink-catalog.json'); }
+function winlinkCatalogBox() { return String(winlinkMailboxDir() || ''); }
 
 function winlinkCatalogStored() {
   if (_winlinkCatalog === undefined) {
@@ -17582,18 +17589,50 @@ function winlinkCatalogStored() {
   return _winlinkCatalog;
 }
 
-function winlinkCatalogStamp() {
-  return WinlinkCatalog.stamp(winlinkCatalogStored(), { requestedAt: settings.winlinkCatalogRequestedAt, now: Date.now(), unreadable: _winlinkCatalogUnreadable });
+/** Write the catalog. true only when the file was really written (the settings write gate can refuse during a profile switch). */
+function winlinkCatalogWrite(stored) {
+  const p = winlinkCatalogPath();
+  const t = Date.now();
+  _writeJsonAtomic(p, stored);
+  const st = _settingsWriteStatus.get(p);
+  if (!(st && st.ok && st.at >= t)) return false;
+  _winlinkCatalog = stored;
+  return true;
 }
 
-/** The panel's data: the full catalog's items (none yet = the starter list), the picks, the pending request. */
+function winlinkCatalogSave() { try { saveSettings(settings); } catch { /* said in the log by the settings writer */ } }
+
+/** 'none' | 'queued' | 'sent' (lib pendingState). A request that is no longer waited for is forgotten here. */
+function winlinkCatalogPending() {
+  const kind = WinlinkCatalog.pendingState({
+    request: settings.winlinkCatalogRequest, outbox: winlinkState.list('out'), sent: winlinkState.list('sent'),
+    listsKnown: !!_winlinkCatalogListsFor && _winlinkCatalogListsFor === winlinkCatalogBox(), stored: winlinkCatalogStored(), now: Date.now(),
+  });
+  if (kind === 'none' && settings.winlinkCatalogRequest) { delete settings.winlinkCatalogRequest; winlinkCatalogSave(); }
+  return kind;
+}
+
+function winlinkCatalogView() {
+  const kind = winlinkCatalogPending();
+  return {
+    pendingKind: kind === 'none' ? '' : kind, requestedAt: (settings.winlinkCatalogRequest || {}).at,
+    unreadable: _winlinkCatalogUnreadable, offer: settings.winlinkCatalogOffer,
+    picks: settings.winlinkCatalogPicks, picksAt: settings.winlinkCatalogPicksAt,
+  };
+}
+
+function winlinkCatalogStamp() { return WinlinkCatalog.stamp(winlinkCatalogStored(), winlinkCatalogView()); }
+
+/** Tell every surface the catalog, the request, an offer or the picks changed. */
+function winlinkCatalogChanged() {
+  winlinkPopoutSend('winlink-catalog-updated');
+  winlinkPush();
+}
+
+/** The panel's data. The first time it is asked for in a run, new Inbox mail is looked at once (an older reply is found this way). */
 function winlinkCatalogGet() {
-  // The pending stamp ends after 7 days (lib/winlink-catalog.js pendingActive).
-  if (settings.winlinkCatalogRequestedAt && !WinlinkCatalog.pendingActive(settings.winlinkCatalogRequestedAt, Date.now())) {
-    delete settings.winlinkCatalogRequestedAt;
-    try { saveSettings(settings); } catch {}
-  }
-  return WinlinkCatalog.payload(winlinkCatalogStored(), { picks: settings.winlinkCatalogPicks, requestedAt: settings.winlinkCatalogRequestedAt, now: Date.now(), unreadable: _winlinkCatalogUnreadable });
+  if (!_winlinkCatalogOpened) { _winlinkCatalogOpened = true; winlinkCatalogScan('opened'); }
+  return WinlinkCatalog.payload(winlinkCatalogStored(), winlinkCatalogView());
 }
 
 /** Put request messages in the Outbox, one after another, through winlinkSend. One request at a time. */
@@ -17617,93 +17656,113 @@ async function winlinkCatalogQueue(messages) {
   }
 }
 
-/** Put in Outbox: the ticked items as request messages (at most 10 IDs each). What was queued joins the picks. */
+/** Put in Outbox: only items of the catalog in force (lib checkRequest), at most 10 IDs a message. What was queued joins the picks. */
 async function winlinkCatalogRequest(ids) {
   if (!String(settings.myCallsign || '').trim()) return { ok: false, error: WinlinkCatalog.TEXT.noCallsign, queued: [], messages: 0 };
-  const messages = WinlinkCatalog.buildRequests(ids);
-  if (!messages.length) return { ok: false, error: 'Tick at least one item.', queued: [], messages: 0 };
-  const r = await winlinkCatalogQueue(messages);
+  const chk = WinlinkCatalog.checkRequest(ids, (winlinkCatalogStored() || {}).items);
+  if (!chk.ok) return { ok: false, error: chk.error, queued: [], messages: 0 };
+  const r = await winlinkCatalogQueue(WinlinkCatalog.buildRequests(chk.ids));
   if (r.queued.length) {
     settings.winlinkCatalogPicks = WinlinkCatalog.addRecent(settings.winlinkCatalogPicks, r.queued);
-    try { saveSettings(settings); } catch {}
+    settings.winlinkCatalogPicksAt = Date.now();
+    winlinkCatalogSave();
     winlinkLog(`catalog: request for ${r.queued.length} item${r.queued.length === 1 ? '' : 's'} in the Outbox (${r.messages} message${r.messages === 1 ? '' : 's'}): ${r.queued.join(' ')}`);
+    winlinkPush();
   }
-  return { ...r, picks: WinlinkCatalog.normalizePicks(settings.winlinkCatalogPicks) };
+  return { ...r, over: chk.over, picks: WinlinkCatalog.normalizePicks(settings.winlinkCatalogPicks) };
 }
 
-/** Get / Update the full catalog: one LIST request in the Outbox. Never a second while one is pending. */
-async function winlinkCatalogRequestList() {
-  if (WinlinkCatalog.pendingActive(settings.winlinkCatalogRequestedAt, Date.now())) return { ok: true, already: true, queued: [], messages: 0 };
+/** Get / Update the full catalog: one LIST request in the Outbox. Never a second while one is in the Outbox; `again` (Request again) only once it has gone out. */
+async function winlinkCatalogRequestList(again) {
+  const kind = winlinkCatalogPending();
+  if (kind === 'queued' || (kind === 'sent' && again !== true)) return { ok: true, already: true, queued: [], messages: 0 };
   if (!String(settings.myCallsign || '').trim()) return { ok: false, error: WinlinkCatalog.TEXT.noCallsign, queued: [], messages: 0 };
+  const before = winlinkState.list('out');
   const r = await winlinkCatalogQueue([WinlinkCatalog.listRequest()]);
   if (!r.ok) return r;
-  settings.winlinkCatalogRequestedAt = Date.now();
-  try { saveSettings(settings); } catch {}
+  settings.winlinkCatalogRequest = { at: Date.now(), mid: WinlinkCatalog.newRequestMid(before, winlinkState.list('out')) };
+  winlinkCatalogSave();
   winlinkLog('catalog: the request for the full catalog (LIST) is in the Outbox');
   winlinkPush();
+  winlinkCatalogScan('asked');
   return r;
 }
 
-/** Star or unstar an item in Your picks. */
+/** Star or unstar an item in Your picks; every open surface hears of it. */
 function winlinkCatalogStar(id, on) {
   if (!WinlinkCatalog.isId(id)) return { ok: false, error: 'Unknown item' };
   settings.winlinkCatalogPicks = WinlinkCatalog.setStar(settings.winlinkCatalogPicks, id, !!on);
-  saveSettings(settings);
+  settings.winlinkCatalogPicksAt = Date.now();
+  winlinkCatalogSave();
+  winlinkPush();
   return { ok: true };
 }
 
-/** One Inbox message: is it the catalog? Read only: never marked read, moved or changed. true = a catalog was stored. */
-async function winlinkCatalogExamine(mid, date) {
-  const msg = await patClient.message('in', mid);
-  if (!WinlinkCatalog.looksLikeCatalog(msg)) return false;
-  const p = WinlinkCatalog.parseCatalogList(msg.body);
-  if (!p.ok) {
-    if (p.reason === 'not-a-table') {
-      _winlinkCatalogUnreadable = true;
-      winlinkLog(`catalog: a message looks like the Winlink catalog but its table could not be read; first line: ${JSON.stringify(p.firstLine)}`);
-    }
-    return false;
+/** "Use it" or "No thanks" on a catalog message nobody asked for. Either way that message is not offered again. */
+async function winlinkCatalogOfferAnswer(use) {
+  const offer = WinlinkCatalog.cleanOffer(settings.winlinkCatalogOffer);
+  if (!offer) return { ok: false, error: WinlinkCatalog.TEXT.offerGone };
+  let error = '';
+  if (use) {
+    if (!patClient) return { ok: false, error: 'Pat is not running' };
+    let stored = null;
+    try { stored = WinlinkCatalog.useOffer(await patClient.message('in', offer.mid), offer, Date.now()); } catch (e) { return { ok: false, error: `Could not open that message: ${e.message}` }; }
+    if (stored && !winlinkCatalogWrite(stored)) return { ok: false, error: 'Could not save the catalog. Try again.' };
+    if (stored) winlinkLog(`catalog: using the catalog from ${offer.from} (${stored.items.length} items), as the operator chose`);
+    else error = WinlinkCatalog.TEXT.offerGone;
   }
-  const stored = WinlinkCatalog.storedFrom(p, { mid, date }, Date.now());
-  if (!stored) return false;
-  _writeJsonAtomic(winlinkCatalogPath(), stored);
-  _winlinkCatalog = stored;
-  _winlinkCatalogUnreadable = false;
-  if (settings.winlinkCatalogRequestedAt) { delete settings.winlinkCatalogRequestedAt; try { saveSettings(settings); } catch {} }
-  const asOf = stored.modified ? `, as of ${stored.modified}` : '';
-  winlinkLog(`catalog: read the Winlink catalog from the Inbox (${stored.items.length} items${asOf})`);
-  return true;
+  settings.winlinkCatalogDeclined = WinlinkCatalog.addDeclined(settings.winlinkCatalogDeclined, offer.mid);
+  delete settings.winlinkCatalogOffer;
+  winlinkCatalogSave();
+  winlinkCatalogChanged();
+  return error ? { ok: false, error } : { ok: true };
 }
 
-/** After the Inbox list is refreshed: look at mail not yet examined, newest first; the first catalog found is the newest. */
-async function winlinkCatalogScan() {
-  if (!patClient) return;
-  if (_winlinkCatalogScanning) { _winlinkCatalogScanAgain = true; return; }
-  _winlinkCatalogScanning = true;
+/**
+ * Look at new Inbox mail for a catalog (lib scanInbox decides everything).
+ * Only while a request is pending, or once after the panel was opened or the
+ * catalog asked for; never the whole Inbox on every launch. Reads only: a
+ * message is never marked read, moved or changed.
+ */
+async function winlinkCatalogScan(why) {
+  let mine = false;
   try {
-    const box = String(winlinkMailboxDir() || '');
+    if (why !== 'mail') _winlinkCatalogWantScan = true;
+    if (!patClient) return;
+    if (_winlinkCatalogScanning) { _winlinkCatalogScanAgain = true; return; }
+    const pending = winlinkCatalogPending() !== 'none';
+    if (!pending && !_winlinkCatalogWantScan) return;
+    _winlinkCatalogScanning = mine = true;
+    const box = winlinkCatalogBox();
+    const pat = patClient;
     if (box !== _winlinkCatalogSeenFor) { _winlinkCatalogSeen.clear(); _winlinkCatalogSeenFor = box; _winlinkCatalogUnreadable = false; }
     const list = winlinkState.list('in');
-    const byMid = new Map(list.map((m) => [m.mid, m]));
-    let changed = false;
-    const wasUnreadable = _winlinkCatalogUnreadable;
-    for (const mid of WinlinkCatalog.toExamine(list, { seen: _winlinkCatalogSeen, stored: winlinkCatalogStored() })) {
-      if (!patClient || String(winlinkMailboxDir() || '') !== box) break; // Pat stopped or the operator changed
-      try {
-        const found = await winlinkCatalogExamine(mid, (byMid.get(mid) || {}).date || '');
-        _winlinkCatalogSeen.add(mid);
-        if (found) { changed = true; break; } // newest first: anything older is an older catalog
-      } catch (e) {
-        _winlinkCatalogSeen.add(mid); // a message Pat cannot open is not asked for again this run
-      }
-    }
-    if (changed || wasUnreadable !== _winlinkCatalogUnreadable) {
-      winlinkPopoutSend('winlink-catalog-updated');
-      winlinkPush();
-    }
+    const res = await WinlinkCatalog.scanInbox({
+      list, seen: _winlinkCatalogSeen, mark: settings.winlinkCatalogScannedTo, stored: winlinkCatalogStored(), pending,
+      declined: settings.winlinkCatalogDeclined, now: Date.now(),
+      read: (mid) => { if (patClient !== pat || winlinkCatalogBox() !== box) throw new Error('Pat stopped or the operator changed'); return pat.message('in', mid); },
+      store: (stored) => winlinkCatalogBox() === box && winlinkCatalogWrite(stored),
+    });
+    if (winlinkCatalogBox() !== box) return; // another operator now: nothing of this pass is theirs
+    const next = WinlinkCatalog.applyScan({ request: settings.winlinkCatalogRequest, offer: settings.winlinkCatalogOffer, declined: settings.winlinkCatalogDeclined, mark: settings.winlinkCatalogScannedTo, unreadable: _winlinkCatalogUnreadable }, res);
+    const set = (k, v) => { if (v == null || (Array.isArray(v) && !v.length) || v === '') delete settings[k]; else settings[k] = v; };
+    set('winlinkCatalogRequest', next.state.request);
+    set('winlinkCatalogOffer', next.state.offer);
+    set('winlinkCatalogDeclined', next.state.declined);
+    set('winlinkCatalogScannedTo', next.state.mark);
+    _winlinkCatalogUnreadable = next.state.unreadable;
+    if (!res.failed && list.length) _winlinkCatalogWantScan = false;
+    for (const line of res.logs) winlinkLog(line);
+    if (res.failed) winlinkLog('catalog: part of the Inbox could not be looked at; it is tried again at the next refresh');
+    if (next.changed || res.examined) winlinkCatalogSave();
+    if (next.changed) winlinkCatalogChanged();
+  } catch (e) {
+    winlinkLog(`catalog: could not look through the Inbox: ${e.message}`);
   } finally {
-    _winlinkCatalogScanning = false;
-    if (_winlinkCatalogScanAgain) { _winlinkCatalogScanAgain = false; winlinkCatalogScan(); }
+    if (mine) {
+      _winlinkCatalogScanning = false;
+      if (_winlinkCatalogScanAgain) { _winlinkCatalogScanAgain = false; winlinkCatalogScan('mail'); }
+    }
   }
 }
 
@@ -17920,7 +17979,10 @@ async function winlinkHandleRemote({ type, req = {}, reply, clientId }) {
         reply({ type: 'winlink-catalog-queued', ...(await winlinkCatalogRequest(req.ids)) });
         return;
       case 'winlink-catalog-request-list':
-        reply({ type: 'winlink-catalog-queued', ...(await winlinkCatalogRequestList()) });
+        reply({ type: 'winlink-catalog-queued', ...(await winlinkCatalogRequestList(req.again === true)) });
+        return;
+      case 'winlink-catalog-offer':
+        result('catalog-offer', await winlinkCatalogOfferAnswer(req.use === true));
         return;
       case 'winlink-catalog-star':
         result('catalog-star', winlinkCatalogStar(String(req.id || ''), req.on === true));
@@ -50063,7 +50125,8 @@ function cloudShackNotice(text, kind) {
   // Winlink catalog requests (docs/winlink-catalog.md). Driving a remote shack, the bridge sends these to the shack.
   ipcMain.handle('winlink-catalog-get', () => winlinkCatalogGet());
   ipcMain.handle('winlink-catalog-request', (_e, ids) => winlinkCatalogRequest(ids));
-  ipcMain.handle('winlink-catalog-request-list', () => winlinkCatalogRequestList());
+  ipcMain.handle('winlink-catalog-request-list', (_e, again) => winlinkCatalogRequestList(again === true));
+  ipcMain.handle('winlink-catalog-offer', (_e, use) => winlinkCatalogOfferAnswer(use === true));
   ipcMain.handle('winlink-catalog-star', (_e, o = {}) => winlinkCatalogStar(o.id, o.on));
   // Driving a remote shack, the bridge sends this to the shack (#299) and this handler never runs.
   ipcMain.handle('winlink-cmd-connect', (_e, o = {}) => {

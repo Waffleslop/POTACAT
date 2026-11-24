@@ -612,6 +612,27 @@ test('Use it: the offered message read again; gone or changed is no catalog', ()
   assert.strictEqual(C.useOffer(catMsg, null, T0), null);
 });
 
+console.log('what a finished pass changes');
+test('accepted: the wait is over, the flag is cleared, an outstanding offer is superseded and not offered again', () => {
+  const r = C.applyScan({ request: { at: T0, mid: 'L1' }, offer: { mid: 'OLDOFFER', from: 'X', count: 30 }, declined: ['D1'], mark: 'a', unreadable: true }, { accepted: { items: [1] }, clearPending: true, mark: 'b' });
+  assert.deepStrictEqual(r, { state: { request: null, offer: null, declined: ['D1', 'OLDOFFER'], mark: 'b', unreadable: false }, changed: true });
+});
+test('offered: kept for the operator; an older offer is superseded; a pending request is cleared when the pass says so', () => {
+  const offer = { mid: 'M2', from: 'W1AW', date: '', count: 21, have: 400 };
+  const r = C.applyScan({ request: { at: T0, mid: 'L1' }, offer: { mid: 'M1', from: 'X', count: 30 }, declined: [] }, { offer, clearPending: true, mark: 'b' });
+  assert.deepStrictEqual([r.state.offer, r.state.declined, r.state.request, r.changed], [offer, ['M1'], null, true]);
+  const same = C.applyScan({ offer }, { offer });
+  assert.deepStrictEqual(same.state.declined, [], 'the same offer again is not declined');
+});
+test('unreadable: flagged once; nothing found: nothing changes but the mark', () => {
+  const r = C.applyScan({ request: { at: T0, mid: 'L1' } }, { unreadable: true, clearPending: true, mark: 'b' });
+  assert.deepStrictEqual([r.state.unreadable, r.state.request, r.changed], [true, null, true]);
+  assert.strictEqual(C.applyScan({ unreadable: true }, { unreadable: true }).changed, false);
+  const quiet = C.applyScan({ request: { at: T0, mid: 'L1' }, mark: 'a' }, { mark: 'b' });
+  assert.deepStrictEqual([quiet.changed, quiet.state.mark, quiet.state.request], [false, 'b', { at: T0, mid: 'L1' }]);
+  assert.strictEqual(C.applyScan({ mark: 'a' }, { mark: '', failed: true }).state.mark, 'a', 'a failed pass does not move the mark');
+});
+
 console.log('which messages a pass reads');
 const INBOX = [
   { mid: 'OLD', date: '2026-03-01T00:00:00Z', from: 'A' }, { mid: 'MID', date: '2026-03-10T00:00:00Z', from: 'B' },
