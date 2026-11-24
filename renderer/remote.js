@@ -10974,8 +10974,13 @@
       paddleDit: function(pressed) { swap ? handleDah(pressed) : handleDit(pressed); },
       paddleDah: function(pressed) { swap ? handleDit(pressed) : handleDah(pressed); },
       setWpm: function(v) { wpm = Math.max(5, Math.min(50, v | 0)); },
+      // cw-config-ack and every settings message carry the mode, changed or
+      // not; only a real change ends an over in progress. Re-applying the
+      // same mode used to cancel it, so a routine settings or config echo cut
+      // tones and elements mid-over.
       setMode: function(m) {
         if (m === 'iambicA' || m === 'iambicB' || m === 'straight') {
+          if (m === mode) return;
           mode = m;
           if (state !== IDLE) { clearTimers(); state = IDLE; onKey(false, undefined, { cancel: true }); }
         }
