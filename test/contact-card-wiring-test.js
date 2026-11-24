@@ -159,6 +159,19 @@ test('Copy mailing address goes to the clipboard only', () => {
   assert.ok(!/logContact|saveQso|updateQso/.test(js + read('preload-contact-popout.js')), 'the window has no way to write the log');
 });
 
+test('Open QRZ page goes through the open-external allowlist (lib/external-url.js, #1015) and the page never navigates', () => {
+  const ExternalUrl = require('../lib/external-url');
+  const vm = CC.build({ call: 'W1XYZ/P', qrz: { call: 'W1XYZ' }, qrzState: 'subscriber', history: [] });
+  assert.strictEqual(ExternalUrl.checked(vm.qrzUrl), vm.qrzUrl, 'qrz.com/db is on the allowlist');
+  const js = read('renderer/contact-popout.js');
+  const html = read('renderer/contact-popout.html');
+  assert.ok(/api\.openExternal\(vm\.qrzUrl\)/.test(js), 'the button asks main');
+  assert.ok(/openExternal: \(url\) => ipcRenderer\.send\('open-external', url\)/.test(read('preload-contact-popout.js')), 'main\'s openExternalIfAllowed handles it');
+  assert.ok(!/window\.open\(|location\.(href|assign|replace)|<a\s/.test(js + html), 'no links, window.open or navigation in the page (lib/window-security.js, #1019)');
+  // Nothing the page does needs a permission: the copy is main's clipboard, images need none.
+  assert.ok(!/navigator\.(clipboard|mediaDevices|geolocation|permissions)|Notification\./.test(js), 'no permission-gated browser API');
+});
+
 test('the photo may come only from QRZ (the page CSP)', () => {
   const html = read('renderer/contact-popout.html');
   const csp = (html.match(/Content-Security-Policy" content="([^"]+)"/) || [])[1] || '';
