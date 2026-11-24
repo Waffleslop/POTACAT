@@ -3084,6 +3084,10 @@
           </div>
         </div>
         <div style="margin-top:10px;border-top:1px solid var(--border);padding-top:8px;">
+          <label class="checkbox-label"><input type="checkbox" id="set-forward-synced-qsos" checked> Also send QSOs from my other devices when they arrive from POTACAT Cloud</label>
+          <span class="help-text" style="margin-left:12px;display:block;line-height:1.5;">A QSO you log on your phone off-grid, or on another device signed in to your POTACAT Cloud account, goes to the logbook, Extra UDP and QRZ Logbook set up here when this PC syncs it, the same as a QSO logged here. Only your own callsign's QSOs, logged after this is turned on. QSOs logged on another PC running POTACAT are left to that PC. If a logbook does not answer, POTACAT tries again for up to three days.</span>
+        </div>
+        <div style="margin-top:10px;border-top:1px solid var(--border);padding-top:8px;">
           <label class="checkbox-label"><input type="checkbox" id="set-lotw-enable"> Upload to ARRL Logbook of the World (via TQSL)</label>
           <span class="help-text" style="margin-left:12px;display:block;">Signs and uploads your POTACAT log with your own TrustedQSL install and callsign certificate. QSOs already at LoTW are skipped automatically.</span>
           <div id="lotw-config" class="hidden" style="margin-left:12px;margin-top:6px;">
@@ -5659,6 +5663,7 @@
   <script src="../lib/jtcat-capture-gate.js"></script>
   <script src="../lib/diagnostic-snapshot.js"></script>
   <script src="was-view.js"></script>
+  <script src="../lib/chime-sounds.js"></script>
   <script src="jtcat-parser.js"></script>
   <script src="remote-ptt.js"></script>
   <script src="../lib/cw-banks.js"></script>

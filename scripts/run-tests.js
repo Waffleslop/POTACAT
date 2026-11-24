@@ -505,6 +505,7 @@ const TESTS = [
   'test/wspr-scheduler-test.js', // #268: a beacon never keys two slots in a row unless TX % is over 50
   'test/wspr-hop-atu-test.js', // #747: a receive-only WSPR hop runs no band-change ATU tune
   'test/wspr-beacon-power-test.js', // #268: the beacon keeps the operator's RF power; rigctld reports the radio's power
+  'test/wspr-beacon-power-scale-test.js', // #521: the beacon's level on each rig's scale (KX3, G90, Icom, Yaesu, Flex), never above the entry; none entered = power left alone
   'test/wspr-reported-dbm-test.js', // #268: the beacon reports the power it runs at (5 W = 37 dBm), or the operator's fixed pick, 0..60 dBm
   'test/js8-native-test.js',
   'test/check-required-natives-test.js', // release gate: ft8_native/js8_native exist, right arch (PE/ELF/Mach-O header), load
@@ -542,7 +543,7 @@ const TESTS = [
   'test/cloud-merge-dupe-test.js',
   'test/cloud-pull-per-profile-test.js', // #245: profiles sharing one account: each pulls only its own QSOs; the dupe guard and journal stay per profile
   'test/cloud-delete-guard-test.js', // #245: delete pushes held (another profile's QSOs, or over 25 an hour) until the operator confirms; dupe guard keeps station callsigns apart
-  'test/cloud-pull-forward-test.js', // #267: a phone's off-grid QSOs of this station reach MacLoggerDX etc. via the pull, once; never another PC's or the history
+  'test/cloud-pull-forward-test.js', // #267/#838: this station's QSOs from a phone or any other device reach MacLoggerDX etc. via the pull, once, retried when a logger refuses; never another PC's or the history
   'test/swr-guard-test.js',
   'test/atu-wizard-test.js',         // Flex ATU Calibration Wizard: plan vs privileges, classifier, run loop on a fake Flex, wiring
   'test/ft8-worker-respawn-test.js',
@@ -582,6 +583,7 @@ const TESTS = [
   'test/cw-playout-lateness-test.js', // #244 diagnostic: paddle playout edge lateness, one line per over
   'test/cw-sidetone-air-agree-test.js', // #244: ECHOCAT Web's sidetone and the air agree; an element is committed once it sounds
   'test/cw-keyer-setmode-same-mode-test.js', // ECHOCAT Web: a settings or config echo with the same keyer mode does not cut a CW over
+  'test/cw-keyer-timing-diag-test.js', // #244 diagnostic: the page keyer's timing record of one over; keying identical with and without it
   'test/web-paddle-input-first-test.js', // #244 Part A: paddle keys and MIDI reach the web keyer first (capture phase); drawing pauses during a paddle over
   'test/spot-hides-test.js',
   'test/mac-titlebar-test.js',
@@ -765,6 +767,7 @@ const TESTS = [
   'test/jtcat-stations-needed-test.js', // #557 part 2: needed marks from the roster under the map's scope, the Park column, Wanted in Stations
   'test/jtcat-auto-compact-test.js', // #857: the JTCAT window picks a compact layout by itself when short (hysteresis; an explicit Full/Compact wins; never resizes the window)
   'test/jtcat-own-tx-offset-test.js', // #503: our own TX rows show the offset that slot went out on
+  'test/jtcat-chimes-test.js', // optional JTCAT chimes: a station calls me, TX stopped by itself (off by default, one sound engine, sound only)
   'test/net-reminder-row-test.js', // a Net Reminders row always names its net (#284)
   'test/freq-dots-test.js', // every frequency an operator reads is written the VFO way, 14.074.00 (Casey 2026-11-11)
   'test/settings-contrast-test.js', // Settings meets the contrast rule in every theme (VARA button in She's On Frequency); rendered: scripts/settings-contrast-audit.js

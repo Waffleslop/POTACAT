@@ -1402,6 +1402,7 @@ const setWavelogUrl = document.getElementById('set-wavelog-url');
 const setWavelogApiKey = document.getElementById('set-wavelog-api-key');
 const setWavelogStationId = document.getElementById('set-wavelog-station-id');
 const setExtraUdp = document.getElementById('set-extra-udp');
+const setForwardSyncedQsos = document.getElementById('set-forward-synced-qsos'); // #838
 const extraUdpConfig = document.getElementById('extra-udp-config');
 const setExtraUdpHost = document.getElementById('set-extra-udp-host');
 const setExtraUdpPort = document.getElementById('set-extra-udp-port');
@@ -5162,28 +5163,12 @@ blMode.addEventListener('keydown', (e) => {
 // never while transmitting. `using` is the Sounds pane's unsaved choices (Test).
 function playQsoChime(kind, using) {
   if (!kind || kind === 'off') return;
+  // The tones are lib/chime-sounds.js, shared with the JTCAT chimes (#1043).
+  // A value this build does not know plays the soft ding, as it always has.
+  const id = ChimeSounds.notesOf(kind).length ? kind : 'soft';
   return PotacatSounds.playChime((ctx, out) => {
-  const t0 = ctx.currentTime;
-  const tone = (freq, at, dur, peak, type) => {
-    const o = ctx.createOscillator();
-    const g = ctx.createGain();
-    o.type = type || 'sine';
-    o.frequency.value = freq;
-    g.gain.setValueAtTime(0.0001, t0 + at);
-    g.gain.exponentialRampToValueAtTime(peak, t0 + at + 0.012);
-    g.gain.exponentialRampToValueAtTime(0.0001, t0 + at + dur);
-    o.connect(g).connect(out);
-    o.start(t0 + at);
-    o.stop(t0 + at + dur + 0.05);
-  };
-  switch (kind) {
-    case 'soft': tone(880, 0, 0.35, 0.18); break;
-    case 'twotone': tone(660, 0, 0.18, 0.18); tone(990, 0.16, 0.32, 0.18); break;
-    case 'bell': tone(1320, 0, 0.9, 0.16); tone(1980, 0, 0.45, 0.05); tone(2640, 0, 0.25, 0.03); break;
-    case 'morse-r': { const u = 0.06; for (const [at, d] of [[0, u], [2 * u, 3 * u], [6 * u, u]]) tone(700, at, d, 0.2); break; } // R = .-.
-    default: tone(880, 0, 0.35, 0.18);
-  }
-  return 1; // seconds: the longest flavour (the bell) with its tail
+    ChimeSounds.play(ctx, id, out);
+    return ChimeSounds.lengthOf(id);
   }, using);
 }
 const qsoSoundState = QsoSounds.createState();
@@ -5206,6 +5191,18 @@ if (window.api.onQsoLogged) window.api.onQsoLogged((q) => { try { onContactLogge
 // the low buzz, with Sounds switched off too.
 if (window.api.onQsoLogFailed) window.api.onQsoLogFailed((q) => {
   try { const r = QsoSounds.saveFailed(q || {}); if (r.sound) PotacatSounds.playFile(r.sound.file); } catch {}
+});
+// JTCAT chimes (the JTCAT window's Options > Sounds): a station calls me, or
+// transmitting stopped by itself. main decides (lib/jtcat-chimes.js) and names
+// the sound; it plays through PotacatSounds like every other sound, so the
+// transmit guard (lib/sound-guard.js) keeps it off the radio's sound card and
+// out of any transmission.
+if (window.api.onJtcatChime) window.api.onJtcatChime((d) => {
+  try {
+    const id = d && d.sound;
+    if (!ChimeSounds.notesOf(id).length) return;
+    PotacatSounds.playChime((ctx, out) => { ChimeSounds.play(ctx, id, out); return ChimeSounds.lengthOf(id); });
+  } catch {}
 });
 
 // --- Tune confirmation click ---
@@ -19070,6 +19067,7 @@ async function openSettingsDialog(tab) {
   setWavelogApiKey.value = s.wavelogApiKey || '';
   setWavelogStationId.value = s.wavelogStationId || '';
   setExtraUdp.checked = s.extraUdpEnabled === true;
+  if (setForwardSyncedQsos) setForwardSyncedQsos.checked = s.forwardSyncedQsos !== false;
   if (setExtraUdpDecodes) setExtraUdpDecodes.checked = s.extraUdpDecodes !== false;
   setExtraUdpHost.value = s.extraUdpHost || '127.0.0.1';
   setExtraUdpPort.value = s.extraUdpPort || 2237;
@@ -20097,6 +20095,7 @@ settingsSave.addEventListener('click', async () => {
     wavelogApiKey: setWavelogApiKey.value.trim(),
     wavelogStationId: setWavelogStationId.value.trim(),
     extraUdpEnabled: setExtraUdp.checked,
+    forwardSyncedQsos: setForwardSyncedQsos ? setForwardSyncedQsos.checked : true,
     extraUdpDecodes: setExtraUdpDecodes ? setExtraUdpDecodes.checked : true,
     extraUdpHost: setExtraUdpHost.value.trim() || '127.0.0.1',
     extraUdpPort: parseInt(setExtraUdpPort.value, 10) || 2237,

@@ -316,7 +316,7 @@ test('nothing in the feature writes the log or builds a record', () => {
     assert.ok(!/require\(|appendRecords|mutateLog|buildAdifFields|saveQsoRecord\(|logContact\(|logQso|saveQso/.test(src), f);
   }
   const block = app.slice(app.indexOf('function onContactLogged('), app.indexOf('// --- Tune confirmation click ---'));
-  assert.ok(!/window\.api\.(?!onQsoLogged|onQsoLogFailed)\w+/.test(block), 'the listeners only listen');
+  assert.ok(!/window\.api\.(?!onQsoLogged|onQsoLogFailed|onJtcatChime)\w+/.test(block), 'the listeners only listen');
 });
 
 test('the main window: the lib decides, the cat keeps 150, 200 and 500', () => {

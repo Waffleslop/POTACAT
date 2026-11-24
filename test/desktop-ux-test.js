@@ -45,7 +45,16 @@ test('chime: four synthesized flavours, persisted as settings.qsoChime, Test but
   assert.ok(/qsoChime: setQsoChime \? setQsoChime\.value : 'off',/.test(app), 'saved with the other settings');
   assert.ok(/window\.api\.onQsoLogged\(\(q\) => \{ try \{ onContactLogged\(q\); \} catch \{\} \}\)/.test(app));
   assert.ok(/if \(r\.sound\.chime\) playQsoChime\(r\.sound\.chime\);/.test(app), 'a picked flavour still plays through playQsoChime');
-  for (const k of ["case 'soft':", "case 'twotone':", "case 'bell':", "case 'morse-r':"]) assert.ok(app.includes(k), k);
+  // The four flavours live in lib/chime-sounds.js since 2026-11-24 (shared with the JTCAT chimes);
+  // playQsoChime plays them through it, into the transmit-guarded output (#1041), and the select offers those four.
+  const sounds = require('../lib/chime-sounds');
+  assert.deepStrictEqual(sounds.QSO_SOUNDS.map((s) => s.id), ['soft', 'twotone', 'bell', 'morse-r']);
+  for (const s of sounds.QSO_SOUNDS) {
+    assert.ok(sounds.notesOf(s.id).length > 0, s.id);
+    assert.ok(html.includes('<option value="' + s.id + '">' + s.label + '</option>'), 'the select offers ' + s.label);
+  }
+  const chimeFn = app.slice(app.indexOf('function playQsoChime'), app.indexOf('function playQsoChime') + 600);
+  assert.ok(chimeFn.includes('PotacatSounds.playChime(') && chimeFn.includes('ChimeSounds.play(ctx, id, out)'), 'the chime goes through the guarded output');
   assert.ok(/id="set-qso-chime"/.test(html) && /id="set-qso-chime-test"/.test(html));
   assert.ok(/<option value="coin">Coin<\/option>/.test(html.slice(html.indexOf('id="set-qso-chime"'), html.indexOf('id="set-qso-chime"') + 300)), 'Coin is the first option');
   assert.ok(!/new Audio\(/.test(app.slice(app.indexOf('function playQsoChime'), app.indexOf('function playQsoChime') + 1500)), 'synthesized, no audio asset');
