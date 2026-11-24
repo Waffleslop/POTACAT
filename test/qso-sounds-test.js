@@ -356,7 +356,7 @@ test('the Sounds pane: its own tab, the labels of the issue, everything on', () 
     '<input type="checkbox" id="set-sound-milestones" checked> Milestone sounds</label>',
     '<input type="checkbox" id="set-milestone-banners" checked> Milestone banners</label>',
     'Volume:', '<input type="range" id="set-sound-volume" min="10" max="100" step="5" value="80">',
-    '<button type="button" id="set-qso-chime-test">Test</button>',
+    '<button type="button" id="set-qso-chime-play" class="btn btn-sm" aria-label="Play the chosen sound">Play</button>', // Play replaced Test (test/sounds-pane-preview-test.js)
     'Sound output:', '<option value="">Automatic</option>',
     'id="set-sound-status"',
   ]) assert.ok(pane.includes(label), label);

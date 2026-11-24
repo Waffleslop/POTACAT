@@ -3318,7 +3318,8 @@
       <label class="checkbox-label"><input type="checkbox" id="set-sounds-on" checked> Sounds</label>
       <span class="help-text sounds-help">Off is silent everywhere, except the low buzz that tells you a contact was not saved.</span>
       <label class="checkbox-label"><input type="checkbox" id="set-sound-contact" checked> Contact logged sound</label>
-      <label class="sounds-row">Sound:
+      <div class="sounds-row">
+        <label for="set-qso-chime">Sound:</label>
         <select id="set-qso-chime">
           <option value="coin">Coin</option>
           <option value="soft">Soft ding</option>
@@ -3326,15 +3327,26 @@
           <option value="bell">Bell</option>
           <option value="morse-r">Morse R (received)</option>
         </select>
-      </label>
+        <button type="button" id="set-qso-chime-play" class="btn btn-sm" aria-label="Play the chosen sound">Play</button>
+      </div>
       <span class="help-text sounds-help">A short sound each time a contact goes into the log, from any window, JTCAT or WSJT-X. A contact that is already in this activation's log plays two falling notes instead. A contact logged on your phone sounds on the phone, not here.</span>
       <label class="checkbox-label"><input type="checkbox" id="set-sound-milestones" checked> Milestone sounds</label>
       <label class="checkbox-label"><input type="checkbox" id="set-milestone-banners" checked> Milestone banners</label>
       <span class="help-text sounds-help">At 1, 10, 25, 50, 100 and 250 contacts in a UTC day: one line at the top of the window for about 3 seconds, and from 10 contacts up a short tune after the contact sound.</span>
+      <!-- Hear the rest of the set (Casey 2026-11-24). data-sound is QsoSounds.previewSound's key. -->
+      <div class="sounds-row sounds-hear" role="group" aria-label="Hear the other sounds">
+        <span class="sounds-hear-label">Hear:</span>
+        <button type="button" class="btn btn-sm" data-sound="dupe" aria-label="Play the dupe sound, two falling notes">Dupe</button>
+        <button type="button" class="btn btn-sm" data-sound="save-failed" aria-label="Play the not saved sound, a low buzz">Not saved</button>
+        <button type="button" class="btn btn-sm" data-sound="10" aria-label="Play the 10 contacts tune">10</button>
+        <button type="button" class="btn btn-sm" data-sound="25" aria-label="Play the 25 contacts tune">25</button>
+        <button type="button" class="btn btn-sm" data-sound="50" aria-label="Play the 50 contacts tune">50</button>
+        <button type="button" class="btn btn-sm" data-sound="100" aria-label="Play the 100 contacts tune">100</button>
+        <button type="button" class="btn btn-sm" data-sound="250" aria-label="Play the 250 contacts tune">250</button>
+      </div>
       <label class="sounds-row">Volume:
         <input type="range" id="set-sound-volume" min="10" max="100" step="5" value="80">
         <span id="set-sound-volume-val">80%</span>
-        <button type="button" id="set-qso-chime-test">Test</button>
       </label>
       <label class="sounds-row">Sound output:
         <select id="set-sound-output">

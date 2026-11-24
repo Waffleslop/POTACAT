@@ -39,7 +39,7 @@ test('chime: main emits qso-logged from saveQsoRecord, the one log choke point',
 // the four flavours keeps it as the contact sound; 'off' (and anything else)
 // is the coin, switched by Settings > Sounds > "Contact logged sound"
 // (test/qso-sounds-test.js). The select moved to the Sounds pane, Coin first.
-test('chime: four synthesized flavours, persisted as settings.qsoChime, Test button', () => {
+test('chime: four synthesized flavours, persisted as settings.qsoChime, Play button', () => {
   assert.ok(/let qsoChime = 'off';/.test(app));
   assert.ok(/qsoChime = settings\.qsoChime \|\| 'off';/.test(app), 'loaded with the other settings');
   assert.ok(/qsoChime: setQsoChime \? setQsoChime\.value : 'off',/.test(app), 'saved with the other settings');
@@ -55,7 +55,7 @@ test('chime: four synthesized flavours, persisted as settings.qsoChime, Test but
   }
   const chimeFn = app.slice(app.indexOf('function playQsoChime'), app.indexOf('function playQsoChime') + 600);
   assert.ok(chimeFn.includes('PotacatSounds.playChime(') && chimeFn.includes('ChimeSounds.play(ctx, id, out)'), 'the chime goes through the guarded output');
-  assert.ok(/id="set-qso-chime"/.test(html) && /id="set-qso-chime-test"/.test(html));
+  assert.ok(/id="set-qso-chime"/.test(html) && /id="set-qso-chime-play"/.test(html), 'Play beside the select (replaced Test, 2026-11-24)');
   assert.ok(/<option value="coin">Coin<\/option>/.test(html.slice(html.indexOf('id="set-qso-chime"'), html.indexOf('id="set-qso-chime"') + 300)), 'Coin is the first option');
   assert.ok(!/new Audio\(/.test(app.slice(app.indexOf('function playQsoChime'), app.indexOf('function playQsoChime') + 1500)), 'synthesized, no audio asset');
 });
