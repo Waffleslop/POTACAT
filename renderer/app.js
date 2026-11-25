@@ -28794,6 +28794,11 @@ document.getElementById('welcome-start').addEventListener('click', async () => {
   _welcomeRemoteClose();
   // Reload prefs so the main UI reflects welcome choices
   loadPrefs();
+  // A radio was saved from Welcome: open its Station Setup checklist now that
+  // Welcome is closed, the same as saving a new radio in Settings does.
+  if (welcomeRig && typeof window.openStationSetup === 'function') {
+    window.openStationSetup(welcomeRig.id);
+  }
 });
 
 // ─── Welcome → Connect to a Remote Shack (v1.9) ──────────────────────
