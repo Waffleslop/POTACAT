@@ -455,6 +455,9 @@ const YaesuScope = require('./lib/yaesu-scope');
 const Ft4222Lib = require('./lib/ft4222-library');
 const SdrScope = require('./lib/sdr-scope');
 const RtlTcpAudio = require('./lib/rtltcp-audio');
+const SdrConnect = require('./lib/sdrconnect-client');          // SDRconnect's WebSocket API (SDRplay nRSP-ST, any SDRplay)
+const SdrConnectAudio = require('./lib/sdrconnect-audio');
+const SdrConnectProto = require('./lib/sdrconnect-protocol');
 const ScopeOverlay = require('./lib/scope-overlay');
 const { explainRigctldFailure } = require('./lib/rigctld-stderr');
 const RigFamily = require('./lib/rig-family');
@@ -41348,6 +41351,7 @@ function startSdrScope() {
   if (sdrScopeClient) return;
   const cfg = sdrScopeSettingsForActiveRig();
   sdrScopeCfg = cfg;
+  if (cfg.kind === 'sdrconnect') { startSdrConnectScope(cfg); return; }
   const dial = _currentFreqHz || yaesuScopeState.centerHz || 0;
   Object.assign(yaesuScopeState, {
     source: 'sdr', kind: 0, spanCode: null, spanHz: SdrScope.spanForRate(cfg.sampleRate), anchor: 'center',
@@ -41385,6 +41389,51 @@ function startSdrScope() {
   client.start();
 }
 
+// The band scope from SDRconnect (lib/sdrconnect-client.js): the spectrum
+// bins of an SDRplay nRSP-ST, or any SDRplay that SDRconnect has open, in the
+// same 850-level frames and through the same fan-out as the rtl_tcp SDR. One
+// connection per SDRconnect, shared with a listener on the same address.
+function startSdrConnectScope(cfg) {
+  const dial = _currentFreqHz || yaesuScopeState.centerHz || 0;
+  const scope = new SdrConnect.SdrConnectScope({ cfg, fps: Math.min(30, settings.yaesuScopeFps || 12) });
+  Object.assign(yaesuScopeState, {
+    source: 'sdr', kind: 0, spanCode: null, spanHz: scope.spanHz, anchor: 'center',
+    modeCode: null, speed: null, scuLan: null, frames: 0, misaligned: 0, helperPath: '', catReads: null,
+    centerHz: dial || yaesuScopeState.centerHz,
+  });
+  sdrScopeClient = scope;
+  sdrScopeBuilder = null;
+  sdrScopeTunedHz = SdrScope.sdrTuneHz(dial, cfg);
+  scope.on('frame', (f) => { if (sdrScopeClient === scope) yaesuScopeOnFrame(SdrScope.orientFrame(f, cfg)); });
+  scope.on('span', (hz) => {
+    if (sdrScopeClient !== scope) return;
+    yaesuScopeState.spanHz = hz;
+    sendCatLog(`[Scope] SDRconnect: span ${(hz / 1000).toFixed(0)} kHz (what the receiver's sample rate allows)`);
+    yaesuScopeBroadcastState();
+  });
+  scope.on('ready', (info) => {
+    if (sdrScopeClient !== scope || !info) return;
+    sendCatLog(`[Scope] SDRconnect connected: ${cfg.host}:${cfg.port}, ${info.activeDevice || 'receiver'}, API ${info.apiVersion || '?'}, ${info.canControl ? 'in control' : 'someone else is in control'}`
+      + `, span ${(scope.spanHz / 1000).toFixed(0)} kHz, gain ${cfg.gain === 'auto' ? 'as SDRconnect has it' : 'step ' + cfg.gain}`
+      + (SdrScope.isFixedIf(cfg) ? `, on the radio's IF output at ${cfg.ifHz} Hz${cfg.invertIf ? ' (mirrored)' : ''}` : (cfg.offsetHz ? `, offset ${cfg.offsetHz} Hz` : '')));
+  });
+  scope.on('control', (ok) => {
+    if (sdrScopeClient !== scope) return;
+    const d = SdrConnectProto.describeSdrConnectError('no-control');
+    sendCatLog(ok ? '[Scope] SDRconnect: control is back; the receiver follows the dial again' : `[Scope] SDRconnect: ${d.headline}. ${d.detail}`);
+  });
+  scope.on('state', (st, info) => {
+    if (sdrScopeClient !== scope) return;
+    if ((st === 'retrying' || st === 'failed') && info) {
+      sendCatLog(`[Scope] SDRconnect: ${info.headline}${info.detail ? ' — ' + info.detail : ''}${st === 'retrying' ? ` (retrying in ${Math.round(info.retryInMs / 1000)} s)` : ''}`);
+      yaesuScopeSetStatus(info.severity === 'blocker' ? 'blocked' : 'error', info);
+    }
+  });
+  sendCatLog(`[Scope] SDR source: connecting to SDRconnect at ${cfg.host}:${cfg.port}`);
+  yaesuScopeSetStatus('starting', null);
+  scope.start(sdrScopeTunedHz);
+}
+
 // ─── Listening through an rtl_tcp server (lib/rtltcp-audio.js) ───────────────
 // The SDR menu's rtl_tcp receiver and the band scope may be the same server.
 // The scope owns it while it runs; the listener demodulates the scope's IQ.
@@ -41395,7 +41444,7 @@ function rtlTcpScopeShareOf(client, cfg) {
 
 /** The band scope's stream, if the scope is reading host:port right now. */
 function rtlTcpScopeShareFor(host, port) {
-  if (!sdrScopeClient || !sdrScopeCfg) return null;
+  if (!sdrScopeClient || !sdrScopeCfg || sdrScopeCfg.kind === 'sdrconnect') return null;
   if (!RtlTcpAudio.sameHost(sdrScopeCfg.host, host) || Number(sdrScopeCfg.port) !== Number(port)) return null;
   return rtlTcpScopeShareOf(sdrScopeClient, sdrScopeCfg);
 }
@@ -41403,6 +41452,12 @@ function rtlTcpScopeShareFor(host, port) {
 /** The rtl_tcp listener connected to host:port, if there is one. */
 function rtlTcpListenerFor(host, port) {
   return kiwiClient instanceof RtlTcpAudio.RtlTcpAudioClient && kiwiClient.sameServer(host, port) ? kiwiClient : null;
+}
+
+/** The rig's band scope block when it reads this address through SDRconnect, else null. */
+function sdrConnectSettingsFor(host, port) {
+  const cfg = sdrScopeSettingsForActiveRig();
+  return cfg.kind === 'sdrconnect' && SdrConnect.normHost(cfg.host) === SdrConnect.normHost(host) && cfg.port === Number(port) ? cfg : null;
 }
 
 /** The SDR's settings: the rig's "Band scope from an SDR" block when it names this server, else defaults. */
@@ -46907,7 +46962,7 @@ function sdrCandidateFor(hz) {
     if (!clean) continue;
     const parts = clean.split(':');
     const port = parseInt(parts[1], 10) || 8073;
-    const reach = port === 8073 ? ListenSource.KIWI_REACH : ListenSource.RTL_TCP_ASSUMED;   // a WebSDR.org port is tried as rtl_tcp first
+    const reach = port === 8073 ? ListenSource.KIWI_REACH : port === SdrConnectProto.DEFAULT_PORT ? ListenSource.SDRPLAY_REACH : ListenSource.RTL_TCP_ASSUMED;   // a WebSDR.org port is tried as rtl_tcp first
     if (ListenSource.covers(reach, hz)) return { host: parts[0], port, label: (e && e.label) || clean };
   }
   return null;
@@ -47009,7 +47064,7 @@ function kiwiStatusHint() {
   if (!win || win.isDestroyed()) return;
   const connected = !!(kiwiClient && kiwiClient.connected);
   let reach = connected && kiwiClient.reach !== undefined ? kiwiClient.reach : null;
-  if (!reach) { const c = sdrCandidateFor(144e6) || sdrCandidateFor(14e6); if (c) reach = c.port === 8073 ? ListenSource.KIWI_REACH : ListenSource.RTL_TCP_ASSUMED; }
+  if (!reach) { const c = sdrCandidateFor(144e6) || sdrCandidateFor(14e6); if (c) reach = c.port === 8073 ? ListenSource.KIWI_REACH : c.port === SdrConnectProto.DEFAULT_PORT ? ListenSource.SDRPLAY_REACH : ListenSource.RTL_TCP_ASSUMED; }
   win.webContents.send('kiwi-status', { connected: listenSdr.live, host: kiwiLiveHost || undefined, kind: kiwiKind || undefined, available: !!reach, reach: reach || undefined, rigReach: rigReachNow() || undefined });
 }
 
@@ -52188,6 +52243,12 @@ function cloudShackNotice(text, kind) {
   ipcMain.on('scope-popout-minimize', (e) => { const w = BrowserWindow.fromWebContents(e.sender); if (w) w.minimize(); });
   ipcMain.on('scope-popout-maximize', (e) => { const w = BrowserWindow.fromWebContents(e.sender); if (w) { if (w.isMaximized()) w.unmaximize(); else w.maximize(); } });
   ipcMain.handle('icom-scope-capture', () => icomScopeCapture(30));
+  // Settings > Radio, Band scope from an SDR, SDRconnect: is it there, which receivers. Read-only.
+  ipcMain.handle('sdrconnect-probe', async (_e, { host, port } = {}) => {
+    const h = String(host || '127.0.0.1').trim() || '127.0.0.1';
+    const p = parseInt(port, 10) || SdrConnectProto.DEFAULT_PORT;
+    try { return await SdrConnect.probeSdrConnect(h, p); } catch (e) { return { ok: false, problem: SdrConnectProto.describeSdrConnectError('unreachable', { host: h, port: p, detail: e && e.message }) }; }
+  });
   ipcMain.on('scope-enable-on-radio', () => {
     // Remote shack: its own Enable (SCU-LAN10 on the shack's FT-710).
     if (isRemoteMode()) { if (isRemoteLinked()) remoteClient.sendRaw({ type: 'scope-enable-radio' }); else refuseRemoteNotLinked(null); return; }
@@ -53525,13 +53586,20 @@ function cloudShackNotice(text, kind) {
     // EventEmitter shape so the wiring below works for any of them.
     const seq = ++kiwiConnectSeq;
     const isKiwi = port === 8073;
-    const scopeShare = isKiwi ? null : rtlTcpScopeShareFor(host, port);
-    const rtlHeader = isKiwi || scopeShare ? null : await RtlTcpAudio.probeRtlTcp(host, port, 1000);
+    // SDRconnect (an SDRplay nRSP-ST, or any SDRplay): its WebSocket API port
+    // 5454, or the address the rig's band scope reads through SDRconnect.
+    // Known before the rtl_tcp probe, which would only cost it a second.
+    const isSdrConnect = !isKiwi && (Number(port) === SdrConnectProto.DEFAULT_PORT || sdrConnectSettingsFor(host, port) !== null);
+    const scopeShare = isKiwi || isSdrConnect ? null : rtlTcpScopeShareFor(host, port);
+    const rtlHeader = isKiwi || scopeShare || isSdrConnect ? null : await RtlTcpAudio.probeRtlTcp(host, port, 1000);
     if (seq !== kiwiConnectSeq) return; // the operator picked another receiver meanwhile
     const isRtlTcp = !!(scopeShare || rtlHeader);
-    const isWebSdr = !isKiwi && !isRtlTcp;
-    const sdrKind = isRtlTcp ? 'rtl_tcp' : isWebSdr ? 'websdr' : 'kiwisdr';
-    if (isRtlTcp) {
+    const isWebSdr = !isKiwi && !isRtlTcp && !isSdrConnect;
+    const sdrKind = isSdrConnect ? 'sdrconnect' : isRtlTcp ? 'rtl_tcp' : isWebSdr ? 'websdr' : 'kiwisdr';
+    if (isSdrConnect) {
+      kiwiClient = new SdrConnectAudio.SdrConnectAudioClient({ sdr: sdrConnectSettingsFor(host, port) || {} });
+      sendCatLog(`[WebSDR] ${host}:${port} is SDRconnect: it does the receiving, POTACAT tunes it and plays its audio`);
+    } else if (isRtlTcp) {
       kiwiClient = new RtlTcpAudio.RtlTcpAudioClient({ sdr: rtlTcpSdrSettingsFor(host, port) });
       sendCatLog(`[WebSDR] ${host}:${port} is an rtl_tcp server (${rtlHeader ? rtlHeader.tunerName : 'shared with the band scope'}): POTACAT demodulates its IQ`);
     } else if (isWebSdr) {
@@ -53640,7 +53708,11 @@ function cloudShackNotice(text, kind) {
         remoteServer.sendToClient({ type: 'kiwi-status', connected: false, error: msg });
       }
     });
-    if (isRtlTcp) {
+    if (isSdrConnect) {
+      // SDRconnect: the target first, so the receiver goes straight to the dial.
+      if (_currentFreqHz > 0) kiwiClient.tune(_currentFreqHz / 1000, sdrListenMode(_currentMode || 'USB', _currentFreqHz));
+      kiwiClient.connect(host, port);
+    } else if (isRtlTcp) {
       // rtl_tcp: the target first, so the SDR goes straight to the dial.
       if (_currentFreqHz > 0) kiwiClient.tune(_currentFreqHz / 1000, _currentMode || 'USB'); // normalizeMode reads DIGU/PKTLSB/…
       if (scopeShare) {
@@ -60366,6 +60438,7 @@ function gracefulCleanup() {
 }
 
 let _yaesuLanQuitDone = false;
+let _sdrConnectQuitDone = false;
 let _quitWatchdog = null;
 let _serialQuitDone = false;
 app.on('before-quit', (e) => {
@@ -60383,6 +60456,14 @@ app.on('before-quit', (e) => {
     try { saveSettings(settings); } catch {}
   }
   winlinkHoldAwake(false); // never leave the Winlink session's App Nap block behind (#187)
+  // SDRconnect: every receiver POTACAT changed goes back as its owner left it
+  // (at most 1.5 s), then the sockets close.
+  if (SdrConnect.defaultRegistry.size && !_sdrConnectQuitDone) {
+    _sdrConnectQuitDone = true;
+    e.preventDefault();
+    Promise.race([SdrConnect.defaultRegistry.closeAll(), new Promise((r) => setTimeout(r, 1500))]).finally(() => app.quit());
+    return;
+  }
   try { aprsMessagesSaveNow(); } catch { /* APRS A1: the conversations are on disk before the process goes */ }
   // A Winlink return still pending (#187): the radio goes back while CAT is up.
   if (winlinkReturnBeforeQuit(() => app.quit())) { e.preventDefault(); return; }
