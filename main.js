@@ -22532,6 +22532,10 @@ function jtcatRunCallersTick(results) {
   const owner = jtcatFullAutoCqOwner;
   const q = owner === 'remote' ? remoteJtcatQso : popoutJtcatQso;
   if (!q || q.mode !== 'cq' || q.phase !== 'cq' || jtcatFullAutoCqPaused) return;
+  // TX Off (the window's TX On/Off, the phone's enable) leaves Run on with the
+  // engine disabled. The answer turns TX on, so it is not made here: the state
+  // machine takes the caller as before and nothing keys until TX is back on.
+  if (!ft8Engine || !ft8Engine._txEnabled) return;
   // The CQ is listening: the queue picks the best caller (ranking, dupes, slot
   // lock). With nobody to pick, the state machine answers exactly as before.
   if (jtcatRunAnswerWaiting(owner, {})) {

@@ -310,7 +310,7 @@ function harness(over) {
     jtcatRunPauseAfter: () => 8, jtcatHopModeForDrainedRun: () => false, jtcatPauseRunCq() {},
     jtcatMaxQsoRetries: () => 5, JTCAT_MAX_CQ_RETRIES: 5, jtcatAutoSkipMin: () => 0,
     stopFullAutoCq() {}, jtcatChimeTxStopped() {},
-    jtcatBuildCqQso: async () => { built.push('CQ'); engine.msg = 'CQ W5XY EM12'; return { mode: 'cq', phase: 'cq', call: null, grid: null, txMsg: 'CQ W5XY EM12', report: null, sentReport: null, myCall: ME, myGrid: 'EM12', txRetries: 0 }; },
+    jtcatBuildCqQso: async () => { built.push('CQ'); engine._txEnabled = true; engine.msg = 'CQ W5XY EM12'; return { mode: 'cq', phase: 'cq', call: null, grid: null, txMsg: 'CQ W5XY EM12', report: null, sentReport: null, myCall: ME, myGrid: 'EM12', txRetries: 0 }; },
   };
   ctx.jtcatWorkedInfo = (call) => ({ blocking: ctx.workedSet.has(call) });
   vm.createContext(ctx);
@@ -411,6 +411,18 @@ test('vm: Hunt\'s signal floor does not stop Run answering its CQ', async () => 
   await h.ctx.cycle([['W5XY N8PFK EM79', -24]], 'P1');
   assert.strictEqual(h.ctx.getQso().call, 'N8PFK');
   assert.strictEqual(h.ctx.getQso().phase, 'cq-report');
+});
+
+test('vm: TX Off while the CQ listens: the queue does not turn TX on; the state machine takes the caller as before', async () => {
+  const h = harness();
+  h.ctx.setQso(await h.ctx.jtcatBuildCqQso());
+  h.engine._txEnabled = false; // the operator's TX Off; Run stays on
+  h.tx.length = 0;
+  await h.ctx.cycle([['W5XY KD0AA EN34', -20], ['W5XY N8PFK EM79', -2]], 'P1');
+  assert.strictEqual(h.engine._txEnabled, false, 'TX stays off');
+  assert.deepStrictEqual(h.tx, [], 'nothing keyed');
+  assert.strictEqual(h.ctx.getQso().call, 'KD0AA', 'the old first-match answer, waiting for TX On');
+  assert.strictEqual(h.catLog.filter((l) => /Run: answering/.test(l)).length, 0);
 });
 
 test('vm: nobody waiting after the QSO gives CQ', async () => {

@@ -85,7 +85,8 @@ Rule: a setting that is operating policy is per profile; a setting about this ma
 - A check that ends Run (a session deadline) goes at the top of rearmCq, above the answer: past it, Run neither
   answers a waiting caller nor calls CQ.
 - Part of "Answer stations that call me" (jtcatAnswerCallers, default on); off, Run behaves as before. Not in Field
-  Day, Hound mode or with auto-sequence off. CAT log: "[JTCAT] Run: answering N8PFK (-12 dB), who called during the
+  Day, Hound mode or with auto-sequence off. With TX Off while the CQ listens, the queue does not answer (it would
+  turn TX on); the state machine takes the caller as before. CAT log: "[JTCAT] Run: answering N8PFK (-12 dB), who called during the
   last QSO"; a skipped caller is named once per Run.
 
 ## When a QSO is logged (#807, Casey 2026-11-20)
