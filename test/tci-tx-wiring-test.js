@@ -34,7 +34,7 @@ test('JTCAT over: every existing guard, the arbiter and the late-start cut come 
   for (const before of ["radioOwner === 'mercury'", 'JtcatRxSource.jtcatTxRefusalForSource', 'if (_swrTripped) {', "ownTxPrivilegeRefused('DATA')", 'jtcatTxWatchdogTripped(', "acquireRadio('jtcat');", 'Ft8Engine.sliceLateStartBuffer(']) {
     assert.ok(at(before) < route, before + ' before the TCI route');
   }
-  assert.ok(route < at('jtcatNoteTxSent(data.message);'), 'a refused over is not counted as sent');
+  assert.ok(route < at('jtcatNoteTxSent(data.message, '), 'a refused over is not counted as sent');
   assert.match(txStart, /if \(!tciDirectTx\) handleRemotePtt\(true,/, 'no PTT line for a TCI over');
   assert.match(txStart, /if \(!tciDirectTx && !fakeItShiftForTx\(data\)\)/);
   assert.match(txStart, /if \(tciDirectTx\) \{[\s\S]*?\} else if \(smartSdrDirectTxOk\) \{/, 'no sound-card route either');

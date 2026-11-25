@@ -130,6 +130,66 @@ test('TX active: the sound is held, and dropped once it has waited 3 s', () => {
   assert.strictEqual(G.timing(true, 2999), 'hold');
   assert.strictEqual(G.timing(true, 3000), 'drop');
   assert.strictEqual(G.timing(false, 2500), 'play', 'unkeyed inside 3 s: it plays');
+  // Voice said outright: the same hold and drop.
+  assert.strictEqual(G.timing(true, 0, true), 'hold');
+  assert.strictEqual(G.timing(true, 3000, true), 'drop');
+});
+
+test('voice TX holds and drops; FT8, CW, a tune play at once; unknown is voice (Casey, 2026-11-25)', () => {
+  // Non-voice: no microphone on the air, the sound plays during the transmission.
+  assert.strictEqual(G.timing(true, 0, false), 'play', 'FT8 / CW / tune: plays at once');
+  assert.strictEqual(G.timing(true, 13000, false), 'play', 'a whole FT8 over later: still plays, never dropped');
+  // Unknown (main said nothing about voice): held, the safe side.
+  assert.strictEqual(G.timing(true, 0, undefined), 'hold');
+  assert.strictEqual(G.timing(true, 0, null), 'hold');
+  assert.strictEqual(G.timing(true, 0, 0), 'hold', 'only false itself lets a sound through');
+});
+
+test('voiceTx(): what is keying, and the mode, say whether a microphone is on the air', () => {
+  // Voice: a voice key-down (PTT, macro, the phone, FreeDV), in a voice mode.
+  for (const mode of ['USB', 'LSB', 'AM', 'FM', 'PKTUSB', '']) {
+    assert.strictEqual(G.voiceTx({ mode, pttKind: 'voice' }), true, 'voice PTT in ' + (mode || 'no mode'));
+  }
+  // Unknown: the radio keyed by hand, a footswitch, TX POTACAT did not start: voice.
+  assert.strictEqual(G.voiceTx({ mode: 'USB' }), true);
+  assert.strictEqual(G.voiceTx({}), true);
+  assert.strictEqual(G.voiceTx(null), true);
+  assert.strictEqual(G.voiceTx({ mode: 'USB', pttKind: 'something-new' }), true, 'a kind this build does not know is voice');
+  // Data mode alone is not proof: an Icom flips to USB-D for a voice PTT, and FreeDV runs in DIGU.
+  assert.strictEqual(G.voiceTx({ mode: 'PKTUSB' }), true);
+  assert.strictEqual(G.voiceTx({ mode: 'DIGU', pttKind: 'voice' }), true);
+  // Not voice: JTCAT (every mode), CW text, a tune, a Winlink/Mercury modem.
+  assert.strictEqual(G.voiceTx({ mode: 'USB', digital: true }), false, 'JTCAT keyed in USB');
+  assert.strictEqual(G.voiceTx({ mode: 'USB', cw: true }), false);
+  assert.strictEqual(G.voiceTx({ mode: 'USB', tune: true }), false);
+  assert.strictEqual(G.voiceTx({ mode: 'PKTUSB', modem: true }), false);
+  for (const k of ['ft8', 'ft4', 'ft2', 'js8', 'psk', 'jtty', 'wspr', 'sstv', 'winlink', 'tune', 'aprs2m', 'aprs30m']) {
+    assert.strictEqual(G.voiceTx({ mode: 'USB', pttKind: k }), false, k);
+  }
+  // CW: no microphone on the air, whatever keyed it (a paddle, a hand key, a PTT).
+  for (const mode of ['CW', 'CWR', 'CW-R', 'cw']) assert.strictEqual(G.voiceTx({ mode }), false, mode);
+  assert.strictEqual(G.voiceTx({ mode: 'CW', pttKind: 'voice' }), false);
+  // A voice key-down outranks a flag from another path: the safe side.
+  assert.strictEqual(G.voiceTx({ mode: 'USB', pttKind: 'voice', digital: true }), true);
+  // Every non-voice kind lib/tx-limit.js knows is not voice (one list of what keys the radio).
+  const kinds = Object.keys(require('../lib/tx-limit').TX_LIMITS_MS).concat('wspr');
+  for (const k of kinds) if (k !== 'voice') assert.strictEqual(G.voiceTx({ pttKind: k }), false, 'tx-limit kind ' + k);
+});
+
+test('JTCAT Run: the coin for a QSO logged as our RR73 goes out plays now, with the banner', () => {
+  // main's answer during the RR73: transmitting, JTCAT keyed it (txKind ft8), rig in DATA-U.
+  const voice = G.voiceTx({ mode: 'PKTUSB', pttKind: 'ft8', digital: true });
+  assert.strictEqual(voice, false);
+  const base = { chosenId: '', devices: [defaultIs(SPEAKERS), SPEAKERS, CODEC], txDevices: ['cdc1'] };
+  const d = G.decide({ ...base, txActive: true, txVoice: voice, heldMs: 0 });
+  assert.strictEqual(d.action, 'play');
+  assert.strictEqual(d.sinkId, '', 'the speakers (the default)');
+  // And still never on the radio's sound card, which is carrying the FT8 audio.
+  const onCodec = G.decide({ chosenId: 'cdc1', devices: [defaultIs(CODEC), SPEAKERS, CODEC], txDevices: ['cdc1'], txActive: true, txVoice: false, heldMs: 0 });
+  assert.strictEqual(onCodec.action, 'play');
+  assert.strictEqual(onCodec.sinkId, 'spk1', 'moved off the radio');
+  const onlyCodec = G.decide({ chosenId: '', devices: [defaultIs(CODEC), CODEC], txDevices: ['cdc1'], txActive: true, txVoice: false });
+  assert.strictEqual(onlyCodec.action, 'silent', 'no other output: nothing plays, transmitting or not');
 });
 
 test('decide(): one answer for "may this sound play now, and where"', () => {
@@ -140,8 +200,10 @@ test('decide(): one answer for "may this sound play now, and where"', () => {
   assert.deepStrictEqual({ action: play.action, sinkId: play.sinkId, why: play.why }, { action: 'play', sinkId: 'spk1', why: 'moved' });
   const silent = G.decide({ chosenId: '', devices: [defaultIs(CODEC), CODEC], txDevices: ['cdc1'], txActive: false });
   assert.deepStrictEqual({ action: silent.action, reason: silent.reason }, { action: 'silent', reason: 'no-other-output' });
-  // Transmitting wins over everything: nothing is even routed.
+  // Transmitting voice wins over everything: nothing is even routed.
   assert.deepStrictEqual(G.decide({ chosenId: '', devices: [defaultIs(CODEC), CODEC], txDevices: ['cdc1'], txActive: true, heldMs: 10 }), { action: 'hold' });
+  assert.deepStrictEqual(G.decide({ ...base, txActive: true, txVoice: true, heldMs: 0 }), { action: 'hold' });
+  assert.deepStrictEqual(G.decide({ ...base, txActive: true, txVoice: true, heldMs: 3100 }), { action: 'drop', reason: 'transmitting' });
 });
 
 console.log('Transmit guard: the glue');
@@ -163,12 +225,17 @@ test('renderer/sounds.js asks the guard before every play, with the live device 
   assert.ok(!/audioCtx\b/.test(sounds), 'its own context, never the shared default-output one');
 });
 
-test('a held sound waits for the unkey and is dropped by the guard\'s own limit; a playing sound is cut when TX starts', () => {
+test('a held sound waits for the unkey and is dropped by the guard\'s own limit; a playing sound is cut when voice TX starts', () => {
   assert.ok(/d\.action === 'hold'/.test(sounds) && /SoundGuard\.HOLD_POLL_MS/.test(sounds));
   assert.ok(/d\.action === 'drop'/.test(sounds));
+  assert.ok(/txActive: st\.tx, txVoice: st\.voice/.test(sounds), 'the guard is told whether the TX is voice');
+  assert.ok(/voice: !\(st && st\.voice === false\)/.test(sounds), 'only main\'s explicit false is "not voice"');
+  assert.ok(/catch \{ return \{ tx: true, voice: true, txDevices: \[\] \}; \}/.test(sounds), 'main unreachable: transmitting voice');
   assert.ok(/function cutAll\(/.test(sounds));
-  assert.ok(/window\.api\.onRemoteTxState\(\(on\) => \{ if \(on\) cutAll\(\); \}\)/.test(sounds), 'the TX state push cuts at once');
-  assert.ok(/if \(tx\) cutAll\(\)/.test(sounds), 'and the watch while a sound plays catches every other kind of TX');
+  assert.ok(/const voiceOn = \(st\) => !!\(st && st\.tx && st\.voice\);/.test(sounds));
+  assert.ok(/window\.api\.onRemoteTxState\(\(on\) => \{ if \(on && live\.size\) txState\(\)\.then\(\(st\) => \{ if \(voiceOn\(st\)\) cutAll\(\); \}\); \}\)/.test(sounds), 'the TX state push cuts a voice TX');
+  assert.ok(/if \(voiceOn\(await txState\(\)\)\) cutAll\(\)/.test(sounds), 'and the watch while a sound plays catches every other voice TX');
+  assert.ok(!/if \(tx\) cutAll\(\)/.test(sounds), 'FT8, CW or a tune no longer cuts a sound');
 });
 
 test('main answers with every kind of transmission it knows: PTT, CW, JTCAT, FreeDV and tune', () => {
@@ -178,10 +245,26 @@ test('main answers with every kind of transmission it knows: PTT, CW, JTCAT, Fre
   for (const part of ['_isEffectivelyTransmitting()', 'rigPresetTransmitting()', 'jtcatAnyTxActive()', '_jtcatTuneTxActive', '_atuSweeping', '_atuTuneEpisode']) {
     assert.ok(body.includes(part), part);
   }
-  assert.ok(/ipcMain\.handle\('sound-tx-state', \(\) => \(\{ tx: soundTxActive\(\), txDevices: soundTxDevices\(\) \}\)\)/.test(main));
+  assert.ok(/ipcMain\.handle\('sound-tx-state', \(\) => soundTxState\(\)\);/.test(main));
+  const si = main.indexOf('function soundTxState()');
+  const st = main.slice(si, main.indexOf('\n}\n', si));
+  assert.ok(/return \{ tx, voice: tx \? soundTxVoice\(\) : false, txDevices: soundTxDevices\(\) \};/.test(st));
   assert.ok(/soundTxState: \(\) => ipcRenderer\.invoke\('sound-tx-state'\)/.test(preload));
   // Reading the state is all it does: nothing in the handler keys or sets the radio.
   assert.ok(!/handleRemotePtt|sendCat|tuneRadio|setMode|write\(/.test(body));
+});
+
+test('main says whether the TX is voice from what is keying and the mode (SoundGuard.voiceTx)', () => {
+  const i = main.indexOf('function soundTxVoice()');
+  assert.ok(i > 0);
+  const body = main.slice(i, main.indexOf('\n}\n', i));
+  assert.ok(/SoundGuard\.voiceTx\(\{/.test(body));
+  assert.ok(/require\('\.\/lib\/sound-guard'\)/.test(main));
+  for (const part of ['mode: _currentMode', '_txLimit.armed', "kind === 'voice' || _remoteTxState", 'digital: jtcatAnyTxActive()', '_cwTxLockoutUntilMs',
+    '_jtcatTuneTxActive', '_atuSweeping', '_atuTuneEpisode', '_externalAtuActive', 'mercuryTxActive', "radioOwner === 'winlink'"]) {
+    assert.ok(body.includes(part), part);
+  }
+  assert.ok(!/handleRemotePtt|sendCat|tuneRadio|setMode|write\(|\.arm\(|disarm\(/.test(body), 'read only');
 });
 
 test('every sound the main window makes for a contact goes through PotacatSounds (no way round the guard)', () => {
@@ -193,6 +276,17 @@ test('every sound the main window makes for a contact goes through PotacatSounds
   assert.ok(/PotacatSounds\.preview\(QsoSounds\.previewSound\(key\), using\)/.test(app), 'the Play and Hear buttons take the same road');
   assert.ok(html.indexOf('<script src="../lib/sound-guard.js"></script>') < html.indexOf('<script src="sounds.js"></script>'));
   assert.ok(html.indexOf('<script src="sounds.js"></script>') < html.indexOf('<script src="app.js"></script>'));
+});
+
+test('the Sounds pane says the rule plainly: never while you talk on the air, never through the radio', () => {
+  const lines = [...html.matchAll(/<span class="help-text sounds-help">([^<]*)<\/span>/g)].map((x) => x[1]);
+  const t = lines.find((l) => /unkey/.test(l));
+  assert.ok(t, 'the help line under Sound output');
+  assert.ok(!lines.some((l) => /No sound plays while you transmit\./.test(l)), 'the old blanket rule is gone');
+  assert.ok(/talk on the air \(SSB, AM, FM, FreeDV\)/.test(t), 'voice is named');
+  assert.ok(/FT8, CW/.test(t) && /play at once/.test(t), 'data modes and CW play at once');
+  assert.ok(/never plays through the radio's sound card/.test(t), 'the where rule');
+  assert.ok(!/No sound plays while you transmit\./.test(t), 'the old blanket rule is gone');
 });
 
 test('nothing in the feature transmits or changes the radio', () => {
