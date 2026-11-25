@@ -72,7 +72,7 @@ New dialog shows it (fetched from GitHub, rendered by `lib/release-notes-format.
 
 **Queued lines first.** Read `D:\Projects\potacat\docs\next-release-notes.md` (workspace file,
 readable from any folder). Every line queued there goes into these notes, in the operator's terms,
-in the right section (or a short section of its own near the end, before the `---` review line).
+in the right section (or a short section of its own near the end).
 Once the notes file is written, empty that file's list and keep the file and its heading. If the
 file is missing or its list is empty, carry on.
 
@@ -92,8 +92,9 @@ Match the shape of the last few files (`release-notes/v1.12.0.md`, `v1.13.0.md`)
   addresses or Discord handles.
 - No version number anywhere in the body's headings, no AI/Claude attribution, no emojis,
   no internal file names, wire message names or commit hashes.
-- End with a `---` line and then exactly:
-  `If ECHOCAT earns a place in your shack, a review on the App Store or Google Play helps other hams find it.`
+- Desktop release notes carry no ECHOCAT or store review ask: no `---` review line, no "review on the
+  App Store or Google Play" (Casey, 2026-11-25). `test/release-notes-format-test.js` fails on it
+  for v1.14.9 and later.
 
 **Title: `release-notes/v<next>.title`**, one line, prose only, NEVER the version (the
 update banner renders `v<version>: <title>` itself). Casey names the release; use his words
@@ -237,7 +238,8 @@ Verify all of these, and report any that fail:
   step 2 gate) are handoffs to the same session.
 - **Mobile** (potacat-app/docs/desktop-handoffs/): if the release unblocks an app OTA or
   changes the wire, tell the `echocat` session which capabilities are now live. Casey decides
-  OTAs. The store "What's New" ends with the same review line.
+  OTAs. The ECHOCAT store "What's New" (not the desktop notes) may end with the review line:
+  `If ECHOCAT earns a place in your shack, a review on the App Store or Google Play helps other hams find it.`
 - **Cloud**: a release that needs a deployed route says so in a
   `DESKTOP_TO_CLOUD_HANDOFF_<date>_<topic>.md`; confirm the route is live before the tag.
 
