@@ -262,6 +262,7 @@ const TESTS = [
   'test/dxpedition-dials-test.js',
   'test/renderer-global-api-test.js',
   'test/heard-grids-test.js',
+  'test/jtcat-rr73-click-log-test.js', // #1060: a click on their RR73 while busy with another station or CQ logs with the reports exchanged earlier; none on record = not logged, with a notice
   'test/idle-rx-watching-test.js',
   'test/jtcat-picker-test.js',
   // Run by CI's test.yml but missing here until 2026-11-02 (a CI-only failure slipped past the local suite):
