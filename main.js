@@ -32971,6 +32971,7 @@ function connectRemote() {
       return;
     }
     console.log('[Echo CAT] Set mode ->', mode);
+    markUserActive({ operatorTook: 'a mode chosen on ECHOCAT' }); // #1051: idle ends, no return over this mode
     // Reset rate limiter so mode-only change goes through
     _lastTuneFreq = 0;
     tuneRadio(_currentFreqHz / 1000, mode);
@@ -44492,6 +44493,7 @@ let autoIdleJttyBand = null; // the band an idle JTTY session is on ('20m' day /
 // session put it on: anywhere else the operator moved it, and it stays. APRS on
 // idle goes back through APRS listening's own return (aprsReturn), same rules.
 let _idleReturnAt = 0;
+let _idlePreAtuBand = null; // _lastTuneBand when idle began: the band the ATU was last matched on
 let _idleRxCheckingRadio = false; // the idle pause let go of the poll so Idle Mode can read the radio before it starts
 const idleReturn = IdleRadioReturn.createIdleReturn({
   load: () => settings.idleRxReturn || null,
@@ -44502,11 +44504,15 @@ const idleReturn = IdleRadioReturn.createIdleReturn({
   tune: (place) => {
     _idleReturnAt = Date.now();
     try { tuneRadio(place.freqHz / 1000, place.mode || undefined, undefined, { origin: 'Idle Mode: the radio goes back', purpose: 'idle-restore' }); } catch {}
+    const returnTuneAt = _lastTuneTime;
     // The width the radio had, put back only if the return left it different.
     // CAT radios only: on a Flex the slice keeps its own width for each mode.
+    // Never over a tune made since (a spot click right after the click that
+    // ended idle): that tune's mode has its own width.
     if (place.filterWidth > 0) {
       setTimeout(() => {
         try {
+          if (_lastTuneTime !== returnTuneAt || !IdleRadioReturn.near(_currentFreqHz, place.freqHz)) return;
           if (_currentFilterWidth !== place.filterWidth && radioTuneRoute() === 'cat' && !(smartSdr && smartSdr.connected)) {
             applyRigControl({ action: 'set-filter-width', value: place.filterWidth }, 'idle-restore');
           }
@@ -44768,6 +44774,9 @@ function startAutoSstvTimer() {
     // 2026-11-18 (FLEX-8600M, 30 m) nothing held Idle Mode off while it
     // listened, and 90 minutes in it would have retuned the radio away.
     if (IdleRadioUse.radioInUse({ jtcatDecoding: autoSstvBlockedByJtcat(), aprsListening: aprsListenHoldsRadio() })) lastActivityTime = Date.now();
+    // A scan (desktop or ECHOCAT) is someone using the radio too: its next step
+    // would end an idle session at once (#1051, a tune with an origin).
+    if (!autoSstvActive && scanStateNow()) lastActivityTime = Date.now();
     // A connected ECHOCAT device is someone at the radio, even one only
     // watching: W0TLP sat in his car with the phone on the rig and Idle Mode
     // QSY'd it to the WSPR dial (2026-11-02). Same rule as the idle CAT-poll
@@ -44991,7 +45000,14 @@ function cancelAutoSstv(opts) {
     return;
   }
   // #1051: the operator is taking the radio from here: no return over it.
-  if (operatorTook) idleReturn.operatorTook(operatorTook, _currentFreqHz);
+  if (operatorTook) {
+    idleReturn.operatorTook(operatorTook, _currentFreqHz);
+    // Idle's receive-only tunes skipped "Auto-tune ATU on band change", so the
+    // tuner was never matched on the idle band. The operator's next tune is
+    // judged from the band before idle: a tune onto the idle band tunes the ATU.
+    _lastTuneBand = _idlePreAtuBand;
+    _atuOwedTune = null;
+  }
   if (autoIdleJs8Active) {
     // JS8-on-idle teardown: close the window only if WE opened it — close =
     // stop frees the radio (and the close handler already spares a session a
@@ -45069,6 +45085,7 @@ function idleRxBegin(label) {
   const icomData = !!(ptt && ptt.data && cat && cat._codec && cat._codec._dataReportAt);
   const here = RadioTuneRoute.placeBefore({ route, freqHz: route ? _currentFreqHz : 0, mode: _currentMode, catDataForm: icomData ? PttModeSwap.dataFormOf(_currentMode || '') : '' });
   const filterWidth = (route === 'cat' && !(smartSdr && smartSdr.connected)) ? (Number(_currentFilterWidth) || 0) : 0;
+  _idlePreAtuBand = _lastTuneBand;
   const m = idleReturn.begin({ home: { freqHz: here.freqHz, mode: here.mode, filterWidth }, rigId: settings.activeRigId || null, label });
   if (m && m.home) sendCatLog(`[Auto-RX] the radio goes back to ${(m.home.freqHz / 1e6).toFixed(4)} MHz${m.home.mode ? ' ' + m.home.mode : ''} when Idle Mode ends, if it is still where Idle Mode put it`);
   // Polling paused for inactivity would hide a knob turn during the session.
@@ -45081,7 +45098,7 @@ function idleRxBegin(label) {
 
 /** #1051: idle ended. The one return: back home if the radio is still where idle put it. */
 function idleRxRestore() {
-  return idleReturn.end({ nowHz: _currentFreqHz, nowMode: _currentMode, connected: radioTuneRoute() !== '' });
+  return idleReturn.end({ nowHz: _currentFreqHz, nowMode: _currentMode, connected: radioTuneRoute() !== '', rigId: settings.activeRigId || null });
 }
 
 /** #1051: the operator took the radio (a transmit, a knob turn): idle ends, the radio stays. */
@@ -45986,12 +46003,21 @@ function tuneRadio(freqKhz, mode, brng, { clearXit, origin, purpose } = {}) {
   }
   _lastTuneFreq = freqHz;
   _lastTuneTime = now;
-  // #1051: a tune while an idle session runs is the session's own (every
-  // operator action ends the session first, in markUserActive). It is a place
-  // the session put the radio, and it is receive only: no band-change ATU carrier.
+  // #1051: a tune while an idle session runs is the session's own (its windows
+  // and hops name no origin; every operator action in POTACAT ends the session
+  // first, in markUserActive). It is a place the session put the radio, and it
+  // is receive only: no band-change ATU carrier. A tune that names where it
+  // came from (a logger over CAT, Winlink, a scan, a link, a channel) is
+  // someone else using the radio: idle ends first, and the radio is not put
+  // back over that tune.
   if (autoSstvActive && !autoIdleAprsActive) {
-    idleReturn.noteDial(freqHz);
-    if (!purpose) purpose = 'idle-rx';
+    const whose = IdleRadioReturn.tuneDuringIdle({ origin, purpose });
+    if (whose === 'outside') {
+      markUserActive({ operatorTook: `a tune from ${origin}` });
+    } else if (whose === 'own') {
+      idleReturn.noteDial(freqHz);
+      if (!purpose) purpose = 'idle-rx';
+    }
   }
   if (settings.audioSource === 'icom-network' && settings.catTarget && settings.catTarget.type === 'icom-network') {
     resetIcomNetworkJtcatUiBuffer();
@@ -49884,6 +49910,7 @@ function cloudShackNotice(text, kind) {
     noteOwnerActivity('mode');
     if (isRemoteMode()) { if (isRemoteLinked()) remoteClient.sendSetMode(mode); else refuseRemoteNotLinked(_e.sender); return; }
     if (!_currentFreqHz) return;
+    markUserActive({ operatorTook: 'a mode chosen in the VFO window' }); // #1051: idle ends, no return over this mode
     _lastTuneFreq = 0; // reset rate limiter
     tuneRadio(_currentFreqHz / 1000, mode);
   });

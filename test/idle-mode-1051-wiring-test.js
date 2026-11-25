@@ -157,5 +157,39 @@ test('the return never sends atu clear or EX040101', () => {
   }
 });
 
+// ── review fixes (2026-11-25) ────────────────────────────────────────────────
+
+test('tuneRadio: a tune from outside the session (logger, Winlink, scan) ends idle instead of becoming an idle dial', () => {
+  const b = fnBody(main, 'function tuneRadio(');
+  assert.ok(/IdleRadioReturn\.tuneDuringIdle\(\{ origin, purpose \}\)/.test(b), 'asks the lib');
+  assert.ok(/whose === 'outside'\)\s*\{\s*markUserActive\(\{ operatorTook:/.test(b), 'outside: the operator took the radio');
+  assert.ok(/whose === 'own'\)\s*\{\s*idleReturn\.noteDial\(freqHz\)/.test(b), 'own: an idle dial');
+});
+
+test('a mode chosen on ECHOCAT or in the VFO window ends idle with no return over it', () => {
+  const ei = main.indexOf("remoteServer.on('set-mode'");
+  assert.ok(/markUserActive\(\{ operatorTook: 'a mode chosen on ECHOCAT' \}\)[\s\S]*tuneRadio\(/.test(main.slice(ei, ei + 900)));
+  const vi = main.indexOf("ipcMain.on('vfo-set-mode'");
+  assert.ok(/markUserActive\(\{ operatorTook: 'a mode chosen in the VFO window' \}\)[\s\S]*tuneRadio\(/.test(main.slice(vi, vi + 900)));
+});
+
+test('the return goes to the radio idle used only (rigId), and its filter width never lands over a later tune', () => {
+  assert.ok(/idleReturn\.end\(\{[^}]*rigId: settings\.activeRigId/.test(fnBody(main, 'function idleRxRestore(')));
+  const gi = main.indexOf('const idleReturn = IdleRadioReturn.createIdleReturn(');
+  const glue = main.slice(gi, main.indexOf('\n});\n', gi));
+  assert.ok(/const returnTuneAt = _lastTuneTime;/.test(glue));
+  assert.ok(/if \(_lastTuneTime !== returnTuneAt \|\| !IdleRadioReturn\.near\(_currentFreqHz, place\.freqHz\)\) return;/.test(glue));
+});
+
+test('the operator taking the radio after idle: the band-change ATU is judged from the band before idle', () => {
+  assert.ok(/_idlePreAtuBand = _lastTuneBand;/.test(fnBody(main, 'function idleRxBegin(')));
+  const c = fnBody(main, 'function cancelAutoSstv(');
+  assert.ok(/idleReturn\.operatorTook\(operatorTook, _currentFreqHz\);[\s\S]{0,500}_lastTuneBand = _idlePreAtuBand;\s*_atuOwedTune = null;/.test(c));
+});
+
+test('a running scan holds Idle Mode off', () => {
+  assert.ok(/if \(!autoSstvActive && scanStateNow\(\)\) lastActivityTime = Date\.now\(\);/.test(fnBody(main, 'function startAutoSstvTimer(')));
+});
+
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed) process.exit(1);

@@ -269,5 +269,49 @@ test('dial activity: slow tuning in small steps still counts once it adds up', (
   assert.strictEqual(moved, true);
 });
 
+// Review fixes (2026-11-25).
+test('home on an idle dial: one return for the mode, then the readback at home confirms it (no resend loop)', () => {
+  const r = rig({ hz: 14095600, mode: 'USB' });
+  r.ret.begin({ home: { freqHz: 14095600, mode: 'USB' }, rigId: 'ic7300', label: 'WSPR' });
+  r.idleTune(14095.6, 'DIGU');
+  r.wait(60 * 60 * 1000);
+  assert.strictEqual(r.ret.end({ nowHz: r.hz, nowMode: r.mode, connected: true }), 'returned');
+  assert.strictEqual(r.mode, 'USB', 'the mode goes back');
+  for (let i = 0; i < 6; i++) {
+    r.wait(4000);
+    r.ret.onReadback(r.hz, { rigId: 'ic7300', active: false, mode: r.mode });
+  }
+  assert.strictEqual(r.sent.length, 1, 'sent once, not resent on every readback: ' + JSON.stringify(r.sent));
+  assert.strictEqual(r.ret.pending(), null, 'confirmed and cleared');
+  assert.ok(!r.logs.some((l) => /did not go back/.test(l)), 'no false "did not go back" line');
+});
+
+test('a different radio connected when idle ends is never tuned to the other radio\'s place', () => {
+  const r = rig();
+  r.ret.begin({ home: { freqHz: 14260000, mode: 'USB' }, rigId: 'flex', label: 'WSPR' });
+  r.idleTune(14095.6, 'DIGU');
+  r.wait(60 * 60 * 1000);
+  // The new radio happens to read on the same WSPR dial.
+  assert.strictEqual(r.ret.end({ nowHz: 14095600, nowMode: 'DIGU', connected: true, rigId: 'ic7300' }), 'other-rig');
+  assert.deepStrictEqual(r.sent, []);
+  assert.ok(r.ret.pending(), 'the place waits for the radio Idle Mode used');
+  r.wait(4000);
+  assert.strictEqual(r.ret.onReadback(14095600, { rigId: 'ic7300', active: false }), 'other-rig');
+  assert.deepStrictEqual(r.sent, []);
+  // The first radio comes back, still on the dial: it goes home.
+  assert.strictEqual(r.ret.onReadback(14095600, { rigId: 'flex', active: false, mode: 'DIGU' }), 'returned');
+  assert.deepStrictEqual(r.sent, [{ freqHz: 14260000, mode: 'USB' }]);
+});
+
+test('a tune during idle: the session\'s own, the return, or someone else (a logger, Winlink, a scan)', () => {
+  const t = IdleReturn.tuneDuringIdle;
+  assert.strictEqual(t({}), 'own', 'its window names no origin');
+  assert.strictEqual(t({ purpose: 'wspr-hop' }), 'own', 'a WSPR band hop');
+  assert.strictEqual(t({ origin: 'Idle Mode: the radio goes back', purpose: 'idle-restore' }), 'restore');
+  for (const origin of ['N1MM+ / logger CAT', 'Winlink (Pat via the rigctld shim)', 'scan', 'link', 'Channels (desktop)', 'SSTV picture from ECHOCAT']) {
+    assert.strictEqual(t({ origin }), 'outside', origin);
+  }
+});
+
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed) process.exit(1);
