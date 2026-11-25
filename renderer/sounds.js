@@ -4,13 +4,14 @@
 //
 // Before every play it asks lib/sound-guard.js "may this sound play now, and
 // where", with the computer's live output list, the radio's TX audio devices
-// and whether the station is transmitting (main, sound-tx-state), and does what
-// it is told:
+// and whether the station is transmitting, and if so whether it is voice
+// (main, sound-tx-state), and does what it is told:
 //   play    on the output named, at the Volume set in Settings > Sounds
-//   hold    wait for the radio to unkey, asking again every HOLD_POLL_MS
-//   drop    the radio stayed keyed for more than 3 s: this sound is not played
+//           (also during FT8, CW, SSTV, a tune: no microphone is on the air)
+//   hold    voice TX: wait for the radio to unkey, asking again every HOLD_POLL_MS
+//   drop    the voice TX lasted more than 3 s: this sound is not played
 //   silent  the only output is the radio's sound card: nothing plays
-// A sound that is playing when a transmission starts is cut at once.
+// A sound that is playing when a voice transmission starts is cut at once.
 //
 // Sounds play one after another, never two at the same time: on a milestone
 // contact the coin, then the milestone sound.
@@ -49,13 +50,19 @@
     return deviceList;
   }
   try { navigator.mediaDevices.addEventListener('devicechange', () => { deviceList = null; }); } catch {}
-  /** { tx, txDevices } from main. If main cannot be asked, the answer is "transmitting": silence is the safe side. */
+  /**
+   * { tx, voice, txDevices } from main. voice is false only when main says the
+   * transmission carries no microphone (FT8, CW, a tune...); missing is voice.
+   * If main cannot be asked, the answer is "transmitting voice": silence is the safe side.
+   */
   async function txState() {
     try {
       const st = await window.api.soundTxState();
-      return { tx: !!(st && st.tx), txDevices: (st && st.txDevices) || [] };
-    } catch { return { tx: true, txDevices: [] }; }
+      return { tx: !!(st && st.tx), voice: !(st && st.voice === false), txDevices: (st && st.txDevices) || [] };
+    } catch { return { tx: true, voice: true, txDevices: [] }; }
   }
+  /** A voice transmission is on: what cuts a playing sound. */
+  const voiceOn = (st) => !!(st && st.tx && st.voice);
 
   /** The context, on the output the guard chose. False when that output cannot be opened. */
   async function openOn(sinkId) {
@@ -92,15 +99,15 @@
     for (const s of live) { try { s.stop(); } catch {} }
     live.clear();
   }
-  // The TX state main already pushes (PTT, JTCAT, SSTV, CW text): the fastest cut.
-  if (window.api && window.api.onRemoteTxState) window.api.onRemoteTxState((on) => { if (on) cutAll(); });
-  // Every other kind of transmission (the radio keyed by hand, a tune): asked while a sound plays.
+  // The TX state main already pushes (PTT, JTCAT, SSTV, CW text): the fastest
+  // cut, once main says the transmission is voice. FT8, CW or a tune does not cut.
+  if (window.api && window.api.onRemoteTxState) window.api.onRemoteTxState((on) => { if (on && live.size) txState().then((st) => { if (voiceOn(st)) cutAll(); }); });
+  // Every other kind of transmission (the radio keyed by hand): asked while a sound plays.
   function watchWhilePlaying() {
     if (watch) return;
     watch = setInterval(async () => {
       if (!live.size) { clearInterval(watch); watch = null; return; }
-      const { tx } = await txState();
-      if (tx) cutAll();
+      if (voiceOn(await txState())) cutAll();
     }, SoundGuard.HOLD_POLL_MS);
   }
 
@@ -120,7 +127,7 @@
       const d = SoundGuard.decide({
         chosenId: cfg.output, chosenLabel: cfg.outputLabel,
         devices: await outputs(), txDevices: st.txDevices,
-        txActive: st.tx, heldMs: Date.now() - due,
+        txActive: st.tx, txVoice: st.voice, heldMs: Date.now() - due,
       });
       if (d.action === 'hold') { await sleep(SoundGuard.HOLD_POLL_MS); continue; }
       if (d.action === 'drop') return { played: false, reason: 'transmitting' };

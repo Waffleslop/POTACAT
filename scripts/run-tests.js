@@ -262,6 +262,7 @@ const TESTS = [
   'test/dxpedition-dials-test.js',
   'test/renderer-global-api-test.js',
   'test/heard-grids-test.js',
+  'test/jtcat-rr73-click-log-test.js', // #1060: a click on their RR73 while busy with another station or CQ logs with the reports exchanged earlier; none on record = not logged, with a notice
   'test/idle-rx-watching-test.js',
   'test/jtcat-picker-test.js',
   // Run by CI's test.yml but missing here until 2026-11-02 (a CI-only failure slipped past the local suite):
@@ -846,6 +847,7 @@ const TESTS = [
   'test/qrz-upload-visible-test.js', // B8 row 3: every QRZ upload logs a [QRZ] line, a refusal toasts, a check never unticks the box
   'test/qrz-late-backfill-test.js', // a late QRZ answer fills the saved record's empty fields
   'test/qrz-request-timeout-test.js', // a stalled QRZ socket gives up at its timeout (activation review fix 1)
+  'test/qrz-lookup-queue-test.js', // QRZ lookups: 2 in flight, 250 ms apart, operator first, bounded queue, one login, 2-min failure cache
   'test/log-qso-fast-reply-test.js', // #732: ECHOCAT's log-ok at the disk write; uploads and respots after, respot outcome as a follow-up
   'test/phone-tx-power-test.js', // ECHOCAT #85: log-qso keeps the phone's txPower (else the usual fill), log-ok records carry it, hello lists log-tx-power
   'test/phone-activation-gear-test.js', // #975: log-qso keeps the phone's rig and antenna (64 chars), desktop rig otherwise; MY_ANTENNA written and read back

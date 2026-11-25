@@ -1033,10 +1033,10 @@ section('Courtesy leg — ends when the 73/RR73 has actually been transmitted');
     const path = require('path');
     const MAIN = readSrc(path.join(__dirname, '..', 'main.js'));
     const single = MAIN.indexOf('ft8Engine._lastTxPeriodKey = jtcatPeriodUtc(modeForTx);');
-    assert(single > 0 && MAIN.indexOf('jtcatNoteTxSent(data.message);', single) - single < 200,
+    assert(single > 0 && MAIN.indexOf('jtcatNoteTxSent(data.message, ', single) > single && MAIN.indexOf('jtcatNoteTxSent(data.message, ', single) - single < 200,
       'single-slice tx-start stamps the courtesy message beside the try stamp');
     const multi = MAIN.indexOf("engine._lastTxPeriodKey = jtcatPeriodUtc(engine._mode || 'FT8');");
-    assert(multi > 0 && MAIN.indexOf('jtcatNoteTxSent(data.message);', multi) - multi < 200,
+    assert(multi > 0 && MAIN.indexOf('jtcatNoteTxSent(data.message, ', multi) > multi && MAIN.indexOf('jtcatNoteTxSent(data.message, ', multi) - multi < 200,
       'multi-slice tx-start stamps the courtesy message beside the try stamp');
     const stall = MAIN.indexOf('function jtcatHandleRetryStall(o) {');
     const body = MAIN.slice(stall, stall + 1200);
