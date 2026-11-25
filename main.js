@@ -22461,6 +22461,8 @@ async function jtcatBuildCqQso(modifier) {
 // Re-arm CQ after a QSO completes or a stalled QSO is abandoned, in run mode.
 async function rearmCq(owner) {
   if (!jtcatFullAutoCq || jtcatFullAutoCqOwner !== owner) return false;
+  // Any check that ends Run or Hunt here (a session deadline) belongs ABOVE
+  // this point: past it, Run neither answers a waiting caller nor calls CQ.
   // Someone called us during the QSO that just ended: answer them, not CQ.
   if (jtcatRunAnswerWaiting(owner, { afterQso: true })) {
     jtcatFullAutoCqUnanswered = 0;
@@ -22508,6 +22510,10 @@ function jtcatRunCallerBlocked(call, band, mode) {
   return '';
 }
 
+function jtcatRunCallersWindowMs() {
+  return JtcatRunCallers.windowMs(ft8Engine && typeof ft8Engine._cycleSec === 'function' ? ft8Engine._cycleSec() : 15);
+}
+
 /** Feed one decode cycle to the queue; while Run's CQ is listening, answer
  *  the best waiting caller. Runs before the QSO machines in each decode path. */
 function jtcatRunCallersTick(results) {
@@ -22515,13 +22521,12 @@ function jtcatRunCallersTick(results) {
   const myCall = onAirCall();
   if (!myCall) return;
   const bm = jtcatCurrentBandMode(ft8Engine);
-  jtcatRunCallers.note(results, myCall, Date.now(), bm.band + '|' + bm.mode);
+  jtcatRunCallers.note(results, myCall, Date.now(), bm.band + '|' + bm.mode, jtcatRunCallersWindowMs());
   const owner = jtcatFullAutoCqOwner;
   const q = owner === 'remote' ? remoteJtcatQso : popoutJtcatQso;
   if (!q || q.mode !== 'cq' || q.phase !== 'cq' || jtcatFullAutoCqPaused) return;
-  // The queue decides who Run's CQ answers (ranking, floor, dupes, slot lock),
-  // so the state machine's first-match pick is skipped for this cycle.
-  q._skipAdvanceOnce = true;
+  // The CQ is listening: the queue picks the best caller (ranking, dupes, slot
+  // lock). With nobody to pick, the state machine answers exactly as before.
   if (jtcatRunAnswerWaiting(owner, {})) {
     jtcatFullAutoCqUnanswered = 0;
     jtcatFullAutoCqLastActivity = Date.now();
@@ -22549,15 +22554,16 @@ function jtcatRunAnswerWaiting(owner, opts) {
     else jtcatRunCallers.noteAbandoned(key);
     jtcatRunCallers.forget(prevCall);
   }
-  const cycleSec = typeof ft8Engine._cycleSec === 'function' ? ft8Engine._cycleSec() : 15;
-  const floor = JtcatSnrFloor.floorFor(settings, band);
+  // No signal floor: that is Hunt's (jtcatHuntMinDb), and Run never applied
+  // it to answers to its CQ. Only callers heard twice, or in the last T/R
+  // cycle, so a one-off false decode is not called a minute later.
   const pick = jtcatRunCallers.pick({
     nowMs: Date.now(),
-    windowMs: JtcatRunCallers.windowMs(cycleSec),
+    windowMs: jtcatRunCallersWindowMs(),
     scope: band + '|' + mode,
     exclude: [prevCall, myCall],
+    confirmedOnly: true,
     isBlocked: (call) => jtcatRunCallerBlocked(call, band, mode),
-    passesFloor: (db) => JtcatSnrFloor.passes(db, floor),
     slotOk: (slot) => JtcatTxSlot.workableUnderLock(jtcatTxSlotLock(), slot),
     rank: (list) => HuntFilters.rankCallers(list, { priority: HuntFilters.normalizePriority(settings.jtcatHuntPriority), myGrid }),
   });
@@ -22582,6 +22588,9 @@ function jtcatRunAnswerWaiting(owner, opts) {
   // cycle has already been processed.
   if (!prev || prev.phase === 'done' || prev.phase === 'cq') shell._skipAdvanceOnce = true;
   ft8Engine._txEnabled = true;
+  // TIME_ON: the advance wrapper notes the partner each cycle, but this first
+  // one ran outside it.
+  _jtcatQsoClock.note(best.call, Date.now());
   if (owner === 'remote') { remoteJtcatQso = shell; remoteJtcatBroadcastQso(); }
   else { popoutJtcatQso = shell; popoutBroadcastQso(); }
   sendCatLog(JtcatRunCallers.answerLogLine(best, { afterQso: !!(opts && opts.afterQso) && !!prevCall, retry, more: pick.ranked.length - 1 }));

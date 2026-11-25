@@ -72,13 +72,18 @@ Rule: a setting that is operating policy is per profile; a setting about this ma
 
 ### Run answers the stations waiting on it (W5XY 2026-11-25)
 - lib/jtcat-run-callers.js remembers every station calling us ("MYCALL THEIRCALL" + grid, report, R+report or
-  nothing) for 4 periods (60 s FT8, 30 s FT4) while Run is on; a station heard calling CQ, working someone else or
-  signing off is dropped. main.js jtcatRunCallersTick feeds it in both decode paths before the done blocks.
+  nothing) for 4 periods (60 s FT8, 30 s FT4) while Run is on. A decode recovered only with AP is never remembered.
+  A station heard calling CQ, working someone else or signing off is dropped. main.js jtcatRunCallersTick feeds it
+  in both decode paths before the done blocks.
 - When a QSO ends or is given up (rearmCq), Run answers the best waiting caller with a report (the CQ-side state
-  machine, handed that caller's message) and calls CQ only when nobody is waiting. While the CQ is listening the
-  queue, not the state machine's first match, picks the answer. Ranking is "Who goes first"; the signal floor, the
-  TX slot lock and the worked-before policy apply; the station just worked is never answered again. A station Run
-  gave up on may be answered once more while it keeps calling. An R+report caller gets a fresh report.
+  machine, handed that caller's message) and calls CQ only when nobody is waiting. Only a caller heard twice in the
+  window, or in the last T/R cycle, is answered, so a one-off false decode is not called a minute later. While the
+  CQ is listening the queue picks the best caller; with nobody to pick the state machine answers as before.
+  Ranking is "Who goes first"; the TX slot lock and the worked-before policy apply; Hunt's signal floor does not
+  (Run never applied it). The station just worked is never answered again. A station Run gave up on may be answered
+  once more while it keeps calling. An R+report caller gets a fresh report. TIME_ON starts when Run answers.
+- A check that ends Run (a session deadline) goes at the top of rearmCq, above the answer: past it, Run neither
+  answers a waiting caller nor calls CQ.
 - Part of "Answer stations that call me" (jtcatAnswerCallers, default on); off, Run behaves as before. Not in Field
   Day, Hound mode or with auto-sequence off. CAT log: "[JTCAT] Run: answering N8PFK (-12 dB), who called during the
   last QSO"; a skipped caller is named once per Run.
