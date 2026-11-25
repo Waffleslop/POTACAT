@@ -10687,7 +10687,7 @@ function buildClusterSpot(raw, myPos, myEntity) {
 // is scheduled so the map updates within ~200 ms. No-op when QRZ isn't
 // configured or the user has it disabled — call-area fallback already
 // provides reasonable map placement for the common large-country cases.
-function refineClusterSpotWithQrz(rawCallsign, spot, myPos) {
+function refineClusterSpotWithQrz(rawCallsign, spot, myPos, getSpots = () => clusterSpots) {
   // 'event' is terminal: the club station's QRZ grid is somebody's house,
   // the event definition's city is where the station actually is.
   if (spot.coordSource === 'qrz' || spot.coordSource === 'event' || !qrz.configured || !settings.enableQrz) return;
@@ -10698,9 +10698,11 @@ function refineClusterSpotWithQrz(rawCallsign, spot, myPos) {
     // Find the spot in clusterSpots — it may have been deduped out by a
     // newer spot for the same callsign+band, in which case the newer spot
     // will pick up the cached QRZ grid on its own enrichment pass.
-    const idx = clusterSpots.findIndex(s => s.callsign === rawCallsign && s.band === spot.band);
+    // getSpots lets CW Spots (#1061) share this one lookup path; it returns the live array.
+    const list = getSpots();
+    const idx = list.findIndex(s => s.callsign === rawCallsign && s.band === spot.band);
     if (idx === -1) return;
-    const s = clusterSpots[idx];
+    const s = list[idx];
     s.lat = ll.lat;
     s.lon = ll.lon;
     s.coordSource = 'qrz';
@@ -10985,6 +10987,8 @@ function connectCwSpots() {
           sendMergedSpots();
         }, 2000);
       }
+      // Same QRZ grid placement as DX Cluster spots (#1061): shared qrz cache and limiter.
+      refineClusterSpotWithQrz(raw.callsign, spot, myPos, () => cwSpots);
     });
     client.on('status', (s) => {
       sendCatLog(`[CW Spots] ${s.connected ? 'Connected to' : 'Disconnected from'} ${host}:${port}`);
