@@ -10698,7 +10698,7 @@ function refineClusterSpotWithQrz(rawCallsign, spot, myPos) {
   // 'event' is terminal: the club station's QRZ grid is somebody's house,
   // the event definition's city is where the station actually is.
   if (spot.coordSource === 'qrz' || spot.coordSource === 'event' || !qrz.configured || !settings.enableQrz) return;
-  qrz.lookup(rawCallsign).then((qrzResult) => {
+  qrz.lookup(rawCallsign, { priority: 'low' }).then((qrzResult) => { // spot placement: behind the operator's own lookups
     if (!qrzResult || !qrzResult.grid) return;
     const ll = gridToLatLon(qrzResult.grid);
     if (!ll) return;
@@ -35087,6 +35087,7 @@ function jtcatNoteTxPowerForMode(mode, message, freqHz, engineHz) {
 // voice 10 min, WSPR exempt). jcoreyc's FT-710 sat keyed at 0 W in DATA-U
 // until POTACAT was closed; nothing but per-feature timers existed.
 const TxLimitLib = require('./lib/tx-limit');
+const SoundGuard = require('./lib/sound-guard'); // voiceTx: may a sound play during this transmission
 let _txLimit = null;
 function txLimit() {
   // isKeyed reads _remoteTxState BEFORE handleRemotePtt updates it, so it says
@@ -45529,6 +45530,31 @@ function soundTxActive() {
   return false;
 }
 
+// Is this transmission voice, a microphone on the air (SSB, AM, FM, FreeDV)?
+// Only then does the guard hold or cut a sound; FT8, CW, SSTV, a modem or a
+// tune carry no microphone, so the coin plays with its banner. What POTACAT is
+// keying, and the radio's mode, decide (lib/sound-guard.js voiceTx); what it
+// cannot tell is voice. Read only, like soundTxActive.
+function soundTxVoice() {
+  const armed = _txLimit && _txLimit.armed;
+  const kind = armed ? String(armed.kind || '') : '';
+  return SoundGuard.voiceTx({
+    mode: _currentMode,
+    // A voice key-down always counts; another kind only while POTACAT holds the PTT it named.
+    pttKind: (kind === 'voice' || _remoteTxState) ? kind : '',
+    digital: jtcatAnyTxActive(),
+    cw: Date.now() < _cwTxLockoutUntilMs,
+    tune: !!(_jtcatTuneTxActive || _atuSweeping || _atuTuneEpisode || _externalAtuActive),
+    modem: !!(mercuryTxActive || radioOwner === 'winlink' || radioOwner === 'mercury'),
+  });
+}
+
+/** What the main window's sounds ask (IPC sound-tx-state). */
+function soundTxState() {
+  const tx = soundTxActive();
+  return { tx, voice: tx ? soundTxVoice() : false, txDevices: soundTxDevices() };
+}
+
 // The guard's "where": every output POTACAT sends transmit audio to. The
 // radio's sound card of every saved rig counts, not only the active one.
 function soundTxDevices() {
@@ -54582,7 +54608,7 @@ function cloudShackNotice(text, kind) {
 
   ipcMain.on('app-relaunch', () => { app.relaunch(); app.exit(0); });
   // #1041: the transmit guard asks before every operator sound. Read only.
-  ipcMain.handle('sound-tx-state', () => ({ tx: soundTxActive(), txDevices: soundTxDevices() }));
+  ipcMain.handle('sound-tx-state', () => soundTxState());
   // themeNow: the theme in force (Appearance System decided here), for a
   // window that reads the theme from the settings (#376).
   ipcMain.handle('get-settings', () => ({ ...settings, appVersion: getAppDisplayVersion(), remoteShack: isRemoteMode(), shackGrid: isRemoteMode() ? remoteShackGrid : '', themeNow: themeQuery() }));
