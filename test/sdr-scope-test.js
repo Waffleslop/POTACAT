@@ -123,7 +123,7 @@ test('setup: rate, direct sampling, ppm, gain mode, then the dial', () => {
 
 test('settings normalise to safe defaults', () => {
   const d = S.normalizeSdrSettings(undefined);
-  assert.deepStrictEqual(d, { enabled: false, host: '127.0.0.1', port: 1234, sampleRate: 1024000, gain: 'auto', directSampling: 'off', ppm: 0, offsetHz: 0, tapMode: 'follow', ifHz: 0, invertIf: false, preferSdr: false });
+  assert.deepStrictEqual(d, { enabled: false, kind: 'rtltcp', host: '127.0.0.1', port: 1234, device: '', spanHz: 800000, sampleRate: 1024000, gain: 'auto', directSampling: 'off', ppm: 0, offsetHz: 0, tapMode: 'follow', ifHz: 0, invertIf: false, preferSdr: false });
   assert.strictEqual(S.normalizeSdrSettings({ sampleRate: 999 }).sampleRate, 1024000, 'an invalid RTL2832 rate falls back');
   assert.strictEqual(S.normalizeSdrSettings({ port: 99999 }).port, 1234);
   assert.strictEqual(S.normalizeSdrSettings({ directSampling: 'Q' }).directSampling, 'q');
