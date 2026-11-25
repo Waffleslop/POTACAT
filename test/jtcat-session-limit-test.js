@@ -285,6 +285,34 @@ test("lib: blocksTx only stops Run's own CQ with no partner, after the deadline"
   assert.strictEqual(SL.blocksTx(st, { now: 5 * MIN, settings: {}, runOn: true, qso: cq }), false, 'unticked: no limit');
 });
 
+test("lib: blocksTx refuses only a CQ; a non-CQ message (an operator reply) still keys", () => {
+  const st = SL.start(SL.createState(), { kind: 'run', owner: 'remote', now: 0, settings: ON(5) });
+  const a = { now: 6 * MIN, settings: ON(5), runOn: true, qso: { call: null, phase: 'cq' } };
+  for (const m of ['CQ K3SBP FN20', 'CQ POTA K3SBP FN20', 'CQ FD K3SBP FN20', ' cq dx K3SBP FN20']) {
+    assert.strictEqual(SL.blocksTx(st, { ...a, message: m }), true, m);
+  }
+  for (const m of ['W1ABC K3SBP FN20', 'W1ABC K3SBP R-12', 'W1ABC K3SBP 73', 'CQK3SBP']) {
+    assert.strictEqual(SL.blocksTx(st, { ...a, message: m }), false, m);
+  }
+  assert.strictEqual(SL.blocksTx(st, a), true, 'no message given: the old rule');
+});
+
+test("main: after the deadline an operator reply from the other surface keys and does not stop Run", () => {
+  // Run on the phone, its CQ shell has no partner; the operator answers a
+  // station in the JTCAT window. That is not Run's CQ: it goes out, and Run is
+  // left for the decode tick (which waits for the window's contact).
+  const h = harness(ON(5));
+  h.ctx.jtcatFullAutoCq = true; h.ctx.jtcatFullAutoCqOwner = 'remote';
+  h.start('run', 'remote');
+  h.ctx.remoteJtcatQso = { call: null, phase: 'cq' };
+  h.ctx.popoutJtcatQso = { call: 'W1ABC', phase: 'reply' };
+  h.ctx.clock = 6 * MIN;
+  assert.strictEqual(h.blocksTx('W1ABC K3SBP FN20'), false);
+  assert.strictEqual(h.blocksTx('CQ K3SBP FN20'), true, "Run's own CQ is still refused");
+  h.tick();
+  assert.ok(!h.calls.some((c) => c[0] === 'stopRun'), 'the contact in the window finishes first');
+});
+
 test("main: tx-start after the deadline does not key Run's repeating CQ (desktop and phone owner)", () => {
   const h = harness(ON(5));
   h.ctx.jtcatFullAutoCq = true; h.ctx.jtcatFullAutoCqOwner = 'popout';
@@ -374,12 +402,13 @@ test("wiring: both tx-start dispatches refuse Run's CQ after the deadline, after
   const acq = MAIN.indexOf("acquireRadio('jtcat');", single);
   const stamp = MAIN.indexOf('ft8Engine._lastTxPeriodKey = jtcatPeriodUtc(modeForTx);', single);
   assert.ok(acq > single && acq - single < 200 && stamp > acq, 'before the radio is taken, every audio route and the try stamp');
-  const multi = MAIN.indexOf('if (jtcatSessionLimitBlocksTx()) { // same as the single-slice tx-start');
+  const multi = MAIN.indexOf('if (jtcatSessionLimitBlocksTx(data.message)) { // same as the single-slice tx-start');
   assert.ok(multi > 0);
   assert.ok(/engine\._txEnabled = false;[\s\S]*engine\.txComplete\(\);[\s\S]*jtcatSessionLimitStop\(\);\n\s*return;/.test(MAIN.slice(multi, multi + 260)));
   const mStamp = MAIN.indexOf("engine._lastTxPeriodKey = jtcatPeriodUtc(engine._mode || 'FT8');", multi);
   assert.ok(mStamp > multi && mStamp - multi < 1500, 'before the multi-slice try stamp and PTT');
-  assert.strictEqual((MAIN.match(/if \(jtcatSessionLimitBlocksTx\(\)\)/g) || []).length, 2, 'both dispatches, nowhere else');
+  assert.strictEqual((MAIN.match(/if \(jtcatSessionLimitBlocksTx\(data\.message\)\)/g) || []).length, 2, 'both dispatches pass the text being keyed');
+  assert.strictEqual((MAIN.match(/jtcatSessionLimitBlocksTx\(/g) || []).length, 3, 'the definition and the two dispatches, nowhere else');
 });
 
 test('wiring: the Hunt-to-Run fallback asks the deadline before startFullAutoCq', () => {
@@ -425,6 +454,16 @@ test('wiring: checked every decode cycle in both decode paths, before the Hunt-t
   for (const at of calls) {
     const fb = MAIN.indexOf('jtcatHuntCqFallbackTick(data.results', at);
     assert.ok(fb > at && fb - at < 6000, 'the limit is checked before the fallback can call CQ');
+  }
+});
+
+test('wiring: the limit is checked before anything else in the decode paths can answer a caller (#1067 jtcatRunCallersTick)', () => {
+  // Run answering waiting callers (PR #1067) must run after the limit's tick, so a
+  // past-deadline Run with no partner is stopped before it can engage anyone.
+  const sites = [...MAIN.matchAll(/jtcatRunCallersTick\(data\.results/g)].map((m) => m.index);
+  for (const at of sites) {
+    const wd = MAIN.lastIndexOf('jtcatFullAutoCqWatchdog();', at);
+    assert.ok(wd > 0 && at - wd < 400, 'jtcatRunCallersTick comes right after jtcatFullAutoCqWatchdog()');
   }
 });
 

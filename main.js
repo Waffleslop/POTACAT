@@ -22835,11 +22835,11 @@ function jtcatSessionLimitTick() {
   } catch (e) { console.error('[JTCAT] session limit:', e); }
 }
 
-/** tx-start: Run's own CQ (no partner) after the deadline is not keyed. */
-function jtcatSessionLimitBlocksTx() {
+/** tx-start: Run's own CQ (no partner) after the deadline is not keyed. message = the text being keyed. */
+function jtcatSessionLimitBlocksTx(message) {
   try {
     const qso = jtcatFullAutoCqOwner === 'remote' ? remoteJtcatQso : popoutJtcatQso;
-    return JtcatSessionLimit.blocksTx(_jtcatSessionLimit, { now: Date.now(), settings, runOn: jtcatFullAutoCq, qso });
+    return JtcatSessionLimit.blocksTx(_jtcatSessionLimit, { now: Date.now(), settings, runOn: jtcatFullAutoCq, qso, message });
   } catch (e) { console.error('[JTCAT] session limit:', e); return false; }
 }
 
@@ -25449,9 +25449,9 @@ function startJtcat(mode) {
       jtcatTxWatchdogStop();
       return;
     }
-    // "Stop Run and Hunt after N minutes": a Run CQ repeating by itself between
-    // two decode periods is not keyed after the deadline. Before PTT and every route.
-    if (jtcatSessionLimitBlocksTx()) {
+    // "Stop Run and Hunt after N minutes": Run's CQ repeating between two decode
+    // periods is not keyed after the deadline. Before PTT and every route.
+    if (jtcatSessionLimitBlocksTx(data.message)) {
       jtcatRefuseTx('the Run time limit ran out');
       jtcatSessionLimitStop();
       return;
@@ -59308,7 +59308,7 @@ function cloudShackNotice(text, kind) {
           jtcatTxWatchdogStop();
           return;
         }
-        if (jtcatSessionLimitBlocksTx()) { // same as the single-slice tx-start
+        if (jtcatSessionLimitBlocksTx(data.message)) { // same as the single-slice tx-start
           engine._txEnabled = false;
           if (engine._txActive) engine.txComplete();
           jtcatSessionLimitStop();
