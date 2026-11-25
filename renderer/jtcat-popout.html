@@ -465,6 +465,8 @@
     .jp-hunt-status { padding: 6px 12px; font-size: 14px; color: var(--text-secondary, #a0a0c0); background: var(--bg-secondary); border-bottom: 1px solid var(--border-primary); }
     .jp-hunt-status b { color: var(--accent-green, #4ecca3); }
     .jp-hunt-status[hidden] { display: none; }
+    .jp-session-limit.stopped { color: var(--text-primary); cursor: pointer; }
+    #jp-session-limit-on { width: 22px; height: 22px; margin: 0 6px 0 0; vertical-align: middle; accent-color: var(--accent-green, #4ecca3); }
     .jp-hidden-note { margin-left: 10px; text-transform: none; letter-spacing: 0; font-weight: 600; font-size: 13px; color: var(--accent-orange, #f0a500); }
     .jp-hidden-note[hidden] { display: none; }
     .jp-opt-section { font-size: 13px; font-weight: 900; text-transform: uppercase; letter-spacing: 1.2px; color: var(--text-dim, #888); padding: 12px 10px 4px; }
@@ -1218,6 +1220,9 @@
   <!-- Hunt status: what was heard and why Hunt answered nobody, or who it
        answers next (main jtcatHuntStatusPush). -->
   <div id="jp-hunt-status" class="jp-hunt-status" hidden aria-live="polite"></div>
+  <!-- "Stop Run and Hunt after N minutes": the time left, or why it stopped
+       (main jtcatSessionLimitPush). -->
+  <div id="jp-session-limit" class="jp-hunt-status jp-session-limit" hidden aria-live="polite"></div>
 
   <!-- Right-click a decode: Never answer its station. -->
   <div id="jp-row-menu" class="jp-row-menu" role="menu" hidden><button type="button" role="menuitem" id="jp-row-menu-ignore"></button><button type="button" role="menuitem" id="jp-row-menu-prior">Prior contacts</button></div>
@@ -1301,6 +1306,10 @@
     <label class="jp-opt-row jp-opt-num-row">
       <span class="jp-opt-label">Stop calling after <input id="jp-calling-time" type="number" min="1" max="30" value="6"> minutes with no answer</span>
       <span class="jp-opt-help">If nobody answers in a way that moves a contact on, and you have not pressed anything, JTCAT stops transmitting after this many minutes. Pressing CQ, turning TX on, replying to a station, or an answer that moves the contact on starts the count again. 1 to 30 minutes; 6 is the same as WSJT-X.</span>
+    </label>
+    <label class="jp-opt-row jp-opt-num-row">
+      <span class="jp-opt-label"><input type="checkbox" id="jp-session-limit-on"> Stop Run and Hunt after <input id="jp-session-limit-min" type="number" min="5" max="240" value="60"> minutes</span>
+      <span class="jp-opt-help">A timer for walking away. When you start Run or Hunt, it counts down, and when it runs out Run or Hunt stops, even if stations are still answering. A contact in progress is finished and logged first; nothing new is started. Stopping and starting again starts the count again. The time left shows under the bar. 5 to 240 minutes. Off unless ticked.</span>
     </label>
     <label class="jp-opt-row jp-opt-num-row">
       <span class="jp-opt-label">Call a station again after <input id="jp-rework-days" type="number" min="0" max="3650" value="0"> days</span>
@@ -1394,7 +1403,7 @@
       <span class="jp-opt-label">Chime when transmitting stops by itself <select id="jp-chime-stop">
         <option value="off" selected>Off</option>
       </select> <button type="button" id="jp-chime-stop-test" class="jp-btn jp-opt-test">Test</button></span>
-      <span class="jp-opt-help">A different sound when JTCAT stops transmitting without you: the "Stop calling after" minutes above ran out, or Hunt went 30 minutes with nothing from you. Silent when you stop it yourself. Both sounds play on the computer's own sound output, like the QSO logged chime in Settings &gt; Spots, and never while JTCAT is transmitting.</span>
+      <span class="jp-opt-help">A different sound when JTCAT stops transmitting without you: the "Stop calling after" minutes above ran out, the "Stop Run and Hunt after" time ran out, or Hunt went 30 minutes with nothing from you. Silent when you stop it yourself. Both sounds play on the computer's own sound output, like the QSO logged chime in Settings &gt; Spots, and never while JTCAT is transmitting.</span>
     </label>
     <div class="jp-opt-section">Special events only</div>
     <div class="jp-opt-warn">Leave these off for normal FT8 and POTA. Each one changes what goes on the air.</div>
@@ -1444,6 +1453,7 @@
   <script src="../lib/rig-bands.js"></script>
   <script src="../lib/jtcat-snr-floor.js"></script>
   <script src="../lib/jtcat-calling-time.js"></script>
+  <script src="../lib/jtcat-session-limit.js"></script>
   <script src="../lib/watchlist-groups.js"></script>
   <script src="../lib/chime-sounds.js"></script>
   <script src="jtcat-parser.js"></script>
