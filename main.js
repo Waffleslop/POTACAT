@@ -24002,11 +24002,13 @@ function jtcatQsoEngine(q) {
 function jtcatForgetExchange(q, logBand, logMode) {
   if (!q || !q.call) return;
   const bm = jtcatSliceBandMode(q.sliceId, jtcatQsoEngine(q));
-  jtcatExchangeHistory.forget(q.call, bm.band, bm.mode);
-  if (logBand != null) jtcatExchangeHistory.forget(q.call, logBand, logMode || bm.mode);
-  if (q.logCall) {
-    jtcatExchangeHistory.forget(q.logCall, bm.band, bm.mode);
-    if (logBand != null) jtcatExchangeHistory.forget(q.logCall, logBand, logMode || bm.mode);
+  // A QSO object may carry no sliceId (CQ shells), so multi-slice also clears
+  // every slice band in use: one transmitter, one QSO with this station.
+  const bands = new Set([bm.band, ..._jtcatSliceExchangeBand.values()]);
+  if (logBand != null) bands.add(logBand);
+  for (const call of [q.call, q.logCall].filter(Boolean)) {
+    for (const band of bands) jtcatExchangeHistory.forget(call, band, bm.mode);
+    if (logBand != null && logMode && String(logMode).toUpperCase() !== bm.mode) jtcatExchangeHistory.forget(call, logBand, logMode);
   }
 }
 // A 73 QSO started by a click on their RR73 while the window or ECHOCAT was

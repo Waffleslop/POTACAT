@@ -364,6 +364,31 @@ for (const surface of ['popout', 'remote']) {
     assert.strictEqual(h.logged[0].rstRcvd, '');
   });
 
+  // Re-review: a CQ QSO shell carries no sliceId, so its log forgets under the
+  // radio's band; the slice noted the exchange under its own band. The slice
+  // bands in use are cleared too, or a repeated RR73 on that slice logs again.
+  test(`${name}, multi-slice, cool-down 0: a QSO with no sliceId logged on a slice whose band differs from the radio's uses the slice's exchange up`, async () => {
+    const h = harness();
+    h.ctx.settings.jtcatRelogCooldownMin = 0;
+    h.ctx._jtcatSliceExchangeBand.set('slice-b', '40m');   // radio is on 20m
+    h.ctx.jtcatManager = { getEngine: () => h.engine };
+    h.ctx.jtcatExchangeHistory.noteHeard('K3SBP W1BBB -07', 'K3SBP', '40m', 'FT8');
+    h.ctx.jtcatNoteTxSent('W1BBB K3SBP R-12', { band: '40m', mode: 'FT8' });
+    // The CQ-side QSO, as a shell built it: no sliceId.
+    h.ctx.setQso(surface, { mode: 'reply', call: 'W1BBB', grid: 'FN31', phase: 'r+report', txMsg: 'W1BBB K3SBP R-12',
+      report: '-07', sentReport: '-12', myCall: 'K3SBP', myGrid: 'FN20', txRetries: 0 });
+    await click(h); // no sliceId: logs when the 73 goes out
+    await new Promise((r) => setImmediate(r));
+    assert.strictEqual(h.logged.length, 1);
+    assert.deepStrictEqual(h.ctx.jtcatExchangeHistory.get('W1BBB', '40m', 'FT8'), { report: '', sentReport: '' }, 'slice band cleared');
+    h.ctx.setQso(surface, callingCq());
+    h.clock.t += 8 * 60 * 1000;
+    if (surface === 'popout') await h.ctx.popoutClick73({ call: 'W1BBB', sliceId: 'slice-b' }, 'K3SBP', 'FN20', h.engine);
+    else await h.ctx.remoteClick73('W1BBB', 'K3SBP', 'FN20', h.engine, 'slice-b');
+    await new Promise((r) => setImmediate(r));
+    assert.strictEqual(h.logged.length, 1, `logged once (logged ${h.logged.length})`);
+  });
+
   // Review finding 4: a slice with no freqKhz keeps its notes under its band
   // name; a reply on that slice must look there, not at the 14074 kHz default.
   test(`${name}, multi-slice: a slice with no freqKhz finds its exchange under its band name`, async () => {
