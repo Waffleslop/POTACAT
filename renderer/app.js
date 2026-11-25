@@ -3638,16 +3638,24 @@ document.getElementById('set-icom-network-tx-gain')?.addEventListener('input', (
   setIcomNetworkTxGainPct(e.target.value);
 });
 
-// Band scope from an SDR (lib/sdr-scope.js, rtl_tcp): per rig, rig.sdrScope.
+// Band scope from an SDR (lib/sdr-scope.js): per rig, rig.sdrScope. Read
+// through an rtl_tcp server, or through SDRconnect (lib/sdrconnect-client.js)
+// for an SDRplay nRSP-ST or any SDRplay.
 function fillSdrScopeForm(cfg) {
   const c = cfg || {};
   const el = (id) => document.getElementById(id);
   if (!el('set-sdr-scope-enabled')) return;
+  const kind = c.kind === 'sdrconnect' ? 'sdrconnect' : 'rtltcp';
   el('set-sdr-scope-enabled').checked = c.enabled === true;
+  if (el('set-sdr-scope-kind')) el('set-sdr-scope-kind').value = kind;
   el('set-sdr-scope-host').value = c.host || '127.0.0.1';
-  el('set-sdr-scope-port').value = c.port || 1234;
+  el('set-sdr-scope-port').value = c.port || (kind === 'sdrconnect' ? 5454 : 1234);
   el('set-sdr-scope-rate').value = String(c.sampleRate || 1024000);
   el('set-sdr-scope-gain').value = c.gain == null || c.gain === '' ? 'auto' : String(c.gain);
+  if (el('set-sdr-scope-span')) el('set-sdr-scope-span').value = String(c.spanHz || 800000);
+  sdrConnectSetChoice('set-sdr-scope-device', c.device || '', c.device || '');
+  sdrConnectSetChoice('set-sdr-scope-lna', kind === 'sdrconnect' && c.gain != null && c.gain !== '' && c.gain !== 'auto' ? String(c.gain) : 'auto', kind === 'sdrconnect' && c.gain !== 'auto' && c.gain != null ? 'Step ' + c.gain : '');
+  sdrConnectStatus('');
   el('set-sdr-scope-direct').value = c.directSampling || 'off';
   el('set-sdr-scope-ppm').value = c.ppm || 0;
   el('set-sdr-scope-offset').value = c.offsetHz || 0;
@@ -3656,11 +3664,80 @@ function fillSdrScopeForm(cfg) {
   if (el('set-sdr-scope-invert')) el('set-sdr-scope-invert').checked = c.invertIf === true;
   el('set-sdr-scope-prefer').checked = c.preferSdr === true;
   syncSdrScopeForm();
+  if (kind === 'sdrconnect' && c.enabled === true) sdrConnectRefresh();
+}
+/** Select value v in a select, adding an option labelled `label` when it is not listed yet. */
+function sdrConnectSetChoice(id, v, label) {
+  const sel = document.getElementById(id);
+  if (!sel) return;
+  if (v && ![...sel.options].some((o) => o.value === v)) {
+    const o = document.createElement('option');
+    o.value = v; o.textContent = label || v;
+    sel.appendChild(o);
+  }
+  sel.value = v;
+}
+function sdrConnectStatus(text, bad) {
+  const s = document.getElementById('sdr-scope-sdrconnect-status');
+  if (!s) return;
+  s.textContent = text || '';
+  s.style.color = bad ? 'var(--accent-red-text, var(--accent-red, #e94560))' : '';
+}
+function sdrScopeKind() {
+  const k = document.getElementById('set-sdr-scope-kind');
+  return k && k.value === 'sdrconnect' ? 'sdrconnect' : 'rtltcp';
+}
+/** Ask SDRconnect which receivers it has (read-only), and fill the Receiver and RF gain lists. */
+let _sdrConnectProbeSeq = 0;
+async function sdrConnectRefresh() {
+  if (!window.api || !window.api.sdrconnectProbe || sdrScopeKind() !== 'sdrconnect') return;
+  const host = String(document.getElementById('set-sdr-scope-host').value || '').trim() || '127.0.0.1';
+  const port = parseInt(document.getElementById('set-sdr-scope-port').value, 10) || 5454;
+  const seq = ++_sdrConnectProbeSeq;
+  sdrConnectStatus('Looking for SDRconnect at ' + host + ':' + port + '...');
+  let r;
+  try { r = await window.api.sdrconnectProbe(host, port); } catch (e) { r = { ok: false, problem: { headline: 'Could not ask SDRconnect', action: String(e && e.message || e) } }; }
+  if (seq !== _sdrConnectProbeSeq) return;
+  if (!r || !r.ok) {
+    const p = (r && r.problem) || {};
+    // The Refresh button is this page's Retry.
+    sdrConnectStatus([p.headline, String(p.action || '').replace(/press Retry/, 'press Refresh')].filter(Boolean).join('. '), true);
+    return;
+  }
+  const dev = document.getElementById('set-sdr-scope-device');
+  const keep = dev.value;
+  dev.textContent = '';
+  const first = document.createElement('option');
+  first.value = ''; first.textContent = 'The one SDRconnect has open';
+  dev.appendChild(first);
+  for (const d of r.devices || []) { const o = document.createElement('option'); o.value = d; o.textContent = d; dev.appendChild(o); }
+  sdrConnectSetChoice('set-sdr-scope-device', keep, keep);
+  const lna = document.getElementById('set-sdr-scope-lna');
+  const keepGain = lna.value;
+  lna.textContent = '';
+  const auto = document.createElement('option');
+  auto.value = 'auto'; auto.textContent = 'Auto (as SDRconnect has it)';
+  lna.appendChild(auto);
+  if (Number.isFinite(r.lnaMin) && Number.isFinite(r.lnaMax) && r.lnaMax >= r.lnaMin && r.lnaMax - r.lnaMin < 64) {
+    for (let g = r.lnaMin; g <= r.lnaMax; g++) { const o = document.createElement('option'); o.value = String(g); o.textContent = 'Step ' + g; lna.appendChild(o); }
+  }
+  sdrConnectSetChoice('set-sdr-scope-lna', keepGain, keepGain === 'auto' ? '' : 'Step ' + keepGain);
+  const which = r.activeDevice || (r.devices && r.devices[0]) || 'no receiver open';
+  sdrConnectStatus('Found SDRconnect' + (r.apiVersion ? ' (API ' + r.apiVersion + ')' : '') + ', ' + which + ', ' + (r.canControl === false ? 'someone else is in control.' : 'in control.'));
 }
 function syncSdrScopeForm() {
   const en = document.getElementById('set-sdr-scope-enabled');
   const cfgEl = document.getElementById('sdr-scope-config');
   if (en && cfgEl) cfgEl.style.display = en.checked ? 'flex' : 'none';
+  // rtl_tcp-only and SDRconnect-only controls follow the SDR type.
+  const sc = sdrScopeKind() === 'sdrconnect';
+  const on = !!(en && en.checked);
+  const kindRow = document.getElementById('sdr-scope-kind-row');
+  if (kindRow) kindRow.style.display = on ? '' : 'none';
+  document.querySelectorAll('#rig-sdr-scope .sdr-rtl-only').forEach((n) => { n.style.display = sc ? 'none' : (n.tagName === 'SPAN' ? 'block' : ''); });
+  document.querySelectorAll('#rig-sdr-scope .sdr-sdrconnect-only').forEach((n) => { n.style.display = sc && (on || n.tagName === 'SPAN') ? (n.tagName === 'SPAN' || n.tagName === 'DIV' ? 'block' : '') : 'none'; });
+  const hl = document.getElementById('sdr-scope-host-label');
+  if (hl) hl.textContent = sc ? 'SDRconnect at:' : 'Server:';
   const prefer = document.getElementById('sdr-scope-prefer-wrap');
   const model = rigModelSelect ? rigModelSelect.value : '';
   if (prefer) prefer.style.display = /FT-?710/i.test(model || '') ? '' : 'none';
@@ -3677,12 +3754,18 @@ function readSdrScopeForm() {
   if (!el('set-sdr-scope-enabled')) return undefined;
   const gainRaw = String(el('set-sdr-scope-gain').value || '').trim().toLowerCase();
   const gainNum = parseFloat(gainRaw);
+  const sc = sdrScopeKind() === 'sdrconnect';
+  const lnaRaw = el('set-sdr-scope-lna') ? el('set-sdr-scope-lna').value : 'auto';
   return {
     enabled: el('set-sdr-scope-enabled').checked,
+    kind: sc ? 'sdrconnect' : 'rtltcp',
     host: String(el('set-sdr-scope-host').value || '').trim() || '127.0.0.1',
-    port: parseInt(el('set-sdr-scope-port').value, 10) || 1234,
+    port: parseInt(el('set-sdr-scope-port').value, 10) || (sc ? 5454 : 1234),
+    device: sc && el('set-sdr-scope-device') ? el('set-sdr-scope-device').value : '',
+    spanHz: el('set-sdr-scope-span') ? parseInt(el('set-sdr-scope-span').value, 10) || 800000 : 800000,
     sampleRate: parseInt(el('set-sdr-scope-rate').value, 10) || 1024000,
-    gain: !gainRaw || gainRaw === 'auto' || !Number.isFinite(gainNum) ? 'auto' : gainNum,
+    gain: sc ? (lnaRaw === 'auto' || !Number.isFinite(parseInt(lnaRaw, 10)) ? 'auto' : parseInt(lnaRaw, 10))
+      : (!gainRaw || gainRaw === 'auto' || !Number.isFinite(gainNum) ? 'auto' : gainNum),
     directSampling: el('set-sdr-scope-direct').value || 'off',
     ppm: parseInt(el('set-sdr-scope-ppm').value, 10) || 0,
     offsetHz: parseInt(el('set-sdr-scope-offset').value, 10) || 0,
@@ -3698,6 +3781,19 @@ function readSdrScopeForm() {
   const tap = document.getElementById('set-sdr-scope-tap');
   if (tap) tap.addEventListener('change', syncSdrScopeForm);
   if (rigModelSelect) rigModelSelect.addEventListener('change', syncSdrScopeForm);
+  const kind = document.getElementById('set-sdr-scope-kind');
+  if (kind) kind.addEventListener('change', () => {
+    // The port follows the type while it is still the other type's default.
+    const port = document.getElementById('set-sdr-scope-port');
+    const sc = sdrScopeKind() === 'sdrconnect';
+    if (port && sc && (port.value === '' || port.value === '1234')) port.value = '5454';
+    if (port && !sc && port.value === '5454') port.value = '1234';
+    syncSdrScopeForm();
+    if (sc) sdrConnectRefresh();
+  });
+  const refresh = document.getElementById('sdr-scope-refresh');
+  if (refresh) refresh.addEventListener('click', sdrConnectRefresh);
+  if (en) en.addEventListener('change', () => { if (en.checked && sdrScopeKind() === 'sdrconnect') sdrConnectRefresh(); });
 }
 
 // ── Bands this radio is used on (lib/rig-bands.js) ──────────────────────
