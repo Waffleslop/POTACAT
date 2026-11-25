@@ -5208,7 +5208,7 @@ blMode.addEventListener('keydown', (e) => {
 // everyone else it is the coin (lib/qso-sounds.js). Every sound here goes
 // through PotacatSounds (renderer/sounds.js), which asks the transmit guard
 // (lib/sound-guard.js) when and on which output: never the radio's sound card,
-// never while transmitting. The Sounds pane's previews go through PotacatSounds.preview.
+// never while transmitting voice (FT8, CW and a tune do not hold it). The Sounds pane's previews go through PotacatSounds.preview.
 function playQsoChime(kind, using) {
   if (!kind || kind === 'off') return;
   // The tones are lib/chime-sounds.js, shared with the JTCAT chimes (#1043).
@@ -5244,7 +5244,7 @@ if (window.api.onQsoLogFailed) window.api.onQsoLogFailed((q) => {
 // transmitting stopped by itself. main decides (lib/jtcat-chimes.js) and names
 // the sound; it plays through PotacatSounds like every other sound, so the
 // transmit guard (lib/sound-guard.js) keeps it off the radio's sound card and
-// out of any transmission.
+// out of any voice transmission.
 if (window.api.onJtcatChime) window.api.onJtcatChime((d) => {
   try {
     const id = d && d.sound;
@@ -17673,7 +17673,7 @@ async function previewSoundsPane(key) {
   if (r && (r.reason === 'replaced' || r.reason === 'busy')) return; // the next preview speaks for itself
   if (r && r.played) { refreshSoundOutputs(using.soundOutput, using.soundOutputLabel); return; }
   soundsPane.status.classList.add('sound-status-warn');
-  if (r && r.reason === 'transmitting') soundsPane.status.textContent = 'Not played: the radio is transmitting. Sounds wait for the transmission to end.';
+  if (r && r.reason === 'transmitting') soundsPane.status.textContent = 'Not played: you were talking on the air. Sounds wait for you to unkey.';
   else if (r && r.reason === 'no-other-output') soundsPane.status.textContent = SoundGuard.NO_OUTPUT_TEXT;
   else if (r && r.reason === 'error') soundsPane.status.textContent = 'Not played: that sound could not be loaded.';
   else soundsPane.status.textContent = 'Not played: that sound output could not be opened.';
