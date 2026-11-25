@@ -82,6 +82,41 @@ test('forgets after the TTL (the re-log cool-down by default) and caps its size'
   assert.strictEqual(h.get('C1CC', '20m', 'FT8').report, '');
 });
 
+test("recoverReports: a QSO with no reports needs ours sent; a QSO with its own reports keeps today's bar", () => {
+  needModule();
+  const empty = () => ({ report: null, sentReport: null });
+  let q = empty();
+  assert.deepStrictEqual(Exchange.recoverReports(q, { report: '-07', sentReport: '' }), { filled: [], usable: false }, 'heard only');
+  assert.deepStrictEqual(q, empty(), 'nothing put on the QSO');
+  q = empty();
+  assert.deepStrictEqual(Exchange.recoverReports(q, { report: '-07', sentReport: '-12' }), { filled: ['report', 'sentReport'], usable: true });
+  q = empty();
+  assert.deepStrictEqual(Exchange.recoverReports(q, { report: '', sentReport: '-12' }), { filled: ['sentReport'], usable: true });
+  q = { report: '-04', sentReport: null };
+  assert.deepStrictEqual(Exchange.recoverReports(q, { report: '', sentReport: '' }), { filled: [], usable: true }, 'own report: usable as today');
+  assert.deepStrictEqual(Exchange.recoverReports(null, {}), { filled: [], usable: false });
+});
+
+test('forget uses an exchange up', () => {
+  needModule();
+  const h = new Exchange.JtcatExchangeHistory({ now: () => 0 });
+  h.noteSent('W1BBB K3SBP R-12', 'K3SBP', '20m', 'FT8');
+  h.noteSent('W1BBB K3SBP R-12', 'K3SBP', '40m', 'FT8');
+  assert.ok(h.forget('w1bbb', '20M', 'ft8'));
+  assert.strictEqual(h.get('W1BBB', '20m', 'FT8').sentReport, '');
+  assert.strictEqual(h.get('W1BBB', '40m', 'FT8').sentReport, '-12', 'another band is kept');
+  assert.ok(!h.forget('W1BBB', '20m', 'FT8'));
+});
+
+test('the notice: last 15 minutes, check the Logbook first', () => {
+  needModule();
+  assert.deepStrictEqual(Exchange.notLoggedNotice('w1bbb', '20m', 'ft8'), {
+    message: 'W1BBB not logged',
+    sub: 'No report from us to W1BBB on 20M FT8 in the last 15 minutes. It may already be logged: check the Logbook first, then add it by hand if it is missing.',
+  });
+  assert.ok(!/session/.test(Exchange.notLoggedNotice('W1BBB', '', '').sub));
+});
+
 test('fillMissingReports fills only empty fields', () => {
   needModule();
   const q = { report: null, sentReport: '-09' };
@@ -112,6 +147,12 @@ function harness() {
   const logged = [];
   const notices = [];
   const catLog = [];
+  // One clock for the log's timestamps, the re-log guard and the history.
+  const clock = { t: Date.UTC(2026, 10, 25, 18, 0, 0) };
+  class FakeDate extends Date {
+    constructor(...a) { if (a.length) super(...a); else super(clock.t); }
+    static now() { return clock.t; }
+  }
   const engine = {
     _mode: 'FT8', _txEnabled: false, msg: '', immediate: true,
     async setTxMessage(m) { this.msg = m; },
@@ -120,7 +161,7 @@ function harness() {
   };
   const ctx = {
     console: { log() {}, warn() {}, error() {} },
-    Date, Map, Set, Promise, String, Number, Object, Array, JSON, Math,
+    Date: FakeDate, Map, Set, Promise, String, Number, Object, Array, JSON, Math,
     settings: { grid: 'FN20', myCallsign: 'K3SBP' },
     wsjtx: null, remoteServer: null, jtcatManager: null,
     _currentFreqHz: 14074000, _jtcatExpectedDialHz: 0,
@@ -145,10 +186,11 @@ function harness() {
     popoutBroadcastQso() {}, remoteJtcatBroadcastQso() {},
     async remoteJtcatSetTxMsg(m) { await engine.setTxMessage(m); },
     jtcatDirectedMsg: (to, from, p) => `${to} ${from} ${p}`,
+    _jtcatSliceExchangeBand: new Map(),
   };
   if (Exchange) {
     ctx.JtcatExchange = Exchange;
-    ctx.jtcatExchangeHistory = new Exchange.JtcatExchangeHistory();
+    ctx.jtcatExchangeHistory = new Exchange.JtcatExchangeHistory({ now: () => clock.t });
   }
   vm.createContext(ctx);
   const fns = [
@@ -157,6 +199,7 @@ function harness() {
     'function popoutJtcatOnDone(', 'function remoteJtcatOnDone(',
     // #1060 helpers (absent before the fix)
     'function jtcatSliceBandMode(', 'function jtcatRecoverExchange(',
+    'function jtcatSliceExchangeBand(', 'function jtcatQsoEngine(', 'function jtcatForgetExchange(',
   ].map(fnSrc).join('\n');
   const popout73 = block73("    if (phase === '73') {\n      // Send 73 courtesy");
   const remote73 = block73("    if (phase === '73') {\n      const prev = remoteJtcatQso;");
@@ -175,14 +218,15 @@ ${remote73}
 this.popoutClick73 = popoutClick73; this.remoteClick73 = remoteClick73;
 this.setQso = (s, q) => { if (s === 'popout') popoutJtcatQso = q; else remoteJtcatQso = q; };
 this.getQso = (s) => (s === 'popout' ? popoutJtcatQso : remoteJtcatQso);
-this.jtcatNoteTxSent = jtcatNoteTxSent; this.jtcatCurrentBandMode = jtcatCurrentBandMode;`, ctx);
+this.jtcatNoteTxSent = jtcatNoteTxSent; this.jtcatCurrentBandMode = jtcatCurrentBandMode;
+this.jtcatSliceExchangeBand = typeof jtcatSliceExchangeBand === 'function' ? jtcatSliceExchangeBand : null;`, ctx);
   // What main does on the air before the click: their report decoded (the
   // decode loop's note) and our R+report going out (the tx-start note).
   ctx.exchangeWithB = () => {
     if (ctx.jtcatExchangeHistory) ctx.jtcatExchangeHistory.noteHeard('K3SBP W1BBB -07', 'K3SBP', '20m', 'FT8');
     ctx.jtcatNoteTxSent('W1BBB K3SBP R-12', { band: '20M', mode: 'FT8' });
   };
-  return { ctx, engine, logged, notices, catLog, exchangeWithB: ctx.exchangeWithB };
+  return { ctx, engine, logged, notices, catLog, clock, exchangeWithB: ctx.exchangeWithB };
 }
 const busyWithA = () => ({ mode: 'reply', call: 'W2AAA', grid: 'EM12', phase: 'r+report', txMsg: 'W2AAA K3SBP R-03',
   report: '-05', sentReport: '-03', myCall: 'K3SBP', myGrid: 'FN20', txRetries: 1 });
@@ -226,7 +270,7 @@ for (const surface of ['popout', 'remote']) {
     assert.strictEqual(h.logged.length, 0, 'not logged');
     assert.strictEqual(h.notices.length, 1, `one notice (got ${h.notices.length})`);
     assert.strictEqual(h.notices[0].message, 'W1BBB not logged');
-    assert.ok(/No signal reports with W1BBB on 20M FT8/.test(h.notices[0].sub), h.notices[0].sub);
+    assert.strictEqual(h.notices[0].sub, 'No report from us to W1BBB on 20M FT8 in the last 15 minutes. It may already be logged: check the Logbook first, then add it by hand if it is missing.');
     assert.strictEqual(h.engine.msg, 'W1BBB K3SBP 73', 'the 73 still goes out');
   });
 
@@ -251,8 +295,94 @@ for (const surface of ['popout', 'remote']) {
     await click(h);
     await new Promise((r) => setImmediate(r));
     assert.strictEqual(h.logged.length, 1, `logged once (logged ${h.logged.length})`);
-    assert.strictEqual(h.notices.filter((n) => /not logged$/.test(n.message) && !/again/.test(n.message)).length, 0, 'never told "no reports"');
-    assert.ok(h.notices.some((n) => n.message === 'W1BBB not logged again'), 'the re-log guard says it was already logged');
+    // The exchange was used up by the log: the third click has nothing to log
+    // with and says so, pointing at the Logbook (where it already is).
+    assert.strictEqual(h.notices.length, 1);
+    assert.strictEqual(h.notices[0].message, 'W1BBB not logged');
+    assert.ok(/check the Logbook first/.test(h.notices[0].sub));
+  });
+
+  // Review finding 1: with the re-log cool-down short or off, the same
+  // reports must not log the station a second time.
+  for (const cooldown of [0, 5]) {
+    test(`${name}, re-log cool-down ${cooldown} min: W1BBB repeats RR73 8 min after it was logged and is clicked again: still logged once`, async () => {
+      const h = harness();
+      h.ctx.settings.jtcatRelogCooldownMin = cooldown;
+      h.exchangeWithB();
+      h.ctx.setQso(surface, busyWithA());
+      await click(h);
+      await new Promise((r) => setImmediate(r));
+      assert.strictEqual(h.logged.length, 1, 'first click logs');
+      h.ctx.setQso(surface, callingCq()); // Run rearms
+      h.clock.t += 8 * 60 * 1000;         // past the cool-down, inside the history's 15 min
+      await click(h);
+      await new Promise((r) => setImmediate(r));
+      assert.strictEqual(h.logged.length, 1, `logged once (logged ${h.logged.length})`);
+      assert.strictEqual(h.notices.length, 1, 'the second click says not logged');
+      assert.strictEqual(h.notices[0].message, 'W1BBB not logged');
+    });
+
+    test(`${name}, re-log cool-down ${cooldown} min: a log from the same station's own QSO also uses the exchange up`, async () => {
+      const h = harness();
+      h.ctx.settings.jtcatRelogCooldownMin = cooldown;
+      h.exchangeWithB();
+      h.ctx.setQso(surface, { mode: 'reply', call: 'W1BBB', grid: 'FN31', phase: 'r+report', txMsg: 'W1BBB K3SBP R-12',
+        report: '-07', sentReport: '-12', myCall: 'K3SBP', myGrid: 'FN20', txRetries: 0 });
+      await click(h); // logs when the 73 goes out
+      await new Promise((r) => setImmediate(r));
+      assert.strictEqual(h.logged.length, 1);
+      h.ctx.setQso(surface, callingCq());
+      h.clock.t += 8 * 60 * 1000;
+      await click(h);
+      await new Promise((r) => setImmediate(r));
+      assert.strictEqual(h.logged.length, 1, `logged once (logged ${h.logged.length})`);
+    });
+  }
+
+  // Review finding 2: a report only HEARD from them (a caller we ignored, an
+  // AP false decode) never makes a QSO; ours must have gone out.
+  test(`${name}: their report heard but none of ours sent: not logged, with the notice`, async () => {
+    const h = harness();
+    if (h.ctx.jtcatExchangeHistory) h.ctx.jtcatExchangeHistory.noteHeard('K3SBP W1BBB -07', 'K3SBP', '20m', 'FT8');
+    h.ctx.setQso(surface, busyWithA());
+    await click(h);
+    await new Promise((r) => setImmediate(r));
+    assert.strictEqual(h.logged.length, 0, 'not logged');
+    assert.strictEqual(h.notices.length, 1);
+    assert.strictEqual(h.notices[0].message, 'W1BBB not logged');
+    assert.strictEqual(h.ctx.getQso(surface).report, null, 'the heard report is not put on the QSO');
+  });
+
+  test(`${name}: our report sent but theirs never decoded: logged with ours, theirs blank`, async () => {
+    const h = harness();
+    h.ctx.jtcatNoteTxSent('W1BBB K3SBP R-12', { band: '20M', mode: 'FT8' });
+    h.ctx.setQso(surface, callingCq());
+    await click(h);
+    await new Promise((r) => setImmediate(r));
+    assert.strictEqual(h.logged.length, 1);
+    assert.strictEqual(h.logged[0].rstSent, '-12');
+    assert.strictEqual(h.logged[0].rstRcvd, '');
+  });
+
+  // Review finding 4: a slice with no freqKhz keeps its notes under its band
+  // name; a reply on that slice must look there, not at the 14074 kHz default.
+  test(`${name}, multi-slice: a slice with no freqKhz finds its exchange under its band name`, async () => {
+    const h = harness();
+    assert.ok(h.ctx.jtcatSliceExchangeBand, 'jtcatSliceExchangeBand exists');
+    const slice = { sliceId: 'slice-b', band: '40m', mode: 'FT8' }; // no freqKhz
+    const key = h.ctx.jtcatSliceExchangeBand(slice);
+    assert.strictEqual(key, '40m');
+    h.ctx._jtcatSliceExchangeBand.set(slice.sliceId, key);           // what the slice start does
+    h.ctx.jtcatManager = { getEngine: () => h.engine };
+    h.ctx.jtcatExchangeHistory.noteHeard('K3SBP W1BBB -07', 'K3SBP', key, 'FT8'); // the slice's decode note
+    h.ctx.jtcatNoteTxSent('W1BBB K3SBP R-12', { band: key, mode: 'FT8' });         // the slice's tx-start note
+    h.ctx.setQso(surface, callingCq());
+    if (surface === 'popout') await h.ctx.popoutClick73({ call: 'W1BBB', sliceId: 'slice-b' }, 'K3SBP', 'FN20', h.engine);
+    else await h.ctx.remoteClick73('W1BBB', 'K3SBP', 'FN20', h.engine, 'slice-b');
+    await new Promise((r) => setImmediate(r));
+    assert.strictEqual(h.logged.length, 1, `logged (logged ${h.logged.length}); ${h.catLog.join(' | ')}`);
+    assert.strictEqual(h.logged[0].rstSent, '-12');
+    assert.deepStrictEqual(h.ctx.jtcatExchangeHistory.get('W1BBB', key, 'FT8'), { report: '', sentReport: '' }, 'used up under the same key');
   });
 
   test(`${name}: the same station's own QSO keeps its reports and logs when the 73 goes out`, async () => {
@@ -289,6 +419,18 @@ test('main: every decode notes reports heard (both decode paths); every tx-start
   assert.strictEqual((main.match(/jtcatNoteTxSent\(data\.message\);/g) || []).length, 0, 'no tx-start without band and mode');
   const nt = fnSrc('function jtcatNoteTxSent(');
   assert.ok(/jtcatExchangeHistory\.noteSent\(message, onAirCall\(\), bandMode\.band, bandMode\.mode\)/.test(nt));
+  // Multi-slice: one band key for the decode note, the tx-start note and replies.
+  assert.ok(/jtcatExchangeHistory\.noteHeard\(r\.text, exchMyCall, jtcatSliceExchangeBand\(s\), /.test(main), 'multi-slice decode note');
+  assert.ok(/jtcatNoteTxSent\(data\.message, \{ band: jtcatSliceExchangeBand\(s\), /.test(main), 'multi-slice tx-start note');
+  assert.ok(/_jtcatSliceExchangeBand\.set\(s\.sliceId, jtcatSliceExchangeBand\(s\)\)/.test(main), 'the slice start records its key');
+});
+
+test('main: every log through jtcatAutoLog uses the exchange up, after the re-log guard', () => {
+  const al = fnSrc('async function jtcatAutoLog(');
+  const guard = al.indexOf('if (relog.skip) {');
+  const forget = al.indexOf('jtcatForgetExchange(q, band, mode);');
+  assert.ok(guard > 0 && forget > guard, 'forget after the guard');
+  assert.ok(forget < al.indexOf('const qsoData = {'), 'and before the record is built');
 });
 
 test('main: both 73 branches recover the exchange before the 73 can go out', () => {

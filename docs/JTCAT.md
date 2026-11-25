@@ -81,8 +81,11 @@ opens at that same moment. The operator's Log button (ECHOCAT jtcat-log-qso) is 
 A click on their RR73 while the window or ECHOCAT is busy with another station or a CQ (#1060)
 builds a fresh 73 QSO with no reports of its own; `jtcatRecoverExchange` fills them from
 lib/jtcat-exchange-history.js (their report from decodes addressed to us, ours from the tx-start
-dispatch; same call, band and mode; 15 min), so it logs like any other. With no report on record
-it is not logged, as before, and the window says "<call> not logged" instead of staying silent.
+dispatch; same call, band and mode; 15 min), so it logs like any other. A QSO with no reports of
+its own logs from there only if a report of OURS went out to them; heard alone is not enough. Every
+log through jtcatAutoLog uses that station's exchange up, so the same reports never log it twice,
+whatever the re-log cool-down. Otherwise it is not logged, as before, and the window says
+"<call> not logged" (check the Logbook first) instead of staying silent.
 WSJT-X raises its Log QSO prompt when it sends a message containing 73 (User Guide 2.7.0,
 11.2 Button Row, "Log QSO"; 4.5 Reporting, "Prompt me to log QSO").
 

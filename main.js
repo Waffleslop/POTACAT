@@ -630,6 +630,8 @@ const JtcatExchange = require('./lib/jtcat-exchange-history');
 // 73 QSO started by clicking their RR73 while busy with another station logs
 // with the reports from that earlier exchange.
 const jtcatExchangeHistory = new JtcatExchange.JtcatExchangeHistory();
+// Multi-slice: the band each slice's notes are kept under (jtcatSliceExchangeBand).
+const _jtcatSliceExchangeBand = new Map();
 let _logPopoutQuiet = false; // the next log-popout-open leaves the keyboard alone
 let _appWindowsClosing = false; // the main window went: POTACAT is quitting
 const { checkClockOffset, syncSystemClock, classifyClockOffset, clockFixSupported, timeSettingsTargets } = require('./lib/ntp');
@@ -23692,6 +23694,7 @@ async function jtcatAutoLog(qso, opts) {
     }
     return;
   }
+  jtcatForgetExchange(q, band, mode); // #1060: these reports log this station once
   const qsoData = {
     // q.logCall: a hound reply calls the fox's BASE call on the air (WSJT-X
     // rule), but the contact is with the call the fox sent: 6W/IK2HKT is
@@ -23973,16 +23976,38 @@ function jtcatNoteTxSent(message, bandMode) {
     }
   }
 }
-// The band and mode a reply goes out on: the slice's own dial in multi-slice,
-// else the radio's (the same sources the decode and tx-start notes use). The
-// single engine's 'default' slice has no dial of its own: the radio's.
+// Multi-slice: the one band key a slice's decodes, transmissions and replies
+// use for the exchange history (its decodes' r.band). A slice with no freqKhz
+// is keyed by its band name, not by the 14074 kHz dial it starts on.
+function jtcatSliceExchangeBand(s) {
+  return (s.freqKhz ? freqToBand(s.freqKhz / 1000) : null) || s.band || '';
+}
+// The band and mode a reply goes out on: a multi-slice slice's own key (set
+// when the slice starts), else the radio's (the same sources the decode and
+// tx-start notes use). The single engine's 'default' slice has none: the radio's.
 function jtcatSliceBandMode(sliceId, engine) {
-  if (jtcatManager && sliceId) {
-    const d = jtcatManager.getDialFreq(sliceId);
-    const band = (d.freqHz ? freqToBand(d.freqHz / 1e6) : null) || d.band || '';
-    if (band) return { band: String(band).toUpperCase(), mode: ((engine && engine._mode) || 'FT8').toUpperCase() };
+  if (sliceId && _jtcatSliceExchangeBand.has(sliceId)) {
+    return { band: String(_jtcatSliceExchangeBand.get(sliceId)).toUpperCase(), mode: ((engine && engine._mode) || 'FT8').toUpperCase() };
   }
   return jtcatCurrentBandMode(engine);
+}
+// The engine a QSO's slice runs on (multi-slice), else the single engine.
+function jtcatQsoEngine(q) {
+  return (jtcatManager && q && q.sliceId && q.sliceId !== 'default' && jtcatManager.getEngine(q.sliceId)) || ft8Engine;
+}
+// A QSO is being logged: its exchange is used up (#1060). The same reports
+// can never log that station again from a later click on their RR73, whatever
+// the re-log cool-down (0-120 min, 0 = off). Both band keys go: the one the
+// notes use and the dial the log is written on (they differ only without CAT).
+function jtcatForgetExchange(q, logBand, logMode) {
+  if (!q || !q.call) return;
+  const bm = jtcatSliceBandMode(q.sliceId, jtcatQsoEngine(q));
+  jtcatExchangeHistory.forget(q.call, bm.band, bm.mode);
+  if (logBand != null) jtcatExchangeHistory.forget(q.call, logBand, logMode || bm.mode);
+  if (q.logCall) {
+    jtcatExchangeHistory.forget(q.logCall, bm.band, bm.mode);
+    if (logBand != null) jtcatExchangeHistory.forget(q.logCall, logBand, logMode || bm.mode);
+  }
 }
 // A 73 QSO started by a click on their RR73 while the window or ECHOCAT was
 // busy with another station or a CQ carries no reports of its own (#1060).
@@ -23993,13 +24018,12 @@ function jtcatSliceBandMode(sliceId, engine) {
 function jtcatRecoverExchange(q, sliceId, engine) {
   if (!q || !q.call || q._logged || q.hound || jtcatFdContext()) return;
   const bm = jtcatSliceBandMode(sliceId, engine);
-  const filled = JtcatExchange.fillMissingReports(q, jtcatExchangeHistory.get(q.call, bm.band, bm.mode));
-  if (filled.length) {
+  const out = JtcatExchange.recoverReports(q, jtcatExchangeHistory.get(q.call, bm.band, bm.mode));
+  if (out.filled.length) {
     sendCatLog(`[JTCAT] ${q.call}: reports from the earlier exchange on ${bm.band || 'this band'} ${bm.mode}: rcvd ${q.report || 'none'}, sent ${q.sentReport || 'none'}`);
-    return;
   }
-  if (JtcatExchange.hasReports(q)) return;
-  sendCatLog(`[JTCAT] Not logged: 73 to ${q.call}, but no signal reports with them were heard or sent on ${bm.band || 'this band'} ${bm.mode} this session`);
+  if (out.usable) return;
+  sendCatLog(`[JTCAT] Not logged: 73 to ${q.call}, but no report of ours went to them on ${bm.band || 'this band'} ${bm.mode} in the last ${JtcatExchange.TTL_MIN} min`);
   if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
     jtcatPopoutWin.webContents.send('jtcat-dupe-warning', JtcatExchange.notLoggedNotice(q.call, bm.band, bm.mode));
   }
@@ -24534,6 +24558,7 @@ function startJtcat(mode) {
     jttyProfile: settings.jttyProfile || 'unknown',
   });
   ft8Engine = jtcatManager.engine; // Phase 0 alias
+  _jtcatSliceExchangeBand.clear(); // single engine: replies key by the radio's band (#1060)
   ft8Engine.on('log', (line) => sendCatLog('[JTCAT] ' + line)); // before Hold below, so its line is logged
 
   // Apply persisted JTCAT calibration to the freshly-started engine.
@@ -58964,10 +58989,12 @@ function cloudShackNotice(text, kind) {
     if (!jtcatManager) jtcatManager = new JtcatManager();
     jtcatManager.setSlotLock(jtcatTxSlotLock());
 
+    _jtcatSliceExchangeBand.clear();
     for (const s of slices) {
       const freqKhz = s.freqKhz || 14074;
       const engine = jtcatManager.startSlice({ sliceId: s.sliceId, mode: s.mode || 'FT8', sliceIndex: s.sliceIndex, band: s.band });
       jtcatManager.setDialFreq(s.sliceId, freqKhz * 1000, s.band);
+      _jtcatSliceExchangeBand.set(s.sliceId, jtcatSliceExchangeBand(s)); // #1060: one band key for notes and replies
       // Wire decode enrichment for this slice
       engine.on('decode', (data) => {
         if (data.results) {
@@ -58979,7 +59006,7 @@ function cloudShackNotice(text, kind) {
           for (const r of data.results) {
             r.sliceId = s.sliceId;
             r.band = currentBand || s.band || '';
-            jtcatExchangeHistory.noteHeard(r.text, exchMyCall, r.band, data.mode || s.mode || 'FT8'); // #1060
+            jtcatExchangeHistory.noteHeard(r.text, exchMyCall, jtcatSliceExchangeBand(s), data.mode || s.mode || 'FT8'); // #1060
             const { dxCall } = extractCallsigns(r.text || '');
             if (!dxCall) continue;
             const uc = dxCall.toUpperCase();
@@ -59160,7 +59187,7 @@ function cloudShackNotice(text, kind) {
         // Per-TX try stamp — same contract as the single-slice tx-start
         // handler; jtcatHandleRetryStall counts one try per stamped TX.
         engine._lastTxPeriodKey = jtcatPeriodUtc(engine._mode || 'FT8');
-        jtcatNoteTxSent(data.message, { band: (s.freqKhz ? freqToBand(s.freqKhz / 1000) : null) || s.band || '', mode: engine._mode || 'FT8' });
+        jtcatNoteTxSent(data.message, { band: jtcatSliceExchangeBand(s), mode: engine._mode || 'FT8' });
         jtcatNoteTxSlot(data.slot);
         rigPresetFlushPending();
         console.log(`[JTCAT Multi] TX start on ${s.sliceId}/${s.band} — PTT on, message: ${data.message}, ${catState}`);
