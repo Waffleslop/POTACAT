@@ -158,7 +158,7 @@ test('a held or dropped preview says why, in plain words', () => {
   const p = app.indexOf('async function previewSoundsPane(');
   const body = app.slice(p, app.indexOf('\n}\n', p));
   assert.ok(/r\.reason === 'replaced'/.test(body), 'a preview replaced by the next one says nothing');
-  assert.ok(body.includes("'Not played: the radio is transmitting. Sounds wait for the transmission to end.'"));
+  assert.ok(body.includes("'Not played: you were talking on the air. Sounds wait for you to unkey.'"));
   assert.ok(body.includes('SoundGuard.NO_OUTPUT_TEXT'));
   assert.ok(body.includes("'Not played: that sound output could not be opened.'"));
   assert.ok(/soundsPane\.status/.test(body));
@@ -170,7 +170,9 @@ console.log('Sounds pane previews: renderer/sounds.js, run with a fake sound dev
 function makeWorld() {
   const w = {
     tx: false,
+    voice: undefined, // main's voice flag; undefined = an answer without one (voice)
     txAsked: 0,
+    txPush: null,     // the remote-tx-state listener sounds.js registered
     devices: [
       { kind: 'audiooutput', deviceId: 'default', label: 'Default - Speakers (Realtek Audio)', groupId: 'g-spk' },
       { kind: 'audiooutput', deviceId: 'spk', label: 'Speakers (Realtek Audio)', groupId: 'g-spk' },
@@ -241,8 +243,8 @@ function makeWorld() {
   };
   sandbox.window = sandbox;
   sandbox.api = {
-    soundTxState: async () => { w.txAsked++; return { tx: w.tx, txDevices: w.txDevices }; },
-    onRemoteTxState() {},
+    soundTxState: async () => { w.txAsked++; return w.voice === undefined ? { tx: w.tx, txDevices: w.txDevices } : { tx: w.tx, voice: w.voice, txDevices: w.txDevices }; },
+    onRemoteTxState(cb) { w.txPush = cb; },
   };
   vm.createContext(sandbox);
   vm.runInContext(soundsSrc, sandbox, { filename: 'renderer/sounds.js' });
@@ -287,6 +289,47 @@ test('the guard applies: never the radio\'s sound card, and not while transmitti
   r = await p;
   assert.deepStrictEqual(plain(r), { played: true });
   assert.deepStrictEqual(w.started.map((s) => s.what), [660, 990]);
+});
+
+test('JTCAT Run: the coin for a QSO logged as the RR73 goes out plays at once, not after the over', async () => {
+  const w = makeWorld();
+  w.S.configure({});
+  w.tx = true; w.voice = false; // main: transmitting, FT8 (no microphone on the air)
+  const t = Date.now();
+  const r = await w.S.playFile('potacat-coin');
+  assert.deepStrictEqual(plain(r), { played: true });
+  assert.ok(Date.now() - t < 1000, 'played now, not held');
+  assert.deepStrictEqual(w.started.map((s) => s.what), ['potacat-coin']);
+  assert.ok(w.started.every((s) => s.sink !== 'radio'), 'never on the radio\'s sound card, which carries the FT8 audio');
+});
+
+test('voice TX still holds a sound and drops it after 3 s', async () => {
+  const w = makeWorld();
+  w.S.configure({});
+  w.tx = true; w.voice = true;
+  const r = await w.S.playFile('potacat-coin');
+  assert.deepStrictEqual(plain(r), { played: false, reason: 'transmitting' });
+  assert.strictEqual(w.started.length, 0);
+});
+
+test('a playing sound: FT8, CW or a tune starting does not cut it; voice does', async () => {
+  const w = makeWorld();
+  w.S.configure({});
+  // Non-voice TX starts mid-sound (the push and the watch both ask): it plays out.
+  const a = w.S.preview({ file: 'potacat-100-boss-down' }, {}); // 1.5 s
+  await sleep(100);
+  w.tx = true; w.voice = false;
+  w.txPush(true);
+  assert.deepStrictEqual(plain(await a), { played: true });
+  // Voice TX starts mid-sound: cut.
+  w.tx = false; w.voice = undefined;
+  const b = w.S.preview({ file: 'potacat-100-boss-down' }, {});
+  await sleep(100);
+  w.tx = true; w.voice = true;
+  const t = Date.now();
+  w.txPush(true);
+  assert.deepStrictEqual(plain(await b), { played: false, reason: 'transmitting' });
+  assert.ok(Date.now() - t < 400, 'cut at once');
 });
 
 test('previews never stack: a new one stops the one playing', async () => {
