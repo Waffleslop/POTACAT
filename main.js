@@ -10691,7 +10691,7 @@ function refineClusterSpotWithQrz(rawCallsign, spot, myPos) {
   // 'event' is terminal: the club station's QRZ grid is somebody's house,
   // the event definition's city is where the station actually is.
   if (spot.coordSource === 'qrz' || spot.coordSource === 'event' || !qrz.configured || !settings.enableQrz) return;
-  qrz.lookup(rawCallsign).then((qrzResult) => {
+  qrz.lookup(rawCallsign, { priority: 'low' }).then((qrzResult) => { // spot placement: behind the operator's own lookups
     if (!qrzResult || !qrzResult.grid) return;
     const ll = gridToLatLon(qrzResult.grid);
     if (!ll) return;
