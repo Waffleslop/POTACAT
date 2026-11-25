@@ -582,10 +582,14 @@
 
   // Called once, some seconds after launch, so the radio has had time to
   // connect (a radio still connecting must not read as "setup unfinished").
+  let skippedForFirstRun = false;
   async function launchCheck() {
     let p;
     try { p = await window.api.stationSetupGet(); } catch { return; }
-    if (!p || !p.rig || !p.launch || p.launch.firstRun || dlg.open) return;
+    if (!p || !p.rig || !p.launch || dlg.open) return;
+    // The Welcome screen is still up: skip now, and run again when it finishes
+    // (afterWelcome below) so a new operator's first session is not left out.
+    if (p.launch.firstRun) { skippedForFirstRun = true; return; }
     const name = p.rig.model || p.rig.name;
     cardRigId = p.rig.id;
     cardNewSteps = [];
@@ -601,6 +605,13 @@
     }
   }
   setTimeout(launchCheck, 12000);
+  // Welcome finished (Get Started): the first-run flag is clear now. Give the
+  // radio the same few seconds to connect, then offer the card once.
+  window.stationSetupAfterWelcome = () => {
+    if (!skippedForFirstRun) return;
+    skippedForFirstRun = false;
+    setTimeout(launchCheck, 12000);
+  };
 
   window.openStationSetup = open;
 })();

@@ -28794,6 +28794,8 @@ document.getElementById('welcome-start').addEventListener('click', async () => {
   _welcomeRemoteClose();
   // Reload prefs so the main UI reflects welcome choices
   loadPrefs();
+  // First run is over: the Station Setup launch card was held back until now.
+  if (typeof window.stationSetupAfterWelcome === 'function') window.stationSetupAfterWelcome();
 });
 
 // ─── Welcome → Connect to a Remote Shack (v1.9) ──────────────────────
