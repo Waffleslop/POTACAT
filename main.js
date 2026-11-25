@@ -557,7 +557,7 @@ const ModemAudioServerMod = require('./lib/modem-audio-server');
 const { ModemAudioLane } = require('./lib/modem-audio-lane-client'); // the modem's audio, off the main process (#187)
 const { buildAdifFields, buildAdifRecord, sqliteQsoToAdifFields, ADIF_HEADER, adifField } = require('./lib/adif-writer');
 const LogExportChoice = require('./lib/log-export-choice');
-const { adifAppMode, adifModeSubmode } = require('./lib/adif-mode');
+const { adifAppMode, adifModeSubmode, adifExportRecord } = require('./lib/adif-mode');
 const { PassQsoOutbox } = require('./lib/pass-qso-outbox');
 const { ClublogOutbox } = require('./lib/clublog-outbox');
 const QsoLog = require('./lib/qso-log');
@@ -626,6 +626,13 @@ const { HeardGrids } = require('./lib/heard-grids');
 // The grid each station last said on the air (lib/heard-grids.js): fills a
 // QSO started from an RR73 or report, whose own text carries no grid.
 const jtcatHeardGrids = new HeardGrids();
+const JtcatExchange = require('./lib/jtcat-exchange-history');
+// The reports each station exchanged with us, per band and mode (#1060): a
+// 73 QSO started by clicking their RR73 while busy with another station logs
+// with the reports from that earlier exchange.
+const jtcatExchangeHistory = new JtcatExchange.JtcatExchangeHistory();
+// Multi-slice: the band each slice's notes are kept under (jtcatSliceExchangeBand).
+const _jtcatSliceExchangeBand = new Map();
 let _logPopoutQuiet = false; // the next log-popout-open leaves the keyboard alone
 let _appWindowsClosing = false; // the main window went: POTACAT is quitting
 const { checkClockOffset, syncSystemClock, classifyClockOffset, clockFixSupported, timeSettingsTargets } = require('./lib/ntp');
@@ -10696,7 +10703,7 @@ function refineClusterSpotWithQrz(rawCallsign, spot, myPos) {
   // 'event' is terminal: the club station's QRZ grid is somebody's house,
   // the event definition's city is where the station actually is.
   if (spot.coordSource === 'qrz' || spot.coordSource === 'event' || !qrz.configured || !settings.enableQrz) return;
-  qrz.lookup(rawCallsign).then((qrzResult) => {
+  qrz.lookup(rawCallsign, { priority: 'low' }).then((qrzResult) => { // spot placement: behind the operator's own lookups
     if (!qrzResult || !qrzResult.grid) return;
     const ll = gridToLatLon(qrzResult.grid);
     if (!ll) return;
@@ -23692,6 +23699,7 @@ async function jtcatAutoLog(qso, opts) {
     }
     return;
   }
+  jtcatForgetExchange(q, band, mode); // #1060: these reports log this station once
   const qsoData = {
     // q.logCall: a hound reply calls the fox's BASE call on the air (WSJT-X
     // rule), but the contact is with the call the fox sent: 6W/IK2HKT is
@@ -23958,7 +23966,10 @@ async function popoutJtcatSetTxMsg(msg) {
 //   is the one place "we send a 73" is seen, whether the auto-sequence, Skip or
 //   the operator put the 73 on the air. Each surface logs through its own path,
 //   so the window's "Open the Log QSO window before saving" opens right here.
-function jtcatNoteTxSent(message) {
+function jtcatNoteTxSent(message, bandMode) {
+  // The report this transmission carries, if any, is one we have now sent
+  // (#1060, lib/jtcat-exchange-history.js).
+  if (bandMode) jtcatExchangeHistory.noteSent(message, onAirCall(), bandMode.band, bandMode.mode);
   for (const surface of ['popout', 'remote']) {
     const q = surface === 'popout' ? popoutJtcatQso : remoteJtcatQso;
     if (!q) continue;
@@ -23968,6 +23979,60 @@ function jtcatNoteTxSent(message) {
       const done = surface === 'popout' ? popoutJtcatOnDone(q) : remoteJtcatOnDone(q);
       done().catch((e) => sendCatLog(`[JTCAT] Log at TX start failed for ${q.call}: ${e && e.message}`));
     }
+  }
+}
+// Multi-slice: the one band key a slice's decodes, transmissions and replies
+// use for the exchange history (its decodes' r.band). A slice with no freqKhz
+// is keyed by its band name, not by the 14074 kHz dial it starts on.
+function jtcatSliceExchangeBand(s) {
+  return (s.freqKhz ? freqToBand(s.freqKhz / 1000) : null) || s.band || '';
+}
+// The band and mode a reply goes out on: a multi-slice slice's own key (set
+// when the slice starts), else the radio's (the same sources the decode and
+// tx-start notes use). The single engine's 'default' slice has none: the radio's.
+function jtcatSliceBandMode(sliceId, engine) {
+  if (sliceId && _jtcatSliceExchangeBand.has(sliceId)) {
+    return { band: String(_jtcatSliceExchangeBand.get(sliceId)).toUpperCase(), mode: ((engine && engine._mode) || 'FT8').toUpperCase() };
+  }
+  return jtcatCurrentBandMode(engine);
+}
+// The engine a QSO's slice runs on (multi-slice), else the single engine.
+function jtcatQsoEngine(q) {
+  return (jtcatManager && q && q.sliceId && q.sliceId !== 'default' && jtcatManager.getEngine(q.sliceId)) || ft8Engine;
+}
+// A QSO is being logged: its exchange is used up (#1060). The same reports
+// can never log that station again from a later click on their RR73, whatever
+// the re-log cool-down (0-120 min, 0 = off). Both band keys go: the one the
+// notes use and the dial the log is written on (they differ only without CAT).
+function jtcatForgetExchange(q, logBand, logMode) {
+  if (!q || !q.call) return;
+  const bm = jtcatSliceBandMode(q.sliceId, jtcatQsoEngine(q));
+  // A QSO object may carry no sliceId (CQ shells), so multi-slice also clears
+  // every slice band in use: one transmitter, one QSO with this station.
+  const bands = new Set([bm.band, ..._jtcatSliceExchangeBand.values()]);
+  if (logBand != null) bands.add(logBand);
+  for (const call of [q.call, q.logCall].filter(Boolean)) {
+    for (const band of bands) jtcatExchangeHistory.forget(call, band, bm.mode);
+    if (logBand != null && logMode && String(logMode).toUpperCase() !== bm.mode) jtcatExchangeHistory.forget(call, logBand, logMode);
+  }
+}
+// A 73 QSO started by a click on their RR73 while the window or ECHOCAT was
+// busy with another station or a CQ carries no reports of its own (#1060).
+// The reports from that station's earlier exchange, heard and sent on this
+// band and mode (lib/jtcat-exchange-history.js), stand in, so the 73 logs it
+// as usual. With none on record it stays unlogged, as before, and the JTCAT
+// window says so instead of skipping it silently.
+function jtcatRecoverExchange(q, sliceId, engine) {
+  if (!q || !q.call || q._logged || q.hound || jtcatFdContext()) return;
+  const bm = jtcatSliceBandMode(sliceId, engine);
+  const out = JtcatExchange.recoverReports(q, jtcatExchangeHistory.get(q.call, bm.band, bm.mode));
+  if (out.filled.length) {
+    sendCatLog(`[JTCAT] ${q.call}: reports from the earlier exchange on ${bm.band || 'this band'} ${bm.mode}: rcvd ${q.report || 'none'}, sent ${q.sentReport || 'none'}`);
+  }
+  if (out.usable) return;
+  sendCatLog(`[JTCAT] Not logged: 73 to ${q.call}, but no report of ours went to them on ${bm.band || 'this band'} ${bm.mode} in the last ${JtcatExchange.TTL_MIN} min`);
+  if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
+    jtcatPopoutWin.webContents.send('jtcat-dupe-warning', JtcatExchange.notLoggedNotice(q.call, bm.band, bm.mode));
   }
 }
 // A QSO the retry cap stopped with reports exchanged both ways but no RR73 from
@@ -24500,6 +24565,7 @@ function startJtcat(mode) {
     jttyProfile: settings.jttyProfile || 'unknown',
   });
   ft8Engine = jtcatManager.engine; // Phase 0 alias
+  _jtcatSliceExchangeBand.clear(); // single engine: replies key by the radio's band (#1060)
   ft8Engine.on('log', (line) => sendCatLog('[JTCAT] ' + line)); // before Hold below, so its line is logged
 
   // Apply persisted JTCAT calibration to the freshly-started engine.
@@ -24752,7 +24818,9 @@ function startJtcat(mode) {
       const wlStr = (settings.watchlist || '').toUpperCase();
       const wlCalls = wlStr ? wlStr.split(',').map(s => s.trim().split(':')[0]).filter(Boolean) : [];
       const chaseCtx = buildChaseContext();
+      const exchMyCall = onAirCall();
       for (const r of data.results) {
+        jtcatExchangeHistory.noteHeard(r.text, exchMyCall, currentBand, data.mode || 'FT8'); // #1060
         const { dxCall } = extractCallsigns(r.text || '');
         if (!dxCall) continue;
         const uc = dxCall.toUpperCase();
@@ -25369,7 +25437,7 @@ function startJtcat(mode) {
     // counts one try per stamped TX (never per decode period). Placed after
     // every TX-block guard above so refused cycles don't count as tries.
     if (ft8Engine) ft8Engine._lastTxPeriodKey = jtcatPeriodUtc(modeForTx);
-    jtcatNoteTxSent(data.message);
+    jtcatNoteTxSent(data.message, jtcatCurrentBandMode(ft8Engine));
     jtcatNoteTxSlot(data.slot); // an Auto CQ keeps the slot we last transmitted in
     const networkStartDelayMs = jtcatNetworkTxStartDelayMs(modeForTx);
     // Split "Fake It": the dial moves first, so the key-down leaves the port
@@ -33741,6 +33809,7 @@ function connectRemote() {
         report: sameCall ? prev.report : null,
         sentReport: sameCall ? prev.sentReport : null,
         myCall, myGrid, txRetries: 0, sliceId: sliceKey, _logged: !!(sameCall && prev._logged) };
+      jtcatRecoverExchange(remoteJtcatQso, sliceId, targetEngine); // #1060: before the 73 can go out
       await remoteJtcatSetTxMsg(txMsg);
       targetEngine._txEnabled = true;
       fireReply();
@@ -35022,6 +35091,7 @@ function jtcatNoteTxPowerForMode(mode, message, freqHz, engineHz) {
 // voice 10 min, WSPR exempt). jcoreyc's FT-710 sat keyed at 0 W in DATA-U
 // until POTACAT was closed; nothing but per-feature timers existed.
 const TxLimitLib = require('./lib/tx-limit');
+const SoundGuard = require('./lib/sound-guard'); // voiceTx: may a sound play during this transmission
 let _txLimit = null;
 function txLimit() {
   // isKeyed reads _remoteTxState BEFORE handleRemotePtt updates it, so it says
@@ -45611,6 +45681,31 @@ function soundTxActive() {
   return false;
 }
 
+// Is this transmission voice, a microphone on the air (SSB, AM, FM, FreeDV)?
+// Only then does the guard hold or cut a sound; FT8, CW, SSTV, a modem or a
+// tune carry no microphone, so the coin plays with its banner. What POTACAT is
+// keying, and the radio's mode, decide (lib/sound-guard.js voiceTx); what it
+// cannot tell is voice. Read only, like soundTxActive.
+function soundTxVoice() {
+  const armed = _txLimit && _txLimit.armed;
+  const kind = armed ? String(armed.kind || '') : '';
+  return SoundGuard.voiceTx({
+    mode: _currentMode,
+    // A voice key-down always counts; another kind only while POTACAT holds the PTT it named.
+    pttKind: (kind === 'voice' || _remoteTxState) ? kind : '',
+    digital: jtcatAnyTxActive(),
+    cw: Date.now() < _cwTxLockoutUntilMs,
+    tune: !!(_jtcatTuneTxActive || _atuSweeping || _atuTuneEpisode || _externalAtuActive),
+    modem: !!(mercuryTxActive || radioOwner === 'winlink' || radioOwner === 'mercury'),
+  });
+}
+
+/** What the main window's sounds ask (IPC sound-tx-state). */
+function soundTxState() {
+  const tx = soundTxActive();
+  return { tx, voice: tx ? soundTxVoice() : false, txDevices: soundTxDevices() };
+}
+
 // The guard's "where": every output POTACAT sends transmit audio to. The
 // radio's sound card of every saved rig counts, not only the active one.
 function soundTxDevices() {
@@ -52622,6 +52717,7 @@ function cloudShackNotice(text, kind) {
         report: sameCall ? prev.report : null,
         sentReport: sameCall ? prev.sentReport : null,
         myCall, myGrid, txRetries: 0, sliceId: replySliceId, _logged: !!(sameCall && prev._logged) };
+      jtcatRecoverExchange(popoutJtcatQso, data.sliceId, replyEngine); // #1060: before the 73 can go out
       replyEngine._txEnabled = true;
       await replyEngine.setTxMessage(txMsg);
       replyEngine.tryImmediateTx();
@@ -54684,7 +54780,7 @@ function cloudShackNotice(text, kind) {
 
   ipcMain.on('app-relaunch', () => { app.relaunch(); app.exit(0); });
   // #1041: the transmit guard asks before every operator sound. Read only.
-  ipcMain.handle('sound-tx-state', () => ({ tx: soundTxActive(), txDevices: soundTxDevices() }));
+  ipcMain.handle('sound-tx-state', () => soundTxState());
   // themeNow: the theme in force (Appearance System decided here), for a
   // window that reads the theme from the settings (#376).
   ipcMain.handle('get-settings', () => ({ ...settings, appVersion: getAppDisplayVersion(), remoteShack: isRemoteMode(), shackGrid: isRemoteMode() ? remoteShackGrid : '', themeNow: themeQuery() }));
@@ -57792,7 +57888,8 @@ function cloudShackNotice(text, kind) {
       let content = ADIF_HEADER;
       for (const q of qsos) {
         const parts = [];
-        for (const [key, value] of Object.entries(q)) {
+        // The writer's MODE/SUBMODE: an old MODE=FT4 goes out as MFSK/FT4 (#381).
+        for (const [key, value] of Object.entries(adifExportRecord(q))) {
           if (key === 'idx') continue;
           if (value != null && value !== '') parts.push(adifField(key, value));
         }
@@ -59092,10 +59189,12 @@ function cloudShackNotice(text, kind) {
     if (!jtcatManager) jtcatManager = new JtcatManager();
     jtcatManager.setSlotLock(jtcatTxSlotLock());
 
+    _jtcatSliceExchangeBand.clear();
     for (const s of slices) {
       const freqKhz = s.freqKhz || 14074;
       const engine = jtcatManager.startSlice({ sliceId: s.sliceId, mode: s.mode || 'FT8', sliceIndex: s.sliceIndex, band: s.band });
       jtcatManager.setDialFreq(s.sliceId, freqKhz * 1000, s.band);
+      _jtcatSliceExchangeBand.set(s.sliceId, jtcatSliceExchangeBand(s)); // #1060: one band key for notes and replies
       // Wire decode enrichment for this slice
       engine.on('decode', (data) => {
         if (data.results) {
@@ -59103,9 +59202,11 @@ function cloudShackNotice(text, kind) {
           const wlStr = (settings.watchlist || '').toUpperCase();
           const wlCalls = wlStr ? wlStr.split(',').map(w => w.trim().split(':')[0]).filter(Boolean) : [];
           const chaseCtx = buildChaseContext();
+          const exchMyCall = onAirCall();
           for (const r of data.results) {
             r.sliceId = s.sliceId;
             r.band = currentBand || s.band || '';
+            jtcatExchangeHistory.noteHeard(r.text, exchMyCall, jtcatSliceExchangeBand(s), data.mode || s.mode || 'FT8'); // #1060
             const { dxCall } = extractCallsigns(r.text || '');
             if (!dxCall) continue;
             const uc = dxCall.toUpperCase();
@@ -59286,7 +59387,7 @@ function cloudShackNotice(text, kind) {
         // Per-TX try stamp — same contract as the single-slice tx-start
         // handler; jtcatHandleRetryStall counts one try per stamped TX.
         engine._lastTxPeriodKey = jtcatPeriodUtc(engine._mode || 'FT8');
-        jtcatNoteTxSent(data.message);
+        jtcatNoteTxSent(data.message, { band: jtcatSliceExchangeBand(s), mode: engine._mode || 'FT8' });
         jtcatNoteTxSlot(data.slot);
         rigPresetFlushPending();
         console.log(`[JTCAT Multi] TX start on ${s.sliceId}/${s.band} — PTT on, message: ${data.message}, ${catState}`);
