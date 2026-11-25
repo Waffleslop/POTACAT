@@ -124,7 +124,8 @@ test('a remote owner gets the same timer', () => {
 });
 
 // ── the real main.js glue against a fake clock ─────────────────────────────
-function harness(settings) {
+function harness(settings, opts) {
+  const o = opts || {};
   const calls = [];
   const sent = [];
   const ctx = {
@@ -141,14 +142,24 @@ function harness(settings) {
     jtcatBuildCqQso: async () => { calls.push(['newCQ']); return { phase: 'cq', txMsg: 'CQ K3SBP FN20' }; },
     remoteJtcatBroadcastQso: () => {}, popoutBroadcastQso: () => {},
     jtcatFullAutoCqUnanswered: 0, jtcatFullAutoCqPaused: false, jtcatFullAutoCqLastActivity: 0,
+    // the Hunt-to-Run fallback start and the real setJtcatHuntMode's neighbours
+    jtcatHuntQuietPeriods: 0, JTCAT_HUNT_FALLBACK_PERIODS: 4,
+    startFullAutoCq: async (owner, mod, so) => { calls.push(['startRun', owner, !!(so && so.auto)]); ctx.jtcatFullAutoCq = true; return true; },
+    broadcastAutoCqState: () => {}, _jtcatSpottedHuntLogged: new Set(), jtcatAutoCqWorkedSession: new Set(),
+    jtcatModeHopEnabled: () => false,
   };
-  const fns = ['jtcatSessionLimitStart', 'jtcatSessionLimitPush', 'jtcatSessionLimitTick', 'jtcatSessionLimitStop', 'rearmCq']
-    .map((n) => extract(MAIN, (n === 'rearmCq' ? 'async ' : '') + 'function ' + n + '(')).join('\n');
+  const names = ['jtcatSessionLimitStart', 'jtcatSessionLimitPush', 'jtcatSessionLimitTick', 'jtcatSessionLimitStop',
+    'jtcatSessionLimitBlocksTx', 'jtcatSessionLimitClear', 'rearmCq', 'jtcatHuntFallbackStart'];
+  if (o.realHunt) { names.push('setJtcatHuntMode'); delete ctx.setJtcatHuntMode; }
+  const isAsync = (n) => n === 'rearmCq' || n === 'jtcatHuntFallbackStart';
+  const fns = names.map((n) => extract(MAIN, (isAsync(n) ? 'async ' : '') + 'function ' + n + '(')).join('\n');
   const src = `const Date = { now: () => clock };
 var _jtcatSessionLimit = JtcatSessionLimit.createState(); var _jtcatSessionLimitNotice = '';
 ${fns}
 _st = _jtcatSessionLimit;
-api = { start: jtcatSessionLimitStart, tick: jtcatSessionLimitTick, rearmCq };`;
+api = { start: jtcatSessionLimitStart, tick: jtcatSessionLimitTick, rearmCq, blocksTx: jtcatSessionLimitBlocksTx,
+  clearAll: jtcatSessionLimitClear, fallbackStart: jtcatHuntFallbackStart,
+  huntMode: (typeof setJtcatHuntMode === 'function' ? setJtcatHuntMode : null) };`;
   vm.createContext(ctx);
   vm.runInContext(src, ctx);
   return { ctx, calls, sent, ...ctx.api, last: () => sent.filter((x) => x[0] === 'jtcat-session-limit').pop() };
@@ -252,6 +263,144 @@ test('main: a manual stop clears it; nothing is stopped later', () => {
   assert.strictEqual(h.last()[1].text, '');
 });
 
+test('lib: unticking mid-session ends the timer; new minutes move the deadline from the start', () => {
+  const st = SL.start(SL.createState(), { kind: 'run', owner: 'popout', now: 0, settings: ON(60) });
+  SL.applySettings(st, ON(30));
+  assert.strictEqual(st.deadline, 30 * MIN);
+  assert.strictEqual(SL.statusText(st, 10 * MIN), 'Run: 20 min left');
+  SL.applySettings(st, { jtcatSessionLimitOn: false, jtcatSessionLimitMin: 30 });
+  assert.strictEqual(SL.isArmed(st), false);
+  const off = SL.createState();
+  SL.applySettings(off, ON(30));
+  assert.strictEqual(SL.isArmed(off), false, 'ticking it on mid-session waits for the next start');
+});
+
+test("lib: blocksTx only stops Run's own CQ with no partner, after the deadline", () => {
+  const st = SL.start(SL.createState(), { kind: 'run', owner: 'popout', now: 0, settings: ON(5) });
+  const cq = { call: null, phase: 'cq' };
+  assert.strictEqual(SL.blocksTx(st, { now: 5 * MIN - 1, settings: ON(5), runOn: true, qso: cq }), false, 'before the deadline');
+  assert.strictEqual(SL.blocksTx(st, { now: 5 * MIN, settings: ON(5), runOn: true, qso: cq }), true, 'the repeating CQ after it');
+  assert.strictEqual(SL.blocksTx(st, { now: 5 * MIN, settings: ON(5), runOn: true, qso: { call: 'W1ABC', phase: 'cq-rr73' } }), false, 'a contact finishes');
+  assert.strictEqual(SL.blocksTx(st, { now: 5 * MIN, settings: ON(5), runOn: false, qso: { call: 'W1ABC', phase: '73' } }), false, "Hunt's contact finishes");
+  assert.strictEqual(SL.blocksTx(st, { now: 5 * MIN, settings: {}, runOn: true, qso: cq }), false, 'unticked: no limit');
+});
+
+test("main: tx-start after the deadline does not key Run's repeating CQ (desktop and phone owner)", () => {
+  const h = harness(ON(5));
+  h.ctx.jtcatFullAutoCq = true; h.ctx.jtcatFullAutoCqOwner = 'popout';
+  h.start('run', 'popout');
+  h.ctx.popoutJtcatQso = { call: null, phase: 'cq' };
+  h.ctx.clock = 4.9 * MIN; h.tick(); // the last decode before the deadline: nothing to do
+  assert.ok(!h.calls.some((c) => c[0] === 'stopRun'));
+  assert.strictEqual(h.blocksTx(), false);
+  h.ctx.clock = 5.05 * MIN; // the next slot, before the next decode
+  assert.strictEqual(h.blocksTx(), true, 'the CQ is refused at key-down');
+  const remote = harness(ON(5));
+  remote.ctx.jtcatFullAutoCq = true; remote.ctx.jtcatFullAutoCqOwner = 'remote';
+  remote.start('run', 'remote');
+  remote.ctx.remoteJtcatQso = { call: 'K1XYZ', phase: 'cq-report' };
+  remote.ctx.clock = 6 * MIN;
+  assert.strictEqual(remote.blocksTx(), false, 'a phone Run contact in progress still keys');
+  remote.ctx.remoteJtcatQso = { call: null, phase: 'cq' };
+  assert.strictEqual(remote.blocksTx(), true);
+});
+
+test('main: the Hunt-to-Run fallback calls no CQ after the deadline', async () => {
+  const h = harness(ON(5));
+  h.ctx.jtcatAutoCqMode = 'all'; h.ctx.jtcatAutoCqOwner = 'popout';
+  h.start('hunt', 'popout');
+  h.ctx.clock = 4 * MIN;
+  await h.fallbackStart();
+  assert.ok(h.calls.some((c) => c[0] === 'startRun' && c[2] === true), 'before the deadline the fallback starts');
+  const h2 = harness(ON(5));
+  h2.ctx.jtcatAutoCqMode = 'all'; h2.ctx.jtcatAutoCqOwner = 'popout';
+  h2.start('hunt', 'popout');
+  h2.ctx.clock = 5 * MIN;
+  await h2.fallbackStart();
+  assert.ok(!h2.calls.some((c) => c[0] === 'startRun'), 'no fallback CQ after it');
+  assert.ok(h2.calls.some((c) => c[0] === 'hunt' && c[1] === 'off'), 'Hunt stops instead');
+});
+
+test('main: unticking mid-session ends the limit at the next check; new minutes apply at once', () => {
+  const h = harness(ON(60));
+  h.ctx.jtcatFullAutoCq = true;
+  h.start('run', 'popout');
+  h.ctx.settings.jtcatSessionLimitMin = 20;
+  h.ctx.clock = 5 * MIN; h.tick();
+  assert.strictEqual(h.last()[1].text, 'Run: 15 min left');
+  h.ctx.settings.jtcatSessionLimitOn = false;
+  h.ctx.clock = 6 * MIN; h.tick();
+  assert.strictEqual(h.last()[1].text, '', 'the countdown goes away');
+  h.ctx.clock = 500 * MIN; h.tick();
+  assert.ok(!h.calls.some((c) => c[0] === 'stopRun'), 'and nothing stops');
+});
+
+test("main: a Hunt pick while the operator's Run is on keeps the Run timer, and Hunt Off leaves it", () => {
+  const h = harness(ON(60), { realHunt: true });
+  h.ctx.jtcatFullAutoCq = true; h.ctx.jtcatFullAutoCqOwner = 'popout';
+  h.start('run', 'popout');
+  h.ctx.clock = 20 * MIN;
+  h.huntMode('pota', 'popout');
+  assert.strictEqual(h.ctx._st.kind, 'run');
+  assert.strictEqual(h.ctx._st.deadline, 60 * MIN, 'not replaced');
+  h.huntMode('off', 'popout');
+  assert.strictEqual(h.ctx._st.kind, 'run', 'Hunt Off does not clear the Run timer');
+  const g = harness(ON(30), { realHunt: true });
+  g.ctx.clock = 3 * MIN;
+  g.huntMode('all', 'popout');
+  assert.strictEqual(g.ctx._st.kind, 'hunt', 'Hunt from off, Run off: a Hunt timer');
+  assert.strictEqual(g.ctx._st.deadline, 33 * MIN);
+  g.ctx.clock = 4 * MIN;
+  g.huntMode('pota', 'popout');
+  assert.strictEqual(g.ctx._st.deadline, 33 * MIN, 'another target is the same session');
+  g.huntMode('off', 'popout');
+  assert.strictEqual(SL.isArmed(g.ctx._st), false, 'Hunt Off clears a Hunt timer');
+});
+
+test('main: stopping the engine clears the timer and the countdown', () => {
+  const h = harness(ON(60));
+  h.ctx.jtcatFullAutoCq = true;
+  h.start('run', 'popout');
+  h.clearAll();
+  assert.strictEqual(SL.isArmed(h.ctx._st), false);
+  assert.strictEqual(h.last()[1].text, '');
+});
+
+test("wiring: both tx-start dispatches refuse Run's CQ after the deadline, after the watchdog and before PTT and the try stamp", () => {
+  const single = MAIN.indexOf("jtcatRefuseTx('the Run time limit ran out');");
+  assert.ok(single > 0);
+  assert.ok(/jtcatRefuseTx\('the Run time limit ran out'\);\n\s*jtcatSessionLimitStop\(\);\n\s*return;/.test(MAIN));
+  assert.ok(MAIN.lastIndexOf('jtcatTxWatchdogStop();', single) > single - 600, 'right after the watchdog guard');
+  const acq = MAIN.indexOf("acquireRadio('jtcat');", single);
+  const stamp = MAIN.indexOf('ft8Engine._lastTxPeriodKey = jtcatPeriodUtc(modeForTx);', single);
+  assert.ok(acq > single && acq - single < 200 && stamp > acq, 'before the radio is taken, every audio route and the try stamp');
+  const multi = MAIN.indexOf('if (jtcatSessionLimitBlocksTx()) { // same as the single-slice tx-start');
+  assert.ok(multi > 0);
+  assert.ok(/engine\._txEnabled = false;[\s\S]*engine\.txComplete\(\);[\s\S]*jtcatSessionLimitStop\(\);\n\s*return;/.test(MAIN.slice(multi, multi + 260)));
+  const mStamp = MAIN.indexOf("engine._lastTxPeriodKey = jtcatPeriodUtc(engine._mode || 'FT8');", multi);
+  assert.ok(mStamp > multi && mStamp - multi < 1500, 'before the multi-slice try stamp and PTT');
+  assert.strictEqual((MAIN.match(/if \(jtcatSessionLimitBlocksTx\(\)\)/g) || []).length, 2, 'both dispatches, nowhere else');
+});
+
+test('wiring: the Hunt-to-Run fallback asks the deadline before startFullAutoCq', () => {
+  const fb = extract(MAIN, 'async function jtcatHuntFallbackStart(');
+  const chk = fb.indexOf('if (!JtcatSessionLimit.mayStartNew(_jtcatSessionLimit, Date.now())) { jtcatSessionLimitStop(); return; }');
+  assert.ok(chk > 0 && chk < fb.indexOf('startFullAutoCq('));
+});
+
+test('wiring: the engine stopping clears the timer (startJtcat and jtcat-start-multi run stopJtcat first)', () => {
+  assert.ok(/jtcatSessionLimitClear\(\);/.test(extract(MAIN, 'function stopJtcat(')));
+  const sj = extract(MAIN, 'function startJtcat(');
+  assert.ok(sj.indexOf('stopJtcat();') >= 0 && sj.indexOf('stopJtcat();') < sj.indexOf("jtcatAutoCqMode = 'off';"));
+  const at = MAIN.indexOf("ipcMain.on('jtcat-start-multi'");
+  const multi = MAIN.slice(at, at + 800);
+  assert.ok(multi.indexOf('stopJtcat();') > 0 && multi.indexOf('stopJtcat();') < multi.indexOf("jtcatAutoCqMode = 'off';"));
+});
+
+test('wiring: the tick re-reads the settings every decode period', () => {
+  assert.ok(/JtcatSessionLimit\.applySettings\(_jtcatSessionLimit, settings\);/.test(extract(MAIN, 'function jtcatSessionLimitTick(')));
+});
+
 // ── wiring ─────────────────────────────────────────────────────────────────
 test('wiring: Run starts it (not the Hunt fallback), every Run stop clears a Run timer', () => {
   assert.ok(/const JtcatSessionLimit = require\('\.\/lib\/jtcat-session-limit'\);/.test(MAIN));
@@ -263,8 +412,10 @@ test('wiring: Run starts it (not the Hunt fallback), every Run stop clears a Run
 test('wiring: Hunt starts it from off, keeps it on a target change, clears it on off', () => {
   const body = extract(MAIN, 'function setJtcatHuntMode(');
   assert.ok(/const wasHunting = jtcatAutoCqMode !== 'off' \|\| !!jtcatHuntFallbackMode;/.test(body));
-  assert.ok(/if \(m === 'off'\) JtcatSessionLimit\.noteStop\(_jtcatSessionLimit, 'hunt'\);\n\s*else if \(!wasHunting\) jtcatSessionLimitStart\('hunt', owner\);/.test(body));
+  assert.ok(/const runOn = jtcatFullAutoCq && !jtcatHuntFallbackMode;/.test(body), "the operator's own Run, not the fallback");
+  assert.ok(/if \(m === 'off'\) \{ if \(!runOn\) JtcatSessionLimit\.noteStop\(_jtcatSessionLimit, 'hunt'\); \}\n\s*else if \(!wasHunting && !runOn\) jtcatSessionLimitStart\('hunt', owner\);/.test(body));
   assert.ok(body.indexOf('const wasHunting') < body.indexOf('jtcatHuntFallbackMode = \'\''), 'read before the fallback is cleared');
+  assert.ok(body.indexOf('const runOn') < body.indexOf('jtcatHuntFallbackMode = \'\''), 'read before the fallback is cleared');
 });
 
 test('wiring: checked every decode cycle in both decode paths, before the Hunt-to-Run fallback', () => {
@@ -314,6 +465,9 @@ test('main: after the deadline rearmCq returns before doing anything else (no an
   const tick = MAIN.lastIndexOf('jtcatSessionLimitTick();', guard);
   assert.ok(guard > 0 && tick > 0 && guard - tick < 300, 'checked immediately before the Hunt picker');
   assert.strictEqual(MAIN.slice(tick, guard).replace(/\/\/[^\n]*\n/g, '').replace(/\s+/g, ' ').trim(), 'jtcatSessionLimitTick();', 'nothing in between');
+  const direct = MAIN.indexOf('jtcatTryAnswerDirectCaller(results, myCall, myGrid)', guard);
+  const pick = MAIN.indexOf('jtcatWorkableCallers(results, myCall, { filterMode: jtcatAutoCqMode })', guard);
+  assert.ok(direct > tick && pick > tick && direct - guard < 2000 && pick - guard < 2000, 'the direct-caller answer and the CQ pick sit after the check, inside that guard');
 });
 
 test('wiring: it only stops, through the existing stop functions', () => {

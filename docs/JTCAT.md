@@ -96,7 +96,8 @@ Departures from WSJT-X (do not "fix"):
    (WSJT-X's figure), 1-30. The ceiling is the 30-minute attended limit on Run and Hunt, which stays.
    A session timer exists too (W5XY 2026-11-25): jtcatSessionLimitOn / jtcatSessionLimitMin (lib/jtcat-session-limit.js),
    "Stop Run and Hunt after N minutes", off by default, 5-240, counted from the start of Run or Hunt whatever happens.
-   At the deadline a contact in progress finishes, then Run or Hunt stops; no new CQ or call after it. Enforced in main.
+   At the deadline a contact in progress finishes, then Run or Hunt stops; no new CQ or call after it (rearmCq, the fallback
+   start, the Hunt picker, and both tx-start dispatches for a Run CQ that repeats between decodes). Enforced in main.
 3. Field Day, CQ side: the ARRL FD sequence ends on their RR73 and we send no 73; it still logs at
    our R+exchange. The S&P side follows the rule (logs when our RR73 goes out).
 

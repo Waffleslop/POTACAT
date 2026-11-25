@@ -22629,6 +22629,8 @@ function jtcatHuntCqFallbackTick(results, mode) {
 }
 
 async function jtcatHuntFallbackStart() {
+  // No fallback CQ once "Stop Run and Hunt after N minutes" ran out.
+  if (!JtcatSessionLimit.mayStartNew(_jtcatSessionLimit, Date.now())) { jtcatSessionLimitStop(); return; }
   const mode = jtcatAutoCqMode;
   const owner = jtcatAutoCqOwner === 'remote' ? 'remote' : 'popout';
   jtcatHuntQuietPeriods = 0;
@@ -22649,6 +22651,7 @@ function setJtcatHuntMode(mode, owner) {
   _jtcatSpottedHuntLogged.clear();
   const m = mode || 'off';
   const wasHunting = jtcatAutoCqMode !== 'off' || !!jtcatHuntFallbackMode;
+  const runOn = jtcatFullAutoCq && !jtcatHuntFallbackMode; // the operator's own Run keeps its own timer
   if (jtcatHuntFallbackMode) {
     jtcatHuntFallbackMode = '';
     stopFullAutoCq('Hunt changed by operator', { quiet: true });
@@ -22681,8 +22684,8 @@ function setJtcatHuntMode(mode, owner) {
     }
   }
   // The session limit starts when Hunt goes on; another target while on is the same session.
-  if (m === 'off') JtcatSessionLimit.noteStop(_jtcatSessionLimit, 'hunt');
-  else if (!wasHunting) jtcatSessionLimitStart('hunt', owner);
+  if (m === 'off') { if (!runOn) JtcatSessionLimit.noteStop(_jtcatSessionLimit, 'hunt'); }
+  else if (!wasHunting && !runOn) jtcatSessionLimitStart('hunt', owner);
   broadcastAutoCqState();
 }
 
@@ -22815,6 +22818,7 @@ function jtcatSessionLimitPush() {
 
 function jtcatSessionLimitTick() {
   try {
+    JtcatSessionLimit.applySettings(_jtcatSessionLimit, settings); // unticked or new minutes apply at once
     const running = jtcatFullAutoCq || jtcatAutoCqMode !== 'off' || !!jtcatHuntFallbackMode;
     const busy = JtcatSessionLimit.qsoInProgress(popoutJtcatQso) || JtcatSessionLimit.qsoInProgress(remoteJtcatQso);
     const act = JtcatSessionLimit.decide(_jtcatSessionLimit, { now: Date.now(), running, qsoInProgress: busy });
@@ -22822,6 +22826,20 @@ function jtcatSessionLimitTick() {
     else if (act === 'stop') { jtcatSessionLimitStop(); return; }
     jtcatSessionLimitPush();
   } catch (e) { console.error('[JTCAT] session limit:', e); }
+}
+
+/** tx-start: Run's own CQ (no partner) after the deadline is not keyed. */
+function jtcatSessionLimitBlocksTx() {
+  try {
+    const qso = jtcatFullAutoCqOwner === 'remote' ? remoteJtcatQso : popoutJtcatQso;
+    return JtcatSessionLimit.blocksTx(_jtcatSessionLimit, { now: Date.now(), settings, runOn: jtcatFullAutoCq, qso });
+  } catch (e) { console.error('[JTCAT] session limit:', e); return false; }
+}
+
+/** The engine stopped: no session, no countdown left on screen. */
+function jtcatSessionLimitClear() {
+  JtcatSessionLimit.clear(_jtcatSessionLimit);
+  jtcatSessionLimitPush();
 }
 
 /** The time ran out and no contact is in progress: stop Run or Hunt. */
@@ -25363,6 +25381,13 @@ function startJtcat(mode) {
       jtcatTxWatchdogStop();
       return;
     }
+    // "Stop Run and Hunt after N minutes": a Run CQ repeating by itself between
+    // two decode periods is not keyed after the deadline. Before PTT and every route.
+    if (jtcatSessionLimitBlocksTx()) {
+      jtcatRefuseTx('the Run time limit ran out');
+      jtcatSessionLimitStop();
+      return;
+    }
     acquireRadio('jtcat'); // held for the duration of this transmission
     nudgePskrMapAfterTx(); // early PSKR-map pull so propagation shows this session
     const catState = cat ? `connected=${cat.connected}` : 'cat=null';
@@ -26383,6 +26408,7 @@ function stopJtcat() {
   // the phone banner (handoff amendment 5; the popout ipc's own null and the
   // remote handler's missing clear were the two halves of that bug).
   clearSpotTarget('stopped');
+  jtcatSessionLimitClear(); // Run and Hunt end with the engine (startJtcat and jtcat-start-multi reset them after this)
   if (smartSdrAudio) { try { smartSdrAudio.cancelTx(); } catch {} }
   if (settings.audioSource === 'icom-network') {
     forceReleaseIcomNetworkTx('JTCAT stop');
@@ -59180,6 +59206,12 @@ function cloudShackNotice(text, kind) {
           engine._txEnabled = false;
           if (engine._txActive) engine.txComplete();
           jtcatTxWatchdogStop();
+          return;
+        }
+        if (jtcatSessionLimitBlocksTx()) { // same as the single-slice tx-start
+          engine._txEnabled = false;
+          if (engine._txActive) engine.txComplete();
+          jtcatSessionLimitStop();
           return;
         }
         const catState = cat ? `connected=${cat.connected}` : 'cat=null';
