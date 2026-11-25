@@ -9574,151 +9574,122 @@ if (window.api && window.api.onRemoteClientDisplaced) {
   }
 })();
 
-// ─── Pair My Device dialog (unified pair entry point, v1.9) ─────────
+// ─── Pair my device (simpler pairing, 2026-11-25) ───────────────────
 //
-// Single dialog hosting both pairing methods:
-//   📱 QR — for in-person mobile pairing (5-min single-use)
-//   💻 Link — for own laptop or off-site friend (1h–30d, owned/guest)
-// Replaces the old separate "Pair my device" QR popout and "Pair my
-// laptop" link dialog. Wires to the same backend (echocatCreatePairingQr
-// for QR, pairLinkCreate for link).
+// QR first, one headline, one live state line. Main owns the code: it
+// renews itself while this dialog is open and every code is revoked when
+// it closes (main.js pairing-screen-open, lib/pairing-session.js). The
+// dialog only draws what main pushes. The link for another computer (a
+// 24-hour owned pair link) is minted only when "Copy a link for another
+// computer" is clicked, under "Trouble pairing?".
 
 let _pairLinkCurrentToken = null;
 let _pairLinkCurrentLink = null;
-let _pairDeviceQrTtlTimer = null;
-let _pairDeviceQrLastData = null;
+let _pairDeviceQrLastData = null; // the 24-hour link minted by "Copy a link for another computer"
+let _pairScreenLast = null;       // last pairing-screen-update payload from main
+let _pairScreenSeq = 0;
+
+function _pairScreenShowError(msg) {
+  const el = document.getElementById('pair-screen-error');
+  if (!el) return;
+  el.textContent = msg || '';
+  el.style.display = msg ? '' : 'none';
+}
 
 function _pairDeviceOpen() {
   const dlg = document.getElementById('pair-device-dialog');
   if (!dlg) return;
   _pairLinkCurrentToken = null;
   _pairLinkCurrentLink = null;
+  _pairScreenLast = null;
+  _pairScreenSeq = 0;
+  _pairScreenShowError('');
+  const browser = document.getElementById('pair-screen-browser');
+  if (browser) browser.style.display = 'none';
+  _pairDeviceRender();
   if (!dlg.open) dlg.showModal();
   _pairLinkRefreshList();
-  // Auto-generate a pair URL the moment the dialog opens. The QR
-  // encodes the same URL the Copy button puts on the clipboard — the
-  // user scans on a phone OR copies for a desktop/laptop. One flow.
-  _pairDeviceQrGenerate();
+  if (!window.api || !window.api.pairingScreenOpen) return;
+  window.api.pairingScreenOpen().then((r) => {
+    if (r && r.error) {
+      _pairScreenShowError(r.error);
+      const st = document.getElementById('pair-screen-state');
+      if (st) st.textContent = '';
+    }
+  }).catch((err) => _pairScreenShowError('Could not get a pairing code: ' + (err && err.message ? err.message : err)));
 }
 
-// The Pair-my-device dialog now always mints an OWNED, 24-hour, single-
-// use pair link via the same pairLinkCreate IPC the link flow used to
-// use. The QR renders the resulting URL; Copy URL puts the same string
-// on the clipboard. Guest access is the separate "Share my rig" flow.
-const _PAIR_DEVICE_TTL_MS = 24 * 60 * 60 * 1000;
-
-async function _pairDeviceQrGenerate() {
+function _pairDeviceRender() {
+  const p = _pairScreenLast;
   const svgEl = document.getElementById('pair-device-qr-svg');
-  const imgEl = document.getElementById('pair-device-qr-img');
+  const card = svgEl ? svgEl.closest('.pair-device-qr-card') : null;
   const fallback = document.getElementById('pair-device-qr-fallback');
-  const ttlEl = document.getElementById('pair-device-qr-ttl');
+  const stateEl = document.getElementById('pair-screen-state');
+  const legacy = document.getElementById('pair-screen-legacy');
+  const phase = p && p.state ? p.state.phase : 'waiting';
+  if (stateEl) {
+    stateEl.textContent = p ? p.line : 'Getting a code ready.';
+    stateEl.dataset.phase = phase;
+  }
+  // Connected: the code has done its job; the window closes by itself.
+  if (card) card.style.display = phase === 'connected' ? 'none' : '';
+  const svg = p ? ((legacy && legacy.checked) ? p.legacyQrSvg : p.qrSvg) : '';
+  if (svgEl) {
+    if (svg) { svgEl.innerHTML = svg; svgEl.style.display = ''; }
+    else { svgEl.innerHTML = ''; svgEl.style.display = 'none'; }
+  }
+  if (fallback) fallback.style.display = (p && !svg) ? '' : 'none';
+  const setVal = (id, v) => { const el = document.getElementById(id); if (el) el.value = v || ''; };
+  setVal('pair-manual-host', p && p.host);
+  setVal('pair-manual-token', p && p.token);
+  setVal('pair-manual-fp', p && p.fingerprint);
+  const urlEl = document.getElementById('pair-screen-browser-url');
+  const textEl = document.getElementById('pair-screen-browser-text');
+  const copyEl = document.getElementById('pair-screen-browser-copy');
+  if (urlEl) urlEl.textContent = (p && p.webUrl) || '';
+  if (textEl) textEl.textContent = (p && p.webHint) || '';
+  if (copyEl) copyEl.style.display = (p && p.webUrl) ? '' : 'none';
+}
+
+if (window.api && window.api.onPairingScreenUpdate) {
+  window.api.onPairingScreenUpdate((payload) => {
+    if (!payload || (payload.seq && payload.seq < _pairScreenSeq)) return; // an older render finished late
+    _pairScreenSeq = payload.seq || _pairScreenSeq;
+    _pairScreenLast = payload;
+    _pairDeviceRender();
+  });
+}
+if (window.api && window.api.onPairingScreenDone) {
+  window.api.onPairingScreenDone(() => {
+    const dlg = document.getElementById('pair-device-dialog');
+    if (dlg && dlg.open) dlg.close();
+  });
+}
+
+// "Copy a link for another computer": an OWNED, 24-hour, single-use pair
+// link (pairLinkCreate), minted on the click. The previous one this dialog
+// minted is revoked so the list does not grow one row per click.
+async function _pairDeviceCopyComputerLink(btn) {
   const status = document.getElementById('pair-device-qr-status');
-  const regen = document.getElementById('pair-device-qr-regen');
-  const copyBtn = document.getElementById('pair-device-qr-copy-url');
-
-  if (_pairDeviceQrTtlTimer) { clearInterval(_pairDeviceQrTtlTimer); _pairDeviceQrTtlTimer = null; }
-  if (regen) { regen.disabled = true; regen.textContent = 'Generating…'; }
-  if (copyBtn) copyBtn.disabled = true;
   if (status) status.textContent = '';
-
-  // Revoke the previous link this dialog minted (if any) so the
-  // pending list doesn't pile up one row per Regenerate click.
+  if (btn) btn.disabled = true;
   const prevToken = _pairDeviceQrLastData && _pairDeviceQrLastData.token;
   if (prevToken) {
     try { await window.api.pairLinkRevoke(prevToken); } catch {}
     _pairDeviceQrLastData = null;
   }
-
   let r;
-  try { r = await window.api.pairLinkCreate({ ttlMs: _PAIR_DEVICE_TTL_MS, trust: 'owned' }); }
-  catch (err) {
-    if (status) status.textContent = 'Pair URL failed: ' + (err.message || err);
-    if (regen) { regen.disabled = false; regen.textContent = 'Regenerate'; }
-    return;
-  }
-  if (r && r.error) {
-    if (status) status.textContent = r.error;
-    if (regen) { regen.disabled = false; regen.textContent = 'Regenerate'; }
-    if (svgEl) svgEl.style.display = 'none';
-    if (imgEl) imgEl.style.display = 'none';
+  try { r = await window.api.pairLinkCreate({ ttlMs: 24 * 60 * 60 * 1000, trust: 'owned' }); }
+  catch (err) { r = { error: 'Could not make a link: ' + (err.message || err) }; }
+  if (btn) btn.disabled = false;
+  if (!r || r.error || !r.url) {
+    if (status) status.textContent = (r && r.error) || 'Could not make a link.';
     return;
   }
   _pairDeviceQrLastData = r;
-  if (copyBtn) copyBtn.disabled = !r.url;
-  // The link still pairs on the home network; this says why it will not
-  // connect over Tailscale (Linux: the operator rule).
-  if (status && r.certWarning) status.textContent = r.certWarning;
-
-  // Render QR. SVG first (crisp), PNG fallback, then text-only fallback.
-  let shown = false;
-  if (svgEl && r.qrSvg) {
-    try {
-      svgEl.innerHTML = r.qrSvg;
-      if (svgEl.querySelector('svg')) {
-        svgEl.style.display = '';
-        if (imgEl) imgEl.style.display = 'none';
-        if (fallback) fallback.style.display = 'none';
-        shown = true;
-      }
-    } catch {}
-  }
-  if (!shown && imgEl && r.qrDataUrl) {
-    imgEl.onerror = () => {
-      imgEl.style.display = 'none';
-      if (fallback) fallback.style.display = '';
-    };
-    imgEl.src = r.qrDataUrl;
-    imgEl.style.display = '';
-    if (svgEl) svgEl.style.display = 'none';
-    if (fallback) fallback.style.display = 'none';
-    shown = true;
-  }
-  if (!shown) {
-    if (svgEl) svgEl.style.display = 'none';
-    if (imgEl) imgEl.style.display = 'none';
-    if (fallback) fallback.style.display = '';
-  }
-  if (svgEl) svgEl.style.opacity = '1';
-  if (imgEl) imgEl.style.opacity = '1';
-
-  // TTL countdown — formatted for hours+minutes since the link lifetime
-  // is hours-to-days, not single-digit minutes like the old QR popout.
-  // Once the link expires, blank the Copy button and dim the QR.
-  if (ttlEl) ttlEl.classList.remove('expired');
-  const fmt = (ms) => {
-    if (ms <= 0) return 'expired';
-    const totalSec = Math.floor(ms / 1000);
-    const h = Math.floor(totalSec / 3600);
-    const m = Math.floor((totalSec % 3600) / 60);
-    const s = totalSec % 60;
-    if (h > 0) return h + 'h ' + String(m).padStart(2, '0') + 'm';
-    if (m > 0) return m + ':' + String(s).padStart(2, '0');
-    return s + 's';
-  };
-  const tick = () => {
-    const remaining = r.expiresAt - Date.now();
-    if (remaining <= 0) {
-      if (ttlEl) {
-        ttlEl.textContent = 'Link expired — click Regenerate.';
-        ttlEl.classList.add('expired');
-      }
-      if (svgEl) svgEl.style.opacity = '0.3';
-      if (imgEl) imgEl.style.opacity = '0.3';
-      if (copyBtn) copyBtn.disabled = true;
-      _pairDeviceQrLastData = null;
-      if (_pairDeviceQrTtlTimer) { clearInterval(_pairDeviceQrTtlTimer); _pairDeviceQrTtlTimer = null; }
-      return;
-    }
-    if (ttlEl) ttlEl.textContent = 'Link expires in ' + fmt(remaining);
-  };
-  tick();
-  _pairDeviceQrTtlTimer = setInterval(tick, 1000);
-
-  if (regen) { regen.disabled = false; regen.textContent = 'Regenerate'; }
-}
-
-function _pairDeviceTeardownQrTimers() {
-  if (_pairDeviceQrTtlTimer) { clearInterval(_pairDeviceQrTtlTimer); _pairDeviceQrTtlTimer = null; }
+  window.api.copyToClipboard(r.url);
+  if (status) status.textContent = r.certWarning || 'Copied. It works once, for 24 hours.';
+  _pairLinkRefreshList();
 }
 
 async function _pairLinkRefreshList() {
@@ -9769,13 +9740,9 @@ async function _pairLinkRevoke(token, confirmFirst) {
   if (!token) return;
   if (confirmFirst && !confirm('Revoke this pair link? Anyone holding it can no longer pair.')) return;
   try { await window.api.pairLinkRevoke(token); } catch {}
-  // If the operator revoked the link currently showing on the QR,
-  // clear our cached pointer so Copy URL stops working until a new
-  // one is generated.
+  // Forget the link "Copy a link for another computer" made, if this was it.
   if (_pairDeviceQrLastData && _pairDeviceQrLastData.token === token) {
     _pairDeviceQrLastData = null;
-    const copyBtn = document.getElementById('pair-device-qr-copy-url');
-    if (copyBtn) copyBtn.disabled = true;
   }
   _pairLinkRefreshList();
 }
@@ -9805,26 +9772,48 @@ if (window.api && window.api.onPairLinkRedeemed) {
   const closeBtn = document.getElementById('pair-device-close');
   if (closeBtn) closeBtn.addEventListener('click', () => dlg.close());
 
-  const qrRegen = document.getElementById('pair-device-qr-regen');
-  if (qrRegen) qrRegen.addEventListener('click', () => _pairDeviceQrGenerate());
-
-  const qrCopy = document.getElementById('pair-device-qr-copy-url');
-  if (qrCopy) qrCopy.addEventListener('click', () => {
-    const url = _pairDeviceQrLastData && _pairDeviceQrLastData.url;
-    if (!url) return;
-    window.api.copyToClipboard(url);
-    const prev = qrCopy.textContent;
-    qrCopy.textContent = 'Copied';
-    setTimeout(() => { qrCopy.textContent = prev; }, 1400);
+  // Closing the dialog (button, ESC, or the auto-close after Connected)
+  // tells main, which revokes every code this screen showed.
+  dlg.addEventListener('close', () => {
+    try { window.api.pairingScreenClose(); } catch {}
   });
 
-  // Stop the TTL timer when the dialog closes; otherwise it keeps
-  // ticking for nothing and the next open double-stacks timers.
-  // _pairDeviceQrLastData stays set so the live link can be reused
-  // on reopen — but the QR view itself re-renders to keep the UI
-  // consistent.
-  dlg.addEventListener('close', () => {
-    _pairDeviceTeardownQrTimers();
+  const qrCopy = document.getElementById('pair-device-qr-copy-url');
+  if (qrCopy) qrCopy.addEventListener('click', () => _pairDeviceCopyComputerLink(qrCopy));
+
+  const legacy = document.getElementById('pair-screen-legacy');
+  if (legacy) legacy.addEventListener('change', _pairDeviceRender);
+
+  dlg.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-pair-copy]');
+    if (!b) return;
+    const el = document.getElementById(b.dataset.pairCopy);
+    if (!el || !el.value) return;
+    window.api.copyToClipboard(el.value);
+    const prev = b.textContent;
+    b.textContent = 'Copied';
+    setTimeout(() => { b.textContent = prev; }, 1400);
+  });
+
+  const browserBtn = document.getElementById('pair-screen-browser-btn');
+  if (browserBtn) browserBtn.addEventListener('click', () => {
+    const box = document.getElementById('pair-screen-browser');
+    if (box) box.style.display = box.style.display === 'none' ? '' : 'none';
+  });
+  const browserCopy = document.getElementById('pair-screen-browser-copy');
+  if (browserCopy) browserCopy.addEventListener('click', () => {
+    const url = _pairScreenLast && _pairScreenLast.webUrl;
+    if (!url) return;
+    window.api.copyToClipboard(url);
+    browserCopy.textContent = 'Copied';
+    setTimeout(() => { browserCopy.textContent = 'Copy'; }, 1400);
+  });
+
+  // Share with a Friend: a Guest Pass, not a paired device (Share my rig).
+  const shareBtn = document.getElementById('pair-screen-share-btn');
+  if (shareBtn) shareBtn.addEventListener('click', () => {
+    dlg.close();
+    if (typeof _shareRigOpen === 'function') _shareRigOpen();
   });
 
   const refresh = document.getElementById('pair-link-refresh');

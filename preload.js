@@ -82,6 +82,19 @@ contextBridge.exposeInMainWorld('api', {
   pairLinkCreate: (opts) => ipcRenderer.invoke('pair-link-create', opts || {}),
   pairLinkList: () => ipcRenderer.invoke('pair-link-list'),
   pairLinkRevoke: (token) => ipcRenderer.invoke('pair-link-revoke', token),
+  // Simpler pairing: the Pair my device screen (main.js pairing-screen-open).
+  pairingScreenOpen: () => ipcRenderer.invoke('pairing-screen-open'),
+  pairingScreenClose: () => ipcRenderer.send('pairing-screen-close'),
+  onPairingScreenUpdate: (cb) => {
+    const handler = (_e, payload) => cb(payload);
+    ipcRenderer.on('pairing-screen-update', handler);
+    return () => ipcRenderer.removeListener('pairing-screen-update', handler);
+  },
+  onPairingScreenDone: (cb) => {
+    const handler = () => cb();
+    ipcRenderer.on('pairing-screen-done', handler);
+    return () => ipcRenderer.removeListener('pairing-screen-done', handler);
+  },
   onPairLinksUpdated: (cb) => {
     const handler = (_e, list) => cb(list);
     ipcRenderer.on('pair-links-updated', handler);

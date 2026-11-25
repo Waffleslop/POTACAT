@@ -566,6 +566,8 @@ const JtcatSnrFloor = require('./lib/jtcat-snr-floor');
 const JtcatCallingTime = require('./lib/jtcat-calling-time');
 const OriginHealth = require('./lib/origin-health');
 const RemoteAccess = require('./lib/remote-access'); // ECHOCAT access: off | cloud | lan (the door itself)
+const PairingSessionLib = require('./lib/pairing-session'); // simpler pairing: the code that renews itself
+const PairingScreen = require('./lib/pairing-screen'); // simpler pairing: the https link, best web address, state line
 const { planImport, findDuplicateGroups } = require('./lib/qso-match');
 const { SmartSdrClient, setColorblindMode: setSmartSdrColorblind, sliceFilterEdges } = require('./lib/smartsdr');
 const { SmartSdrAudio } = require('./lib/smartsdr-audio');
@@ -1751,6 +1753,14 @@ let spotsPopoutWin = null; // pop-out spots window (activator mode)
 let clusterPopoutWin = null; // pop-out DX cluster terminal window
 let propPopoutWin = null;    // pop-out propagation map window
 let pairPopoutWin = null;    // pop-out ECHOCAT pairing QR window
+let _pairScreen = null;      // the open "Pair my device" screen (simpler pairing), see pairing-screen-open
+// What the mDNS advert says for simpler pairing (lib/pairing-session.js advertTxtExtras).
+function _pairScreenAdvertState() {
+  return {
+    pairingOpen: !!_pairScreen,
+    cloudDeviceId: settings && settings.cloudAccessToken ? (settings.cloudDeviceId || '') : '',
+  };
+}
 let pairRequestPopoutWin = null; // tap-to-pair Approve/Deny popout
 let vfoPopoutWin = null;     // pop-out VFO window
 let _lastVfoTunedSpot = null; // the last activator card sent to the VFO window
@@ -31518,6 +31528,8 @@ function connectRemote() {
   // Tap-to-pair toggle. Default on; operator can flip off in
   // Settings → ECHOCAT if they share their LAN with strangers.
   try { remoteServer.setAllowPairRequests(settings.allowPairRequests !== false); } catch {}
+  // mDNS: pair=1 while the pairing screen is open; sid = derived Cloud id.
+  try { remoteServer.setAdvertState(_pairScreenAdvertState()); } catch {}
   // More than one of the owner's devices at a time (default off for one release).
   try { remoteServer.setMultiClient(settings.echocatMultiClient === true); } catch {}
   // When the server adds or revokes a device, persist the new list.
@@ -48446,7 +48458,7 @@ function cloudShackNotice(text, kind) {
       minWidth: 360, minHeight: 420, // never smaller than its own controls (N0KAH 2026-10-24)
       width: 500,
       height: 600,
-      title: 'POTACAT — Pair Mobile App',
+      title: 'POTACAT — Pair ECHOCAT',
       backgroundColor: getThemeWindowBg(),
       show: false,
       resizable: true,
@@ -48493,9 +48505,9 @@ function cloudShackNotice(text, kind) {
     }
     const isMac = process.platform === 'darwin';
     pairRequestPopoutWin = new BrowserWindow({
-      minWidth: 340, minHeight: 260, // never smaller than its own controls (N0KAH 2026-10-24)
+      minWidth: 340, minHeight: 540, // room for the six-digit number; never smaller than its own controls (N0KAH 2026-10-24)
       width: 420,
-      height: 440,
+      height: 580,
       title: 'POTACAT — Pair request',
       show: false,
       backgroundColor: getThemeWindowBg(),
@@ -48509,7 +48521,7 @@ function cloudShackNotice(text, kind) {
         nodeIntegration: false,
       },
     });
-    rememberWindowPlace(pairRequestPopoutWin, 'pairRequestPopoutBounds', { minWidth: 340, minHeight: 260 });
+    rememberWindowPlace(pairRequestPopoutWin, 'pairRequestPopoutBounds', { minWidth: 340, minHeight: 540 });
     pairRequestPopoutWin.setMenuBarVisibility(false);
     pairRequestPopoutWin.loadFile(path.join(__dirname, 'renderer', 'pair-request-popout.html'), { query: themeQuery() });
     pairRequestPopoutWin.once('ready-to-show', () => {
@@ -54955,6 +54967,58 @@ function cloudShackNotice(text, kind) {
       sendCatLog('[Pair QR] FAILED — createPairingToken returned empty.');
       return { error: 'Pairing token came back empty. ECHOCAT may not be fully started yet — wait a moment and tap Regenerate.' };
     }
+    const { qrParamsObj, fingerprint, wsUrl, hostname, cloudHost, tsHost, tsIp, effectiveMode } = _pairQrParamsFor(pairingToken, opts);
+    const qrParams = new URLSearchParams(qrParamsObj);
+    const qrText = `potacat://pair?${qrParams.toString()}`;
+    // Generate BOTH formats best-effort. The QR is a convenience: the
+    // pairing data (qrText / pairingToken / fingerprint / host) is the
+    // source of truth and is ALWAYS returned, even if both QR rendering
+    // paths fail on this platform. KD2TJU on Linux Mint 22.3 hit a case
+    // where qrcode's PNG output was an unreadable payload AND the SVG
+    // path also failed — the renderer was emptying the manual fields
+    // on the resulting error and leaving the user with no path to pair.
+    // Now we surface a non-fatal `qrError` instead so the UI can still
+    // populate the fields.
+    let svg = '';
+    let dataUrl = '';
+    let qrError = '';
+    try {
+      svg = await qrcode.toString(qrText, { type: 'svg', errorCorrectionLevel: 'M', margin: 2 });
+    } catch (err) {
+      console.error('[Echo CAT] QR SVG generation failed:', err.message);
+      sendCatLog('[Pair QR] SVG render failed: ' + err.message);
+      qrError = err.message;
+    }
+    try {
+      dataUrl = await qrcode.toDataURL(qrText, { errorCorrectionLevel: 'M', width: 320, margin: 2 });
+    } catch (err) {
+      console.error('[Echo CAT] QR PNG generation failed:', err.message);
+      sendCatLog('[Pair QR] PNG render failed: ' + err.message);
+      if (!qrError) qrError = err.message;
+    }
+    // Every leg the QR carries: a phone pairing away from the LAN can only
+    // use what is listed here, so a bug report shows what it had.
+    sendCatLog(`[Pair QR] OK — mode=${effectiveMode} lan=${effectiveMode === 'cloud' ? 'none' : wsUrl} tailscale=${tsHost || tsIp ? [tsHost, tsIp].filter(Boolean).join(' / ') : 'none'} cloud=${cloudHost || 'none'} fp=${fingerprint ? fingerprint.slice(0, 16) + '…' : 'none'} svg=${svg ? 'yes' : 'no'} png=${dataUrl ? 'yes' : 'no'}${qrError && !(svg || dataUrl) ? ' qrError=' + qrError : ''}`);
+    return {
+      qrText,
+      dataUrl,
+      svg,
+      qrError: (svg || dataUrl) ? '' : qrError, // only surface when BOTH formats failed
+      pairingToken,
+      fingerprint,
+      host: wsUrl,
+      cloudHost,
+      hostname,
+      ttlSeconds: tokenTtlMs ? Math.floor(tokenTtlMs / 1000) : 5 * 60,
+      shareMode: !!opts.share,
+      warn: softWarn || '',
+    };
+  });
+
+  // The potacat://pair parameters for one pairing token: host, fingerprint,
+  // name and the Tailscale / Cloud legs. Shared by the older QR window and
+  // the simpler-pairing screen (lib/pairing-screen.js builds the link).
+  function _pairQrParamsFor(pairingToken, opts = {}) {
     let fingerprint = '';
     try {
       if (remoteServer._tlsCertPem) {
@@ -55038,51 +55102,148 @@ function cloudShackNotice(text, kind) {
     // Tailscale-issued LE cert that validates publicly (dial tsHost with
     // standard TLS, no pin). Absent = self-signed or unknown → pin `fp`.
     if (altHosts.tsCertPublic) qrParamsObj.tsCertPublic = '1';
-    const qrParams = new URLSearchParams(qrParamsObj);
-    const qrText = `potacat://pair?${qrParams.toString()}`;
-    // Generate BOTH formats best-effort. The QR is a convenience: the
-    // pairing data (qrText / pairingToken / fingerprint / host) is the
-    // source of truth and is ALWAYS returned, even if both QR rendering
-    // paths fail on this platform. KD2TJU on Linux Mint 22.3 hit a case
-    // where qrcode's PNG output was an unreadable payload AND the SVG
-    // path also failed — the renderer was emptying the manual fields
-    // on the resulting error and leaving the user with no path to pair.
-    // Now we surface a non-fatal `qrError` instead so the UI can still
-    // populate the fields.
-    let svg = '';
-    let dataUrl = '';
-    let qrError = '';
+    return { qrParamsObj, fingerprint, wsUrl, hostname, cloudHost, tsHost, tsIp, effectiveMode };
+  }
+
+  // ─── Simpler pairing: the "Pair my device" screen (2026-11-25) ─────────
+  // lib/pairing-session.js keeps one fresh single-use code on screen and
+  // revokes every code when the screen closes; lib/pairing-screen.js builds
+  // the https link and the state line. This block only wires them to the
+  // ECHOCAT server and the main window. The older potacat:// QR window
+  // (echocat-create-pairing-qr) is untouched.
+  function _pairScreenBestWeb() {
+    const t = cloudTunnel ? cloudTunnel.getState() : null;
+    const access = RemoteAccess.normalizeRemoteAccess(settings).access;
+    const originOk = !(t && t.origin) || t.origin.state === 'ok';
+    let lan = [];
+    try { lan = RemoteServer.getLocalIPs().filter((ip) => !ip.tailscale).map((ip) => ip.address); } catch {}
+    return PairingScreen.bestWeb({
+      access,
+      cloudUrl: (t && t.status === 'live' && t.cloudHost && originOk) ? 'https://' + t.cloudHost : '',
+      addresses: access === 'cloud' ? [] : lan,
+      port: (remoteServer && remoteServer._port) || 7300,
+    });
+  }
+
+  function _pairScreenFingerprint() {
     try {
-      svg = await qrcode.toString(qrText, { type: 'svg', errorCorrectionLevel: 'M', margin: 2 });
-    } catch (err) {
-      console.error('[Echo CAT] QR SVG generation failed:', err.message);
-      sendCatLog('[Pair QR] SVG render failed: ' + err.message);
-      qrError = err.message;
+      if (remoteServer && remoteServer._tlsCertPem) {
+        return new (require('crypto').X509Certificate)(remoteServer._tlsCertPem).fingerprint256 || '';
+      }
+    } catch {}
+    return '';
+  }
+
+  async function _pairScreenPush() {
+    const ps = _pairScreen;
+    if (!ps || !ps.sender || ps.sender.isDestroyed()) return;
+    const seq = ++ps.seq;
+    const web = _pairScreenBestWeb();
+    const webUrl = web.url;
+    const payload = { seq, state: ps.state, line: PairingScreen.stateLine(ps.state), webUrl, webKind: web.kind, webHint: PairingScreen.browserHint(web.kind) };
+    const cur = ps.session.current();
+    if (cur && remoteServer) {
+      const p = _pairQrParamsFor(cur.token, {});
+      const link = PairingScreen.buildPairLink(p.qrParamsObj, { web: webUrl });
+      const legacy = PairingScreen.buildLegacyPairUri(p.qrParamsObj);
+      const qrcode = require('qrcode');
+      let qrSvg = '';
+      let legacyQrSvg = '';
+      try { qrSvg = await qrcode.toString(link, { type: 'svg', errorCorrectionLevel: 'M', margin: 2 }); } catch (err) { sendCatLog('[Pair screen] QR render failed: ' + err.message); }
+      try { legacyQrSvg = await qrcode.toString(legacy, { type: 'svg', errorCorrectionLevel: 'M', margin: 2 }); } catch {}
+      Object.assign(payload, { link, legacy, qrSvg, legacyQrSvg, host: p.wsUrl, token: cur.token, fingerprint: p.fingerprint });
     }
-    try {
-      dataUrl = await qrcode.toDataURL(qrText, { errorCorrectionLevel: 'M', width: 320, margin: 2 });
-    } catch (err) {
-      console.error('[Echo CAT] QR PNG generation failed:', err.message);
-      sendCatLog('[Pair QR] PNG render failed: ' + err.message);
-      if (!qrError) qrError = err.message;
+    if (_pairScreen !== ps || ps.sender.isDestroyed()) return; // closed meanwhile
+    ps.sender.send('pairing-screen-update', payload);
+  }
+
+  function _pairScreenSetState(ev) {
+    const ps = _pairScreen;
+    if (!ps) return;
+    const next = PairingScreen.nextState(ps.state, ev);
+    if (next === ps.state) return;
+    ps.state = next;
+    _pairScreenPush();
+    if (next.phase === 'connected' && !ps.closeTimer) {
+      sendCatLog('[Pair screen] connected: ' + next.name);
+      ps.closeTimer = setTimeout(() => {
+        if (_pairScreen === ps && !ps.sender.isDestroyed()) ps.sender.send('pairing-screen-done');
+      }, PairingScreen.CLOSE_AFTER_CONNECT_MS);
     }
-    // Every leg the QR carries: a phone pairing away from the LAN can only
-    // use what is listed here, so a bug report shows what it had.
-    sendCatLog(`[Pair QR] OK — mode=${effectiveMode} lan=${effectiveMode === 'cloud' ? 'none' : wsUrl} tailscale=${tsHost || tsIp ? [tsHost, tsIp].filter(Boolean).join(' / ') : 'none'} cloud=${cloudHost || 'none'} fp=${fingerprint ? fingerprint.slice(0, 16) + '…' : 'none'} svg=${svg ? 'yes' : 'no'} png=${dataUrl ? 'yes' : 'no'}${qrError && !(svg || dataUrl) ? ' qrError=' + qrError : ''}`);
-    return {
-      qrText,
-      dataUrl,
-      svg,
-      qrError: (svg || dataUrl) ? '' : qrError, // only surface when BOTH formats failed
-      pairingToken,
-      fingerprint,
-      host: wsUrl,
-      cloudHost,
-      hostname,
-      ttlSeconds: tokenTtlMs ? Math.floor(tokenTtlMs / 1000) : 5 * 60,
-      shareMode: !!opts.share,
-      warn: softWarn || '',
-    };
+  }
+
+  function _pairScreenClose(why) {
+    const ps = _pairScreen;
+    if (!ps) return;
+    _pairScreen = null;
+    ps.session.stop(); // every code this screen showed is revoked here
+    clearInterval(ps.watch);
+    clearTimeout(ps.closeTimer);
+    try { if (remoteServer) remoteServer.setAdvertState(_pairScreenAdvertState()); } catch {}
+    sendCatLog('[Pair screen] closed (' + why + '); its codes are revoked');
+  }
+
+  ipcMain.handle('pairing-screen-open', async (e) => {
+    _pairScreenClose('reopened');
+    if (!remoteServer || !remoteServer.running) {
+      return { error: 'ECHOCAT is not running. Choose who can reach this computer under Settings > ECHOCAT first.' };
+    }
+    // Same preparation as the older QR: a Tailscale certificate if one is
+    // due, and the current Tailscale / Cloud hosts.
+    try { await ensureTailscaleCertReady((msg) => sendCatLog('[Pair screen] ' + msg)); } catch {}
+    try { await _refreshAltHosts(); } catch {}
+    if (!remoteServer || !remoteServer.running) return { error: 'ECHOCAT restarted. Close this window and open it again.' };
+    const sender = e.sender;
+    const session = new PairingSessionLib.PairingSession({
+      // Owner's own phone: a trusted device, as the 24-hour owned link was.
+      mint: (ttlMs) => remoteServer.createPairingToken({ ttlMs, trusted: true }),
+      revoke: (token) => { try { if (remoteServer) remoteServer.revokePairingToken(token); } catch {} },
+      onRotate: ({ reason }) => { if (reason !== 'renew') sendCatLog('[Pair screen] new code (' + reason + ')'); _pairScreenPush(); },
+    });
+    const ps = { session, sender, state: PairingScreen.initialState(), seq: 0, watch: null, closeTimer: null };
+    _pairScreen = ps;
+    session.start(_pairScreenFingerprint());
+    // A certificate change or an ECHOCAT restart makes the code on screen
+    // dead; replace it within seconds, never leave it up.
+    ps.watch = setInterval(() => {
+      if (_pairScreen !== ps || !remoteServer) return;
+      if (session.noteFingerprint(_pairScreenFingerprint())) return;
+      const cur = session.current();
+      if (cur && !remoteServer.hasPairingToken(cur.token)) session.rotate('server');
+    }, 5000);
+    // The window going away or reloading closes the screen too: no code
+    // (and no pair=1 advert) may outlive the dialog that showed it.
+    sender.once('destroyed', () => { if (_pairScreen === ps) _pairScreenClose('window gone'); });
+    sender.once('did-navigate', () => { if (_pairScreen === ps) _pairScreenClose('window reloaded'); }); // main frame only; iframes do not fire it
+    sender.once('render-process-gone', () => { if (_pairScreen === ps) _pairScreenClose('window crashed'); });
+    try { remoteServer.setAdvertState(_pairScreenAdvertState()); } catch {}
+    sendCatLog('[Pair screen] open; code renews every ' + Math.round(session.rotateMs / 1000) + ' s');
+    return { ok: true, allowTapToPair: settings.allowPairRequests !== false };
+  });
+
+  ipcMain.on('pairing-screen-close', () => _pairScreenClose('closed'));
+
+  onRemoteServer((rs) => {
+    rs.on('pairing-token-redeemed', ({ token, deviceId, name }) => {
+      const ps = _pairScreen;
+      if (!ps || !ps.session.owns(token)) return;
+      ps.session.noteRedeemed(token, deviceId); // replaced at once
+      _pairScreenSetState({ type: 'paired', deviceId, name });
+    });
+    rs.on('pair-request', (req) => {
+      if (_pairScreen) _pairScreenSetState({ type: 'request', name: req.deviceName, code: req.code });
+    });
+    rs.on('pair-request-resolved', ({ approved, deviceId }) => {
+      const ps = _pairScreen;
+      if (!ps) return;
+      if (approved && deviceId) ps.session.pairedDeviceIds.add(String(deviceId));
+      _pairScreenSetState({ type: 'request-resolved', approved, deviceId });
+    });
+    rs.on('paired-device-connected', ({ deviceId, name }) => {
+      const ps = _pairScreen;
+      if (!ps || !ps.session.pairedDeviceIds.has(String(deviceId))) return;
+      _pairScreenSetState({ type: 'connected', deviceId, name });
+    });
   });
 
   ipcMain.handle('echocat-list-paired-devices', () => {
@@ -55253,11 +55414,14 @@ function cloudShackNotice(text, kind) {
   // redeemPairLinkUrl still fires the 'pair-link-redeemed' event for the UI;
   // we also return a result for immediate feedback. K3SBP 2026-06-10.
   ipcMain.handle('pair-redeem-url', async (_e, url) => {
-    if (!url || !/^potacat:\/\/pair\?/i.test(String(url))) {
-      return { ok: false, error: 'Not a potacat://pair link' };
+    // Both forms: potacat://pair?... and the https link with the
+    // parameters after "#" (lib/pairing-screen.js). Redeemed as potacat://.
+    const parsed = PairingScreen.parsePairLink(url);
+    if (parsed.error) {
+      return { ok: false, error: 'Not a POTACAT pairing link' };
     }
     try {
-      await redeemPairLinkUrl(url);
+      await redeemPairLinkUrl(parsed.form === 'https' ? PairingScreen.buildLegacyPairUri(parsed.params) : url);
       return { ok: true };
     } catch (err) {
       return { ok: false, error: err && err.message ? err.message : String(err) };

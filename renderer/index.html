@@ -1676,7 +1676,7 @@
                   </div>
                 </div>
               </div>
-              <div class="summary-help">Browser-based ECHOCAT (no phone app). Open the URL on a phone/tablet on your LAN (set a password under ECHOCAT if you want one). The mobile app uses the Pair flow instead.</div>
+              <div class="summary-help">Browser-based ECHOCAT (no phone app). Open the URL on a phone/tablet on your LAN (set a password under ECHOCAT if you want one). The ECHOCAT app on a phone uses Pair my device instead.</div>
             </div>
           </details>
         </div>
@@ -4013,7 +4013,7 @@
             <label class="checkbox-label" style="margin-top:8px;"><input type="checkbox" id="set-echocat-multi-client"> Allow more than one of my devices at a time (beta)</label>
             <span class="help-text" style="margin-left:12px;display:block;">Your phone and another POTACAT can both stay connected instead of the newest one taking over. Whoever presses PTT holds the radio until they let go, and each device is told when another one tunes. A Guest Pass still has the radio to itself, and the audio goes to the device that asked for it last.</span>
             <label class="checkbox-label" style="margin-top:8px;"><input type="checkbox" id="set-allow-pair-requests" checked> Allow tap-to-pair from the local network</label>
-            <span class="help-text" style="margin-left:12px;display:block;">When the POTACAT mobile app sees your desktop on the LAN, tapping the discovered card sends a pair request and pops an Approve/Deny window here. Works only for devices on your local network — requests arriving through the POTACAT Cloud Tunnel are always refused. Turn off if you share a network with strangers (libraries, coffee shops).</span>
+            <span class="help-text" style="margin-left:12px;display:block;">When ECHOCAT on a phone finds this computer on your network, tapping it sends a pair request and opens an Approve window here with a six-digit number. Approve only when your phone shows the same number. Works only for devices on your local network — requests arriving through the POTACAT Cloud Tunnel are always refused. Turn off if you share a network with strangers (libraries, coffee shops).</span>
           </div>
           <div>
             <label for="set-echocat-pair-host" style="font-size:12px;font-weight:600;display:block;margin-bottom:3px;">Pair host override</label>
@@ -4829,66 +4829,84 @@
     </div>
   </dialog>
 
-  <!-- Pair My Device dialog (v1.9 — unified pair entry point).
-       Replaces three earlier buttons: "Pair my device" (QR popout),
-       "Pair my laptop" (share-link), and the older "Share with a
-       friend" path. Inside, the user picks a method:
-         📱 QR — best for an in-person phone/tablet, 5-min TTL
-         💻 Link — best for own laptop or off-site friend, 1h–30d
-       Each method has its own form below. The "Share my rig" button
-       (Guest Pass) stays separate because privileges + power caps
-       are conceptually different from a paired-device handshake.
-       Wired in app.js: _pairDeviceOpen / _pairDeviceQrGenerate /
-       _pairDeviceLinkGenerate. -->
+  <!-- Pair my device (simpler pairing, 2026-11-25). QR first, one headline,
+       one live state line. The code renews itself while this is open
+       (lib/pairing-session.js) and every code it showed is revoked when it
+       closes. Host, token, fingerprint, the link for another computer and
+       the pair-link list live behind "Trouble pairing?". Wired in app.js:
+       _pairDeviceOpen / _pairDeviceRender. -->
   <dialog id="pair-device-dialog">
-    <h3 style="display:flex;justify-content:space-between;align-items:baseline;">
-      Pair my device
-      <span style="font-size:11px;font-weight:normal;color:#666;">ESC to close</span>
+    <h3 class="pair-screen-head">
+      Pair ECHOCAT with this computer
+      <span class="pair-screen-esc">ESC to close</span>
     </h3>
 
-    <p class="pair-link-intro">
-      Add another device — phone, tablet, laptop, or another POTACAT — to
-      control this shack. Scan the QR on a phone or tablet, or copy the URL
-      and open it in POTACAT on the other device.
-    </p>
-    <p class="help-text" style="margin-top:-4px;">
-      Other ways to pair: <b>tap-to-pair</b> (phone app finds this desktop on
-      your home Wi-Fi — an Approve window pops here; same network only), or
-      <b>Cloud account</b> (sign in to POTACAT Cloud on both devices and pick
-      this shack in the app — no QR, no popup).
-    </p>
+    <p class="pair-screen-headline">Point your phone's camera here</p>
 
-    <div class="pair-device-warning">
-      <strong>Warning:</strong> This gives access to your rig until it is revoked.
-      You should only use this for your devices. To share access with someone
-      else, use <b>Share my rig</b>.
-    </div>
-
-    <div id="pair-device-qr-form" class="pair-device-method-form">
-      <div class="pair-device-qr-card">
-        <div id="pair-device-qr-svg" class="pair-device-qr" style="display:none;"></div>
-        <img id="pair-device-qr-img" class="pair-device-qr" alt="POTACAT pairing QR" style="display:none;">
-        <div id="pair-device-qr-fallback" class="help-text" style="display:none;text-align:center;">
-          QR didn't render on this build — use the copy button below.
-        </div>
-        <div id="pair-device-qr-ttl" class="pair-device-qr-ttl"></div>
-      </div>
-      <div class="pair-device-qr-actions">
-        <button type="button" class="primary" id="pair-device-qr-copy-url">Copy URL</button>
-        <button type="button" id="pair-device-qr-regen">Regenerate</button>
-        <span class="help-text" id="pair-device-qr-status"></span>
-      </div>
-
-      <div class="pair-link-section pair-link-pending">
-        <div class="pair-link-section-title" style="display:flex;justify-content:space-between;align-items:baseline;">
-          <span>Active &amp; recent pair links</span>
-          <button type="button" class="pair-link-refresh" id="pair-link-refresh">Refresh</button>
-        </div>
-        <ul id="pair-link-list" class="pair-link-list">
-          <li class="pair-link-empty">No links yet.</li>
-        </ul>
+    <div class="pair-device-qr-card">
+      <div id="pair-device-qr-svg" class="pair-device-qr" style="display:none;"></div>
+      <div id="pair-device-qr-fallback" class="pair-screen-qr-fallback" style="display:none;">
+        The code could not be drawn here. Open "Trouble pairing?" below.
       </div>
     </div>
+
+    <div id="pair-screen-state" class="pair-screen-state" role="status" aria-live="polite">Getting a code ready.</div>
+    <div id="pair-screen-error" class="pair-screen-error" style="display:none;"></div>
+
+    <!-- Why the app: ECHOCAT's verified lines, relayed by Alan 2026-11-25. -->
+    <ul class="pair-screen-why">
+      <li>Lock your phone or switch apps and the radio keeps playing.</li>
+      <li>Get an alert when a callsign you watch is spotted, even while you are in another app.</li>
+    </ul>
+
+    <div class="pair-screen-secondary">
+      <button type="button" class="pair-screen-linkbtn" id="pair-screen-browser-btn">Use a browser instead</button>
+      <span class="pair-screen-dot" aria-hidden="true">&middot;</span>
+      <button type="button" class="pair-screen-linkbtn" id="pair-screen-share-btn">Share with a Friend</button>
+    </div>
+    <div id="pair-screen-browser" class="pair-screen-browser" style="display:none;">
+      <div class="pair-screen-browser-text" id="pair-screen-browser-text"></div>
+      <div class="pair-screen-browser-row">
+        <code id="pair-screen-browser-url"></code>
+        <button type="button" id="pair-screen-browser-copy">Copy</button>
+      </div>
+    </div>
+
+    <details class="pair-screen-trouble" id="pair-screen-trouble">
+      <summary>Trouble pairing?</summary>
+      <div class="pair-screen-trouble-body">
+        <p class="help-text">In ECHOCAT, choose to pair by hand and copy these in. They change with the code above.</p>
+        <div class="pair-device-manual">
+          <div class="pair-device-manual-row">
+            <label for="pair-manual-host">Host</label>
+            <div class="pair-device-manual-value"><input type="text" id="pair-manual-host" readonly><button type="button" data-pair-copy="pair-manual-host">Copy</button></div>
+          </div>
+          <div class="pair-device-manual-row">
+            <label for="pair-manual-token">Pairing token (one use)</label>
+            <div class="pair-device-manual-value"><input type="text" id="pair-manual-token" readonly><button type="button" data-pair-copy="pair-manual-token">Copy</button></div>
+          </div>
+          <div class="pair-device-manual-row">
+            <label for="pair-manual-fp">Certificate fingerprint</label>
+            <div class="pair-device-manual-value"><input type="text" id="pair-manual-fp" readonly><button type="button" data-pair-copy="pair-manual-fp">Copy</button></div>
+          </div>
+        </div>
+        <label class="checkbox-label pair-screen-legacy-toggle"><input type="checkbox" id="pair-screen-legacy"> Show the older code (for an ECHOCAT that has not updated yet)</label>
+        <div class="pair-device-qr-actions">
+          <button type="button" id="pair-device-qr-copy-url">Copy a link for another computer</button>
+          <span class="help-text" id="pair-device-qr-status"></span>
+        </div>
+        <p class="help-text">That link pairs another POTACAT: paste it under More &gt; Remote Radios. It works once, for 24 hours.</p>
+        <div class="pair-link-section pair-link-pending">
+          <div class="pair-link-section-title" style="display:flex;justify-content:space-between;align-items:baseline;">
+            <span>Active &amp; recent pair links</span>
+            <button type="button" class="pair-link-refresh" id="pair-link-refresh">Refresh</button>
+          </div>
+          <ul id="pair-link-list" class="pair-link-list">
+            <li class="pair-link-empty">No links yet.</li>
+          </ul>
+        </div>
+      </div>
+    </details>
 
     <div class="dialog-buttons">
       <button type="button" id="pair-device-close">Close</button>
@@ -5648,6 +5666,7 @@
   <script src="../lib/mercury-offer.js"></script>
   <script src="../lib/wsjtx-mode-notice.js"></script>
   <script src="../lib/cloud-billing-ui.js"></script>
+  <script src="../lib/pairing-screen.js"></script>
   <script src="../lib/custom-cat-follow.js"></script>
   <script src="../lib/rig-gain-steps.js"></script>
   <script src="../lib/voice-recorder.js"></script>

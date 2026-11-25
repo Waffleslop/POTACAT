@@ -156,11 +156,23 @@
       color: var(--bad);
     }
     .hidden { display: none; }
+    /* Simpler pairing: the six-digit number the phone shows too
+       (lib/pairing-session.js pairCode). */
+    .pair-code-box { background: var(--bg-card); border: 1px solid var(--accent); border-radius: 8px; padding: 12px 14px; margin-bottom: 16px; text-align: center; }
+    .pair-code-label { font-size: 13px; color: var(--text-dim); }
+    .pair-code { font-size: 34px; font-weight: 700; letter-spacing: 4px; font-variant-numeric: tabular-nums; margin: 4px 0; color: var(--text); }
+    .pair-code-hint { font-size: 13px; color: var(--text-dim); line-height: 1.4; }
   </style>
 </head>
 <body>
   <h1>Pair request</h1>
   <p class="lead">A device on your network is asking to pair with this POTACAT desktop. Approve only if it's one of yours.</p>
+
+  <div class="pair-code-box" id="pair-code-box">
+    <div class="pair-code-label">Your phone should show this number</div>
+    <div class="pair-code" id="pair-code">--- ---</div>
+    <div class="pair-code-hint" id="pair-code-hint">Approve only if the numbers match.</div>
+  </div>
 
   <div class="device-card" id="device-card">
     <div class="device-row">
