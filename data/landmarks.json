@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "updated": "2026-10-29",
+  "updated": "2026-11-25",
   "categories": [
     { "id": "time", "label": "Time signals", "reason": "on all day, every day; the first thing to try on a new radio" },
     { "id": "beacon", "label": "Beacons", "reason": "tell you which bands are open, and to where" },
@@ -22,16 +22,6 @@
     { "id": "wwv-5000", "name": "WWV / WWVH", "khz": 5000, "mode": "AM", "category": "time", "hours": "24h", "region": "Colorado and Hawaii", "line": "Good at night and in the early morning", "helpFrom": "wwv-10000" },
     { "id": "wwv-15000", "name": "WWV / WWVH", "khz": 15000, "mode": "AM", "category": "time", "hours": "24h", "region": "Colorado and Hawaii", "line": "Daytime, longer distances", "helpFrom": "wwv-10000" },
     { "id": "wwv-20000", "name": "WWV", "khz": 20000, "mode": "AM", "category": "time", "hours": "24h", "region": "Colorado", "line": "Daytime only, and only when the high bands are open", "helpFrom": "wwv-10000" },
-    {
-      "id": "chu-7850", "name": "CHU", "khz": 7850, "mode": "AM", "category": "time", "hours": "24h",
-      "region": "Ottawa, Canada",
-      "line": "Canada's time signal, strong in the east at night",
-      "hear": "A tick every second, a voice announcing the time in English and French each minute, and a short burst of data tones between seconds 31 and 39.",
-      "why": "Canada's official time signal, on three frequencies. 7850 sits just above the 40 m band and is strong across eastern North America after dark.",
-      "try": "On a quiet evening, tune 7850 and then 3330. Which one is louder tells you how far the signal is travelling tonight."
-    },
-    { "id": "chu-3330", "name": "CHU", "khz": 3330, "mode": "AM", "category": "time", "hours": "24h", "region": "Ottawa, Canada", "line": "Canada's time signal, the night-time frequency", "helpFrom": "chu-7850" },
-    { "id": "chu-14670", "name": "CHU", "khz": 14670, "mode": "AM", "category": "time", "hours": "24h", "region": "Ottawa, Canada", "line": "Canada's time signal, the daytime frequency", "helpFrom": "chu-7850" },
     {
       "id": "rwm-9996", "name": "RWM", "khz": 9996, "mode": "CW", "category": "time", "hours": "24h",
       "region": "Moscow, Russia",
