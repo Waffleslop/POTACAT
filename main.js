@@ -625,6 +625,11 @@ const { HeardGrids } = require('./lib/heard-grids');
 // The grid each station last said on the air (lib/heard-grids.js): fills a
 // QSO started from an RR73 or report, whose own text carries no grid.
 const jtcatHeardGrids = new HeardGrids();
+const JtcatExchange = require('./lib/jtcat-exchange-history');
+// The reports each station exchanged with us, per band and mode (#1060): a
+// 73 QSO started by clicking their RR73 while busy with another station logs
+// with the reports from that earlier exchange.
+const jtcatExchangeHistory = new JtcatExchange.JtcatExchangeHistory();
 let _logPopoutQuiet = false; // the next log-popout-open leaves the keyboard alone
 let _appWindowsClosing = false; // the main window went: POTACAT is quitting
 const { checkClockOffset, syncSystemClock, classifyClockOffset, clockFixSupported, timeSettingsTargets } = require('./lib/ntp');
@@ -23953,7 +23958,10 @@ async function popoutJtcatSetTxMsg(msg) {
 //   is the one place "we send a 73" is seen, whether the auto-sequence, Skip or
 //   the operator put the 73 on the air. Each surface logs through its own path,
 //   so the window's "Open the Log QSO window before saving" opens right here.
-function jtcatNoteTxSent(message) {
+function jtcatNoteTxSent(message, bandMode) {
+  // The report this transmission carries, if any, is one we have now sent
+  // (#1060, lib/jtcat-exchange-history.js).
+  if (bandMode) jtcatExchangeHistory.noteSent(message, onAirCall(), bandMode.band, bandMode.mode);
   for (const surface of ['popout', 'remote']) {
     const q = surface === 'popout' ? popoutJtcatQso : remoteJtcatQso;
     if (!q) continue;
@@ -23963,6 +23971,37 @@ function jtcatNoteTxSent(message) {
       const done = surface === 'popout' ? popoutJtcatOnDone(q) : remoteJtcatOnDone(q);
       done().catch((e) => sendCatLog(`[JTCAT] Log at TX start failed for ${q.call}: ${e && e.message}`));
     }
+  }
+}
+// The band and mode a reply goes out on: the slice's own dial in multi-slice,
+// else the radio's (the same sources the decode and tx-start notes use). The
+// single engine's 'default' slice has no dial of its own: the radio's.
+function jtcatSliceBandMode(sliceId, engine) {
+  if (jtcatManager && sliceId) {
+    const d = jtcatManager.getDialFreq(sliceId);
+    const band = (d.freqHz ? freqToBand(d.freqHz / 1e6) : null) || d.band || '';
+    if (band) return { band: String(band).toUpperCase(), mode: ((engine && engine._mode) || 'FT8').toUpperCase() };
+  }
+  return jtcatCurrentBandMode(engine);
+}
+// A 73 QSO started by a click on their RR73 while the window or ECHOCAT was
+// busy with another station or a CQ carries no reports of its own (#1060).
+// The reports from that station's earlier exchange, heard and sent on this
+// band and mode (lib/jtcat-exchange-history.js), stand in, so the 73 logs it
+// as usual. With none on record it stays unlogged, as before, and the JTCAT
+// window says so instead of skipping it silently.
+function jtcatRecoverExchange(q, sliceId, engine) {
+  if (!q || !q.call || q._logged || q.hound || jtcatFdContext()) return;
+  const bm = jtcatSliceBandMode(sliceId, engine);
+  const filled = JtcatExchange.fillMissingReports(q, jtcatExchangeHistory.get(q.call, bm.band, bm.mode));
+  if (filled.length) {
+    sendCatLog(`[JTCAT] ${q.call}: reports from the earlier exchange on ${bm.band || 'this band'} ${bm.mode}: rcvd ${q.report || 'none'}, sent ${q.sentReport || 'none'}`);
+    return;
+  }
+  if (JtcatExchange.hasReports(q)) return;
+  sendCatLog(`[JTCAT] Not logged: 73 to ${q.call}, but no signal reports with them were heard or sent on ${bm.band || 'this band'} ${bm.mode} this session`);
+  if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
+    jtcatPopoutWin.webContents.send('jtcat-dupe-warning', JtcatExchange.notLoggedNotice(q.call, bm.band, bm.mode));
   }
 }
 // A QSO the retry cap stopped with reports exchanged both ways but no RR73 from
@@ -24747,7 +24786,9 @@ function startJtcat(mode) {
       const wlStr = (settings.watchlist || '').toUpperCase();
       const wlCalls = wlStr ? wlStr.split(',').map(s => s.trim().split(':')[0]).filter(Boolean) : [];
       const chaseCtx = buildChaseContext();
+      const exchMyCall = onAirCall();
       for (const r of data.results) {
+        jtcatExchangeHistory.noteHeard(r.text, exchMyCall, currentBand, data.mode || 'FT8'); // #1060
         const { dxCall } = extractCallsigns(r.text || '');
         if (!dxCall) continue;
         const uc = dxCall.toUpperCase();
@@ -25364,7 +25405,7 @@ function startJtcat(mode) {
     // counts one try per stamped TX (never per decode period). Placed after
     // every TX-block guard above so refused cycles don't count as tries.
     if (ft8Engine) ft8Engine._lastTxPeriodKey = jtcatPeriodUtc(modeForTx);
-    jtcatNoteTxSent(data.message);
+    jtcatNoteTxSent(data.message, jtcatCurrentBandMode(ft8Engine));
     jtcatNoteTxSlot(data.slot); // an Auto CQ keeps the slot we last transmitted in
     const networkStartDelayMs = jtcatNetworkTxStartDelayMs(modeForTx);
     // Split "Fake It": the dial moves first, so the key-down leaves the port
@@ -33737,6 +33778,7 @@ function connectRemote() {
         report: sameCall ? prev.report : null,
         sentReport: sameCall ? prev.sentReport : null,
         myCall, myGrid, txRetries: 0, sliceId: sliceKey, _logged: !!(sameCall && prev._logged) };
+      jtcatRecoverExchange(remoteJtcatQso, sliceId, targetEngine); // #1060: before the 73 can go out
       await remoteJtcatSetTxMsg(txMsg);
       targetEngine._txEnabled = true;
       fireReply();
@@ -52452,6 +52494,7 @@ function cloudShackNotice(text, kind) {
         report: sameCall ? prev.report : null,
         sentReport: sameCall ? prev.sentReport : null,
         myCall, myGrid, txRetries: 0, sliceId: replySliceId, _logged: !!(sameCall && prev._logged) };
+      jtcatRecoverExchange(popoutJtcatQso, data.sliceId, replyEngine); // #1060: before the 73 can go out
       replyEngine._txEnabled = true;
       await replyEngine.setTxMessage(txMsg);
       replyEngine.tryImmediateTx();
@@ -58932,9 +58975,11 @@ function cloudShackNotice(text, kind) {
           const wlStr = (settings.watchlist || '').toUpperCase();
           const wlCalls = wlStr ? wlStr.split(',').map(w => w.trim().split(':')[0]).filter(Boolean) : [];
           const chaseCtx = buildChaseContext();
+          const exchMyCall = onAirCall();
           for (const r of data.results) {
             r.sliceId = s.sliceId;
             r.band = currentBand || s.band || '';
+            jtcatExchangeHistory.noteHeard(r.text, exchMyCall, r.band, data.mode || s.mode || 'FT8'); // #1060
             const { dxCall } = extractCallsigns(r.text || '');
             if (!dxCall) continue;
             const uc = dxCall.toUpperCase();
@@ -59115,7 +59160,7 @@ function cloudShackNotice(text, kind) {
         // Per-TX try stamp — same contract as the single-slice tx-start
         // handler; jtcatHandleRetryStall counts one try per stamped TX.
         engine._lastTxPeriodKey = jtcatPeriodUtc(engine._mode || 'FT8');
-        jtcatNoteTxSent(data.message);
+        jtcatNoteTxSent(data.message, { band: (s.freqKhz ? freqToBand(s.freqKhz / 1000) : null) || s.band || '', mode: engine._mode || 'FT8' });
         jtcatNoteTxSlot(data.slot);
         rigPresetFlushPending();
         console.log(`[JTCAT Multi] TX start on ${s.sliceId}/${s.band} — PTT on, message: ${data.message}, ${catState}`);

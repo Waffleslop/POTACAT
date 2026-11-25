@@ -78,6 +78,11 @@ A QSO that breaks before any 73 is not logged. The tx-start dispatch asks `txLog
 (window, ECHOCAT, Hunt, Auto CQ, Run, spot target, a click on a decode, Skip) reaches one of
 those two points; none logs on its own. "Open the Log QSO window before saving" (jtcatLogPrompt)
 opens at that same moment. The operator's Log button (ECHOCAT jtcat-log-qso) is a manual log.
+A click on their RR73 while the window or ECHOCAT is busy with another station or a CQ (#1060)
+builds a fresh 73 QSO with no reports of its own; `jtcatRecoverExchange` fills them from
+lib/jtcat-exchange-history.js (their report from decodes addressed to us, ours from the tx-start
+dispatch; same call, band and mode; 15 min), so it logs like any other. With no report on record
+it is not logged, as before, and the window says "<call> not logged" instead of staying silent.
 WSJT-X raises its Log QSO prompt when it sends a message containing 73 (User Guide 2.7.0,
 11.2 Button Row, "Log QSO"; 4.5 Reporting, "Prompt me to log QSO").
 
