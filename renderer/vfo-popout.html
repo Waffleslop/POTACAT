@@ -14,7 +14,7 @@
       --g: #1a1a2e; --s: #16213e; --s2: #2a2a4a; --s3: #33335a; --in: #0d0d1a; --line: rgba(255,255,255,.06);
       --t: #e0e0e0; --t2: #b4b4c8; --t3: #8e8ea8;
       --blue: #4fc3f7; --green: #4ecca3; --red: #e94560; --gold: #ffd740; --amber: #f0a500;
-      --on-blue: #0d1b2a; --green-tint: rgba(78,204,163,.16); --red-tint: #3a1828; --red-text: #ffc7d1;
+      --on-blue: #0d1b2a; --on-amber: #111; --green-tint: rgba(78,204,163,.16); --red-tint: #3a1828; --red-text: #ffc7d1;
       --ptt: #e94560; --ptt-on: #e94560; --on-red: #fff; --on-ptt: #fff; --log-bg: rgba(78,204,163,.16);
       --knob-housing-a: #404058; --knob-housing-b: #2a2a3a; --knob-housing-c: #1a1a28; --knob-base: #222233;
       --knob-a: #4a4a62; --knob-b: #353548; --knob-c: #28283a;
@@ -46,7 +46,7 @@
       --g: #f0f2f5; --s: #ffffff; --s2: #e6e8ed; --s3: #d6d9e0; --in: #e9ecf1; --line: rgba(0,0,0,.07);
       --t: #1a1a2e; --t2: #4a4a6a; --t3: #5f5f78;
       --blue: #1976d2; --green: #2e7d5a; --red: #c62828; --gold: #8a6508; --amber: #b26a00;
-      --on-blue: #ffffff; --green-tint: #dcefe6; --red-tint: #fde8e8; --red-text: #8e1c1c;
+      --on-blue: #ffffff; --on-amber: #000; /* 4.9:1 on this amber; #111 fell just short of 4.5 */ --green-tint: #dcefe6; --red-tint: #fde8e8; --red-text: #8e1c1c;
       --ptt: #c62828; --ptt-on: #e53935; --log-bg: #dcefe6;
       --knob-housing-a: #ffffff; --knob-housing-b: #dde0e6; --knob-housing-c: #bfc4ce; --knob-base: #b4b9c4;
       --knob-a: #fbfbfd; --knob-b: #e3e6eb; --knob-c: #cdd1d9;
@@ -64,7 +64,7 @@
       --s3: color-mix(in srgb, var(--ds-fill), var(--ds-ink) 10%); --in: var(--ds-bg); /* wells (meter tracks, text boxes) sink to the page colour; --ds-control is a dark control on the light themes */ --line: var(--ds-line-subtle);
       --t: var(--ds-ink); --t2: var(--ds-ink-muted); --t3: var(--ds-ink-muted);
       --blue: var(--ds-tint); --green: var(--ds-ok); --red: var(--ds-air-ink); --gold: var(--ds-warn); /* states, never the brand colour (#376) */ --amber: var(--ds-warn);
-      --on-blue: var(--ds-on-tint); --on-red: var(--ds-on-danger); --on-ptt: var(--ds-on-air);
+      --on-blue: var(--ds-on-tint); --on-red: var(--ds-on-danger); --on-ptt: var(--ds-on-air); --on-amber: var(--ds-on-warn);
       --green-tint: var(--ds-ok-subtle); --red-tint: var(--ds-danger-subtle); --red-text: var(--ds-danger);
       /* PTT at rest is the theme's on-air red, not its deep shade (the muddy red Casey flagged). */
       --ptt: var(--ds-air); --ptt-on: var(--ds-air); --log-bg: var(--ds-ok-subtle);
@@ -130,6 +130,9 @@
     .chip.vfoab { background: var(--s3); color: var(--t); }
     .chip.split { background: var(--amber); color: #111; font-weight: 600; }
     .chip.sdr { background: var(--green); color: #111; font-weight: 600; }
+    /* #1100: the radio is off and only the SDR is tuned. Larger and bolder than
+       the other chips, in the same amber as SPLIT, so it reads at a glance. */
+    .chip.sdr-only { background: var(--amber); color: var(--on-amber); font-weight: 700; font-size: 12px; letter-spacing: .02em; }
     .chip.tx { background: var(--ptt-on); color: var(--on-ptt); font-weight: 600; }
     select.chip { appearance: none; -webkit-appearance: none; font-family: inherit; outline: none; }
     select.chip option { background: var(--s); color: var(--t); }
@@ -563,6 +566,7 @@
         <span class="vfo-section step-group" id="sec-step"><button class="chip step-btn" id="step-down-btn" title="Step down (Down arrow key; hold to keep tuning)" aria-label="Step down">&#x25BC;</button><select class="chip" id="step-select" title="Tuning step for the knob, the mouse wheel and the arrow keys (Left and Right arrow keys change it)" aria-label="Tuning step"></select><button class="chip step-btn" id="step-up-btn" title="Step up (Up arrow key; hold to keep tuning)" aria-label="Step up">&#x25B2;</button></span>
         <span class="chip split" id="split-badge" style="display:none" title="Split operation: transmitting on the other VFO">SPLIT</span>
         <span class="chip sdr" id="kiwi-rx-badge" style="display:none">SDR RX</span>
+        <span class="chip sdr-only" id="sdr-only-badge" style="display:none" title="The radio is off or not answering. Tuning moves only the SDR; nothing is transmitted.">Radio off: SDR only</span>
         <span class="chip tx hidden" id="tx-chip">TX</span>
         <span class="chip band-chip" id="band-chip"></span>
         </div>
@@ -1153,11 +1157,13 @@ function renderFreqDisplay(hz) {
 function updateDisplay() {
   if (stripEntry) stripRender(); // the operator is typing here: the live dial waits
   else {
-    renderFreqDisplay(radioLinkUp ? currentFreqHz : 0);
-    freqDisplay.title = radioLinkUp ? 'Click to type a frequency' : 'The radio is not answering (switched off, or the cable is out)';
+    // #1100: with the radio off, the SDR's dial is what you hear and tune.
+    renderFreqDisplay(radioLinkUp || sdrOnly ? currentFreqHz : 0);
+    freqDisplay.title = sdrOnly ? 'The radio is off: tuning moves only the SDR. Click to type a frequency'
+      : radioLinkUp ? 'Click to type a frequency' : 'The radio is not answering (switched off, or the cable is out)';
   }
   const m = (currentMode || '').toUpperCase();
-  modeBadge.textContent = !radioLinkUp ? '---' : (FreedvDisplayMode.freedvBadge(currentMode) || '---');
+  modeBadge.textContent = !(radioLinkUp || sdrOnly) ? '---' : (FreedvDisplayMode.freedvBadge(currentMode) || '---');
   if (currentFilterWidth > 0) {
     filterBadge.textContent = currentFilterWidth >= 1000
       ? (currentFilterWidth / 1000).toFixed(1) + ' kHz'
@@ -1173,11 +1179,27 @@ function updateDisplay() {
 // False while main says the radio does not answer (off, cable out): dashes
 // instead of the last dial, so a switched-off radio does not look on.
 let radioLinkUp = true;
+// #1100: true while the radio cannot be tuned and the connected SDR can
+// (main's sdrOnly, on vfo-radio-state and kiwi-status alike).
+let sdrOnly = false;
+let kiwiRxShown = false;   // the SDR is what you hear (kiwi-status connected)
+function paintSdrOnly() {
+  document.getElementById('sdr-only-badge').style.display = sdrOnly ? '' : 'none';
+  // "Radio off: SDR only" says it all; SDR RX beside it would say it twice.
+  document.getElementById('kiwi-rx-badge').style.display = kiwiRxShown && !sdrOnly ? '' : 'none';
+}
+function setSdrOnly(v) {
+  if (!!v === sdrOnly) return;
+  sdrOnly = !!v;
+  paintSdrOnly();
+  updateDisplay();
+}
 window.api.onRadioState((s) => {
   if (s && s.radioLinkUp !== undefined) {
     radioLinkUp = !!s.radioLinkUp;
     if (window.vfoPowerLinkChanged) window.vfoPowerLinkChanged(radioLinkUp);
   }
+  if (s && s.sdrOnly !== undefined) setSdrOnly(s.sdrOnly);
   if (s && s.meters) { radioMeters = s.meters; applyMeterRows(); }
   if (s) {
     // #164: a button tied to some radios shows only while one of them is active.
@@ -3233,7 +3255,7 @@ function miniParts(key) {
   const $ = (id) => document.getElementById(id);
   const ids = {
     freq: ['freq-display', 'freq-other-row'],
-    mode: ['mode-badge', 'vfo-badge', 'split-badge', 'kiwi-rx-badge', 'tx-chip'],
+    mode: ['mode-badge', 'vfo-badge', 'split-badge', 'kiwi-rx-badge', 'sdr-only-badge', 'tx-chip'],
     band: ['band-chip'], scan: ['mini-scan-btn'], audio: ['audio-btn'], ptt: ['ptt-btn'],
     log: ['log-btn-vfo'], cat: ['mini-cat'], filter: ['filter-badge'], step: ['sec-step'], lock: ['vfo-lock-btn'],
     splitup: ['split-up-row'],
@@ -5027,7 +5049,11 @@ window.api.onKiwiStatus((s) => {
     }
   }
   updateKiwiButtonStates();
-  document.getElementById('kiwi-rx-badge').style.display = s.connected ? '' : 'none';
+  kiwiRxShown = !!s.connected;
+  // A kiwi-status without the field is the SDR going away: no SDR, no SDR-only.
+  if (s.sdrOnly !== undefined) setSdrOnly(s.sdrOnly);
+  else if (!s.connected) setSdrOnly(false);
+  paintSdrOnly();
   syncSdrVolumeRow(); // VOL drives the SDR; this row stands in when VOL is hidden
   // Mute local radio audio monitor when SDR active, restore when off
   if (s.connected) {

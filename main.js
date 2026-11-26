@@ -4798,13 +4798,15 @@ function sendCatStatus(s) {
       _catLinkUpLast = linkUp;
       stationSetupNotify();
       sendVfoState(); // the VFO window stops (or starts) showing the radio's dial
+      // #1100: "Radio off: SDR only" on or off for every surface (the phone too).
+      if (kiwiClient && kiwiClient.connected) broadcastKiwiStatus(listenSdr.live, listenSdr.live ? undefined : { available: true });
       if (!linkUp) {
         // A Flex Direct station has no USB to drop: "lost" there means the
         // radio holds no slice POTACAT can tune (it will create one).
         const flexDirect = !!(smartSdr && smartSdr.connected && smartSdr.mode === 'self');
         sendCatLog(flexDirect
           ? '[CAT] RADIO LINK LOST — the Flex has no slice for POTACAT to tune. Tunes will be refused until one exists (POTACAT creates one after a few seconds).'
-          : '[CAT] RADIO LINK LOST — the rig is no longer reachable (USB/serial dropped?). Tunes will be refused until it returns.');
+          : '[CAT] RADIO LINK LOST — the rig is no longer reachable (USB/serial dropped?). ' + (sdrOnlyNow() ? 'Tunes move only the connected SDR until it returns (Radio off: SDR only).' : 'Tunes will be refused until it returns.'));
         // De-key the dedicated CW key line too. It's a SEPARATE USB-serial
         // adapter from the CAT port, so the rig/PTT reconnect safety never
         // touched it — a CW send caught mid-key by a serial glitch could latch
@@ -4855,6 +4857,7 @@ function sendCatStatus(s) {
         // "RADIO LINK LOST" — the port had reopened, the radio was not there).
         // Only a RigController knows; the Flex/CatClient paths keep the line.
         const answered = !(cat && typeof cat.radioPowerEvidence === 'function') || cat.radioPowerEvidence() === true;
+        listenSdrRadioBack(); // #1100: SDR-only ends; the radio is not tuned to the SDR's frequency
         if (answered) sendCatLog('[CAT] Radio link restored.');
         else sendCatLog('[CAT] Port reopened — waiting for the radio to answer (the link counts as restored at its first reply).');
         try { yaesuScopeNoteRadioBack('radio link restored'); } catch { /* no scope */ }
@@ -31982,7 +31985,7 @@ function connectRemote() {
       if (hz > 0) {
         const route = ListenSource.routeWithoutRig(hz, rigReachNow(), listenSdrState(), !!sdrCandidateFor(hz));
         const why = (settings.catTarget && settings.catTarget.type === 'none') ? 'from ECHOCAT (no CAT control)' : 'from ECHOCAT (the radio is not connected)';
-        if (route === 'sdr') { listenSdrTake(hz, mode, why); return; }
+        if (route === 'sdr') { listenSdrTakeWithoutRig(hz, mode, why); return; }
         if (route === 'connect' && listenSdrConnectFor(hz, mode, why)) return;
       }
       if (settings.catTarget && settings.catTarget.type === 'none') {
@@ -36190,6 +36193,9 @@ function sendVfoState() {
     // window shows dashes, not the last dial, which looked like a radio
     // still on after Power Off.
     radioLinkUp: vfoRadioLinkUp(),
+    // #1100: the radio cannot be tuned and the connected SDR can: every tune
+    // moves the SDR alone; the window says "Radio off: SDR only".
+    sdrOnly: sdrOnlyNow(),
     wfm: vfoWfmAvailable(),         // a Wideband FM button in the mode picker
     // The TX power control (GitHub #199): the same payload as the JTCAT and
     // Winlink windows' TX Pwr, caps already scaled by Full power (W).
@@ -47402,7 +47408,9 @@ function jtcatWebSdrFollowDial(dialKhz, why) {
 // While live, the radio's own dial is tracked in _currentFreqHz but not
 // shown; the displayed frequency is the SDR's, and a tune back inside the
 // radio's range hands the displays and the audio straight back.
-const listenSdr = { live: false, auto: false, hz: 0, mode: '' };
+// `withoutRig` = the SDR took a tune because the radio could not be tuned
+// (switched off, CAT link down: #1100); it ends when the radio answers again.
+const listenSdr = { live: false, auto: false, hz: 0, mode: '', withoutRig: false };
 let kiwiManual = false;
 let kiwiLiveHost = '';
 let kiwiKind = '';
@@ -47482,7 +47490,7 @@ function sdrCandidateFor(hz) {
 /** kiwi-status to every surface. connected = you hear the SDR; reach rides along for the Landmarks tab. */
 function broadcastKiwiStatus(connected, extra) {
   const reach = kiwiClient && kiwiClient.connected && kiwiClient.reach !== undefined ? kiwiClient.reach : null;
-  const msg = { connected: !!connected, host: kiwiLiveHost || undefined, kind: kiwiKind || undefined, reach: reach || undefined, rigReach: rigReachNow() || undefined, ...(extra || {}) };
+  const msg = { connected: !!connected, host: kiwiLiveHost || undefined, kind: kiwiKind || undefined, reach: reach || undefined, rigReach: rigReachNow() || undefined, sdrOnly: sdrOnlyNow(), ...(extra || {}) };
   for (const wc of require('electron').webContents.getAllWebContents()) wc.send('kiwi-status', msg);
   if (remoteServer && remoteServer.hasClient && remoteServer.hasClient()) remoteServer.sendToClient({ type: 'kiwi-status', ...msg });
 }
@@ -47500,6 +47508,7 @@ function kiwiGoIdle(why) {
   if (!listenSdr.live) return;
   listenSdr.live = false;
   listenSdr.auto = false;
+  listenSdr.withoutRig = false;
   sendCatLog(`[WebSDR] Back to the radio${why ? ' — ' + why : ''}`);
   broadcastKiwiStatus(false, { available: !!(kiwiClient && kiwiClient.connected) });
   if (remoteAudioWin && !remoteAudioWin.isDestroyed()) remoteAudioWin.webContents.send('kiwi-active', false);
@@ -47521,6 +47530,57 @@ function listenSdrTake(hz, mode, why) {
     kiwiGoLive(true);
   }
   sendCatFrequency(hz);   // the displays show what you hear (the radio's dial is kept, not shown)
+}
+
+/** The radio can be moved: a CAT link, the Flex API or TCI (the tune IPC's own test). */
+function rigTuneLinked() {
+  return !!((smartSdr && smartSdr.canTune) || (cat && cat.connected) || tciRigLinked());
+}
+
+/** "Radio off: SDR only" (#1100): the radio cannot be tuned and a connected SDR can. */
+function sdrOnlyNow() {
+  return ListenSource.sdrOnly({
+    remote: isRemoteMode(),
+    rigLinked: rigTuneLinked(),
+    noCat: !!(settings && settings.catTarget && settings.catTarget.type === 'none'),
+    sdrConnected: !!(kiwiClient && kiwiClient.connected),
+  });
+}
+
+/**
+ * A tune POTACAT cannot give the radio (switched off, CAT link down, no CAT
+ * control) goes to the connected SDR (#329 phone, #1100 desktop). Nothing is
+ * sent to the radio. The SDR holds every readout meanwhile, a chosen SDR too:
+ * with the radio away there is no radio dial to show.
+ */
+function listenSdrTakeWithoutRig(hz, mode, why) {
+  listenSdr.withoutRig = true;
+  if (listenSdr.live) listenSdr.auto = true;
+  listenSdrTake(hz, mode, why);
+  broadcastKiwiStatus(true);   // the windows learn "Radio off: SDR only" with the first SDR-only tune
+}
+
+/**
+ * The radio answers again (#1100). The radio is NOT tuned to the SDR's last
+ * frequency: a reconnect has never tuned the radio, and the radio keeps the
+ * dial it has. The SDR-only spell ends: an SDR the operator chose follows the
+ * radio's dial again (and is retuned to it, so what you hear matches the
+ * readout); one that took over only because the radio was off goes idle.
+ * The next tune moves the radio as it always has.
+ */
+function listenSdrRadioBack() {
+  if (!listenSdr.withoutRig) return;
+  listenSdr.withoutRig = false;
+  if (!listenSdr.live) return;
+  if (kiwiManual && kiwiClient && kiwiClient.connected) {
+    listenSdr.auto = false;
+    sendCatLog('[WebSDR] The radio is back: the SDR follows its dial again');
+    if (_currentFreqHz > 0) kiwiClient.tune(_currentFreqHz / 1000, sdrListenMode(_currentMode, _currentFreqHz).toLowerCase());
+    broadcastKiwiStatus(true);
+    if (_currentFreqHz > 0) sendCatFrequency(_currentFreqHz);   // every readout returns to the radio
+    return;
+  }
+  kiwiGoIdle('the radio is back');
 }
 
 /** Bring up the first listed SDR that covers hz and finish the tune when it answers (listenSdrResume). False when none covers it. */
@@ -54204,7 +54264,7 @@ function cloudShackNotice(text, kind) {
     kiwiClient.on('disconnected', () => {
       kiwiActive = false;
       const wasLive = listenSdr.live;
-      listenSdr.live = false; listenSdr.auto = false; kiwiLiveHost = '';
+      listenSdr.live = false; listenSdr.auto = false; listenSdr.withoutRig = false; kiwiLiveHost = '';
       if (wasLive && _currentFreqHz > 0) sendCatFrequency(_currentFreqHz);   // the readouts return to the radio
       sendCatLog('[WebSDR] Disconnected');
       for (const wc of require('electron').webContents.getAllWebContents()) {
@@ -54220,7 +54280,7 @@ function cloudShackNotice(text, kind) {
     });
     kiwiClient.on('error', (msg) => {
       sendCatLog(`[WebSDR] Error: ${msg}`);
-      listenSdr.live = false; listenSdr.auto = false;
+      listenSdr.live = false; listenSdr.auto = false; listenSdr.withoutRig = false;
       for (const wc of require('electron').webContents.getAllWebContents()) {
         wc.send('kiwi-status', { connected: false, error: msg, host: kiwiFullHost }); // host: the VFO window names it (#390)
       }
@@ -54264,7 +54324,7 @@ function cloudShackNotice(text, kind) {
     kiwiActive = false;
     kiwiManual = false;
     const wasLive = listenSdr.live;
-    listenSdr.live = false; listenSdr.auto = false; kiwiLiveHost = '';
+    listenSdr.live = false; listenSdr.auto = false; listenSdr.withoutRig = false; kiwiLiveHost = '';
     if (wasLive && _currentFreqHz > 0) sendCatFrequency(_currentFreqHz);
   });
 
@@ -54358,6 +54418,16 @@ function cloudShackNotice(text, kind) {
     // moved on as if it worked. (K6RBJ 2026-07-17.)
     if (!((smartSdr && smartSdr.canTune) || (cat && cat.connected) || tciRigLinked())) {
       if (sdrFollowed) return; // JTCAT listens on the WebSDR; the radio is not needed to hear
+      // SDR-only tuning (#1100, Casey 2026-11-26): the radio is off or its
+      // link is down, and a connected SDR can hear it. The tune moves the SDR
+      // alone (nothing goes to the radio) and the VFO window says
+      // "Radio off: SDR only". No SDR connected: the refusal below, as before.
+      const sdrHz = Math.round(parseFloat(frequency) * 1000);
+      if (sdrHz > 0 && ListenSource.desktopTune(sdrHz, false, rigReachNow(), listenSdrState()) === 'sdr') {
+        const noCatRig = !!(settings.catTarget && settings.catTarget.type === 'none');
+        listenSdrTakeWithoutRig(sdrHz, mode, noCatRig ? '(no CAT control)' : 'with the radio off');
+        return;
+      }
       if (settings.catTarget && settings.catTarget.type === 'none') {
         // No CAT control is a choice, not a fault: say what to set by hand.
         const mhz = (parseFloat(frequency) / 1000).toFixed(3);

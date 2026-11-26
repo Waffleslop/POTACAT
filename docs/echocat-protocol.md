@@ -990,6 +990,7 @@ boat and aircraft turned to `course`). Idle Mode's `aprs` choice stays on
 | `kiwi-connect` | C→S | Connect to an SDR: a KiwiSDR, a WebSDR station or an rtl_tcp server. `{host?, id?, password?}`; no `host` = the station's first listed SDR. |
 | `kiwi-disconnect` | C→S | Disconnect. |
 | `kiwi-tune` | C→S | `{freqKhz, mode?}`: tune the connected SDR (`freqKhz` may be a string, as for `tune`). Ignored when no SDR is connected. |
+| `kiwi-status` | S→C | `{connected, host?, kind?, reach?, rigReach?, available?, error?, sdrOnly?}`: `connected` = the SDR is what you hear. `sdrOnly` (boolean, #1100, desktop 2026-11-26): the radio cannot be tuned (switched off, or its CAT link is down; never for a no-CAT radio) and an SDR is connected, so every tune moves the SDR alone; show "Radio off: SDR only" (the desktop VFO window's words, lib/listen-source.js `SDR_ONLY_TEXT`). Also sent on the radio's link change. Absent = false (older shacks, and the plain `{connected: false}` sent when the SDR disconnects). |
 | `refused` | S→C | `{reason: 'guest-pass', of, text, reqId?}`: the shack will not do that for this Guest Pass session. Show `text` as it is; `of` is the message type, for the client's own use, never for display. |
 
 **Guest Pass (2026-11-14, #543).** A pass session may send all three SDR

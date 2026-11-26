@@ -360,6 +360,7 @@ const TESTS = [
   'test/kiwisdr-tls-test.js', // KiwiSDR with HTTPS on: https:// entries and a wss:// retry (DL0HC)
   'test/kiwisdr-test.js', // KiwiSDR: settings after AR OK (firmware 1.902), receivers that allow no apps
   'test/listen-source-test.js', // who you hear: the radio, or the SDR where the radio cannot go (Casey 2026-10-30)
+  'test/sdr-only-tuning-test.js', // #1100: radio off + SDR connected, a desktop tune moves only the SDR; the VFO window says "Radio off: SDR only"
   'test/k4rvc-preset-flip-test.js', // an Icom's DATA flag folded into the mode the preset rules see; launch applies nothing
   'test/channels-test.js', // Directory > Channels: the saved frequency chart, CHIRP CSV both ways (KL4XQ, KC8DHX lists)
   'test/memory-recall-test.js', // #308: a Channels entry recalls the radio's own memory; any later tune leaves memory mode first
