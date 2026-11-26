@@ -67,6 +67,28 @@ client                                 server
   |  ... feature messages flow ...      |
 ```
 
+**When a connection is admitted (2026-11-26).** A connection becomes a
+client (counted in `clients-list`, sent `auth-ok` and the station state,
+and able to displace another device) only once it is real:
+
+- **Token paths** (`auth-mode: token`, a Guest Pass): when its `auth`
+  succeeds. **Cookie** (`auth-mode: cookie`): at connect, the upgrade's
+  cookie being the credential.
+- **No token required** (`auth-mode: none`, local trust): when its valid
+  `hello` arrives. The server sends `hello` and `auth-mode: none` at
+  connect as before, then waits: `auth-ok` follows the client's `hello`.
+  Before that hello the socket is not signed in: only `hello` and `auth`
+  are read (an `auth` with a paired device's token only names the device),
+  everything else is dropped, and it displaces no one. A socket that never
+  says hello is closed by the same 10 s timer as an unauthenticated one
+  (`auth-fail` `Timeout`, then close). Every current client sends `hello`
+  first on open: the ECHOCAT app, ECHOCAT Web (renderer/remote.js), a POTACAT
+  desktop (lib/remote-client.js) and scripts/echocat-cli.js. Only browser
+  pages from before v1.5.14 did not, and the page is served by this server,
+  so a reload brings one that does. Before this, a local socket admitted at
+  connect displaced the operator's phone even if it closed without a word
+  (K3SBP 2026-11-26).
+
 ### Who may connect (added 2026-11-22)
 
 Checked at the WebSocket upgrade, before the server `hello`
@@ -92,8 +114,8 @@ Checked at the WebSocket upgrade, before the server `hello`
   (100.64/10) are not public. Over the Cloud Tunnel nothing changes.
 
 LAN, Tailscale and loopback clients keep the local-trust behaviour of a fresh
-install: `auth-mode: none` and `auth-ok` with no token, unless the operator
-requires one.
+install: `auth-mode: none` and `auth-ok` with no token (after the client's
+`hello`, see above), unless the operator requires one.
 
 ## Message catalog
 
@@ -116,7 +138,7 @@ Format: each row is `name — direction — purpose`. Directions:
 | `pass-guest-waiting` | S→C | An owner device waits behind a Guest Pass (Guest Pass hopping, 2026-10-27; "Lend my rig", capability `owner-presence`). An owner device that connects while a guest holds the rig gets `auth-ok` with `passGuest`; one that was connected and idle when a guest took the rig gets `pass-guest-waiting`. Both carry `{callsign, passCode, endsAt, connected, lastActiveAt?}` and the device answers with `pass-take-over` (then `pass-take-over-ok`), or gets `pass-guest-gone {reason}` when the guest's session ends. `passCode` (string, 2026-11-22): the guest's pass code, so the phone can match the pass on My passes; these messages only ever go to owner devices. `connected` (boolean, 2026-11-22): the guest's device is connected now (false inside the 60 s reconnect hold after a drop). `lastActiveAt` (epoch ms, 2026-11-22): the guest's last action on the radio, starting at the moment the guest's session began, so a guest who has done nothing reads idle; absent when the shack has no clock for this pass. An action on the radio is the hand-back rule's list (lib/pass-owner-activity.js `fromEchocatMessage`): a PTT key-down, a voice macro, the ATU tune, CW, a tune, VFO, band or rig change, a mode change, a JTCAT, JTTY or PSK transmission, Winlink connect, QSY or retry, an SSTV photo, JS8 sends, FreeDV transmit; never pings, reads, subscriptions or key-ups. Nothing else about what the guest did is sent. While a device waits, the shack sends it a fresh `pass-guest-waiting` only when `connected` changes or when the guest acts after 2 minutes or more without an action (idle to active), never on every action: the phone ages the line itself. Both fields are optional: an older desktop sends neither. Rules: lib/pass-guest-activity.js. |
 | `clients-list` | S→C | Presence: every connected device, one copy per device: `{clients: [{id, name, platform, version, since, keyed, audio, guest, you}], multi}`. `you` marks the receiver's own row, `keyed` the device holding PTT, `audio` the device the audio bridge streams to, `guest` a Guest Pass session. On a guest row, the copies sent to the owner's devices also carry `passCode` (the guest's pass code) and `call` (the guest's on-air call, `''` for an anonymous guest) (2026-11-22), so the phone's My passes can mark the pass that is connected now. A guest's copy never carries them, on any row, its own included. An older desktop sends neither: show nothing. Rules: lib/clients-list.js. |
 | `pass-take-back` | C→S | "Take the radio" (2026-11-15, #200, #541 step 4, capability `pass-state`). `{}`. Granted only on the connection that is told `waiting`/`owner-idle` (the guest's device that was on the air, after 5 minutes without owner activity): the radio goes back to it at once, as on Give it back (`on-air`/`none`, with `pass-resumed` alongside), and a device waiting for it stays `waiting`/`other-device`. Refused, with the current `pass-state` sent again, in every other case: the owner is using the radio (`owner-has-radio`), a take is pending (`owner-soon`), the guest already has the radio, the device is waiting for another of the guest's devices, or the client did not list `pass-state`. |
-| `kicked` | S→C | Server bumped this client because another connected. Carries `byPlatform`, `byVersion`, `byHost` so the displaced client can render a friendly "another device took over" banner instead of a mystery disconnect. |
+| `kicked` | S→C | Server bumped this client because another connected (`reason`: `Another device took over this rig`). Carries `byPlatform` and `byVersion` (from the newcomer's `hello`; always filled now that no connection is admitted before its hello or credential) and `byHost` (the newcomer's address: the visitor's own IP from `cf-connecting-ip` when it came through the Cloud Tunnel, since the socket itself is cloudflared on 127.0.0.1; otherwise the socket address, as before) so the displaced client can render a friendly "another device took over" banner instead of a mystery disconnect. **`byName`** (optional string, 2026-11-26; lib/kicked-by.js): the newcomer in words, first that applies: a Guest Pass guest's callsign (upper case); the paired device's name as set at pairing; `this computer` for a connection from the shack PC itself (loopback without Cloud Tunnel headers). Absent when none is known (an unpaired LAN device, or a LAN device whose paired token arrives in an `auth` after its `hello`), and absent from older desktops: show `byName` when present ("Taken over by Casey's iPad"), otherwise the older `byPlatform` / `byHost` text. |
 | `revoked` | S→C | The shack operator revoked this device's pairing **while it was connected** (Settings → paired devices → Revoke). Carries `reason` (display string). Sent immediately before the server closes the socket with code `4004`. Unlike `kicked`, the device token no longer exists — the client must drop to its unpaired state and must **not** auto-reconnect (a reconnect gets a terminal `auth-fail`; the server can't distinguish revoked from never-paired once the record is deleted). Only the matching per-device pairing is kicked; legacy shared-token and Guest Pass sessions are unaffected (pass revocation has its own `pass-ended` flow). New 2026-06-12. |
 | `pass-ended` | S→C | The Guest Pass this session was riding on ended (the owner pressed Cancel pass, it expired, or the owner's Cloud entitlement lapsed). Carries `reason` and `code`. `reason` keeps its older values: Cancel pass in Share My Rig (named Revoke before 2026-11-14) is still `revoked` on the wire. The server also purges the pass's web-gate sessions, so a browser reload lands on the connect page (with `?notice=pass-ended`) rather than a dead SPA. Pre-existing message, registered 2026-09-11. |
 | `pong` | S→C | Reply to `ping` for connection health checks. |

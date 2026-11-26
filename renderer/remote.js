@@ -2597,7 +2597,8 @@
         if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
         mainUI.classList.add('hidden');
         connectScreen.classList.remove('hidden');
-        connectError.textContent = 'Another client connected. Tap Connect to take over.';
+        // byName (2026-11-26): the paired device, the guest's call, or "this computer".
+        connectError.textContent = (msg.byName ? 'Taken over by ' + msg.byName + '.' : 'Another client connected.') + ' Tap Connect to take over.';
         connectError.classList.remove('hidden');
         connectBtn.textContent = 'Connect';
         connectBtn.disabled = false;
