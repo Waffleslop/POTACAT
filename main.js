@@ -10695,33 +10695,46 @@ function buildClusterSpot(raw, myPos, myEntity) {
 // centroid to the actual operator grid via QRZ. K3SBP 2026-05-14: DX cluster
 // spots only carry callsign + freq + comment on the wire, so the map view
 // had nothing to plot against except centroids. With QRZ configured, every
-// unique callsign gets one network lookup (subsequently cached); the spot's
-// lat/lon gets refined in clusterSpots after the lookup resolves and a flush
-// is scheduled so the map updates within ~200 ms. No-op when QRZ isn't
-// configured or the user has it disabled — call-area fallback already
+// unique callsign gets one network lookup (subsequently cached), at low
+// priority through lib/qrz.js's lookup queue. A call already in the cache is
+// placed at once on the spot itself, and the caller's own flush carries it;
+// a looked-up grid is written to the spot in getSpots() (clusterSpots, or
+// cwSpots for CW Spots, #1061) and a 200 ms flush is scheduled. No-op when QRZ
+// isn't configured or the user has it disabled — call-area fallback already
 // provides reasonable map placement for the common large-country cases.
-function refineClusterSpotWithQrz(rawCallsign, spot, myPos) {
+function refineClusterSpotWithQrz(rawCallsign, spot, myPos, getSpots = () => clusterSpots) {
   // 'event' is terminal: the club station's QRZ grid is somebody's house,
   // the event definition's city is where the station actually is.
   if (spot.coordSource === 'qrz' || spot.coordSource === 'event' || !qrz.configured || !settings.enableQrz) return;
-  qrz.lookup(rawCallsign, { priority: 'low' }).then((qrzResult) => { // spot placement: behind the operator's own lookups
-    if (!qrzResult || !qrzResult.grid) return;
-    const ll = gridToLatLon(qrzResult.grid);
-    if (!ll) return;
-    // Find the spot in clusterSpots — it may have been deduped out by a
-    // newer spot for the same callsign+band, in which case the newer spot
-    // will pick up the cached QRZ grid on its own enrichment pass.
-    const idx = clusterSpots.findIndex(s => s.callsign === rawCallsign && s.band === spot.band);
-    if (idx === -1) return;
-    const s = clusterSpots[idx];
+  const place = (s, grid) => {
+    const ll = gridToLatLon(grid);
+    if (!ll) return false;
     s.lat = ll.lat;
     s.lon = ll.lon;
     s.coordSource = 'qrz';
-    s.grid = qrzResult.grid;
+    s.grid = grid;
     if (myPos) {
       s.distance = Math.round(haversineDistanceMiles(myPos.lat, myPos.lon, ll.lat, ll.lon));
       s.bearing = Math.round(bearing(myPos.lat, myPos.lon, ll.lat, ll.lon));
     }
+    return true;
+  };
+  // Known call: place it now, no extra flush. A stream of known calls (CW
+  // Spots, whose own flush is 2 s) would otherwise send the whole spot list
+  // every 200 ms (#1062 review).
+  const known = qrz.cached ? qrz.cached(rawCallsign) : undefined;
+  if (known !== undefined) {
+    if (known && known.grid) place(spot, known.grid);
+    return;
+  }
+  qrz.lookup(rawCallsign, { priority: 'low' }).then((qrzResult) => { // spot placement: behind the operator's own lookups
+    if (!qrzResult || !qrzResult.grid) return;
+    // Find the spot in its list — it may have been deduped out by a newer
+    // spot for the same callsign+band, in which case the newer spot will
+    // pick up the cached QRZ grid on its own pass.
+    const list = getSpots(); // the live array: cwSpots is reassigned when trimmed
+    const s = list.find(x => x.callsign === rawCallsign && x.band === spot.band);
+    if (!s || !place(s, qrzResult.grid)) return;
     // Short flush so the renderer gets the position update promptly. The
     // normal 2 s flush would still pick this up; 200 ms keeps the visible
     // marker jitter (centroid → actual grid) brief.
@@ -10998,6 +11011,8 @@ function connectCwSpots() {
           sendMergedSpots();
         }, 2000);
       }
+      // Same QRZ grid placement as DX Cluster spots (#1061): the shared qrz cache and lookup queue, low priority.
+      refineClusterSpotWithQrz(raw.callsign, spot, myPos, () => cwSpots);
     });
     client.on('status', (s) => {
       sendCatLog(`[CW Spots] ${s.connected ? 'Connected to' : 'Disconnected from'} ${host}:${port}`);
