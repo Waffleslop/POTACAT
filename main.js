@@ -39140,7 +39140,8 @@ function normalizeCallForIndex(call) {
 
 /** Pick the best-available reference from an ADIF record (POTA/SOTA/WWFF/etc). */
 function adifRef(rec) {
-  if (rec.SIG && rec.SIG_INFO) return `${rec.SIG.toUpperCase()} ${rec.SIG_INFO.toUpperCase()}`;
+  const sp = ContactCard.sigPair(rec); // SIG + SIG_INFO, or a SIG-less POTA/WWFF-shaped SIG_INFO (#1099)
+  if (sp) return `${sp[0]} ${sp[1]}`;
   if (rec.POTA_REF) return `POTA ${rec.POTA_REF.toUpperCase()}`;
   if (rec.SOTA_REF) return `SOTA ${rec.SOTA_REF.toUpperCase()}`;
   if (rec.WWFF_REF) return `WWFF ${rec.WWFF_REF.toUpperCase()}`;

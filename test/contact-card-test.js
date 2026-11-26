@@ -234,6 +234,43 @@ test('where(): the weather is asked for a grid square centre only', () => {
   assert.strictEqual(CC.where({ ...base, qrz: null, history: [], prefix: null }), null);
 });
 
+test('#1099: SIG_INFO with no SIG reads as a POTA park; the log is never touched', () => {
+  const rec = { CALL: 'W1XYZ', QSO_DATE: '20260720', TIME_ON: '140200', BAND: '20M', MODE: 'SSB', SIG_INFO: 'US-1234' };
+  const copy = JSON.stringify(rec);
+  assert.deepStrictEqual(CC.sigPair(rec), ['POTA', 'US-1234']);
+  const vm = CC.build({ ...base, history: [], record: rec });
+  assert.strictEqual(cell(vm, 'POTA'), 'US-1234');
+  assert.strictEqual(JSON.stringify(rec), copy, 'read side only');
+  // The history row main.js builds from this record: adifRef() uses sigPair().
+  const sp = CC.sigPair(rec);
+  const row = CC.build({ ...base, history: [{ date: '20260720', time: '1402', band: '20m', mode: 'SSB', ref: `${sp[0]} ${sp[1]}` }] }).contacts[0];
+  assert.strictEqual(row.park, 'US-1234');
+  assert.ok(/ContactCard\.sigPair\(rec\)/.test(readSrc(path.join(__dirname, '..', 'main.js'))), 'adifRef goes through sigPair');
+});
+
+test('#1099: SIG POTA + SIG_INFO still works; a SIG-less SOTA-style SIG_INFO is not a park; no SIG_INFO, nothing', () => {
+  assert.deepStrictEqual(CC.sigPair({ SIG: 'pota', SIG_INFO: 'us-0001' }), ['POTA', 'US-0001']);
+  assert.deepStrictEqual(CC.sigPair({ SIG: 'WWFF', SIG_INFO: 'KFF-1234' }), ['WWFF', 'KFF-1234']);
+  assert.strictEqual(CC.sigPair({ SIG_INFO: 'W4C/CM-001' }), null);
+  assert.strictEqual(CC.sigPair({ SIG_INFO: 'Summit of nowhere' }), null);
+  assert.strictEqual(CC.sigPair({ SIG: 'POTA' }), null);
+  assert.strictEqual(CC.sigPair({}), null);
+  assert.strictEqual(CC.sigPair(null), null);
+  const sota = { CALL: 'W1XYZ', QSO_DATE: '20260720', TIME_ON: '140200', BAND: '20M', SIG_INFO: 'W4C/CM-001' };
+  const vm = CC.build({ ...base, history: [], record: sota });
+  assert.strictEqual(cell(vm, 'POTA'), '—');
+  assert.strictEqual(cell(vm, 'SOTA'), '—');
+  const none = CC.build({ ...base, history: [], record: { CALL: 'W1XYZ', QSO_DATE: '20260720', TIME_ON: '140200', BAND: '20M' } });
+  assert.strictEqual(cell(none, 'POTA'), '—');
+});
+
+test('#1099: a SIG-less WWFF-shaped SIG_INFO is WWFF, not POTA', () => {
+  assert.deepStrictEqual(CC.sigPair({ SIG_INFO: 'KFF-1234' }), ['WWFF', 'KFF-1234']);
+  const vm = CC.build({ ...base, history: [], record: { CALL: 'W1XYZ', QSO_DATE: '20260720', TIME_ON: '140200', BAND: '20M', SIG_INFO: 'KFF-1234' } });
+  assert.strictEqual(cell(vm, 'POTA'), '—');
+  assert.strictEqual(cell(vm, 'WWFF'), 'KFF-1234');
+});
+
 test('this test is in the list CI runs', () => {
   assert.ok(readSrc(path.join(__dirname, '..', 'scripts', 'run-tests.js')).includes("'test/contact-card-test.js'"));
 });
