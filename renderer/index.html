@@ -467,11 +467,15 @@
           </div>
         </div>
         <div id="rig-tab-custom" class="rig-tab-panel hidden">
-          <!-- #164: buttons by default; Edit opens the editing rows. Up to 25. -->
+          <!-- #164: buttons by default; Edit opens the editing rows. Up to 25.
+               Add opens the editor with a new empty row, so "5 / 25" does not read as the limit. -->
           <div class="rig-custom-head">
             <span class="rig-custom-title">Custom CAT</span>
             <span id="rig-custom-count" class="rig-custom-count">0 / 25</span>
-            <button type="button" id="rig-custom-edit" class="rig-custom-edit-link">Edit</button>
+            <span class="rig-custom-links">
+              <button type="button" id="rig-custom-add-link" class="rig-custom-edit-link" title="Add a button">Add</button>
+              <button type="button" id="rig-custom-edit" class="rig-custom-edit-link">Edit</button>
+            </span>
           </div>
           <div id="rig-custom-view" class="rig-custom-view"></div>
           <div id="rig-custom-editor" class="hidden">

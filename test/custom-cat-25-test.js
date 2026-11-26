@@ -280,7 +280,50 @@ test('protocol: the rigs field is documented, additive', () => {
   assert.ok(/activeRigId/.test(row), 'names the field the filter compares against');
 });
 
+// --- Add beside Edit ---------------------------------------------------------
+// Operators read "5 / 25 Edit" as "five is the limit": adding was only inside
+// the editor. Now an Add beside Edit opens the editor with a new empty row.
+
+test('Add: room until 25; a new empty row, never two; unchanged at 25', () => {
+  assert.strictEqual(Follow.canAdd([]), true);
+  assert.strictEqual(Follow.canAdd(Array.from({ length: 24 }, (_, i) => btn(i))), true);
+  assert.strictEqual(Follow.canAdd(Array.from({ length: 25 }, (_, i) => btn(i))), false);
+  assert.strictEqual(Follow.canAdd(null), true);
+  const five = Array.from({ length: 5 }, (_, i) => btn(i));
+  const six = Follow.withNewRow(five);
+  assert.strictEqual(six.length, 6);
+  assert.deepStrictEqual(six[5], { name: '', command: '' });
+  assert.strictEqual(five.length, 5, 'the saved list is not changed in place');
+  assert.strictEqual(Follow.withNewRow(six).length, 6, 'an empty last row is reused');
+  assert.deepStrictEqual(Follow.withNewRow([]), [{ name: '', command: '' }]);
+  const full = Array.from({ length: 25 }, (_, i) => btn(i));
+  assert.strictEqual(Follow.withNewRow(full).length, 25, 'no 26th');
+});
+
+test('Rig panel: an Add link beside Edit opens the editor with a new row', () => {
+  const tab = HTML.slice(HTML.indexOf('<div id="rig-tab-custom"'), HTML.indexOf('<div id="rig-tab-presets"'));
+  const head = tab.slice(tab.indexOf('rig-custom-head'), tab.indexOf('id="rig-custom-view"'));
+  assert.ok(/id="rig-custom-add-link"[^>]*>Add</.test(head), 'Add in the header, plain label');
+  assert.ok(head.indexOf('rig-custom-add-link') < head.indexOf('id="rig-custom-edit"'), 'Add sits next to Edit');
+  assert.ok(/rigCustomAddLink\.classList\.toggle\('hidden', customCatEditing \|\| !CustomCatFollow\.canAdd\(customCatButtons\)\)/.test(APP), 'shown on view with room');
+  const click = APP.slice(APP.indexOf('rigCustomAddLink.addEventListener('), APP.indexOf('rigCustomAddLink.addEventListener(') + 700);
+  assert.ok(/customCatButtons = CustomCatFollow\.withNewRow\(customCatButtons\)/.test(click), 'a new empty row');
+  assert.ok(/customCatEditing = true/.test(click) && /renderCustomCat\(\)/.test(click), 'opens the editor');
+  assert.ok(/\.rig-custom-links \{[^}]*margin-left: auto/.test(CSS), 'Add and Edit together on the right');
+});
+
+test('ECHOCAT Web: an Add button beside Edit opens the editor with a new row', () => {
+  const RHTML = src('renderer', 'remote.html');
+  const sec = RHTML.slice(RHTML.indexOf('<div id="rc-custom-cat"'), RHTML.indexOf('id="rc-custom-cat-edit"') + 80);
+  assert.ok(/id="rc-custom-cat-add"[^>]*>Add</.test(sec), 'Add beside Edit, plain label');
+  assert.ok(/customCatAddBtn\.classList\.toggle\('hidden', customCatEditing \|\| !room\)/.test(REMOTE), 'shown on view with room');
+  const click = REMOTE.slice(REMOTE.indexOf("customCatAddBtn.addEventListener('click'"), REMOTE.indexOf("customCatAddBtn.addEventListener('click'") + 700);
+  assert.ok(/customCatData = CustomCatFollow\.withNewRow\(customCatData\)/.test(click), 'a new empty row');
+  assert.ok(/customCatEditing = true/.test(click) && /renderCustomCatEditor\(\)/.test(click), 'opens the editor');
+  assert.ok(/customCatEditBtn\.textContent = 'Done'/.test(click), 'Edit reads Done');
+});
+
 Promise.all(pending).then(() => {
-  console.log(`\nCustom CAT 25 / per radio (#164): ${pass} passed, ${fail} failed`);
+  console.log(`\nCustom CAT 25 / per radio (#164):${pass} passed, ${fail} failed`);
   process.exit(fail === 0 ? 0 : 1);
 });

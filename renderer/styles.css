@@ -7451,6 +7451,9 @@ a.settings-echocat-badge-link:hover {
   cursor: pointer;
 }
 .rig-custom-edit-link:hover { opacity: 0.85; }
+/* Add and Edit sit together on the right of the header. */
+.rig-custom-links { margin-left: auto; display: inline-flex; align-items: baseline; gap: 12px; }
+.rig-custom-links .rig-custom-edit-link { margin-left: 0; }
 /* The tab is as wide as about five buttons, so the view wraps five to a row
    and an editing row (label, type, command, Send, Radios, remove) fits one line. */
 #rig-tab-custom { width: 400px; max-width: 100%; }

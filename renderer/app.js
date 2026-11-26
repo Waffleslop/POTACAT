@@ -27564,6 +27564,7 @@ const rigCustomAddBtn = document.getElementById('rig-custom-add');
 const rigCustomView = document.getElementById('rig-custom-view');
 const rigCustomEditor = document.getElementById('rig-custom-editor');
 const rigCustomEditLink = document.getElementById('rig-custom-edit');
+const rigCustomAddLink = document.getElementById('rig-custom-add-link');
 const rigCustomCount = document.getElementById('rig-custom-count');
 let customCatButtons = [];
 try { customCatButtons = CustomCatFollow.capSlots(JSON.parse(localStorage.getItem('custom-cat-buttons') || '[]')); } catch { customCatButtons = []; }
@@ -28000,6 +28001,8 @@ function renderCustomCat() {
   customToggleReflectors = [];
   if (rigCustomCount) rigCustomCount.textContent = customCatButtons.length + ' / ' + CustomCatFollow.MAX_SLOTS;
   if (rigCustomEditLink) rigCustomEditLink.textContent = customCatEditing ? 'Done' : 'Edit';
+  // Add beside Edit: shown while the buttons are on view and there is room.
+  if (rigCustomAddLink) rigCustomAddLink.classList.toggle('hidden', customCatEditing || !CustomCatFollow.canAdd(customCatButtons));
   if (rigCustomAddBtn) {
     rigCustomAddBtn.textContent = '+ Add (' + customCatButtons.length + ' of ' + CustomCatFollow.MAX_SLOTS + ')';
     rigCustomAddBtn.disabled = customCatButtons.length >= CustomCatFollow.MAX_SLOTS;
@@ -28065,6 +28068,20 @@ if (rigCustomAddBtn) {
     // Focus the new slot's label input
     const slots = rigCustomSlotsContainer.querySelectorAll('.rig-custom-name');
     if (slots.length > 0) slots[slots.length - 1].focus();
+  });
+}
+
+// Add beside Edit: open the editor with a new empty row and put the cursor in it.
+if (rigCustomAddLink) {
+  rigCustomAddLink.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!CustomCatFollow.canAdd(customCatButtons)) return;
+    customCatButtons = CustomCatFollow.withNewRow(customCatButtons);
+    customCatEditing = true;
+    renderCustomCat();
+    const names = rigCustomSlotsContainer.querySelectorAll('.rig-custom-name');
+    if (names.length > 0) names[names.length - 1].focus();
   });
 }
 
