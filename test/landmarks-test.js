@@ -58,6 +58,18 @@ test('the helper text is written plainly: no exclamation marks, no em-dashes, no
   }
 });
 
+// NRC Canada ended CHU's shortwave broadcasts on 3330, 7850 and 14670 kHz on
+// 22 June 2026 (last announcement 14:10 UTC). A landmark is a signal you can
+// hear, so none of the three is listed (Casey 2026-11-25).
+test('CHU is gone: no landmark on 3330, 7850 or 14670 kHz', () => {
+  for (const e of CATALOG.landmarks) {
+    assert.ok(!/^chu-/i.test(e.id) && e.name !== 'CHU', e.id + ' is a CHU entry');
+    assert.ok(![3330, 7850, 14670].includes(e.khz), e.id + ' sits on a CHU frequency');
+    assert.ok(!/\bCHU\b/.test([e.line, e.hear, e.why, e.try].join(' ')), e.id + ' still mentions CHU');
+  }
+  assert.ok(CATALOG.landmarks.find((l) => l.id === 'wwv-10000') && CATALOG.landmarks.find((l) => l.id === 'rwm-9996'), 'the other time stations stay');
+});
+
 test('ids are unique; the NCDXF rows are exactly the five beacon frequencies', () => {
   const ids = CATALOG.landmarks.map((l) => l.id);
   assert.strictEqual(new Set(ids).size, ids.length);
