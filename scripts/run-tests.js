@@ -714,6 +714,9 @@ const TESTS = [
   'test/sdr-scope-test.js',
   'test/sdr-scope-if-tap-test.js', // #394: an SDR on a radio's IF output stays on the IF
   'test/rtltcp-audio-test.js',
+  'test/sdrconnect-protocol-test.js', // SDRconnect WebSocket API (SDRplay nRSP-ST): envelope, binary types, levels from bins, restore set
+  'test/sdrconnect-client-test.js', // SDRconnect against a fake server: discovery, scope follows the dial, reconnect, failures, clean shutdown
+  'test/sdrconnect-audio-test.js', // listening and JTCAT through SDRconnect: 48 kHz audio, demodulator, sharing the scope, main.js wiring
   'test/landmarks-test.js', // Directory > Landmarks: the catalog gate, hours, rig coverage, the NCDXF clock, the feed, wiring
   'test/directory-key-nav-test.js', // #501: Directory arrow keys move from the row you clicked; ends clamp; a tab switch resets
   'test/lz3aw-round14-test.js',

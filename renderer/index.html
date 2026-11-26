@@ -2513,26 +2513,55 @@
           <summary>Band scope from an SDR</summary>
           <div style="margin-top:6px;">
             <label class="checkbox-label"><input type="checkbox" id="set-sdr-scope-enabled"> Show a band scope from a separate SDR (RTL-SDR, SDRplay) for this rig</label>
-            <span class="help-text" style="display:block;margin:2px 0 6px 24px;">POTACAT reads the SDR through an rtl_tcp server: run <b>rtl_tcp</b> for an RTL-SDR or <b>rsp_tcp</b> for an SDRplay, then open More &gt; Band Scope. The SDR follows your dial; click a signal to tune there.</span>
+            <div id="sdr-scope-kind-row" style="margin:2px 0 4px 24px;">
+              <label>SDR type:
+                <select id="set-sdr-scope-kind">
+                  <option value="rtltcp">rtl_tcp server (RTL-SDR, or SDRplay through rsp_tcp)</option>
+                  <option value="sdrconnect">SDRconnect (SDRplay nRSP-ST, or any SDRplay on SDRconnect)</option>
+                </select>
+              </label>
+            </div>
+            <span class="help-text sdr-rtl-only" style="display:block;margin:2px 0 6px 24px;">POTACAT reads the SDR through an rtl_tcp server: run <b>rtl_tcp</b> for an RTL-SDR or <b>rsp_tcp</b> for an SDRplay, then open More &gt; Band Scope. The SDR follows your dial; click a signal to tune there.</span>
+            <span class="help-text sdr-sdrconnect-only" style="display:none;margin:2px 0 6px 24px;">POTACAT reads the SDR through SDRconnect on this PC. Start SDRconnect, choose your nRSP-ST once, and turn on its WebSocket server. The SDR follows your dial; click a signal to tune there. Never connect it to the antenna you transmit on.</span>
             <div id="sdr-scope-config" style="margin-left:24px;display:flex;flex-wrap:wrap;gap:6px 12px;align-items:center;">
-              <label>Server: <input type="text" id="set-sdr-scope-host" value="127.0.0.1" style="width:120px;"></label>
+              <label><span id="sdr-scope-host-label">Server:</span> <input type="text" id="set-sdr-scope-host" value="127.0.0.1" style="width:120px;"></label>
               <label>Port: <input type="number" id="set-sdr-scope-port" min="1" max="65535" value="1234" style="width:70px;"></label>
-              <label>Span:
+              <label class="sdr-sdrconnect-only" style="display:none;">Receiver:
+                <select id="set-sdr-scope-device" style="max-width:240px;">
+                  <option value="">The one SDRconnect has open</option>
+                </select>
+              </label>
+              <button type="button" id="sdr-scope-refresh" class="sdr-sdrconnect-only" style="display:none;">Refresh</button>
+              <label class="sdr-sdrconnect-only" style="display:none;">Span:
+                <select id="set-sdr-scope-span">
+                  <option value="200000">200 kHz</option>
+                  <option value="800000" selected>800 kHz</option>
+                  <option value="1600000">1.6 MHz</option>
+                  <option value="5000000">5 MHz</option>
+                  <option value="8000000">8 MHz</option>
+                </select>
+              </label>
+              <label class="sdr-sdrconnect-only" style="display:none;" title="SDRconnect's RF gain steps for this receiver">RF gain:
+                <select id="set-sdr-scope-lna">
+                  <option value="auto">Auto (as SDRconnect has it)</option>
+                </select>
+              </label>
+              <label class="sdr-rtl-only">Span:
                 <select id="set-sdr-scope-rate">
                   <option value="250000">200 kHz</option>
                   <option value="1024000" selected>800 kHz</option>
                   <option value="2048000">1.6 MHz</option>
                 </select>
               </label>
-              <label title="auto, or a gain in dB (0-50 on most RTL-SDR tuners)">Gain: <input type="text" id="set-sdr-scope-gain" value="auto" style="width:60px;"></label>
-              <label title="RTL-SDR V3/V4 receive HF (below 24 MHz) in Q-branch direct sampling. Leave Off for SDRplay or an upconverter.">HF direct sampling:
+              <label class="sdr-rtl-only" title="auto, or a gain in dB (0-50 on most RTL-SDR tuners)">Gain: <input type="text" id="set-sdr-scope-gain" value="auto" style="width:60px;"></label>
+              <label class="sdr-rtl-only" title="RTL-SDR V3/V4 receive HF (below 24 MHz) in Q-branch direct sampling. Leave Off for SDRplay or an upconverter.">HF direct sampling:
                 <select id="set-sdr-scope-direct">
                   <option value="off">Off</option>
                   <option value="q">Q branch (RTL-SDR V3/V4 on HF)</option>
                   <option value="i">I branch</option>
                 </select>
               </label>
-              <label title="Frequency correction for the dongle's crystal">PPM: <input type="number" id="set-sdr-scope-ppm" min="-200" max="200" value="0" style="width:60px;"></label>
+              <label class="sdr-rtl-only" title="Frequency correction for the dongle's crystal">PPM: <input type="number" id="set-sdr-scope-ppm" min="-200" max="200" value="0" style="width:60px;"></label>
               <label title="Where the SDR's antenna input is connected">The SDR is connected to:
                 <select id="set-sdr-scope-tap">
                   <option value="follow">An antenna, or the radio's RX OUT (moves with the dial)</option>
@@ -2544,6 +2573,7 @@
               <span id="sdr-scope-invert-wrap"><label class="checkbox-label" title="Tick this if signals above the dial show below it on the scope"><input type="checkbox" id="set-sdr-scope-invert"> The radio's IF is upside down (mirror the picture)</label></span>
               <label class="checkbox-label" id="sdr-scope-prefer-wrap" title="The FT-710 has its own USB band scope; tick this to show the SDR instead"><input type="checkbox" id="set-sdr-scope-prefer"> Use the SDR instead of the FT-710's own scope</label>
             </div>
+            <div id="sdr-scope-sdrconnect-status" class="help-text sdr-sdrconnect-only" role="status" aria-live="polite" style="display:none;margin:6px 0 0 24px;"></div>
           </div>
         </details>
         <div class="rig-editor-buttons">
@@ -3684,6 +3714,7 @@
       <legend>WebSDR</legend>
       <span class="help-text">Listen through a remote receiver (KiwiSDR or WebSDR.org) while transmitting on your local radio. Useful for local QRM. Click <b>Browse</b> to pick from a curated list, or type a host manually. Port 8073 = KiwiSDR, other ports = WebSDR.org.</span>
       <span class="help-text" style="display:block;margin-top:4px;">An <b>rtl_tcp</b> server works here too: an RTL-SDR running rtl_tcp, or an SDRplay running rsp_tcp, on this PC or a Pi by your antenna (for example <b>192.168.1.50:1234</b>). POTACAT recognises it when it connects and does the receiving itself. It sends about 4 Mbit/s, so use it on your own network. If that SDR is also your band scope (Settings &gt; Radio, Edit the rig, Band scope from an SDR), its gain and direct sampling settings are used, and listening shares the scope's connection.</span>
+      <span class="help-text" style="display:block;margin-top:4px;"><b>SDRconnect</b> works here too, for an SDRplay nRSP-ST or any SDRplay: enter the PC running SDRconnect with port 5454 (for example <b>127.0.0.1:5454</b>). SDRconnect does the receiving; POTACAT tunes it and plays what it hears.</span>
       <div style="display:flex;gap:6px;margin-top:8px;align-items:center;">
         <label style="flex:1;">Label: <input type="text" id="set-kiwi-label-1" placeholder="K3FEF" style="width:100%;max-width:80px;"></label>
         <label style="flex:3;">Host: <input type="text" id="set-kiwi-host-1" placeholder="host:port (e.g. k3fef.com:8073)" style="width:100%;max-width:260px;"></label>
