@@ -439,6 +439,7 @@ function resolveCallsign(call, db) {
 const CallZones = require('./lib/call-zones'); // CQ/ITU zones for spots + logbook rows (LZ3AW item 30)
 const DxRule = require('./lib/dx-rule'); // what counts as DX: another entity, or the operator's distance (G4BFG)
 const ParkEntity = require('./lib/park-entity'); // a POTA park's DXCC entity, for a home call signed abroad (#662)
+const { createLaunchPing } = require('./lib/launch-ping'); // launch statistics ping held until Welcome is done (#1073)
 const InstallDefaults = require('./lib/install-defaults'); // always-on features + the one-time defaults (Casey 2026-10-27)
 const ClusterNodeChoice = require('./lib/cluster-node-choice'); // turn saved cluster nodes on/off from the Source menu (LZ3AW item 1)
 const { parseAdifFile, parseWorkedQsos, parseAllQsos, parseAllRawQsos, parseAdifStream, parseSqliteFile, parseSqliteConfirmed, isSqliteFile, parseRecord: parseAdifRecord, normalizeMode: normalizeLogMode } = require('./lib/adif');
@@ -45355,6 +45356,12 @@ function telemetryAllowed() {
   return !!(settings && settings.enableTelemetry && !settings.firstRun);
 }
 
+const launchPing = createLaunchPing({
+  allowed: telemetryAllowed,
+  waiting: () => !!(settings && settings.firstRun),
+  send: () => { sendTelemetry(0); },
+});
+
 function sendTelemetry(sessionSeconds) {
   if (!telemetryAllowed()) return Promise.resolve();
   if (!settings.telemetryId) {
@@ -53236,7 +53243,7 @@ function cloudShackNotice(text, kind) {
   }
 
   // Send telemetry ping on launch (only when enabled, after a short delay)
-  setTimeout(() => sendTelemetry(0), 8000);
+  setTimeout(() => launchPing.onLaunchTimer(), 8000);
 
 
 
@@ -57251,6 +57258,7 @@ function cloudShackNotice(text, kind) {
     // The rig's audio devices win over an empty or stale mirror in the blob.
     healRigAudioMirror(settings);
     saveSettings(settings);
+    launchPing.onSettingsSaved(); // #1073: the Welcome choice is saved; send the held launch ping if allowed
     // Automatic retry turned off while one waits: it is cancelled now (#425).
     if (settings.winlinkAutoRetry === false) winlinkRetryCancel('setting-off');
 

@@ -561,6 +561,7 @@ const TESTS = [
   'test/prop-empty-state-test.js',
   'test/rotctld-client-test.js',
   'test/station-setup-test.js',
+  'test/launch-ping-test.js',
   'test/setup-share-test.js',
   'test/lz3aw-round6-test.js',
   'test/cw-auto-sync-test.js',
