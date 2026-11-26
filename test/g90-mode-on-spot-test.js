@@ -2,14 +2,15 @@
 'use strict';
 // GitHub #916: clicking a spot moved a Xiegu G90's frequency but not its mode
 // (14.235 USB -> 14.035 CW left the radio in USB). The G90 runs through
-// rigctld (Hamlib 3088). Hamlib's G90 backend marks the mode VFO-targetable,
-// so it sets the mode only with CI-V 26; when the radio rejects 26 (G90
-// firmware, Hamlib issue 1547) Hamlib sends just the DATA flag (1A 06) and
-// never the mode. Reproduced against the bundled rigctld 4.7.2 with a
-// simulated G90 that rejects 26: "M CW 0" changed nothing on the radio.
-// The G90 now also gets a plain CI-V 06 set-mode frame through `w` before
-// each M (standard CI-V, manual v1.01 PDF page 19), at Hamlib's G90 address
-// 0xA4. These are the exact bytes a spot click sends.
+// rigctld (Hamlib 3088). PR #920 added a raw CI-V 06 set-mode frame through
+// `w` before each M, tested only against a simulated G90 that rejects CI-V 26.
+// A real G90 (firmware 1.81, bundled Hamlib 4.7.2) rejects that 06 frame (NG)
+// and accepts Hamlib's own M (CI-V 26, ACK; FT8 = 26 with the DATA flag), and
+// rigctld's `w` leaves the NG in its buffer and closes the link, which looped
+// with the reconnect's mode re-send (1.14.8). The G90 now sets its mode with
+// Hamlib's M only. The generic guard from #1086 stays: a raw CI-V mode frame
+// (any model with civModeAddr; none in the catalog today) that the link drops
+// on is not sent again this session.
 // Run: node test/g90-mode-on-spot-test.js
 const assert = require('assert');
 const { EventEmitter } = require('events');
@@ -46,6 +47,7 @@ async function spotClick(baseModel, lastMode, hz, mode) {
   await sleep(700);
   return writes;
 }
+const noRaw = (w) => assert.ok(w.every((l) => !/^w /.test(l)), 'a raw w line was sent: ' + JSON.stringify(w));
 
 // `w` argument -> the bytes rigctld writes to the serial port.
 function rawBytes(line) {
@@ -59,62 +61,83 @@ const civ = (modeByte) => [0xFE, 0xFE, 0xA4, 0xE0, 0x06, modeByte, 0xFD];
   console.log('G90 mode on a spot click (#916)');
   const G90 = RIG_MODELS.G90;
 
-  await test('USB -> CW spot: CI-V 06 03 before each M CW, then the frequency', async () => {
+  await test('USB -> CW spot: M CW, then the frequency, M CW again, no raw frame', async () => {
     const w = await spotClick(G90, 'USB', 14035000, 'CW');
-    assert.strictEqual(w.length, 6, JSON.stringify(w));
-    assert.deepStrictEqual(rawBytes(w[0]), civ(0x03));
-    assert.strictEqual(w[1], 'M CW 0\n');
-    assert.strictEqual(w[2], 'F 14035000\n');
-    assert.deepStrictEqual(rawBytes(w[3]), civ(0x03));
-    assert.strictEqual(w[4], 'M CW 0\n');
-    assert.strictEqual(w[5], 'F 14035000\n');
+    assert.deepStrictEqual(w, ['M CW 0\n', 'F 14035000\n', 'M CW 0\n', 'F 14035000\n']);
   });
 
-  await test('CW -> USB spot: CI-V 06 01', async () => {
+  await test('CW -> USB spot: M USB, no raw frame', async () => {
     const w = await spotClick(G90, 'CW', 14235000, 'USB');
-    assert.deepStrictEqual(rawBytes(w[0]), civ(0x01));
-    assert.strictEqual(w[1], 'M USB 0\n');
-    assert.strictEqual(w[2], 'F 14235000\n');
+    noRaw(w);
+    assert.strictEqual(w[0], 'M USB 0\n');
+    assert.strictEqual(w[1], 'F 14235000\n');
   });
 
-  await test('USB -> LSB spot: CI-V 06 00', async () => {
+  await test('USB -> LSB spot: M LSB, no raw frame', async () => {
     const w = await spotClick(G90, 'USB', 7200000, 'LSB');
-    assert.deepStrictEqual(rawBytes(w[0]), civ(0x00));
-    assert.strictEqual(w[1], 'M LSB 0\n');
+    noRaw(w);
+    assert.strictEqual(w[0], 'M LSB 0\n');
   });
 
-  await test('an SSB spot on 40 m resolves to LSB: CI-V 06 00', async () => {
+  await test('an SSB spot on 40 m resolves to M LSB, no raw frame', async () => {
     const w = await spotClick(G90, 'CW', 7185000, 'SSB');
-    assert.deepStrictEqual(rawBytes(w[0]), civ(0x00));
-    assert.strictEqual(w[1], 'M LSB 0\n');
+    noRaw(w);
+    assert.strictEqual(w[0], 'M LSB 0\n');
   });
 
-  await test('FT8 spot: base USB with CI-V 06 01, then Hamlib M PKTUSB sets the DATA flag', async () => {
+  await test('FT8 spot: M PKTUSB (USB plus DATA in one CI-V 26), no raw frame', async () => {
     const w = await spotClick(G90, 'CW', 14074000, 'FT8');
-    assert.deepStrictEqual(rawBytes(w[0]), civ(0x01));
-    assert.strictEqual(w[1], 'M PKTUSB 0\n');
-    assert.strictEqual(w[2], 'F 14074000\n');
+    noRaw(w);
+    assert.strictEqual(w[0], 'M PKTUSB 0\n');
+    assert.strictEqual(w[1], 'F 14074000\n');
   });
 
-  await test('the raw frame comes first in every mode set, so Hamlib\'s DATA flag is the last word', async () => {
+  await test('a direct setMode on the G90 is Hamlib M alone', async () => {
     const { codec, writes } = rig(G90, 'USB');
     codec.setMode('DIGL', 7074000);
-    assert.deepStrictEqual(rawBytes(writes[0]), civ(0x00));
-    assert.strictEqual(writes[1], 'M PKTLSB 0\n');
+    assert.deepStrictEqual(writes, ['M PKTLSB 0\n']);
   });
 
-  await test('another rigctld radio sends no raw frame (generic Hamlib model)', async () => {
+  await test('the G90 model carries no raw CI-V mode address', async () => {
+    assert.strictEqual(G90.civModeAddr, undefined);
+  });
+
+  await test('the reconnect mode re-send on a G90 sends nothing raw', async () => {
+    const { r, writes } = rig(G90, 'USB');
+    r.tune(14035000, 'CW', {});
+    await sleep(2300); // the drop comes later than the #1086 guard's 1.5 s window
+    r._transport.emit('close');
+    writes.length = 0;
+    r.connected = true;
+    r._enforceRequestedMode(); // what the reconnect runs, 1.5 s later
+    await sleep(1700);
+    assert.ok(writes.includes('M CW 0\n'), JSON.stringify(writes));
+    noRaw(writes);
+  });
+
+  await test('another rigctld radio is unchanged (generic Hamlib model)', async () => {
     const w = await spotClick(GENERIC_CAPS.rigctld, 'USB', 14035000, 'CW');
     assert.deepStrictEqual(w, ['M CW -1\n', 'F 14035000\n', 'M CW -1\n', 'F 14035000\n']);
   });
 
-  await test('another Hamlib model in the catalog sends no raw frame', async () => {
-    const others = Object.entries(RIG_MODELS).filter(([n, m]) => n !== 'G90' && m && m.civModeAddr != null);
-    assert.deepStrictEqual(others.map(([n]) => n), []);
+  await test('no model in the catalog sends a raw CI-V mode frame', async () => {
+    const withFrame = Object.entries(RIG_MODELS).filter(([, m]) => m && m.civModeAddr != null);
+    assert.deepStrictEqual(withFrame.map(([n]) => n), []);
   });
 
-  await test('rigctld printing the CI-V echo of a `w` is swallowed, not read as a mode or frequency', async () => {
-    const { codec } = rig(G90, null);
+  // The #1086 guard stays generic: a model given civModeAddr (none today) gets
+  // the frame, and a link that drops right after it turns it off.
+  const FRAMED = { ...G90, civModeAddr: 0xA4 };
+
+  await test('guard: a model with civModeAddr sends the 06 frame before M', async () => {
+    const { codec, writes } = rig(FRAMED, 'USB');
+    codec.setMode('CW', 14035000);
+    assert.deepStrictEqual(rawBytes(writes[0]), civ(0x03));
+    assert.strictEqual(writes[1], 'M CW 0\n');
+  });
+
+  await test('guard: rigctld printing the CI-V echo of a `w` is swallowed, not read as a mode or frequency', async () => {
+    const { codec } = rig(FRAMED, null);
     const seen = [];
     codec.on('mode', (m) => seen.push('mode ' + m));
     codec.on('frequency', (f) => seen.push('freq ' + f));
@@ -124,33 +147,31 @@ const civ = (modeByte) => [0xFE, 0xFE, 0xA4, 0xE0, 0x06, modeByte, 0xFD];
     assert.ok(!codec._pending.some((e) => e.kind === 'raw'), 'the raw entry is answered');
   });
 
-  // 1.14.8 field report (macOS, bundled Hamlib 4.7.2): rigctld closed the link
-  // ~10 ms after every raw frame, and the reconnect's mode re-send sent it again.
-  await test('a link that drops right after the raw frame turns it off: the next mode set is Hamlib M alone', async () => {
-    const { r, codec, writes } = rig(G90, 'USB');
-    const transport = r._transport;
+  await test('guard: a link that drops right after the raw frame turns it off: the next mode set is M alone', async () => {
+    const { r, codec, writes } = rig(FRAMED, 'USB');
     codec.setMode('CW', 14035000);
     assert.deepStrictEqual(rawBytes(writes[0]), civ(0x03));
-    transport.emit('close');
+    r._transport.emit('close');
     writes.length = 0;
     codec.setMode('USB', 14235000);
     assert.deepStrictEqual(writes, ['M USB 0\n']);
   });
 
-  await test('after that drop the reconnect mode re-send carries no raw frame, so there is no connect-drop loop', async () => {
-    const { r, writes } = rig(G90, 'USB');
+  await test('guard: after that drop the reconnect mode re-send carries no raw frame (no connect-drop loop)', async () => {
+    const { r, writes } = rig(FRAMED, 'USB');
     r.tune(14035000, 'CW', {});
     await sleep(700);
     r._transport.emit('close');
     writes.length = 0;
     r.connected = true;
-    r._enforceRequestedMode(); // what the reconnect runs, 1.5 s later
+    r._enforceRequestedMode();
     await sleep(1700);
-    assert.ok(writes.includes('M CW 0\n') && writes.every((l) => !/^w /.test(l)), JSON.stringify(writes));
+    assert.ok(writes.includes('M CW 0\n'), JSON.stringify(writes));
+    noRaw(writes);
   });
 
-  await test('a link that drops long after the raw frame keeps it (the #916 mode fix stays on)', async () => {
-    const { r, codec, writes } = rig(G90, 'USB');
+  await test('guard: a link that drops long after the raw frame keeps it', async () => {
+    const { r, codec, writes } = rig(FRAMED, 'USB');
     codec.setMode('CW', 14035000);
     codec._civModeSentMs = Date.now() - 60000;
     r._transport.emit('close');

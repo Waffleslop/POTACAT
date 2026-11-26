@@ -110,13 +110,12 @@ t('main.js advertises caps.dataModes from the one rule', () => {
 });
 
 // --- What each codec sends for set-mode DIGU / DIGL ---
-t('G90 (rigctld): CI-V 06 USB/LSB at 0xA4, then M PKTUSB / PKTLSB', () => {
-  for (const [mode, tok, byte] of [['DIGU', 'PKTUSB', '01'], ['DIGL', 'PKTLSB', '00']]) {
+t('G90 (rigctld): M PKTUSB / PKTLSB only, no raw CI-V frame (#916)', () => {
+  for (const [mode, tok] of [['DIGU', 'PKTUSB'], ['DIGL', 'PKTLSB']]) {
     const w = [];
     const c = new RigctldCodec(RIG_MODELS.G90, (d) => w.push(String(d)));
     assert.strictEqual(c.setMode(mode, HZ), tok);
-    assert.ok(w[0].startsWith('w ') && w[0].toLowerCase().includes(`\\0xa4\\0xe0\\0x06\\0x${byte}`), JSON.stringify(w));
-    assert.ok(w.some((l) => l.startsWith(`M ${tok} `)), JSON.stringify(w));
+    assert.deepStrictEqual(w, [`M ${tok} 0\n`]);
   }
 });
 t('Icom IC-7300 (CI-V): 06 USB/LSB, then 1A 06 with DATA on', () => {
