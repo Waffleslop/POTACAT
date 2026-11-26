@@ -788,6 +788,7 @@ const TESTS = [
   'test/jtcat-auto-compact-test.js', // #857: the JTCAT window picks a compact layout by itself when short (hysteresis; an explicit Full/Compact wins; never resizes the window)
   'test/jtcat-own-tx-offset-test.js', // #503: our own TX rows show the offset that slot went out on
   'test/jtcat-chimes-test.js', // optional JTCAT chimes: a station calls me, TX stopped by itself (off by default, one sound engine, sound only)
+  'test/jtcat-run-callers-test.js', // Run answers the stations that called during a QSO before calling CQ again (W5XY 2026-11-25)
   'test/net-reminder-row-test.js', // a Net Reminders row always names its net (#284)
   'test/freq-dots-test.js', // every frequency an operator reads is written the VFO way, 14.074.00 (Casey 2026-11-11)
   'test/settings-contrast-test.js', // Settings meets the contrast rule in every theme (VARA button in She's On Frequency); rendered: scripts/settings-contrast-audit.js

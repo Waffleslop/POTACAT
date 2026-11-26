@@ -147,6 +147,7 @@ function harness(settings, opts) {
     startFullAutoCq: async (owner, mod, so) => { calls.push(['startRun', owner, !!(so && so.auto)]); ctx.jtcatFullAutoCq = true; return true; },
     broadcastAutoCqState: () => {}, _jtcatSpottedHuntLogged: new Set(), jtcatAutoCqWorkedSession: new Set(),
     jtcatModeHopEnabled: () => false,
+    jtcatRunAnswerWaiting: () => false, // #1067: no caller waiting in these tests
   };
   const names = ['jtcatSessionLimitStart', 'jtcatSessionLimitPush', 'jtcatSessionLimitTick', 'jtcatSessionLimitStop',
     'jtcatSessionLimitBlocksTx', 'jtcatSessionLimitClear', 'rearmCq', 'jtcatHuntFallbackStart'];

@@ -22493,6 +22493,15 @@ async function rearmCq(owner) {
   // Session limit FIRST ("Stop Run and Hunt after N minutes"): past the deadline
   // Run neither answers a waiting caller nor calls CQ; it stops here.
   if (!JtcatSessionLimit.mayStartNew(_jtcatSessionLimit, Date.now())) { jtcatSessionLimitStop(); return false; }
+  // Any other check that ends Run or Hunt here belongs ABOVE this point:
+  // past it, Run answers a waiting caller or calls CQ.
+  // Someone called us during the QSO that just ended: answer them, not CQ.
+  if (jtcatRunAnswerWaiting(owner, { afterQso: true })) {
+    jtcatFullAutoCqUnanswered = 0;
+    jtcatFullAutoCqPaused = false;
+    jtcatFullAutoCqLastActivity = Date.now();
+    return true;
+  }
   const qso = await jtcatBuildCqQso(jtcatFullAutoCqModifier);
   if (!qso) { stopFullAutoCq('callsign/grid not set'); return false; }
   // A re-arm follows real activity (a QSO finished, stalled, or the band came
@@ -22503,6 +22512,130 @@ async function rearmCq(owner) {
   if (owner === 'remote') { remoteJtcatQso = qso; remoteJtcatBroadcastQso(); }
   else { popoutJtcatQso = qso; popoutBroadcastQso(); }
   sendCatLog('[JTCAT] Full Auto CQ — re-arming CQ: ' + qso.txMsg);
+  return true;
+}
+
+// Run's waiting callers (lib/jtcat-run-callers.js, W5XY 2026-11-25): every
+// station that called us in the last few periods, so one that called during a
+// QSO is answered when it ends instead of Run calling CQ over them.
+const JtcatRunCallers = require('./lib/jtcat-run-callers');
+const jtcatRunCallers = new JtcatRunCallers.RunCallerQueue();
+
+/** Does Run answer waiting callers itself? Off: the CQ phase behaves as before. */
+function jtcatRunServesCallers() {
+  return !!jtcatFullAutoCq && settings.jtcatAnswerCallers !== false && _autoSeqEnabled()
+    && !jtcatFdContext() && !settings.jtcatHoundMode;
+}
+
+/** Run's dupe test for a waiting caller: the worked-before policy, the Log QSO
+ *  window, Never answer, and this session's attempts, except that a station
+ *  Run gave up on may be answered once more while it keeps calling.
+ *  Returns why it is not answered, or '' when it may be. */
+function jtcatRunCallerBlocked(call, band, mode) {
+  const where = `on ${band || 'this band'} ${mode}`.trimEnd();
+  if (HuntFilters.isIgnored(call, jtcatIgnoreList())) return 'on your Never answer list';
+  if (jtcatLogReviews.holds(call, band, mode)) return 'waiting in the Log QSO window';
+  if (jtcatWorkedInfo(call, band, mode).blocking) return 'already worked ' + where;
+  if (jtcatSessionHas(call, band, mode) && !jtcatRunCallers.mayRetry(jtcatSessionKey(call, band, mode))) {
+    return 'already worked or tried ' + where + ' this session';
+  }
+  return '';
+}
+
+function jtcatRunCallersWindowMs() {
+  return JtcatRunCallers.windowMs(ft8Engine && typeof ft8Engine._cycleSec === 'function' ? ft8Engine._cycleSec() : 15);
+}
+
+/** Feed one decode cycle to the queue; while Run's CQ is listening, answer
+ *  the best waiting caller. Runs before the QSO machines in each decode path. */
+function jtcatRunCallersTick(results) {
+  if (!jtcatRunServesCallers()) return;
+  const myCall = onAirCall();
+  if (!myCall) return;
+  const bm = jtcatCurrentBandMode(ft8Engine);
+  jtcatRunCallers.note(results, myCall, Date.now(), bm.band + '|' + bm.mode, jtcatRunCallersWindowMs());
+  const owner = jtcatFullAutoCqOwner;
+  const q = owner === 'remote' ? remoteJtcatQso : popoutJtcatQso;
+  if (!q || q.mode !== 'cq' || q.phase !== 'cq' || jtcatFullAutoCqPaused) return;
+  // TX Off (the window's TX On/Off, the phone's enable) leaves Run on with the
+  // engine disabled. The answer turns TX on, so it is not made here: the state
+  // machine takes the caller as before and nothing keys until TX is back on.
+  if (!ft8Engine || !ft8Engine._txEnabled) return;
+  // The CQ is listening: the queue picks the best caller (ranking, dupes, slot
+  // lock). With nobody to pick, the state machine answers exactly as before.
+  if (jtcatRunAnswerWaiting(owner, {})) {
+    jtcatFullAutoCqUnanswered = 0;
+    jtcatFullAutoCqLastActivity = Date.now();
+  }
+}
+
+/**
+ * Answer the best station waiting on us: a CQ-side QSO shell handed the
+ * caller's own message, so the state machine builds the report (or R+report)
+ * exactly as for an answer to our CQ. Synchronous: the shell is in place
+ * before this cycle's QSO processing runs. Returns true when engaged.
+ */
+function jtcatRunAnswerWaiting(owner, opts) {
+  if (!jtcatRunServesCallers() || jtcatFullAutoCqOwner !== owner) return false;
+  if (!ft8Engine || _swrTripped) return false;
+  // Past the session deadline Run starts nothing new, a waiting caller included.
+  if (!JtcatSessionLimit.mayStartNew(_jtcatSessionLimit, Date.now())) return false;
+  const myCall = onAirCall();
+  const myGrid = (settings.grid || '').toUpperCase().substring(0, 4);
+  if (!myCall || !myGrid) return false;
+  const { band, mode } = jtcatCurrentBandMode(ft8Engine);
+  const prev = owner === 'remote' ? remoteJtcatQso : popoutJtcatQso;
+  const prevCall = (prev && prev.call) || '';
+  if (prevCall) {
+    const key = jtcatSessionKey(prevCall, band, mode);
+    if (prev.phase === 'done') jtcatRunCallers.noteCompleted(key);
+    else jtcatRunCallers.noteAbandoned(key);
+    jtcatRunCallers.forget(prevCall);
+  }
+  // No signal floor: that is Hunt's (jtcatHuntMinDb), and Run never applied
+  // it to answers to its CQ. Only callers heard twice, or in the last T/R
+  // cycle, so a one-off false decode is not called a minute later.
+  const pick = jtcatRunCallers.pick({
+    nowMs: Date.now(),
+    windowMs: jtcatRunCallersWindowMs(),
+    scope: band + '|' + mode,
+    exclude: [prevCall, myCall],
+    confirmedOnly: true,
+    isBlocked: (call) => jtcatRunCallerBlocked(call, band, mode),
+    slotOk: (slot) => JtcatTxSlot.workableUnderLock(jtcatTxSlotLock(), slot),
+    rank: (list) => HuntFilters.rankCallers(list, { priority: HuntFilters.normalizePriority(settings.jtcatHuntPriority), myGrid }),
+  });
+  for (const b of pick.blocked) {
+    if (jtcatRunCallers.firstSkipNote(b.call)) sendCatLog(`[JTCAT] Run: not answering ${b.call}, ${b.why}`);
+  }
+  const best = pick.best;
+  if (!best) return false;
+  const shell = { mode: 'cq', phase: 'cq', call: null, grid: null, txMsg: '',
+    report: null, sentReport: null, myCall, myGrid, txRetries: 0,
+    // The previous QSO's last TX is not a try for this one.
+    _retryTxCounted: ft8Engine._lastTxPeriodKey || '' };
+  let msg = '';
+  _jtcatStateMachine.advanceJtcatQso(shell, [JtcatRunCallers.answerDecode(best, myCall)], (m) => { msg = m; }, () => {},
+    { engine: ft8Engine, log: sendCatLog });
+  if (shell.phase === 'cq' || !msg) return false;
+  if (!jtcatReplySlot(ft8Engine, best.call, best.slot)) return false;
+  jtcatRunCallers.forget(best.call);
+  const retry = jtcatSessionHas(best.call, band, mode);
+  // Called before this cycle's QSO processing (the CQ listening, a QSO just
+  // done): those decodes were just used to start it. After an abandon the
+  // cycle has already been processed.
+  if (!prev || prev.phase === 'done' || prev.phase === 'cq') shell._skipAdvanceOnce = true;
+  ft8Engine._txEnabled = true;
+  // TIME_ON: the advance wrapper notes the partner each cycle, but this first
+  // one ran outside it.
+  _jtcatQsoClock.note(best.call, Date.now());
+  if (owner === 'remote') { remoteJtcatQso = shell; remoteJtcatBroadcastQso(); }
+  else { popoutJtcatQso = shell; popoutBroadcastQso(); }
+  sendCatLog(JtcatRunCallers.answerLogLine(best, { afterQso: !!(opts && opts.afterQso) && !!prevCall, retry, more: pick.ranked.length - 1 }));
+  Promise.resolve(ft8Engine.setTxMessage(msg)).then(() => {
+    const cur = owner === 'remote' ? remoteJtcatQso : popoutJtcatQso;
+    if (cur === shell && typeof ft8Engine.tryImmediateTx === 'function') ft8Engine.tryImmediateTx();
+  }).catch(() => {});
   return true;
 }
 
@@ -22531,6 +22664,7 @@ async function startFullAutoCq(owner, modifier, opts) {
   jtcatFullAutoCqPaused = false;
   jtcatAutoCqMode = 'off';        // run and hunt are mutually exclusive
   if (!auto) jtcatAutoCqWorkedSession.clear();
+  jtcatRunCallers.clear();
   broadcastAutoCqState();
   // Run supersedes any armed Spot Target (K3SBP 2026-07-17): calling CQ and
   // waiting on a specific activator are mutually exclusive intents — without
@@ -22559,6 +22693,7 @@ function stopFullAutoCq(reason, opts) {
   const wasActive = jtcatFullAutoCq;
   jtcatFullAutoCq = false;
   jtcatFullAutoCqOwner = null;
+  jtcatRunCallers.clear();
   JtcatSessionLimit.noteStop(_jtcatSessionLimit, 'run');
   jtcatFullAutoCqUnanswered = 0;
   jtcatFullAutoCqPaused = false;
@@ -24023,6 +24158,8 @@ function advanceJtcatQso(q, results, setTxMsg, onDone) {
   // engine + log dependencies injected so the unit tests in
   // test/jtcat-test.js can drive it without spinning the full app.
   const deps = { engine: ft8Engine, log: sendCatLog };
+  // Run's waiting-caller pick (jtcatRunCallersTick) already used this cycle.
+  if (q && q._skipAdvanceOnce) { q._skipAdvanceOnce = false; return; }
   // Run mode only: don't re-work a station we've already logged on this band
   // and mode. Left off every other path deliberately — a human who pressed CQ
   // answers whoever calls (WSJT-X parity), and the double-click reply gets the
@@ -24995,6 +25132,8 @@ function startJtcat(mode) {
     jtcatChimeCallers(data);
     // Attended-operator watchdog for Full Auto CQ run mode (Part 97).
     jtcatFullAutoCqWatchdog();
+    // Run: remember who is calling us; answer the best of them rather than CQ.
+    jtcatRunCallersTick(data.results || []);
     // Clean up completed QSOs. In Full Auto CQ run mode the owning session
     // re-arms a fresh CQ instead of going idle (work-then-CQ-again loop) —
     // both owners now, since the phone can drive run mode (jtcat-full-auto-cq).
@@ -59401,6 +59540,8 @@ function cloudShackNotice(text, kind) {
         // Advance QSO state machine from this slice's decodes
         // (same logic as single-engine path in startJtcat)
         jtcatFullAutoCqWatchdog();
+        // Run answers only callers heard on the slice it transmits on (ft8Engine).
+        if (engine === ft8Engine) jtcatRunCallersTick(data.results || []);
         if (popoutJtcatQso && popoutJtcatQso.phase === 'done') {
           if (JtcatSpotTarget.qsoEndClearsTarget(jtcatSpotTarget, popoutJtcatQso.call)) {
             clearSpotTarget('worked');
