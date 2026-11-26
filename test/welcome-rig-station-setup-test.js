@@ -43,5 +43,35 @@ test('saving a new radio in that editor opens its Station Setup, after the save'
   assert.ok(/Promise\.resolve\(_ssSave\)\.then\(\(\) => window\.openStationSetup\(newId\)\)/.test(s), 'opens after the save');
 });
 
-console.log(`\n${passed} passed, ${failed} failed`);
-process.exit(failed ? 1 : 0);
+// "Here" run for real (the function itself, with the window's calls stubbed):
+// no radio saved -> Settings > Radio opens straight into Add; radios already
+// saved -> Settings > Radio shows the saved list and no editor opens.
+async function runHere(rigs) {
+  const calls = [];
+  const deps = {
+    window: { FirstRun: { chooseWhere: () => ({ action: 'rig-editor', state: { step: 'done', where: 'here' }, patch: {} }) },
+      api: { saveSettings: async () => {}, getSettings: async () => ({ rigs }) } },
+    welcomeShowRemotePanel: () => calls.push('remote-panel'),
+    welcomeCloseFlow: () => calls.push('close'),
+    openSettingsDialog: async (tab) => { calls.push('settings:' + tab); },
+    openRigEditor: (mode) => calls.push('editor:' + mode),
+  };
+  const fn = new Function(...Object.keys(deps), 'let _firstRunState = {};\n' + choose + '\n}\nreturn welcomeChooseWhere;')(...Object.values(deps));
+  await fn('here');
+  return calls;
+}
+async function testAsync(name, fn) {
+  try { await fn(); passed++; console.log('  ok  ' + name); }
+  catch (e) { failed++; console.log('  FAIL ' + name + '\n       ' + (e.message || e)); }
+}
+(async () => {
+  await testAsync('Here with no radio saved: Settings > Radio, straight into Add', async () => {
+    assert.deepStrictEqual(await runHere([]), ['close', 'settings:radio', 'editor:add']);
+    assert.deepStrictEqual(await runHere(undefined), ['close', 'settings:radio', 'editor:add']);
+  });
+  await testAsync('Here with radios already saved: Settings > Radio shows the saved list, no editor', async () => {
+    assert.deepStrictEqual(await runHere([{ id: 'r1', name: 'IC-7300' }]), ['close', 'settings:radio']);
+  });
+  console.log(`\n${passed} passed, ${failed} failed`);
+  process.exit(failed ? 1 : 0);
+})();
