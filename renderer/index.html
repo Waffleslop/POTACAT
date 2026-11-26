@@ -5264,352 +5264,121 @@
     <div id="whats-new-body" style="max-height:400px;overflow-y:auto;padding:8px 0;font-size:13px;line-height:1.5;color:var(--text-secondary);"></div>
   </dialog>
 
-  <!-- Welcome dialog (first run) -->
-  <dialog id="welcome-dialog">
-    <h3>POTACAT: Democratizing Remote Radio</h3>
-    <p class="welcome-text">Here are some quick settings to get you up and running. There are many more inside the Settings menu.</p>
+  <!-- Welcome dialog: a shorter first run (lib/first-run.js), one decision per
+       screen. Station: callsign, grid square, look, usage statistics. Where:
+       where the radio is. settings.firstRun turns false when Station is
+       finished, so the statistics choice is saved before anything is sent. -->
+  <dialog id="welcome-dialog" aria-labelledby="welcome-title">
+    <div class="welcome-step-label" id="welcome-step-label">Step 1 of 2</div>
 
-    <div class="welcome-section-label">Station</div>
-    <div style="display:flex;gap:8px;align-items:flex-end;">
-      <label class="welcome-field" style="margin-bottom:0;">Callsign:
-        <input type="text" id="welcome-callsign" maxlength="10" placeholder="WB6ACU" style="text-transform:uppercase;width:140px;">
-      </label>
-      <label class="welcome-field" style="margin-bottom:0;">QTH Grid Square:
-        <input type="text" id="welcome-grid" maxlength="6" placeholder="FN20jb" style="width:110px;">
-      </label>
-    </div>
-    <span class="help-text" style="margin-top:4px;margin-bottom:8px;display:block;">Used for distance calculation, DX Cluster login, and QSO logging</span>
-    <div style="display:flex;gap:8px;">
-      <label class="welcome-field" style="flex:1;">Distance Unit:
-        <select id="welcome-dist-unit">
-          <option value="mi">Miles</option>
-          <option value="km">Kilometers</option>
-        </select>
-      </label>
-      <label class="welcome-field" style="flex:1;">License Class:
-        <select id="welcome-license-class">
-          <option value="none">None (no filtering)</option>
-          <optgroup label="United States">
-            <option value="us_extra">US Extra</option>
-            <option value="us_advanced">US Advanced</option>
-            <option value="us_general">US General</option>
-            <option value="us_technician">US Technician</option>
-          </optgroup>
-          <optgroup label="Canada">
-            <option value="ca_honours">CA Advanced / Basic with Honours</option>
-            <option value="ca_basic">CA Basic</option>
-          </optgroup>
-        </select>
-      </label>
-    </div>
-    <label class="checkbox-label" style="margin-top:4px;margin-bottom:8px;" title="Hide spots your license class can't operate, plus any truly out-of-band frequencies. Uses the License Class above.">
-      <input type="checkbox" id="welcome-hide-oob"> Hide spots outside my license privileges
-    </label>
+    <section class="welcome-screen" id="welcome-screen-station" data-step="station">
+      <h3 id="welcome-title">Welcome to POTACAT</h3>
+      <p class="welcome-text">Your callsign, your grid square and a look. Everything else can wait.</p>
 
-    <!-- Pick your look (#376): right after the callsign. Appearance, the
-         themes for the mode in force, and a live preview; every click
-         repaints this window at once. -->
-    <div class="welcome-section-label" id="welcome-look-label">Pick your look</div>
-    <div id="welcome-look-picker"></div>
-    <span class="help-text" style="display:block;margin-bottom:6px;">The same six looks as the ECHOCAT app. Change any time in Settings &gt; Display.</span>
-    <div class="welcome-field">
-      <span style="font-size:13px;color:var(--text-secondary);">Change Font Size</span>
-      <span class="help-text" style="display:block;margin-top:2px;">Press <kbd>Ctrl +</kbd> to make text larger, <kbd>Ctrl &minus;</kbd> to make smaller, <kbd>Ctrl 0</kbd> to reset</span>
-    </div>
-
-    <div class="welcome-section-label">Idle Mode</div>
-    <label class="checkbox-label" style="margin-bottom:4px;">
-      <input type="checkbox" id="welcome-enable-auto-sstv">
-      When this station is idle, have POTACAT open WSPR, PSK31, SSTV or another program to passively receive. The radio goes back to its frequency and mode when you return.
-    </label>
-    <div style="margin-left:22px;margin-bottom:8px;display:flex;align-items:center;gap:6px;font-size:13px;">
-      <span>After</span>
-      <input type="number" id="welcome-auto-sstv-min" min="5" max="1440" value="90" style="width:60px;">
-      <span>minutes of no activity, receive</span>
-      <select id="welcome-idle-rx-mode" style="font-size:13px;">
-        <option value="sstv">SSTV</option>
-        <option value="wspr" selected>WSPR</option>
-        <option value="psk31">PSK31</option>
-        <option value="jtty">JTTY</option>
-        <option value="js8">JS8</option>
-        <option value="aprs">APRS</option>
-      </select>
-    </div>
-    <div id="welcome-idle-psk-opts" style="margin-left:22px;margin-bottom:8px;display:none;align-items:center;gap:6px;font-size:13px;">
-      <span>Band:</span>
-      <select id="welcome-idle-psk-band" style="font-size:13px;">
-        <option value="80m">80m</option>
-        <option value="40m">40m</option>
-        <option value="30m">30m</option>
-        <option value="20m" selected>20m</option>
-        <option value="17m">17m</option>
-        <option value="15m">15m</option>
-        <option value="10m">10m</option>
-      </select>
-      <span class="help-text">parks on one band (no hopping)</span>
-    </div>
-    <div id="welcome-idle-wspr-opts" style="margin-left:22px;margin-bottom:8px;display:none;align-items:center;gap:18px;flex-wrap:wrap;font-size:13px;">
-      <label class="checkbox-label" style="font-size:13px;display:inline-flex;align-items:center;gap:5px;margin:0;" title="Sweep across the WSPR bands, one per 2-minute cycle"><input type="radio" name="welcome-idle-wspr-band-mode" id="welcome-idle-wspr-band-hop"> Band hopping</label>
-      <label class="checkbox-label" style="font-size:13px;display:inline-flex;align-items:center;gap:5px;margin:0;"><input type="radio" name="welcome-idle-wspr-band-mode" id="welcome-idle-wspr-band-single" checked> Single band:
-        <select id="welcome-idle-wspr-band" style="font-size:13px;">
-          <option value="40m">40m</option>
-          <option value="30m">30m</option>
-          <option value="20m" selected>20m</option>
-          <option value="17m">17m</option>
-          <option value="15m">15m</option>
-          <option value="10m">10m</option>
-          <option value="2m">2m</option>
-        </select>
-      </label>
-    </div>
-    <span id="welcome-idle-sstv-note" class="help-text" style="display:block;margin-left:22px;margin-bottom:8px;">SSTV flips to 20m in the daytime and 40m at night, based on your grid square.</span>
-
-    <div class="welcome-section-label">Usage Statistics</div>
-    <label class="checkbox-label" style="margin-bottom:4px;">
-      <input type="checkbox" id="welcome-enable-telemetry" checked>
-      Share anonymous usage statistics
-    </label>
-    <span class="help-text" style="display:block;margin-left:22px;margin-bottom:8px;">A random ID, the POTACAT version, your operating system, how long POTACAT was open, and how many QSOs and re-spots you made per program. Never your callsign, location, frequencies or contacts. You can turn this off at any time in Settings.</span>
-
-    <div class="welcome-section-label">QRZ Lookup (optional)</div>
-    <span class="help-text" style="display:block;margin-bottom:6px;">Shows operator name, location, and callsign details on spots. Requires a QRZ account.</span>
-    <div style="display:flex;gap:8px;">
-      <label class="welcome-field" style="flex:1;">Username:
-        <input type="text" id="welcome-qrz-user" maxlength="10" placeholder="K3SBP" style="text-transform:uppercase;">
-      </label>
-      <label class="welcome-field" style="flex:1;">Password:
-        <input type="password" id="welcome-qrz-pass" placeholder="QRZ password">
-      </label>
-    </div>
-
-    <!-- Connect to a remote shack — first-class entry point for the
-         desktop-to-desktop initiative. Three paths surface here:
-           1. Cloud account: "Sign in to find your shacks" → Path 1 of
-              the auth model (cloud_devices listing → 1-click pair).
-           2. Tap-to-pair: mDNS-discovered shacks on the LAN → tap
-              Connect → shack pops an Approve modal → done.
-           3. Pair link: paste the URL from an email, or scan a QR.
-         Persona D (single-host user with local rig) doesn't lose
-         anything — the local-radio section is still right below this.
-         Persona B (Tailscale-only, off-LAN) sees an empty mDNS list
-         and falls naturally to the paste-link path. -->
-    <div class="welcome-remote-section">
-      <div class="welcome-section-label" style="margin-top:0;">Connect to a Remote Shack (recommended if you have one)</div>
-      <span class="help-text" style="display:block;margin-bottom:10px;">
-        Already have POTACAT running on a different computer connected to your radio?
-        Connect this one to it — your laptop becomes the shack's screen.
-      </span>
-
-      <div class="welcome-remote-discovered" id="welcome-remote-discovered">
-        <div class="welcome-remote-discovered-header">
-          <span>Shacks on your network</span>
-          <button type="button" class="welcome-remote-rescan" id="welcome-remote-rescan">Scan again</button>
-        </div>
-        <ul id="welcome-remote-list" class="welcome-remote-list">
-          <li class="welcome-remote-scanning">Looking on the local network&hellip;</li>
-        </ul>
+      <div class="welcome-fields-row">
+        <label class="welcome-field">Your callsign
+          <input type="text" id="welcome-callsign" maxlength="12" placeholder="WB6ACU" autocomplete="off" spellcheck="false" style="text-transform:uppercase;">
+        </label>
+        <label class="welcome-field">Your grid square
+          <input type="text" id="welcome-grid" maxlength="8" placeholder="for example FN20jb" autocomplete="off" spellcheck="false">
+        </label>
       </div>
+      <span class="help-text welcome-grid-note" id="welcome-grid-note" aria-live="polite">No grid square yet. Distances and your place on the map stay blank until you add one in Settings &gt; Station.</span>
+      <span class="welcome-error hidden" id="welcome-grid-error" role="alert"></span>
 
-      <div class="welcome-remote-or">or</div>
+      <!-- Pick your look (#376): right after the callsign. Appearance, the
+           themes for the mode in force, and a live preview; every click
+           repaints this window at once. -->
+      <div class="welcome-section-label" id="welcome-look-label">Pick your look</div>
+      <div id="welcome-look-picker"></div>
+      <span class="help-text" style="display:block;margin-bottom:6px;">The same six looks as the ECHOCAT app. Change any time in Settings &gt; Display.</span>
 
-      <div class="welcome-remote-alt-row">
-        <button type="button" id="welcome-remote-cloud-btn" class="welcome-remote-alt">
-          <span class="welcome-remote-alt-icon">☁</span>
-          <span>
-            <span class="welcome-remote-alt-title">Sign in to POTACAT Cloud</span>
-            <span class="welcome-remote-alt-sub">See your shacks from anywhere &mdash; no QR or email needed.</span>
-          </span>
+      <div class="welcome-section-label">Usage Statistics</div>
+      <label class="checkbox-label" style="margin-bottom:4px;">
+        <input type="checkbox" id="welcome-enable-telemetry" checked>
+        Share anonymous usage statistics
+      </label>
+      <span class="help-text" style="display:block;margin-left:22px;margin-bottom:8px;">A random ID, the POTACAT version, your operating system, how long POTACAT was open, and how many QSOs and re-spots you made per program. Never your callsign, location, frequencies or contacts. You can turn this off at any time in Settings.</span>
+
+      <div class="dialog-buttons welcome-nav">
+        <button type="button" id="welcome-station-next" class="log-save-btn">Next</button>
+      </div>
+    </section>
+
+    <section class="welcome-screen hidden" id="welcome-screen-where" data-step="where">
+      <h3>Where is your radio?</h3>
+      <div class="welcome-choices" role="group" aria-label="Where is your radio?">
+        <button type="button" class="welcome-choice" id="welcome-where-here" data-where="here">
+          <span class="welcome-choice-title">Here</span>
+          <span class="welcome-choice-sub">Plugged into this computer, or a network radio such as a FlexRadio on this computer's network.</span>
+        </button>
+        <button type="button" class="welcome-choice" id="welcome-where-remote" data-where="remote">
+          <span class="welcome-choice-title">On another computer running POTACAT</span>
+          <span class="welcome-choice-sub">That computer has the radio. This one becomes its screen.</span>
+        </button>
+        <button type="button" class="welcome-choice" id="welcome-where-none" data-where="none">
+          <span class="welcome-choice-title">No radio yet</span>
+          <span class="welcome-choice-sub">Look around first. The spots are live; add a radio any time in Settings &gt; Radio.</span>
         </button>
       </div>
-      <!-- Email + password, the same sign-in as Settings > Cloud. The button
-           above used to start Google sign-in, which needs a client id POTACAT
-           does not ship, so it could only answer "Google Client ID not
-           configured" (fresh install, 2026-10-21). -->
-      <div id="welcome-cloud-login" class="hidden" style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;">
-        <input type="text" id="welcome-cloud-email" placeholder="Email or callsign" autocomplete="username" autocapitalize="off" spellcheck="false" style="flex:1;min-width:150px;">
-        <input type="password" id="welcome-cloud-password" placeholder="Password" autocomplete="current-password" style="flex:1;min-width:120px;">
-        <button type="button" id="welcome-cloud-signin" class="btn btn-primary">Sign in</button>
+
+      <!-- Connect to a remote shack: today's block, unchanged, shown when the
+           operator picks "On another computer running POTACAT". Three paths:
+           shacks found on the network, POTACAT Cloud sign-in, a pasted link. -->
+      <div class="welcome-remote-section hidden" id="welcome-remote-panel">
+        <div class="welcome-section-label" style="margin-top:0;">Connect to a Remote Shack</div>
+        <span class="help-text" style="display:block;margin-bottom:10px;">
+          Already have POTACAT running on a different computer connected to your radio?
+          Connect this one to it — your laptop becomes the shack's screen.
+        </span>
+
+        <div class="welcome-remote-discovered" id="welcome-remote-discovered">
+          <div class="welcome-remote-discovered-header">
+            <span>Shacks on your network</span>
+            <button type="button" class="welcome-remote-rescan" id="welcome-remote-rescan">Scan again</button>
+          </div>
+          <ul id="welcome-remote-list" class="welcome-remote-list">
+            <li class="welcome-remote-scanning">Looking on the local network&hellip;</li>
+          </ul>
+        </div>
+
+        <div class="welcome-remote-or">or</div>
+
+        <div class="welcome-remote-alt-row">
+          <button type="button" id="welcome-remote-cloud-btn" class="welcome-remote-alt">
+            <span class="welcome-remote-alt-icon">☁</span>
+            <span>
+              <span class="welcome-remote-alt-title">Sign in to POTACAT Cloud</span>
+              <span class="welcome-remote-alt-sub">See your shacks from anywhere &mdash; no QR or email needed.</span>
+            </span>
+          </button>
+        </div>
+        <!-- Email + password, the same sign-in as Settings > Cloud. The button
+             above used to start Google sign-in, which needs a client id POTACAT
+             does not ship, so it could only answer "Google Client ID not
+             configured" (fresh install, 2026-10-21). -->
+        <div id="welcome-cloud-login" class="hidden" style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;">
+          <input type="text" id="welcome-cloud-email" placeholder="Email or callsign" autocomplete="username" autocapitalize="off" spellcheck="false" style="flex:1;min-width:150px;">
+          <input type="password" id="welcome-cloud-password" placeholder="Password" autocomplete="current-password" style="flex:1;min-width:120px;">
+          <button type="button" id="welcome-cloud-signin" class="btn btn-primary">Sign in</button>
+        </div>
+
+        <div class="welcome-remote-alt-row">
+          <div class="welcome-remote-paste-row">
+            <input type="text" id="welcome-remote-paste-input" placeholder="potacat://pair?…  (paste from email or copied link)" autocomplete="off" spellcheck="false">
+            <button type="button" id="welcome-remote-paste-btn">Pair</button>
+          </div>
+          <span class="help-text" style="display:block;margin-top:4px;">Open the link in your email on this computer, or paste it here.</span>
+        </div>
+
+        <div id="welcome-remote-status" class="welcome-remote-status hidden"></div>
       </div>
 
-      <div class="welcome-remote-alt-row">
-        <div class="welcome-remote-paste-row">
-          <input type="text" id="welcome-remote-paste-input" placeholder="potacat://pair?…  (paste from email or copied link)" autocomplete="off" spellcheck="false">
-          <button type="button" id="welcome-remote-paste-btn">Pair</button>
-        </div>
-        <span class="help-text" style="display:block;margin-top:4px;">Open the link in your email on this computer, or paste it here.</span>
+      <div class="dialog-buttons welcome-nav">
+        <button type="button" id="welcome-where-back" class="welcome-back-btn">Back</button>
+        <button type="button" id="welcome-start" class="log-save-btn hidden">Get Started</button>
       </div>
-
-      <div id="welcome-remote-status" class="welcome-remote-status hidden"></div>
-    </div>
-
-    <div class="welcome-radio-section">
-      <div class="welcome-section-label" style="margin-top:0;">…or set up a Local Radio (this computer is connected to the rig)</div>
-      <span class="help-text" style="display:block;margin-bottom:8px;">
-        You may need to check out the <a href="#" id="welcome-radio-help-link">Set Up My Radio</a>
-        section of the website. You can always edit your radio in Settings.
-        Additional help can be found on the <a href="#" id="welcome-radio-discord-link">POTACAT Discord</a>.
-      </span>
-      <div id="welcome-rig-display" class="hidden"></div>
-      <button type="button" id="welcome-rig-add-btn" class="rig-action-btn">+ Add Rig</button>
-      <div id="welcome-rig-editor" class="hidden">
-        <label>Rig Name:
-          <input type="text" id="welcome-rig-name" placeholder="My Radio" maxlength="40">
-        </label>
-        <label class="radio-label"><input type="radio" name="welcome-radio-type" value="flex" checked> FlexRadio (SmartSDR)</label>
-        <div id="welcome-flex-config" class="radio-sub hidden">
-          <label>Slice: <select id="welcome-flex-slice">
-            <option value="5002">Slice A (TCP :5002)</option>
-            <option value="5003">Slice B (TCP :5003)</option>
-            <option value="5004">Slice C (TCP :5004)</option>
-            <option value="5005">Slice D (TCP :5005)</option>
-          </select></label>
-        </div>
-        <label class="radio-label"><input type="radio" name="welcome-radio-type" value="tci"> Zeus or Thetis (TCI server)</label>
-        <div id="welcome-tci-config" class="radio-sub hidden">
-          <label>Program: <select id="welcome-tci-server">
-            <option value="zeus">Zeus</option>
-            <option value="thetis">Thetis</option>
-          </select></label>
-          <label>Host: <input type="text" id="welcome-tci-host" value="127.0.0.1" placeholder="127.0.0.1"></label>
-          <label>TCI port: <input type="number" id="welcome-tci-port" value="40001" min="1" max="65535"></label>
-          <label class="checkbox-label"><input type="checkbox" id="welcome-tci-auto-start" checked> Start the receiver when POTACAT connects</label>
-          <button type="button" id="welcome-tci-check" class="rig-action-btn">Test connection</button>
-          <span id="welcome-tci-result" role="status" aria-live="polite" style="font-size:12px;"></span>
-          <span class="help-text">POTACAT tunes the radio, follows its dial and sets its receive controls through TCI. With Zeus it also transmits FT8 and the other digital modes from JTCAT, and voice from ECHOCAT; the PTT button and CW here do not key it yet. Thetis is receive only until a Thetis owner has confirmed transmit.</span>
-        </div>
-        <label class="radio-label"><input type="radio" name="welcome-radio-type" value="tcpcat"> IP Radio (TCP CAT)</label>
-        <div id="welcome-tcpcat-config" class="radio-sub hidden">
-          <span class="help-text" style="font-size:12px;">Connect to any radio with TCP CAT</span>
-          <label>Host: <input type="text" id="welcome-tcpcat-host" placeholder="127.0.0.1" value="127.0.0.1"></label>
-          <label>Port: <input type="number" id="welcome-tcpcat-port" placeholder="5002" min="1" max="65535" value="5002"></label>
-        </div>
-        <label class="radio-label"><input type="radio" name="welcome-radio-type" value="serialcat"> Serial CAT (Kenwood / Yaesu)</label>
-        <div id="welcome-serialcat-config" class="radio-sub hidden">
-          <span class="help-text" style="font-size:12px;">Direct Kenwood-protocol CAT over serial. Works with QRPLabs QMX/QDX, Yaesu (FT-891/991A/710, FTDX10/3000/101), and most Kenwood-protocol radios.</span>
-          <label>Serial Port:
-            <div style="display:flex;gap:6px;margin-top:4px;">
-              <select id="welcome-serialcat-port" style="flex:1;"></select>
-              <input type="text" id="welcome-serialcat-port-manual" placeholder="or type COM port" style="width:120px;">
-            </div>
-            <span class="help-text" style="margin-top:2px;display:block;">Port not listed? Type it in the box.</span>
-          </label>
-          <label>Baud Rate:
-            <select id="welcome-serialcat-baud">
-              <option value="4800">4800</option>
-              <option value="9600" selected>9600</option>
-              <option value="19200">19200</option>
-              <option value="38400">38400</option>
-              <option value="57600">57600</option>
-              <option value="115200">115200</option>
-            </select>
-          </label>
-          <label class="checkbox-label" style="margin-top:6px;display:flex;align-items:center;gap:6px;">
-            <input type="checkbox" id="welcome-serialcat-dtr-off"> Disable DTR/RTS
-          </label>
-        </div>
-        <label class="radio-label"><input type="radio" name="welcome-radio-type" value="icom"> Icom (CI-V)</label>
-        <div id="welcome-icom-config" class="radio-sub hidden">
-          <span class="help-text" style="font-size:12px;">Direct CI-V binary protocol over USB. For IC-7300, IC-705, and other Icom radios.</span>
-          <label>Radio Model:
-            <select id="welcome-icom-model">
-              <option value="0x94">IC-7300</option>
-              <option value="0xB6">IC-7300 MK II</option>
-              <option value="0xA4">IC-705</option>
-              <option value="0x98">IC-7610</option>
-              <option value="0xB2">IC-7760</option>
-              <option value="0x88">IC-7100</option>
-              <option value="0x76">IC-7200</option>
-              <option value="0x80">IC-7410</option>
-              <option value="0x7A">IC-7600</option>
-              <option value="0x8E">IC-7851</option>
-              <option value="0xA2">IC-9700</option>
-              <option value="0x70">IC-7000</option>
-              <option value="0x58">IC-706MKIIG</option>
-              <option value="0x4E">IC-706MKII</option>
-            </select>
-          </label>
-          <label>Serial Port:
-            <div style="display:flex;gap:6px;margin-top:4px;">
-              <select id="welcome-icom-port" style="flex:1;"></select>
-              <input type="text" id="welcome-icom-port-manual" placeholder="or type COM port" style="width:120px;">
-            </div>
-          </label>
-          <label>Baud Rate:
-            <select id="welcome-icom-baud">
-              <option value="4800">4800</option>
-              <option value="9600">9600</option>
-              <option value="19200">19200</option>
-              <option value="38400">38400</option>
-              <option value="57600">57600</option>
-              <option value="115200" selected>115200</option>
-            </select>
-          </label>
-        </div>
-        <label class="radio-label"><input type="radio" name="welcome-radio-type" value="hamlib"> Other Rig (Hamlib)</label>
-        <div id="welcome-hamlib-config" class="radio-sub hidden">
-          <label>Rig Model:
-            <input type="text" id="welcome-rig-search" placeholder="Search rigs...">
-            <select id="welcome-rig-model" size="4"><option value="">Select a rig...</option></select>
-          </label>
-          <label>Port / Address:
-            <div style="display:flex;gap:6px;margin-top:4px;">
-              <select id="welcome-rig-port" style="flex:1;"></select>
-              <input type="text" id="welcome-rig-port-manual" placeholder="or type COM port" style="width:120px;">
-            </div>
-            <div style="font-size:11px;color:#888;margin-top:2px;">Port not listed? Type it in the box — virtual COM ports from Win4Icom/Win4Yaesu may not appear in the dropdown.</div>
-          </label>
-          <label>Baud Rate:
-            <select id="welcome-rig-baud">
-              <option value="4800">4800</option>
-              <option value="9600" selected>9600</option>
-              <option value="19200">19200</option>
-              <option value="38400">38400</option>
-              <option value="57600">57600</option>
-              <option value="115200">115200</option>
-            </select>
-          </label>
-          <label class="checkbox-label" style="margin-top:6px;display:flex;align-items:center;gap:6px;">
-            <input type="checkbox" id="welcome-rig-dtr-off"> Disable DTR/RTS
-          </label>
-        </div>
-        <label class="radio-label"><input type="radio" name="welcome-radio-type" value="rigctldnet"> rigctld Network</label>
-        <div id="welcome-rigctldnet-config" class="radio-sub hidden">
-          <span class="help-text">Connect to a remote rigctld server (e.g. on another machine)</span>
-          <label>Host: <input type="text" id="welcome-rigctldnet-host" placeholder="192.168.1.100" value="127.0.0.1"></label>
-          <label>Port: <input type="number" id="welcome-rigctldnet-port" min="1" max="65535" value="4532"></label>
-        </div>
-        <label class="radio-label"><input type="radio" name="welcome-radio-type" value="flrig"> FLRig (a shared radio)</label>
-        <div id="welcome-flrig-config" class="radio-sub hidden">
-          <span class="help-text">flrig holds the radio and POTACAT shares it with your other programs. Give flrig's address and server port (Config &gt; Setup &gt; Xcvr in flrig; 12345 by default).</span>
-          <label>Host: <input type="text" id="welcome-flrig-host" placeholder="127.0.0.1" value="127.0.0.1"></label>
-          <label>Port: <input type="number" id="welcome-flrig-port" min="1" max="65535" value="12345"></label>
-        </div>
-        <label class="radio-label"><input type="radio" name="welcome-radio-type" value="dxlab-commander"> DXLab Commander</label>
-        <div id="welcome-dxlab-commander-config" class="radio-sub hidden">
-          <span class="help-text">Control the radio through DXLab Commander's TCP port (Commander's Base Port + 2, default 52002). Commander must be running. Add command sequences later in Settings &gt; Radio, Edit the rig, Commander command sequences.</span>
-          <label>Host: <input type="text" id="welcome-dxlab-commander-host" placeholder="127.0.0.1" value="127.0.0.1"></label>
-          <label>Port: <input type="number" id="welcome-dxlab-commander-port" min="1" max="65535" value="52002"></label>
-        </div>
-        <label class="radio-label"><input type="radio" name="welcome-radio-type" value="nocat"> No CAT control (VOX)</label>
-        <div id="welcome-nocat-config" class="radio-sub hidden">
-          <span class="help-text">For a radio with no computer control — a VOX-keyed kit such as the Pebble HF. You tune it by hand; POTACAT's audio keys it through its VOX. Choose the sound card that connects to the radio as RX audio in and TX audio out afterwards (Settings &gt; Radio, Edit the rig, Audio Devices).</span>
-        </div>
-        <div class="rig-editor-buttons">
-          <button type="button" id="welcome-rig-save-btn">Save Rig</button>
-          <button type="button" id="welcome-rig-cancel-btn">Cancel</button>
-        </div>
-      </div>
-    </div>
-    <div class="welcome-beta-note">
-      POTACAT is in active development. If you experience a bug, have difficulty connecting your radio, or have a feature request, please join the <a href="#" id="welcome-discord-link">Discord</a> and ask for help. Be verbose in your requests and bug reports &mdash; share your rig, operating system, and exactly what you did and what did not work.
-    </div>
-    <div class="dialog-buttons" style="margin-top:12px;">
-      <button type="button" id="welcome-start" class="log-save-btn">Get Started</button>
-    </div>
-    <div class="welcome-coffee">
-      <span>Love POTACAT? A coffee goes a long way to keep development alive!</span>
-      <button type="button" id="welcome-coffee-btn" class="coffee-btn">Buy Me a Coffee</button>
-    </div>
+    </section>
   </dialog>
 
   <script src="../node_modules/leaflet/dist/leaflet.js"></script>
@@ -5629,6 +5398,7 @@
   <script src="../lib/waterfall-palettes.js"></script>
   <script src="../lib/app-theme.js"></script>
   <script src="../lib/look-picker.js"></script>
+  <script src="../lib/first-run.js"></script>
   <script src="../lib/rig-bands.js"></script>
   <script src="../lib/spot-band-filter.js"></script>
   <script src="../lib/listen-source.js"></script>

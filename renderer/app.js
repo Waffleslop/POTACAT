@@ -2612,8 +2612,8 @@ function rigAudioSourceOf(rig) {
     ? v : window.RigFamily.defaultAudioSourceFor(fam);
 }
 
-// Zeus / Thetis over TCI (lib/tci-target.js). The Settings rig editor and the
-// Welcome editor share these field helpers; prefix 'rig' or 'welcome'.
+// Zeus / Thetis over TCI (lib/tci-target.js). Field helpers for the Settings
+// rig editor (prefix 'rig').
 function tciRigFields(prefix) {
   const el = (k) => document.getElementById(`${prefix}-tci-${k}`);
   return { server: el('server'), host: el('host'), port: el('port'), autoStart: el('auto-start'), check: el('check'), result: el('result') };
@@ -2652,9 +2652,7 @@ function wireTciRigFields(f) {
   });
 }
 const rigTciFields = tciRigFields('rig');
-const welcomeTciFields = tciRigFields('welcome');
 wireTciRigFields(rigTciFields);
-wireTciRigFields(welcomeTciFields);
 
 function updateRadioSubPanels() {
   const type = getSelectedRadioType();
@@ -12707,15 +12705,17 @@ function initMap() {
 
 async function updateHomeMarker() {
   const settings = await window.api.getSettings();
-  const grid = settings.grid || 'FN20jb';
+  // No grid square set: no home marker, and nothing is measured from a made-up
+  // place (it used to fall back to FN20jb).
+  const grid = settings.grid || '';
   const pos = gridToLatLonLocal(grid);
-  if (!pos) return;
-  mainHomePos = { lat: pos.lat, lon: pos.lon };
-
   // Remove old home markers
   if (homeMarker) {
     for (const m of homeMarker) map.removeLayer(m);
+    homeMarker = null;
   }
+  if (!pos) { mainHomePos = null; return; }
+  mainHomePos = { lat: pos.lat, lon: pos.lon };
 
   const homeIcon = L.divIcon({
     className: 'home-marker-icon',
@@ -19994,7 +19994,7 @@ settingsSave.addEventListener('click', async () => {
     // still connecting (SP5GB, 1.11.7). None selected → the target is left
     // alone; the CAT pill's None is the explicit disconnect.
     ...(rigTarget ? { catTarget: rigTarget } : {}),
-    grid: setGrid.value.trim() || 'FN20jb',
+    grid: setGrid.value.trim(), // blank stays blank: no made-up location (a shorter first run)
     homeState: (document.getElementById('set-home-state') || {}).value || '',
     homeCounty: (document.getElementById('set-home-county') || {}).value || '',
     distUnit: setDistUnit.value,
@@ -24207,7 +24207,7 @@ function applyRigBandsMain() {
   RB.applyToElements(document, '#rbn-band-filter .multi-dropdown-item', rigBandsList);
   RB.applyToElements(document, '#band-buttons button', rigBandsList);
   RB.applyToElements(document, '.jtcat-band-btn', rigBandsList);
-  for (const id of ['dirv-band-filter', 'set-idle-psk-band', 'set-idle-wspr-band', 'welcome-idle-psk-band', 'welcome-idle-wspr-band']) {
+  for (const id of ['dirv-band-filter', 'set-idle-psk-band', 'set-idle-wspr-band']) {
     const sel = document.getElementById(id);
     if (!sel) continue;
     RB.applyToElements(sel, 'option', rigBandsList);
@@ -24375,14 +24375,14 @@ function tickRbnAges() {
 async function updateRbnHomeMarker() {
   if (!rbnMap) return;
   const settings = await window.api.getSettings();
-  const grid = settings.grid || 'FN20jb';
+  const grid = settings.grid || ''; // no grid square: no home, no arcs from a made-up place
   const pos = gridToLatLonLocal(grid);
-  if (!pos) return;
-  rbnHomePos = pos;
-
   if (rbnHomeMarker) {
     for (const m of rbnHomeMarker) rbnMap.removeLayer(m);
+    rbnHomeMarker = null;
   }
+  if (!pos) { rbnHomePos = null; return; }
+  rbnHomePos = pos;
 
   const homeIcon = L.divIcon({
     className: 'home-marker-icon',
@@ -28417,13 +28417,6 @@ document.getElementById('discord-link').addEventListener('click', (e) => {
   e.preventDefault();
   window.api.openExternal('https://discord.gg/cuNQpES38C');
 });
-document.getElementById('welcome-discord-link').addEventListener('click', (e) => {
-  e.preventDefault();
-  window.api.openExternal('https://discord.gg/cuNQpES38C');
-});
-document.getElementById('welcome-coffee-btn').addEventListener('click', () => {
-  window.api.openExternal('https://buymeacoffee.com/potacat');
-});
 document.getElementById('issues-link').addEventListener('click', (e) => {
   e.preventDefault();
   window.api.openExternal('https://github.com/Waffleslop/POTACAT/issues');
@@ -28479,334 +28472,133 @@ const welcomeGridInput = document.getElementById('welcome-grid');
 const welcomeCallsignInput = document.getElementById('welcome-callsign');
 
 
-// --- Welcome rig editor ---
-let welcomeRig = null; // rig configured in welcome dialog
-let welcomeRigIsNew = false; // true only for a radio added in this Welcome, not the existing one shown on reopen
-let welcomeHamlibLoaded = false;
-let welcomeSerialcatLoaded = false;
-let welcomeIcomLoaded = false;
-let welcomeAllRigOptions = [];
+// --- Welcome: a shorter first run (lib/first-run.js) ---
+// Two screens inside the Welcome dialog, one decision each. Station: callsign,
+// grid square, look and the usage statistics choice; its Next is the save that
+// turns firstRun false. Where: where the radio is. "Here" opens the Settings
+// rig editor (the full one: model picker, Icom Network, Yaesu LAN, K4, Flex
+// Discover), whose save opens Station Setup for a new radio, as it always has.
+// "Another computer" shows the remote shack panel below. "No radio yet" closes
+// the flow on the spots table.
+let _firstRunState = null; // window.FirstRun.normalize(settings.firstRunState)
+let _welcomeStep = 'station';
+let _welcomeStationSaved = false; // this open got past the station step
+const welcomeGridNote = document.getElementById('welcome-grid-note');
+const welcomeGridError = document.getElementById('welcome-grid-error');
 
-function getWelcomeRadioType() {
-  const checked = document.querySelector('input[name="welcome-radio-type"]:checked');
-  return checked ? checked.value : 'flex';
-}
-
-function updateWelcomeRadioSubPanels() {
-  const type = getWelcomeRadioType();
-  document.getElementById('welcome-flex-config').classList.toggle('hidden', type !== 'flex');
-  document.getElementById('welcome-tcpcat-config').classList.toggle('hidden', type !== 'tcpcat');
-  document.getElementById('welcome-tci-config').classList.toggle('hidden', type !== 'tci');
-  document.getElementById('welcome-serialcat-config').classList.toggle('hidden', type !== 'serialcat');
-  document.getElementById('welcome-icom-config').classList.toggle('hidden', type !== 'icom');
-  document.getElementById('welcome-hamlib-config').classList.toggle('hidden', type !== 'hamlib');
-  document.getElementById('welcome-rigctldnet-config').classList.toggle('hidden', type !== 'rigctldnet');
-  const wFlrig = document.getElementById('welcome-flrig-config');
-  if (wFlrig) wFlrig.classList.toggle('hidden', type !== 'flrig');
-  document.getElementById('welcome-dxlab-commander-config').classList.toggle('hidden', type !== 'dxlab-commander');
-  const wNocat = document.getElementById('welcome-nocat-config');
-  if (wNocat) wNocat.classList.toggle('hidden', type !== 'nocat');
-  if (type === 'serialcat' && !welcomeSerialcatLoaded) {
-    welcomeSerialcatLoaded = true;
-    loadWelcomeSerialcatPorts();
-  }
-  if (type === 'icom' && !welcomeIcomLoaded) {
-    welcomeIcomLoaded = true;
-    loadWelcomeIcomPorts();
-  }
-  if (type === 'hamlib' && !welcomeHamlibLoaded) {
-    welcomeHamlibLoaded = true;
-    loadWelcomeHamlibFields();
+function welcomeShowStep(step) {
+  _welcomeStep = step;
+  for (const el of welcomeDialog.querySelectorAll('.welcome-screen')) el.classList.toggle('hidden', el.dataset.step !== step);
+  document.getElementById('welcome-step-label').textContent = window.FirstRun.stepLabel(step);
+  if (step === 'where') {
+    welcomeShowRemotePanel(false); // opens only on its own choice; Back closes it again
+    document.getElementById('welcome-where-here').focus();
+  } else {
+    welcomeCallsignInput.focus();
   }
 }
-
-async function loadWelcomeSerialcatPorts() {
-  const ports = await window.api.listPorts();
-  const sel = document.getElementById('welcome-serialcat-port');
-  sel.innerHTML = '';
-  for (const p of ports) {
-    const opt = document.createElement('option');
-    opt.value = p.path;
-    opt.textContent = `${p.path} — ${p.friendlyName}`;
-    sel.appendChild(opt);
+function welcomeShowRemotePanel(show) {
+  document.getElementById('welcome-remote-panel').classList.toggle('hidden', !show);
+  document.getElementById('welcome-start').classList.toggle('hidden', !show);
+  for (const b of welcomeDialog.querySelectorAll('.welcome-choice')) {
+    b.setAttribute('aria-pressed', show && b.dataset.where === 'remote' ? 'true' : 'false');
   }
+  if (show) _welcomeRemoteOpen(); else _welcomeRemoteClose();
 }
-
-async function loadWelcomeIcomPorts() {
-  const ports = await window.api.listPorts();
-  const sel = document.getElementById('welcome-icom-port');
-  sel.innerHTML = '';
-  for (const p of ports) {
-    const opt = document.createElement('option');
-    opt.value = p.path;
-    opt.textContent = `${p.path} — ${p.friendlyName}`;
-    sel.appendChild(opt);
-  }
+function welcomeUpdateGridNote() {
+  welcomeGridNote.textContent = window.FirstRun.gridNote(welcomeGridInput.value);
+  welcomeGridError.classList.add('hidden');
 }
+welcomeGridInput.addEventListener('input', welcomeUpdateGridNote);
 
-async function loadWelcomeHamlibFields() {
-  const rigModel = document.getElementById('welcome-rig-model');
-  const rigPort = document.getElementById('welcome-rig-port');
-  rigModel.innerHTML = '<option value="">Loading rigs...</option>';
-  const rigs = await window.api.listRigs();
-  welcomeAllRigOptions = rigs;
-  rigModel.innerHTML = '';
-  for (const rig of rigs) {
-    const opt = document.createElement('option');
-    opt.value = rig.id;
-    opt.textContent = `${rig.mfg} ${rig.model}`;
-    rigModel.appendChild(opt);
-  }
-  const ports = await window.api.listPorts();
-  rigPort.innerHTML = '';
-  for (const p of ports) {
-    const opt = document.createElement('option');
-    opt.value = p.path;
-    opt.textContent = `${p.path} — ${p.friendlyName}`;
-    rigPort.appendChild(opt);
-  }
-}
-
-function buildWelcomeCatTarget() {
-  const type = getWelcomeRadioType();
-  if (type === 'tci') return readTciRigTarget(welcomeTciFields);
-  if (type === 'flex') {
-    return { type: 'tcp', host: '127.0.0.1', port: parseInt(document.getElementById('welcome-flex-slice').value, 10) };
-  } else if (type === 'tcpcat') {
-    return { type: 'tcp', host: document.getElementById('welcome-tcpcat-host').value.trim() || '127.0.0.1', port: parseInt(document.getElementById('welcome-tcpcat-port').value, 10) || 5002 };
-  } else if (type === 'serialcat') {
-    const manual = document.getElementById('welcome-serialcat-port-manual').value.trim();
-    return {
-      type: 'serial',
-      path: manual || document.getElementById('welcome-serialcat-port').value,
-      baudRate: parseInt(document.getElementById('welcome-serialcat-baud').value, 10) || 9600,
-      dtrOff: document.getElementById('welcome-serialcat-dtr-off').checked,
-    };
-  } else if (type === 'icom') {
-    const manual = document.getElementById('welcome-icom-port-manual').value.trim();
-    const modelSelect = document.getElementById('welcome-icom-model');
-    return {
-      type: 'icom',
-      path: manual || document.getElementById('welcome-icom-port').value,
-      baudRate: parseInt(document.getElementById('welcome-icom-baud').value, 10) || 115200,
-      civAddress: parseInt(modelSelect.value, 16),
-      civModel: modelSelect.options[modelSelect.selectedIndex].text,
-    };
-  } else if (type === 'hamlib') {
-    const manual = document.getElementById('welcome-rig-port-manual').value.trim();
-    return {
-      type: 'rigctld',
-      rigId: parseInt(document.getElementById('welcome-rig-model').value, 10),
-      serialPort: manual || document.getElementById('welcome-rig-port').value,
-      baudRate: parseInt(document.getElementById('welcome-rig-baud').value, 10) || 9600,
-      dtrOff: document.getElementById('welcome-rig-dtr-off').checked,
-    };
-  } else if (type === 'rigctldnet') {
-    return {
-      type: 'rigctldnet',
-      host: document.getElementById('welcome-rigctldnet-host').value.trim() || '127.0.0.1',
-      port: parseInt(document.getElementById('welcome-rigctldnet-port').value, 10) || 4532,
-    };
-  } else if (type === 'flrig') {
-    return {
-      type: 'flrig',
-      host: document.getElementById('welcome-flrig-host').value.trim() || '127.0.0.1',
-      port: parseInt(document.getElementById('welcome-flrig-port').value, 10) || 12345,
-    };
-  } else if (type === 'dxlab-commander') {
-    return {
-      type: 'dxlab-commander',
-      host: document.getElementById('welcome-dxlab-commander-host').value.trim() || '127.0.0.1',
-      port: parseInt(document.getElementById('welcome-dxlab-commander-port').value, 10) || window.CommanderSequences.DEFAULT_PORT,
-    };
-  } else if (type === 'nocat') {
-    return { type: 'none' }; // No CAT control (VOX) — see buildCatTargetFromForm
-  }
-  return null;
-}
-
-function showWelcomeRigItem(rig) {
-  const display = document.getElementById('welcome-rig-display');
-  display.innerHTML = '';
-  const item = document.createElement('div');
-  item.className = 'rig-item active';
-  item.innerHTML = `
-    <div class="rig-item-info">
-      <div class="rig-item-name">${rig.name || 'Unnamed Rig'}</div>
-      <div class="rig-item-desc">${describeRigTarget(rig.catTarget)}</div>
-    </div>
-  `;
-  const removeBtn = document.createElement('button');
-  removeBtn.type = 'button';
-  removeBtn.className = 'rig-item-btn rig-delete-btn';
-  removeBtn.textContent = '\u2715';
-  removeBtn.title = 'Remove';
-  removeBtn.setAttribute('aria-label', 'Remove ' + (rig.name || 'Unnamed Rig'));
-  removeBtn.addEventListener('click', (e) => {
-    e.stopPropagation();
-    welcomeRig = null;
-    welcomeRigIsNew = false;
-    display.innerHTML = '';
-    display.classList.add('hidden');
-    document.getElementById('welcome-rig-add-btn').classList.remove('hidden');
-  });
-  item.appendChild(removeBtn);
-  display.appendChild(item);
-  display.classList.remove('hidden');
-}
-
-document.querySelectorAll('input[name="welcome-radio-type"]').forEach((btn) => {
-  btn.addEventListener('change', () => updateWelcomeRadioSubPanels());
-});
-
-document.getElementById('welcome-rig-add-btn').addEventListener('click', () => {
-  fillTciRigFields(welcomeTciFields, null);
-  welcomeHamlibLoaded = false;
-  welcomeSerialcatLoaded = false;
-  document.getElementById('welcome-rig-editor').classList.remove('hidden');
-  document.getElementById('welcome-rig-add-btn').classList.add('hidden');
-  document.getElementById('welcome-rig-name').value = '';
-  document.querySelector('input[name="welcome-radio-type"][value="flex"]').checked = true;
-  updateWelcomeRadioSubPanels();
-  document.getElementById('welcome-rig-name').focus();
-});
-
-document.getElementById('welcome-rig-cancel-btn').addEventListener('click', () => {
-  document.getElementById('welcome-rig-editor').classList.add('hidden');
-  document.getElementById('welcome-rig-add-btn').classList.remove('hidden');
-});
-
-document.getElementById('welcome-rig-save-btn').addEventListener('click', () => {
-  const name = document.getElementById('welcome-rig-name').value.trim() || 'My Radio';
-  const catTarget = buildWelcomeCatTarget();
-  if (catTarget && catTarget.type === 'tci') {
-    const bad = window.TciTarget.validate(catTarget);
-    if (bad) { welcomeTciFields.result.textContent = bad; return; }
-  }
-  welcomeRig = { id: 'rig_' + Date.now(), name, catTarget };
-  welcomeRigIsNew = true;
-  // Keep POTACAT's audio/tune slice in sync with the chosen Flex CAT shim port
-  // (5002→A …) so a non-A pick doesn't leave audio on slice A while CAT targets
-  // another slice.
-  if (catTarget && catTarget.type === 'tcp' && catTarget.port >= 5002 && catTarget.port <= 5005) {
-    welcomeRig.flexSlice = catTarget.port - 5002;
-  }
-  showWelcomeRigItem(welcomeRig);
-  document.getElementById('welcome-rig-editor').classList.add('hidden');
-  document.getElementById('welcome-rig-add-btn').classList.add('hidden');
-});
-
-document.getElementById('welcome-radio-help-link').addEventListener('click', (e) => {
-  e.preventDefault();
-  window.api.openExternal('https://potacat.com/radios.html');
-});
-
-document.getElementById('welcome-radio-discord-link').addEventListener('click', (e) => {
-  e.preventDefault();
-  window.api.openExternal('https://discord.gg/cuNQpES38C');
-});
-
-// Welcome hamlib rig search filter
-document.getElementById('welcome-rig-search').addEventListener('input', () => {
-  const query = document.getElementById('welcome-rig-search').value.toLowerCase().trim();
-  const sel = document.getElementById('welcome-rig-model');
-  sel.innerHTML = '';
-  const filtered = query ? welcomeAllRigOptions.filter(r => `${r.mfg} ${r.model}`.toLowerCase().includes(query)) : welcomeAllRigOptions;
-  for (const rig of filtered) {
-    const opt = document.createElement('option');
-    opt.value = rig.id;
-    opt.textContent = `${rig.mfg} ${rig.model}`;
-    sel.appendChild(opt);
-  }
-});
-
-// Welcome import buttons
-document.getElementById('welcome-start').addEventListener('click', async () => {
-  const myCallsign = (welcomeCallsignInput.value.trim() || '').toUpperCase();
-  const grid = welcomeGridInput.value.trim() || 'FN20jb';
-  const distUnitVal = document.getElementById('welcome-dist-unit').value;
-  const licenseClassVal = document.getElementById('welcome-license-class').value;
-  const hideOobChecked = document.getElementById('welcome-hide-oob').checked;
-  const autoSstvChecked = document.getElementById('welcome-enable-auto-sstv').checked;
-  const autoSstvMinVal = Math.max(5, Math.min(1440, parseInt(document.getElementById('welcome-auto-sstv-min').value, 10) || 90));
-  const idleRxModeVal = ['wspr', 'psk31', 'js8', 'jtty', 'aprs'].includes(document.getElementById('welcome-idle-rx-mode').value) ? document.getElementById('welcome-idle-rx-mode').value : 'sstv';
-  const idleWsprBandHopVal = document.getElementById('welcome-idle-wspr-band-hop').checked;
-  const idleWsprBandVal = document.getElementById('welcome-idle-wspr-band').value || '20m';
-  const idlePskBandVal = document.getElementById('welcome-idle-psk-band').value || '20m';
-  const telemetryEl = document.getElementById('welcome-enable-telemetry');
-  const qrzUser = (document.getElementById('welcome-qrz-user')?.value || '').trim().toUpperCase();
-  const qrzPass = document.getElementById('welcome-qrz-pass')?.value || '';
-  const currentSettings = await window.api.getSettings();
-
-  // Merge with existing settings so upgrade doesn't wipe user preferences
-  const saveData = {
-    ...currentSettings,
-    myCallsign,
-    grid,
-    distUnit: distUnitVal,
-    licenseClass: licenseClassVal,
-    hideOutOfBand: hideOobChecked,
-    enableAutoSstv: autoSstvChecked,
-    autoSstvInactivityMin: autoSstvMinVal,
-    idleRxMode: idleRxModeVal,
-    idleWsprBandHop: idleWsprBandHopVal,
-    idleWsprBand: idleWsprBandVal,
-    idlePskBand: idlePskBandVal,
-    firstRun: false,
-    lastVersion: currentSettings.appVersion,
+function welcomeStationFields() {
+  return {
+    callsign: welcomeCallsignInput.value,
+    grid: welcomeGridInput.value,
+    telemetry: document.getElementById('welcome-enable-telemetry').checked,
   };
-  // Usage statistics: ticked by default on a new install, the operator's
-  // own choice when the welcome screen is reopened (see main.js telemetry).
-  if (telemetryEl) saveData.enableTelemetry = telemetryEl.checked;
-  // Only set QRZ if user filled it in (don't overwrite existing with blank)
-  if (qrzUser) {
-    saveData.qrzUsername = qrzUser;
-    saveData.enableQrz = true;
-  }
-  if (qrzPass) saveData.qrzPassword = qrzPass;
-  delete saveData.appVersion; // runtime-only, don't persist
+}
 
-  // Add rig if configured in welcome (skip if already exists)
-  if (welcomeRig) {
-    const existingRigs = currentSettings.rigs || [];
-    if (!existingRigs.some(r => r.id === welcomeRig.id)) {
-      saveData.rigs = [...existingRigs, welcomeRig];
-    }
-    saveData.activeRigId = welcomeRig.id;
-    // Per-rig audio source. New Flex setup defaults to SmartSDR Direct so
-    // FT8/SSTV audio streams straight to the radio with no DAX program and
-    // no device config — the "Local/DAX" default was the #1 "PTT keys but
-    // no audio" setup trap (Casey 2026-06-17 hit it himself). An existing
-    // global value that's valid for this rig's family is kept, so no
-    // existing user's audio source is ever changed (DAX-program Flex users
-    // stay on 'dax'). This rig becomes active, so mirror to the global too.
-    const welcomeFam = window.RigFamily.rigFamily(welcomeRig);
-    welcomeRig.audioSource = window.RigFamily.audioSourceValidFor(welcomeFam, currentSettings.audioSource)
-      ? currentSettings.audioSource
-      : window.RigFamily.defaultAudioSourceFor(welcomeFam);
-    saveData.audioSource = welcomeRig.audioSource;
+// Station > Next: the one save that turns firstRun false. main.js runs
+// launchPing.onSettingsSaved on it, so the held launch ping goes now, and only
+// when the statistics box above was left ticked. A blank grid is saved blank.
+async function welcomeStationNext() {
+  const s = await window.api.getSettings();
+  const r = window.FirstRun.finishStation(_firstRunState, { ...welcomeStationFields(), appVersion: s.appVersion });
+  if (r.error) {
+    welcomeGridError.textContent = r.error;
+    welcomeGridError.classList.remove('hidden');
+    welcomeGridInput.focus();
+    return;
   }
-
-  await window.api.saveSettings(saveData);
+  await window.api.saveSettings(r.patch);
+  _firstRunState = r.state;
+  _welcomeStationSaved = true;
   // Mirror lastVersion into localStorage too — see checkFirstRun for why.
-  if (saveData.lastVersion) {
-    try { localStorage.setItem('whatsNewSeenVersion', saveData.lastVersion); } catch {}
+  if (r.patch.lastVersion) {
+    try { localStorage.setItem('whatsNewSeenVersion', r.patch.lastVersion); } catch {}
   }
+  welcomeGridInput.value = r.patch.grid;
+  loadPrefs(); // the main window shows the callsign and grid now
+  welcomeShowStep('where');
+}
+document.getElementById('welcome-station-next').addEventListener('click', welcomeStationNext);
+for (const el of [welcomeCallsignInput, welcomeGridInput]) {
+  el.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); welcomeStationNext(); } });
+}
 
+document.getElementById('welcome-where-back').addEventListener('click', () => welcomeShowStep('station'));
+
+async function welcomeChooseWhere(choice) {
+  const r = window.FirstRun.chooseWhere(_firstRunState, choice);
+  if (r.error) return;
+  _firstRunState = r.state;
+  await window.api.saveSettings(r.patch);
+  if (r.action === 'remote-panel') { welcomeShowRemotePanel(true); return; }
+  welcomeCloseFlow();
+  if (r.action === 'rig-editor') {
+    // Until the "which radio" step is built, "Here" opens the Settings rig
+    // editor. A first radio opens straight into Add; an install that already
+    // has radios sees its list first. Saving a new radio there opens its
+    // Station Setup checklist (saveRigEditor), the same as from Settings.
+    const s = await window.api.getSettings();
+    await openSettingsDialog('radio');
+    if (!(s.rigs || []).length) openRigEditor('add');
+  }
+}
+for (const b of welcomeDialog.querySelectorAll('.welcome-choice')) {
+  b.addEventListener('click', () => welcomeChooseWhere(b.dataset.where));
+}
+
+// Get Started, on the remote shack panel: the flow is over.
+document.getElementById('welcome-start').addEventListener('click', async () => {
+  const r = window.FirstRun.finishFlow(_firstRunState);
+  _firstRunState = r.state;
+  await window.api.saveSettings(r.patch);
+  welcomeCloseFlow();
+});
+
+function welcomeCloseFlow() {
   welcomeDialog.close();
   _welcomeRemoteClose();
-  // Reload prefs so the main UI reflects welcome choices
   loadPrefs();
-  // A radio was added in Welcome: open its Station Setup checklist now that
-  // Welcome is closed, the same as saving a new radio in Settings does. Not for
-  // the existing radio a reopened Welcome (F11) shows: Settings opens it only
-  // for a new radio, and the operator may have hidden its reminders.
-  if (welcomeRig && welcomeRigIsNew && typeof window.openStationSetup === 'function') {
-    window.openStationSetup(welcomeRig.id);
-  }
   // First run is over: the Station Setup launch card was held back until now
-  // (it stays away when the checklist above was just opened).
+  // (it stays away when the checklist was just opened from the rig editor).
   if (typeof window.stationSetupAfterWelcome === 'function') window.stationSetupAfterWelcome();
+}
+
+// Esc on the station step keeps what was typed: the next open (the next launch,
+// while firstRun is still set) shows it again. Esc on a later step closes; that
+// step waits, and the station step's choices are already saved.
+welcomeDialog.addEventListener('cancel', () => {
+  if (_welcomeStep !== 'station' || !window.FirstRun) return;
+  const st = window.FirstRun.keepDraft(_firstRunState, welcomeStationFields());
+  _firstRunState = st;
+  window.api.saveSettings({ firstRunState: st });
+});
+welcomeDialog.addEventListener('close', () => {
+  _welcomeRemoteClose();
+  if (_welcomeStationSaved && typeof window.stationSetupAfterWelcome === 'function') window.stationSetupAfterWelcome();
 });
 
 // ─── Welcome → Connect to a Remote Shack (v1.9) ──────────────────────
@@ -29119,66 +28911,23 @@ async function checkFirstRun(force = false) {
   const versionAlreadySeen = (s.lastVersion === s.appVersion) || (seenLs === s.appVersion);
   const isNewVersion = s.appVersion && !versionAlreadySeen;
 
-  if (force || s.firstRun) {
-    // Reset welcome rig state
-    welcomeRig = null;
-    welcomeRigIsNew = false;
-    const welcomeRigDisplay = document.getElementById('welcome-rig-display');
-    welcomeRigDisplay.innerHTML = '';
-    welcomeRigDisplay.classList.add('hidden');
-    document.getElementById('welcome-rig-add-btn').classList.remove('hidden');
-    document.getElementById('welcome-rig-editor').classList.add('hidden');
-    // Pre-fill with existing settings when forced (not fresh install)
-    if (force) {
-      welcomeCallsignInput.value = s.myCallsign || '';
-      welcomeGridInput.value = s.grid || '';
-      if (s.distUnit) document.getElementById('welcome-dist-unit').value = s.distUnit;
-      if (s.licenseClass) document.getElementById('welcome-license-class').value = s.licenseClass;
-      document.getElementById('welcome-hide-oob').checked = s.hideOutOfBand === true;
-      // Idle Mode is OFF for new installs (#1051, Casey 2026-11-24: the box
-      // is unticked in the HTML). On re-open it shows what is saved, and unset
-      // reads off, as it runs (startAutoSstvTimer): reopening the welcome
-      // never turns it on for anyone.
-      document.getElementById('welcome-enable-auto-sstv').checked = s.enableAutoSstv === true;
-      // Telemetry: a new install's settings carry enableTelemetry: true; an
-      // older install that never chose has it unset, which stays unticked.
-      { const t = document.getElementById('welcome-enable-telemetry'); if (t) t.checked = s.enableTelemetry === true; }
-      document.getElementById('welcome-auto-sstv-min').value = s.autoSstvInactivityMin || 90;
-      // Idle-RX mode (WSPR or SSTV) + WSPR band options on the welcome screen
-      (function () {
-        const modeEl = document.getElementById('welcome-idle-rx-mode');
-        if (!modeEl) return;
-        modeEl.value = (['wspr', 'psk31', 'js8', 'jtty', 'aprs'].includes(s.idleRxMode)) ? s.idleRxMode : 'sstv';
-        document.getElementById('welcome-idle-wspr-band-hop').checked = s.idleWsprBandHop === true;
-        document.getElementById('welcome-idle-wspr-band-single').checked = s.idleWsprBandHop !== true;
-        document.getElementById('welcome-idle-wspr-band').value = s.idleWsprBand || '20m';
-        document.getElementById('welcome-idle-psk-band').value = s.idlePskBand || '20m';
-        const upd = function () {
-          const wspr = modeEl.value === 'wspr';
-          const psk = modeEl.value === 'psk31';
-          document.getElementById('welcome-idle-wspr-opts').style.display = wspr ? 'flex' : 'none';
-          document.getElementById('welcome-idle-psk-opts').style.display = psk ? 'flex' : 'none';
-          document.getElementById('welcome-idle-sstv-note').style.display = modeEl.value === 'sstv' ? '' : 'none';
-        };
-        if (!modeEl.dataset.idleWired) { modeEl.addEventListener('change', upd); modeEl.dataset.idleWired = '1'; }
-        upd();
-      })();
-      const welcomeQrzUser = document.getElementById('welcome-qrz-user');
-      const welcomeQrzPass = document.getElementById('welcome-qrz-pass');
-      if (welcomeQrzUser) welcomeQrzUser.value = s.qrzUsername || '';
-      if (welcomeQrzPass) welcomeQrzPass.value = s.qrzPassword || '';
-      _themeState = _themeStateFrom(s);
-      renderLookPickers();
-      // Show existing active rig if any
-      const rigs = s.rigs || [];
-      const activeRig = rigs.find(r => r.id === s.activeRigId) || rigs[0];
-      if (activeRig) {
-        welcomeRig = activeRig;
-        showWelcomeRigItem(activeRig);
-      }
-    }
+  const openAt = window.FirstRun ? window.FirstRun.openAt(s, { force }) : (force || s.firstRun ? 'station' : null);
+  if (openAt) {
+    // A new install (firstRun) or F11: the station step, filled from a kept
+    // draft (Esc) or what is saved. An existing install sees none of this unasked.
+    _firstRunState = window.FirstRun.normalize(s.firstRunState);
+    _welcomeStationSaved = false;
+    const f = window.FirstRun.stationFields(s);
+    welcomeCallsignInput.value = f.callsign;
+    welcomeGridInput.value = f.grid;
+    // Telemetry: a new install's settings carry enableTelemetry: true; an older
+    // install that never chose has it unset, which stays unticked.
+    document.getElementById('welcome-enable-telemetry').checked = f.telemetry;
+    welcomeUpdateGridNote();
+    _themeState = _themeStateFrom(s);
+    renderLookPickers();
     welcomeDialog.showModal();
-    _welcomeRemoteOpen();
+    welcomeShowStep(openAt);
   } else if (isNewVersion) {
     // Version changed — show "What's New" release notes, not the welcome screen.
     // Triple guard against re-showing on subsequent launches:

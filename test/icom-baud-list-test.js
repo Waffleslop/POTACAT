@@ -8,7 +8,9 @@ const { civWakeupPreambleCount } = require('../lib/codecs/civ-codec');
 
 const html = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'index.html'), 'utf8');
 const EXPECTED = ['4800', '9600', '19200', '38400', '57600', '115200'];
-const IDS = ['set-icom-baud', 'welcome-icom-baud', 'set-serialcat-baud', 'set-rig-baud'];
+// A shorter first run (2026-11-26): the Welcome rig editor is gone; "Here" opens
+// the Settings rig editor, so the Settings half of this rule is the whole rule.
+const IDS = ['set-icom-baud', 'set-serialcat-baud', 'set-rig-baud'];
 
 function options(id) {
   const m = html.match(new RegExp(`<select id="${id}"[^>]*>([^]*?)</select>`));
@@ -22,7 +24,6 @@ function t(name, fn) { try { fn(); pass++; console.log('  ok', name); } catch (e
 for (const id of IDS) t(`#${id} offers all six rates`, () => assert.deepStrictEqual(options(id).values, EXPECTED));
 t('Icom selects default to 115200', () => {
   assert.strictEqual(options('set-icom-baud').selected, '115200');
-  assert.strictEqual(options('welcome-icom-baud').selected, '115200');
 });
 const table = { 4800: 7, 9600: 13, 19200: 25, 38400: 50, 57600: 75, 115200: 150 };
 for (const b of EXPECTED) t(`Icom codec accepts ${b}`, () => assert.strictEqual(civWakeupPreambleCount(b), table[b]));

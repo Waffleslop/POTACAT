@@ -264,16 +264,16 @@ test('Settings, the sidebar and Welcome: the look picker replaces the old dropdo
 
 test('Welcome: "Pick your look" comes right after the callsign, with the mode in force and a live preview', () => {
   const html = read('renderer/index.html');
-  const w0 = html.indexOf('<dialog id="welcome-dialog">');
+  const w0 = html.indexOf('<dialog id="welcome-dialog"');
   const w = html.slice(w0, html.indexOf('</dialog>', w0));
   const iCall = w.indexOf('id="welcome-callsign"');
   const iLook = w.indexOf('>Pick your look</div>');
-  const iIdle = w.indexOf('>Idle Mode</div>');
-  assert.ok(iCall > 0 && iLook > iCall && iIdle > iLook, 'order: Station (callsign), Pick your look, Idle Mode');
+  const iStats = w.indexOf('>Usage Statistics</div>');
+  assert.ok(iCall > 0 && iLook > iCall && iStats > iLook, 'order: callsign, Pick your look, Usage Statistics');
   assert.ok(!/welcome-section-label[^>]*>[^<]*<\/div>[\s\S]*welcome-section-label/.test(w.slice(iCall, iLook)), 'no other section between the callsign and the look');
   assert.ok(w.includes('<div id="welcome-look-picker"></div>'));
   assert.ok(w.includes('The same six looks as the ECHOCAT app. Change any time in Settings &gt; Display.'));
-  assert.ok(w.indexOf('Change Font Size') > iLook, 'the font-size hint moved with it');
+  assert.ok(!/Idle Mode/.test(w), 'a shorter first run: callsign, grid, look and the statistics choice only');
   const app = read('renderer/app.js');
   assert.ok(/window\.LookPicker\.render\(document\.getElementById\('welcome-look-picker'\), \{ state: _themeState, systemDark: sd, scope: 'active', preview: true, onChange: applyLookChoice \}\);/.test(app));
 });

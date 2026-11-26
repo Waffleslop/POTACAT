@@ -173,12 +173,12 @@ test('the checklist can still prove a no-CAT radio transmits: tune tone, then th
   assert.ok(ss.includes("case 'tune-tone':") && ss.includes("const tone = confirmTx.action === 'tune-tone'"), 'the tone gets the antenna warning, worded for VOX');
 });
 
-test('the welcome wizard offers the type, and a single-band radio says so on a spot click', () => {
+// A shorter first run (2026-11-26): the first run's "Here" opens the Settings rig
+// editor, which offers the type (checked above); the Welcome wizard is gone.
+test('the first run reaches the type through the Settings editor, and a single-band radio says so on a spot click', () => {
   const html = read('renderer/index.html');
-  assert.ok(html.includes('<input type="radio" name="welcome-radio-type" value="nocat"> No CAT control (VOX)') && html.includes('id="welcome-nocat-config"'));
-  const app = read('renderer/app.js');
-  assert.ok(app.includes("} else if (type === 'nocat') {\n    return { type: 'none' };") || /type === 'nocat'\) \{\s*return \{ type: 'none' \};/.test(app), 'welcome builder');
-  assert.ok(app.includes("wNocat.classList.toggle('hidden', type !== 'nocat')"), 'welcome panel toggles');
+  assert.ok(!/name="welcome-radio-type"/.test(html));
+  assert.ok(/name="radio-type" value="nocat"/.test(html));
   const main = read('main.js');
   assert.ok(main.includes('function noCatBandNote(mhz)') && (main.match(/noCatBandNote\(parseFloat\(mhz\)\)/g) || []).length === 2, 'both tune refusals carry the band note');
 });

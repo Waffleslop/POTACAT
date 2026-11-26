@@ -582,7 +582,7 @@ test('Test Connection names each case: nothing listening, no radio, a silent por
 
 // --- wiring: every place the type has to be known ---
 
-test('the type is wired through main, the rig editor and the welcome wizard', () => {
+test('the type is wired through main and the rig editor', () => {
   const main = read('main.js');
   assert.ok(/target\.type === 'dxlab-commander'/.test(main), 'connectCat branch');
   assert.ok(/new CommanderCodec\(/.test(main));
@@ -590,9 +590,7 @@ test('the type is wired through main, the rig editor and the welcome wizard', ()
   assert.ok(/target\.type === 'dxlab-commander'\) return 'commander'/.test(main), 'detectRigType');
   const html = read('renderer/index.html');
   assert.ok(/name="radio-type" value="dxlab-commander"/.test(html));
-  assert.ok(/name="welcome-radio-type" value="dxlab-commander"/.test(html));
   assert.ok(/id="set-dxlab-commander-port"[^>]*value="52002"/.test(html), 'the editor defaults to 52002');
-  assert.ok(/id="welcome-dxlab-commander-port"[^>]*value="52002"/.test(html), 'the wizard defaults to 52002');
   assert.ok(/commander-sequences\.js/.test(html), 'the renderer loads the shared slot table');
   const app = read('renderer/app.js');
   assert.ok(/radioType === 'dxlab-commander'/.test(app) && /type === 'dxlab-commander'/.test(app));

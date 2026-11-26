@@ -233,7 +233,8 @@ const SELECT_ON_MASTER = `
             <option value="ca_basic">CA Basic</option>
           </optgroup>
         `;
-for (const id of ['set-license-class', 'welcome-license-class']) {
+// A shorter first run (2026-11-26): licence class left the Welcome; unset means no filtering.
+for (const id of ['set-license-class']) {
   test(`#${id} is unchanged, and every option is a class in the shared module with the same label`, () => {
     const m = INDEX.match(new RegExp(`<select id="${id}">([\\s\\S]*?)</select>`));
     assert.ok(m, 'select found');
