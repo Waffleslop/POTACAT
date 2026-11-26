@@ -816,6 +816,7 @@ const TESTS = [
   'test/sstv-spec-timing-test.js', // Scottie, PD and Robot 72 send and read the spec line: exact scans, Robot 72's porch before each chroma
   'test/vfo-typed-freq-uhf-test.js', // 432100 and 1296100 typed in the VFO window are 70 cm and 23 cm, not 0.43 and 1.3 MHz (davidcappello IC-9700)
   'test/swr-rest-on-rx-test.js', // SWR and ALC go back to rest on receive (davidcappello IC-9700); the Icom SWR scale is Hamlib's
+  'test/swr-display-test.js', // a perfect match (wire 0) shows 1.0 while transmitting, a dash on receive (desktop meter box, VFO window, ECHOCAT Web)
   'test/sculan10-test.js', // Yaesu SCU-LAN10 (experimental): wire protocol against the spec's reference values, the transport against a fake unit (login, setup, keepalives, CAT de-dup, RX audio, login timeout, password never logged)
   'test/sculan10-wiring-test.js', // SCU-LAN10 in POTACAT: a visible rig-editor choice, Yaesu codec over the transport, RX audio to JTCAT/SSTV/ECHOCAT, a key-down with LAN audio refused (never a silent carrier)
   'test/yaesu-lan-tx-test.js', // SCU-LAN10 TX owners (#227): one transmitter at a time; a second is refused before PTT, a release cancels only its own, nobody unkeys another's

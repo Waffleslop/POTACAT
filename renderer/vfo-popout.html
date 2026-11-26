@@ -956,6 +956,7 @@
 <script src="../lib/audio-device-heal.js"></script>
 <script src="../lib/vfo-audio-reattach.js"></script>
 <script src="../lib/vfo-monitor-tx-mute.js"></script>
+<script src="../lib/swr-display.js"></script>
 <script src="../lib/vfo-ptt-mic.js"></script>
 <script src="../lib/sdr-failure.js"></script>
 <script src="../lib/mic-label-probe.js"></script>
@@ -3541,20 +3542,28 @@ window.api.onSmeter((val) => {
   smeterText.style.color = color;
 });
 
-window.api.onSwr((val) => {
-  if (val <= 0) {
+// A 0 while transmitting is a perfect match (1.0), on receive a dash
+// (lib/swr-display.js). The last wire value is kept so the row can go back
+// to a dash when TX ends.
+let lastSwrWire = null;
+function drawSwrRow() {
+  const swr = SwrDisplay.ratio(lastSwrWire, VfoMonitorTxMute.transmitting(pttDown, vfoRadioTx));
+  if (swr == null) {
     swrBar.style.width = '0%';
-    swrText.textContent = '\u2014';
+    swrText.textContent = SwrDisplay.DASH;
     swrText.style.color = '#666';
     return;
   }
-  const swr = 1.0 + (val / 60);
   const pct = Math.min(100, ((swr - 1) / 4) * 100);
   const color = swr <= 1.5 ? '#4ecca3' : swr <= 2.0 ? '#ffd740' : swr <= 3.0 ? '#f0a500' : '#e94560';
   swrBar.style.width = pct + '%';
   swrBar.style.background = color;
-  swrText.textContent = swr < 10 ? swr.toFixed(1) : '>10';
+  swrText.textContent = SwrDisplay.text(swr);
   swrText.style.color = color;
+}
+window.api.onSwr((val) => {
+  lastSwrWire = val;
+  drawSwrRow();
 });
 
 const fwdPwrBar = document.getElementById('fwdpwr-bar');
@@ -4107,6 +4116,7 @@ window.api.onTxState((state) => {
     setPttVisual(false);
     pttDown = false;
     if (kiwiGainNode) kiwiGainNode.gain.value = kiwiVolume;
+    if (lastSwrWire === 0) drawSwrRow(); // a 1.0 shown during the over is a dash on receive
   }
   applyMonitorGain();
 });

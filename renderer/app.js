@@ -23787,20 +23787,34 @@ window.api.onCatSmeter((val) => {
   smeterTextEl.style.color = color;
 });
 
-window.api.onCatSwr((val) => {
-  if (val <= 0) {
+// A 0 while transmitting is a perfect match (1.0), on receive a dash
+// (lib/swr-display.js). TX state: the same one the VFO window's TX banner
+// follows (main's _broadcastEffectiveTxState). The last wire value is kept so
+// the row goes back to a dash when TX ends.
+let meterSwrWire = null;
+let meterTxOn = false;
+function drawSwrMeter() {
+  const swr = SwrDisplay.ratio(meterSwrWire, meterTxOn);
+  if (swr == null) {
     drawMeterBar(swrBarCanvas, 0, meterLevelColor('idle'));
-    swrTextEl.textContent = '—';
+    swrTextEl.textContent = SwrDisplay.DASH;
     swrTextEl.style.color = meterThemeColor('--text-dim', '#666');
     return;
   }
   showMeterBox();
-  const swr = 1.0 + (val / 60);
   const level = Math.min(1, (swr - 1) / 4);
   const color = meterLevelColor(swr <= 1.5 ? 'ok' : swr <= 3.0 ? 'warn' : 'bad');
   drawMeterBar(swrBarCanvas, level, color);
-  swrTextEl.textContent = swr < 10 ? swr.toFixed(1) : '>10';
+  swrTextEl.textContent = SwrDisplay.text(swr);
   swrTextEl.style.color = color;
+}
+window.api.onCatSwr((val) => {
+  meterSwrWire = val;
+  drawSwrMeter();
+});
+if (window.api.onRemoteTxState) window.api.onRemoteTxState((on) => {
+  meterTxOn = !!on;
+  if (!meterTxOn && meterSwrWire === 0) drawSwrMeter(); // only a 0 reads differently on TX and RX
 });
 
 // Measured forward power. Scaled against the radio's power SETTING when it
