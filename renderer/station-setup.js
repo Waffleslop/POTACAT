@@ -505,6 +505,7 @@
   }
 
   async function open(id) {
+    openedThisSession = true;
     rigId = id || null;
     busy = {};
     confirmTx = null;
@@ -582,14 +583,21 @@
 
   // Called once, some seconds after launch, so the radio has had time to
   // connect (a radio still connecting must not read as "setup unfinished").
-  let skippedForFirstRun = false;
+  // launchDone: the check has looked at a radio outside first run this session
+  // (card shown or not), so it never runs twice. openedThisSession: the operator
+  // already had the checklist open, so no "Finish setting up" card right after.
+  let launchDone = false;
+  let openedThisSession = false;
+  let afterWelcomeQueued = false;
   async function launchCheck() {
+    if (launchDone || openedThisSession) return;
     let p;
     try { p = await window.api.stationSetupGet(); } catch { return; }
-    if (!p || !p.rig || !p.launch || dlg.open) return;
-    // The Welcome screen is still up: skip now, and run again when it finishes
-    // (afterWelcome below) so a new operator's first session is not left out.
-    if (p.launch.firstRun) { skippedForFirstRun = true; return; }
+    // During Welcome there is often no radio yet (rig null, no launch) and
+    // firstRun is set when there is: stationSetupAfterWelcome runs it again.
+    if (!p || !p.rig || !p.launch || p.launch.firstRun || dlg.open) return;
+    if (launchDone || openedThisSession) return;
+    launchDone = true;
     const name = p.rig.model || p.rig.name;
     cardRigId = p.rig.id;
     cardNewSteps = [];
@@ -605,11 +613,12 @@
     }
   }
   setTimeout(launchCheck, 12000);
-  // Welcome finished (Get Started): the first-run flag is clear now. Give the
-  // radio the same few seconds to connect, then offer the card once.
+  // Welcome finished (Get Started): the first-run flag is clear now and a radio
+  // added in Welcome is saved. Give the radio the same few seconds to connect,
+  // then run the check once, unless it already ran or the checklist was opened.
   window.stationSetupAfterWelcome = () => {
-    if (!skippedForFirstRun) return;
-    skippedForFirstRun = false;
+    if (launchDone || openedThisSession || afterWelcomeQueued) return;
+    afterWelcomeQueued = true;
     setTimeout(launchCheck, 12000);
   };
 
