@@ -5428,6 +5428,76 @@
         <button type="button" id="welcome-start" class="log-save-btn hidden">Get Started</button>
       </div>
     </section>
+
+    <!-- Which radio (renderer/first-run-radio.js, lib/rig-quick-setup.js): the
+         model first, then what POTACAT fills in from it. Ports are the ones the
+         system lists; no port is opened to look for a radio. -->
+    <section class="welcome-screen hidden" id="welcome-screen-radio" data-step="radio">
+      <h3 id="welcome-radio-title">Which radio do you have?</h3>
+      <p class="welcome-text">Type its name, for example 7300, FT-710 or Flex. POTACAT fills in the rest.</p>
+      <div id="wfr-pick">
+        <input type="text" id="wfr-search" class="wfr-search" placeholder="Search, for example IC-7300" autocomplete="off" spellcheck="false" aria-label="Search for your radio" aria-controls="wfr-results">
+        <div id="wfr-results" class="wfr-results" role="listbox" aria-label="Radios"></div>
+        <span class="help-text wfr-hint" id="wfr-search-hint" aria-live="polite">Start typing. Every radio POTACAT knows is listed.</span>
+      </div>
+      <div id="wfr-setup" class="hidden">
+        <div class="wfr-chosen">
+          <span class="wfr-chosen-name" id="wfr-chosen-name"></span>
+          <button type="button" class="wfr-link" id="wfr-change">Choose another radio</button>
+        </div>
+        <p class="wfr-how" id="wfr-how"></p>
+
+        <div id="wfr-port-row" class="wfr-row hidden">
+          <label class="wfr-label" for="wfr-port">The USB port the radio is on</label>
+          <div class="wfr-inline">
+            <select id="wfr-port"></select>
+            <button type="button" class="welcome-back-btn" id="wfr-port-refresh">Look again</button>
+          </div>
+          <span class="help-text wfr-note" id="wfr-port-note" aria-live="polite"></span>
+        </div>
+
+        <div id="wfr-baud-row" class="wfr-row hidden">
+          <label class="wfr-label" for="wfr-baud">Speed (baud)</label>
+          <select id="wfr-baud"></select>
+        </div>
+
+        <div id="wfr-flex-row" class="wfr-row hidden">
+          <button type="button" class="welcome-back-btn" id="wfr-flex-find">Find my radio</button>
+          <span class="help-text wfr-note" id="wfr-flex-note" aria-live="polite">POTACAT listens for the radio's own announcement on your network. It takes about 3 seconds.</span>
+          <label class="wfr-label" for="wfr-flex-host">Radio address</label>
+          <input type="text" id="wfr-flex-host" class="wfr-search" placeholder="for example 192.168.1.50" autocomplete="off" spellcheck="false">
+        </div>
+
+        <!-- Radio menu settings POTACAT cannot make over CAT, from
+             lib/rig-setup-notes.js only (never guessed). -->
+        <div id="wfr-notes" class="wfr-notes hidden"></div>
+
+        <div id="wfr-full-row" class="wfr-row hidden">
+          <span class="help-text wfr-note" id="wfr-full-text"></span>
+          <button type="button" class="welcome-back-btn" id="wfr-full-btn">Open radio settings</button>
+        </div>
+        <span class="welcome-error hidden" id="wfr-error" role="alert"></span>
+      </div>
+      <div class="dialog-buttons welcome-nav">
+        <button type="button" id="wfr-back" class="welcome-back-btn">Back</button>
+        <button type="button" id="wfr-save" class="log-save-btn" disabled>Save and check it</button>
+      </div>
+    </section>
+
+    <!-- Radio check (renderer/first-run-radio.js, lib/radio-check.js): Station
+         Setup's control and hearing steps, inline. It reads and listens only;
+         sending audio and the test transmit stay in Station Setup. -->
+    <section class="welcome-screen hidden" id="welcome-screen-check" data-step="check">
+      <h3>Check the radio</h3>
+      <p class="welcome-text">POTACAT only listens here. Nothing is sent on the air.</p>
+      <div id="wfc-steps" class="wfc-steps" aria-live="polite"></div>
+      <span class="help-text wfc-later">Sending audio and a short test transmission are in Station Setup (More menu), when you want them.</span>
+      <div class="dialog-buttons welcome-nav">
+        <button type="button" id="wfc-back" class="welcome-back-btn">Back</button>
+        <button type="button" id="wfc-skip" class="wfr-link">Skip the check</button>
+        <button type="button" id="wfc-done" class="log-save-btn">Done</button>
+      </div>
+    </section>
   </dialog>
 
   <script src="../node_modules/leaflet/dist/leaflet.js"></script>
@@ -5436,6 +5506,9 @@
   <script src="../lib/net-reminder-row.js"></script>
   <script src="../lib/rig-family.js"></script>
   <script src="../lib/rig-model-connection.js"></script>
+  <script src="../lib/rig-record.js"></script>
+  <script src="../lib/rig-quick-setup.js"></script>
+  <script src="../lib/radio-check.js"></script>
   <script src="../lib/tci-target.js"></script>
   <script src="../lib/tx-audio-input.js"></script>
   <script src="../lib/tx-power-control.js"></script>
@@ -5514,6 +5587,7 @@
   <script src="sounds.js"></script>
   <script src="app.js"></script>
   <script src="station-setup.js"></script>
+  <script src="first-run-radio.js"></script>
   <script src="echocat-review.js"></script>
   <script src="../lib/cloud-shacks.js"></script>
   <script src="cloud-ui.js"></script>

@@ -172,7 +172,9 @@ test('the rig editor: the box follows the rule until the operator chooses, and o
   assert.ok(/box\.addEventListener\('change', \(\) => \{ rigPowerOffChoice = box\.checked; \}\)/.test(app), 'a click is a choice');
   assert.ok(/rigPowerOffChoice = editing && typeof editing\.allowPowerOffNoWake === 'boolean' \? editing\.allowPowerOffNoWake : undefined/.test(app), 'opening the editor loads the stored choice, or none');
   assert.ok(/if \(rigPowerOffStored !== undefined\) rig\.allowPowerOffNoWake = rigPowerOffStored; else delete rig\.allowPowerOffNoWake;/.test(app), 'edit saves a choice only');
-  assert.ok(/\.\.\.\(rigPowerOffStored !== undefined \? \{ allowPowerOffNoWake: rigPowerOffStored \} : \{\}\)/.test(app), 'add saves a choice only');
+  // A new rig: the record is built by lib/rig-record.js (shared with the first run).
+  assert.ok(/allowPowerOffNoWake: rigPowerOffStored,/.test(app), 'add passes it on');
+  assert.ok(/\.\.\.\(v\.allowPowerOffNoWake !== undefined \? \{ allowPowerOffNoWake: v\.allowPowerOffNoWake \} : \{\}\)/.test(require('fs').readFileSync(require('path').join(__dirname, '..', 'lib', 'rig-record.js'), 'utf8')), 'add saves a choice only');
   assert.ok(/async function refreshRigSetupNotes\(\) \{\s*refreshPacketModeNote\(\);\s*refreshPowerOffNote\(\);/.test(app), 'refreshed with the model and connection');
 });
 

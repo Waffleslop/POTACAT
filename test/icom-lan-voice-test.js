@@ -51,7 +51,9 @@ check('the rig editor shows, loads and saves it for Icom Network rigs only', () 
   assert.ok(/lanVoiceSsbRow\.classList\.toggle\('hidden', type !== 'icom-network'\)/.test(app));
   assert.ok(/lanVoiceSsbEl\.checked = !!rig\.lanVoiceInSsb/.test(app));
   assert.ok(/if \(rigLanVoiceInSsb\) rig\.lanVoiceInSsb = true; else delete rig\.lanVoiceInSsb;/.test(app));
-  assert.ok(/\.\.\.\(rigLanVoiceInSsb \? \{ lanVoiceInSsb: true \} : \{\}\)/.test(app));
+  // A new rig: the record is built by lib/rig-record.js (shared with the first run).
+  assert.ok(/lanVoiceInSsb: rigLanVoiceInSsb,/.test(app));
+  assert.ok(/\.\.\.\(v\.lanVoiceInSsb \? \{ lanVoiceInSsb: true \} : \{\}\)/.test(require('fs').readFileSync(require('path').join(__dirname, '..', 'lib', 'rig-record.js'), 'utf8')));
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);

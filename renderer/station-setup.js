@@ -623,4 +623,9 @@
   };
 
   window.openStationSetup = open;
+  // The first run's radio check (renderer/first-run-radio.js) shows the
+  // control and hearing steps inline, with this same listen. Once it has, the
+  // after-Welcome card does not offer the checklist again this session.
+  window.StationSetupChecks = { listenTest };
+  window.stationSetupSeenInline = () => { openedThisSession = true; };
 })();

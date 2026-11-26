@@ -125,7 +125,8 @@ test('SSB-over-DATA stands down on a Voice in DATA rig', () => {
 test('rig editor has the box and saves rig.voiceAsData', () => {
   assert.ok(html.includes('id="set-voice-as-data"'));
   assert.ok(app.includes('rig.voiceAsData = true'));
-  assert.ok(app.includes('voiceAsData: true'));
+  // A new rig: the record is built by lib/rig-record.js (shared with the first run).
+  assert.ok(app.includes('voiceAsData: rigVoiceAsData,') && require('fs').readFileSync(require('path').join(__dirname, '..', 'lib', 'rig-record.js'), 'utf8').includes('voiceAsData: true'));
 });
 test('the G90 setup note points at the option', () => {
   const notes = require('../lib/rig-setup-notes');

@@ -290,7 +290,9 @@ t('one question, two choices, the tick box under the data jack, the help with th
 t('app.js saves the jack per rig (absent = data jack) and the tick box only once set', () => {
   assert.ok(/if \(rigAudioJack === 'mic'\) rig\.audioJack = 'mic'; else delete rig\.audioJack;/.test(APP));
   assert.ok(/if \(typeof rigVoiceDataSwitch === 'boolean'\) rig\.voiceDataSwitch = rigVoiceDataSwitch; else delete rig\.voiceDataSwitch;/.test(APP));
-  assert.ok(/\.\.\.\(rigAudioJack === 'mic' \? \{ audioJack: 'mic' \} : \{\}\)/.test(APP));
+  // A new rig: the record is built by lib/rig-record.js (shared with the first run).
+  assert.ok(/audioJack: rigAudioJack,/.test(APP));
+  assert.ok(/\.\.\.\(v\.audioJack === 'mic' \? \{ audioJack: 'mic' \} : \{\}\)/.test(require('fs').readFileSync(require('path').join(__dirname, '..', 'lib', 'rig-record.js'), 'utf8')));
   assert.ok(/RigAudioJack\.appliesToRadioType\(type\)/.test(APP), 'shown for sound-card radios only');
 });
 

@@ -94,7 +94,9 @@ test('rig editor: the checkbox grid, native pre-ticks, saved only once touched',
   assert.ok(html.includes('<script src="../lib/rig-bands.js"></script>'));
   assert.ok(/await initRigBandsForEditor\(mode === 'edit'/.test(app));
   assert.ok(/const rb = rigBandsToSave\(\); if \(rb\) rig\.bands = rb; else delete rig\.bands;/.test(app));
-  assert.ok(/\.\.\.\(rigBandsToSave\(\) \? \{ bands: rigBandsToSave\(\) \} : \{\}\)/.test(app));
+  // A new rig: the record is built by lib/rig-record.js (shared with the first run).
+  assert.ok(/bands: rigBandsToSave\(\),/.test(app));
+  assert.ok(/\.\.\.\(v\.bands \? \{ bands: v\.bands \} : \{\}\)/.test(R('lib/rig-record.js')));
   assert.ok(/if \(!rigBandsState\.touched\) rigBandsState\.selected = new Set\(native \|\|/.test(app));
 });
 
