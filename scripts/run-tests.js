@@ -158,6 +158,7 @@ const TESTS = [
   'test/ts-wss-url-test.js',
   'test/cq-target-test.js',
   'test/cq-target-relay-test.js',
+  'test/hunt-chase-state-test.js',
   'test/remote-audio-answerer-test.js',
   'test/remote-ptt-test.js',
   'test/echocat-protocol-test.js',

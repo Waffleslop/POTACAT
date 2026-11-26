@@ -22002,7 +22002,7 @@ function jtcatHuntProgramMatchOne(d, filterMode) {
   });
   if (ok && !_jtcatSpottedHuntLogged.has(d.call)) {
     const why = { 'wanted-country': `${d.entity} is a country you still need`, 'new-grid': `${d.grid} is a grid you still need here`, dx: `${d.entity} is on another continent`,
-      chase: settings.jtcatChaseTarget ? `matches your Call target ${settings.jtcatChaseTarget}` : '', watchlist: 'is on your watchlist' }[filterMode];
+      chase: settings.jtcatChaseTarget ? `matches your Call target ${settings.jtcatChaseTarget}${CqTarget.classifyTarget(settings.jtcatChaseTarget).kind === 'usstate' && d.grid ? ` (grid ${d.grid})` : ''}` : '', watchlist: 'is on your watchlist' }[filterMode];
     if (why) {
       _jtcatSpottedHuntLogged.add(d.call);
       sendCatLog(`[JTCAT] Hunt: ${d.call} — ${why}; answering their CQ`);

@@ -74,8 +74,10 @@ truthy(CqTarget.matchesDecode('JA', { entity: 'Japan', call: 'JA1XYZ' }, helpers
 falsy(CqTarget.matchesDecode('JA', { entity: 'United States', call: 'W1AW' }, helpers), 'JA does not match a US decode');
 truthy(CqTarget.matchesDecode('JA', { entity: 'Japan' }, { targetEntityName: 'Japan' }), 'JA matches via precomputed targetEntityName');
 
-// usstate — documented v1 no-op for incoming highlight
-falsy(CqTarget.matchesDecode('FL', { entity: 'United States', grid: 'EL98' }, helpers), 'FL (US state) does not highlight in v1 (documented limitation)');
+// usstate: only from decode.state (main sets it from the grid); a bare grid
+// with no state attached is not a match. Full rules: test/hunt-chase-state-test.js.
+falsy(CqTarget.matchesDecode('FL', { entity: 'United States', grid: 'EL98' }, helpers), 'FL with no decode.state -> no match');
+truthy(CqTarget.matchesDecode('FL', { entity: 'United States', grid: 'EL98', state: { code: 'FL', candidates: ['FL'], certain: true, source: 'grid' } }, helpers), 'FL matches a decode whose grid puts it in FL');
 
 // none / guards
 falsy(CqTarget.matchesDecode('', { text: 'CQ POTA W1AW' }, helpers), 'empty target never matches');
