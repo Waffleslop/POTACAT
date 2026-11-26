@@ -563,6 +563,7 @@ const TESTS = [
   'test/station-setup-test.js',
   'test/station-setup-after-welcome-test.js',
   'test/launch-ping-test.js',
+  'test/first-run-test.js', // a shorter first run: steps, resume, Esc keeps entries, firstRun turns false at the station step, local markers
   'test/setup-share-test.js',
   'test/lz3aw-round6-test.js',
   'test/cw-auto-sync-test.js',

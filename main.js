@@ -954,7 +954,8 @@ const GLOBAL_KEYS = new Set([
   'rigPresetRules',    // { rigId|'*': [{ bands, families, presetId }] } — band + mode rules, first match wins; byMode is the fallback
   'remoteShackAudio',  // this PC's speaker/mic/volume/PTT key for a remote shack (machine devices)
   'echocatMultiClient', // this shack lets the owner's devices connect together (server property)
-  'firstRun',          // first-time-launch flag
+  'firstRun',          // first-time-launch flag: true until the first-run station step is finished
+  'firstRunState',     // lib/first-run.js: the step reached, the radio answer, a kept draft, local milestone markers
   'yaesuScopeFps',     // band-scope helper frame rate — a display/machine property
   'tuneStepHz',        // VFO knob/wheel + band scope tuning step, one synced value (applyTuneStep)
   'yaesuScopeHelperPath', // explicit yaesu-scope binary on THIS machine
