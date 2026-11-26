@@ -222,7 +222,7 @@ test('rate limit: the caller memory does not grow without end', () => {
 
 // ---- transmitting stops by itself ----
 test('trigger: each automatic stop chimes', () => {
-  assert.deepStrictEqual(lib().AUTO_STOP_REASONS.slice().sort(), ['hunt-idle', 'run-idle', 'run-paused', 'tx-watchdog']);
+  assert.deepStrictEqual(lib().AUTO_STOP_REASONS.slice().sort(), ['hunt-idle', 'run-idle', 'run-paused', 'time-limit', 'tx-watchdog']);
   for (const reason of lib().AUTO_STOP_REASONS) {
     assert.strictEqual(lib().stopChime(lib().createState(), { setting: STOP, reason, now: 1 }), STOP, reason);
   }
@@ -268,13 +268,14 @@ test('main: both decode paths ask once per decode event, before the QSO machines
   }
 });
 
-test('main: only the four automatic stops chime; no operator path does', () => {
+test('main: only the five automatic stops chime; no operator path does', () => {
   const sites = main.match(/jtcatChimeTxStopped\('[a-z-]+'\)/g) || [];
   assert.deepStrictEqual(sites.slice().sort(), [
     "jtcatChimeTxStopped('hunt-idle')", "jtcatChimeTxStopped('run-idle')",
-    "jtcatChimeTxStopped('run-paused')", "jtcatChimeTxStopped('tx-watchdog')",
+    "jtcatChimeTxStopped('run-paused')", "jtcatChimeTxStopped('time-limit')", "jtcatChimeTxStopped('tx-watchdog')",
   ]);
-  assert.strictEqual((main.match(/jtcatChimeTxStopped\(/g) || []).length, 5, 'four calls and the definition');
+  assert.strictEqual((main.match(/jtcatChimeTxStopped\(/g) || []).length, 6, 'five calls and the definition');
+  assert.ok(/jtcatChimeTxStopped\('time-limit'\)/.test(extract(main, 'jtcatSessionLimitStop')));
   assert.ok(/jtcatChimeTxStopped\('tx-watchdog'\)/.test(extract(main, 'jtcatTxWatchdogStop')));
   const wd = extract(main, 'jtcatFullAutoCqWatchdog');
   assert.ok(/jtcatChimeTxStopped\('run-idle'\)/.test(wd) && /jtcatChimeTxStopped\('hunt-idle'\)/.test(wd));

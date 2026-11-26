@@ -129,6 +129,10 @@ function _applyPopoutTheme(payload) {
     if (callingTimeInput && window.JtcatCallingTime) {
       callingTimeInput.value = window.JtcatCallingTime.clampMinutes(s.jtcatCallingTimeMin);
     }
+    if (sessionLimitOn && sessionLimitMin && window.JtcatSessionLimit) {
+      sessionLimitOn.checked = window.JtcatSessionLimit.isOn(s);
+      sessionLimitMin.value = window.JtcatSessionLimit.clampMinutes(s.jtcatSessionLimitMin);
+    }
     logPrompt = s.jtcatLogPrompt === true;
     if (logPromptToggle) logPromptToggle.classList.toggle('active', logPrompt);
     autoRespot = s.jtcatAutoRespot === true;
@@ -276,6 +280,8 @@ function _applyPopoutTheme(payload) {
   var fullAutoCqBtn = document.getElementById('jp-full-auto-cq');
   var maxAttemptsInput = document.getElementById('jp-max-attempts');
   var callingTimeInput = document.getElementById('jp-calling-time');  // #161 TX watchdog minutes
+  var sessionLimitOn = document.getElementById('jp-session-limit-on');   // "Stop Run and Hunt after N minutes"
+  var sessionLimitMin = document.getElementById('jp-session-limit-min');
   var openWatchlistBtn = document.getElementById('jp-open-watchlist');
   if (openWatchlistBtn) openWatchlistBtn.addEventListener('click', function () {
     if (window.api.openWatchlistSettings) window.api.openWatchlistSettings();
@@ -3116,6 +3122,18 @@ function _applyPopoutTheme(payload) {
       window.api.saveSettings({ jtcatCallingTimeMin: n });
     });
   }
+  // Session limit (lib/jtcat-session-limit.js, 5-240, default 60, off by
+  // default). Main reads it when Run or Hunt starts.
+  if (sessionLimitOn && sessionLimitMin && window.JtcatSessionLimit) {
+    sessionLimitOn.addEventListener('change', function() {
+      window.api.saveSettings({ jtcatSessionLimitOn: sessionLimitOn.checked });
+    });
+    sessionLimitMin.addEventListener('change', function() {
+      var n = window.JtcatSessionLimit.clampMinutes(sessionLimitMin.value);
+      sessionLimitMin.value = n;
+      window.api.saveSettings({ jtcatSessionLimitMin: n });
+    });
+  }
   // Hunt's signal floor (lib/jtcat-snr-floor.js): normalised on change, and
   // the by-band line says which pieces it could not read.
   if (huntMinDbInput && window.JtcatSnrFloor) {
@@ -3782,6 +3800,29 @@ function _applyPopoutTheme(payload) {
       if (!st || st.off || !st.text) { huntStatusEl.hidden = true; huntStatusEl.textContent = ''; return; }
       huntStatusEl.hidden = false;
       huntStatusEl.textContent = st.text;
+    });
+  }
+
+  // The session limit line: "Run: 42 min left", then "Run stopped: your
+  // 60-minute limit ran out." until Run or Hunt starts again. A click hides
+  // the stopped line.
+  var sessionLimitEl = document.getElementById('jp-session-limit');
+  var sessionLimitDismissed = '';
+  if (window.api.onJtcatSessionLimit && sessionLimitEl) {
+    window.api.onJtcatSessionLimit(function (st) {
+      var text = (st && st.text) || '';
+      var stopped = !!(st && st.stopped);
+      if (!stopped) sessionLimitDismissed = '';
+      if (!text || (stopped && text === sessionLimitDismissed)) { sessionLimitEl.hidden = true; sessionLimitEl.textContent = ''; return; }
+      sessionLimitEl.hidden = false;
+      sessionLimitEl.textContent = text;
+      sessionLimitEl.classList.toggle('stopped', stopped);
+      sessionLimitEl.title = stopped ? 'Click to hide' : '';
+    });
+    sessionLimitEl.addEventListener('click', function () {
+      if (!sessionLimitEl.classList.contains('stopped')) return;
+      sessionLimitDismissed = sessionLimitEl.textContent;
+      sessionLimitEl.hidden = true;
     });
   }
 

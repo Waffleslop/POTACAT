@@ -27,7 +27,7 @@ lib/ft8_native, renderer/jtcat-popout.* or the ECHOCAT jtcat-* messages.
 - The pop-out to shack bridge is lib/remote-bridge.js (a row per channel; the test fails otherwise).
 
 ## Operating rules that are settings (names only; semantics in each module's header)
-Per profile: jtcatMaxQsoAttempts, jtcatCallingTimeMin, jtcatReworkDays, jtcatHuntSpotted, jtcatNferParks, jtcatLogPrompt,
+Per profile: jtcatMaxQsoAttempts, jtcatCallingTimeMin, jtcatSessionLimitOn/Min, jtcatReworkDays, jtcatHuntSpotted, jtcatNferParks, jtcatLogPrompt,
 jtcatRelogCooldownMin, jtcatRunPauseAfter, jtcatModeHop*, jtcatFdMode/jtcatFdExch, jtcatHoundMode,
 jtcatSkipTx1, jtcatApDecode, jtcatLateStartTx, jttyMacroStyle, jttyMacros, pskMacros.
 Machine-wide (GLOBAL_KEY): ultracat, jtcatRxGain, jtcatTxGain (desktop-authoritative, one writer
@@ -60,7 +60,7 @@ Rule: a setting that is operating policy is per profile; a setting about this ma
   chime per decode period; a caller who keeps calling does not chime again until 10 minutes pass without a call
   from them; the station of a QSO in progress is remembered the same way, so their last 73 is not a new caller.
 - Transmitting stops by itself: the Tx watchdog (jtcatCallingTimeMin), the 30-minute attended limit ending Hunt
-  or Run, and Run pausing on a worked-out band (JtcatChimes.AUTO_STOP_REASONS). An operator stop (Halt, a Hunt,
+  or Run, the session limit running out (jtcatSessionLimitMin, reason time-limit), and Run pausing on a worked-out band (JtcatChimes.AUTO_STOP_REASONS). An operator stop (Halt, a Hunt,
   Run or mode change, the phone) is silent: jtcatHaltTxNow, stopFullAutoCq and setJtcatHuntMode carry no chime.
   Not included: the SWR guard, the per-QSO try cap, a tune link, APRS or SSTV taking the audio.
 - Where it sounds: the main window's default-output AudioContext, never given a sink, so never the transmit
@@ -102,6 +102,10 @@ Departures from WSJT-X (do not "fix"):
    The Tx watchdog exists too: `jtcatCallingTimeMin` (#161, lib/jtcat-calling-time.js), minutes of
    FT8/FT4/FT2 transmitting with no QSO progress and no operator action before TX stops, default 6
    (WSJT-X's figure), 1-30. The ceiling is the 30-minute attended limit on Run and Hunt, which stays.
+   A session timer exists too (W5XY 2026-11-25): jtcatSessionLimitOn / jtcatSessionLimitMin (lib/jtcat-session-limit.js),
+   "Stop Run and Hunt after N minutes", off by default, 5-240, counted from the start of Run or Hunt whatever happens.
+   At the deadline a contact in progress finishes, then Run or Hunt stops; no new CQ or call after it (rearmCq, the fallback
+   start, the Hunt picker, and both tx-start dispatches for a Run CQ that repeats between decodes). Enforced in main.
 3. Field Day, CQ side: the ARRL FD sequence ends on their RR73 and we send no 73; it still logs at
    our R+exchange. The S&P side follows the rule (logs when our RR73 goes out).
 
@@ -153,6 +157,7 @@ Departures from WSJT-X (do not "fix"):
 ## Tests
 lib/ft8-engine-test.js, lib/psk-engine-test.js, test/jtty-*.js, test/jtcat-*.js,
 test/jtcat-chimes-test.js (the chimes: triggers, non-triggers, rate limit, wiring),
+test/jtcat-session-limit-test.js (Stop Run and Hunt after N minutes),
 test/decode-contract-test.js (real worker, native and WASM), test/layout-alignment-test.js (rows at
 phone and desktop widths, CI only), test/remote-bridge-test.js, test/k9cyt-requests-test.js.
 
