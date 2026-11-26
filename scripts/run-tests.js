@@ -21,6 +21,7 @@ const os = require('os');
 const path = require('path');
 
 const TESTS = [
+  'test/cw-spots-qrz-grid-test.js', // #1061: CW Spots placed by refineClusterSpotWithQrz (cache, low-priority queue, enableQrz); cached calls add no flush
   'test/syntax-check-test.js', // every source file parses (a main.js syntax error passed every other test)
   'test/icom-civ-address-learn-test.js', // sweep 3c: a USB Icom at another CI-V address is found from its own replies, used and saved
   'test/icom-usb-data-mod-test.js', // sweep 1a: over USB CI-V, DATA MOD to USB for a data session and put back (IC-7300, MK II, IC-7100, IC-7610 DATA1/2/3, IC-9700 #892 with CI-V byte tests)
@@ -201,6 +202,7 @@ const TESTS = [
   'test/rigctld-kenwood-power-test.js', // a TS-590/TS-2000 behind Hamlib keeps its power: raw PC, never Hamlib's PC000/PC255 probe
   'test/jtcat-tx-watchdog-test.js',
   'test/jtcat-calling-time-test.js',
+  'test/jtcat-session-limit-test.js', // "Stop Run and Hunt after N minutes" (W5XY): off by default, waits for a contact in progress, no new CQ/call after, phone-started enforced in main
   'test/jtcat-replace-log-test.js',
   'test/jtcat-second-caller-test.js',
   'test/jtcat-quiet-freq-test.js', // CQ quiet frequency: main measures the engine audio while no waterfall draws (one rule, lib/jtcat-quiet-freq.js)
@@ -560,6 +562,7 @@ const TESTS = [
   'test/rotctld-client-test.js',
   'test/station-setup-test.js',
   'test/station-setup-after-welcome-test.js',
+  'test/launch-ping-test.js',
   'test/setup-share-test.js',
   'test/lz3aw-round6-test.js',
   'test/cw-auto-sync-test.js',
@@ -751,6 +754,7 @@ const TESTS = [
   'test/bands-everywhere-test.js',
   'test/remote-tx-audio-diag-test.js',
   'test/welcome-cloud-signin-test.js',
+  'test/welcome-rig-station-setup-test.js',
   'test/activation-filename-date-test.js',
   'test/remote-rig-test.js',
   'test/remote-rig-power-test.js', // #152: rig power on/off from a remote POTACAT; no Power Off under a TX
@@ -767,6 +771,7 @@ const TESTS = [
   'test/tailscale-detect-test.js',
   'test/yaesu-legacy-codec-test.js',
   'test/yaesu-audit-ftx1-test.js', // Yaesu CAT audit: FTX-1 width SH00nn from Table 5, RTTY-U/PSK/DATA-FM-N readback
+  'test/ftx1-preamp-readback-test.js', // the FTX-1 preamp is read back (PA0; -> PA02; = AMP2, PA1;/PA2; on 2 m / 70 cm), so a radio already on AMP2 shows it when a window opens (rev 2508-C p.22)
   'test/icom-network-log-routing-test.js',
   'test/icom-network-voice-test.js',
   'test/jtty-chats-test.js',
@@ -813,6 +818,8 @@ const TESTS = [
   'test/activator-log-once-test.js', // the Activator log saves once per press, and a slow QRZ never holds up a save (.eddiejames duplicates)
   'test/serial-hs-trial-test.js', // the RTS/CTS no-answer trial covers Kenwood too (jcoreyc TS-480), never the legacy Yaesu protocol
   'test/rts-ptt-flow-voice-test-544-test.js', // #544: PTT on RTS vs RTS/CTS per port, no trial where RTS keys PTT, the voice test says keyed only with evidence
+  'test/idle-radio-return-test.js', // #1051: every idle mode puts the radio back, never over the operator's own move
+  'test/idle-mode-1051-wiring-test.js', // #1051: one return path, operator actions win, outside tuning is activity, Idle Mode off for new installs
   'test/idle-radio-use-test.js', // APRS listening is use of the radio: Idle Mode never starts or retunes under it (on air 2026-11-18)
   'test/idle-wspr-band-test.js', // idle-RX WSPR uses only the rig's bands and offers 2 m (artificialjumpprotection IC-7100)
   'test/park-db-check-test.js', // activator: only POTA refs are checked against the parks list (og3e WWFF/SOTA flagged as typos), and the warning never overflows

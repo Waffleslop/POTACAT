@@ -211,7 +211,7 @@ test('the idle session ends when the operator takes the radio from ECHOCAT or cl
   for (const ev of ['tune', 'jtcat-start', 'jtcat-set-mode']) {
     const at = MAIN.indexOf(`remoteServer.on('${ev}',`);
     assert.ok(at > 0, ev);
-    assert.ok(/markUserActive\(\);/.test(MAIN.slice(at, at + 700)), `${ev} counts as the operator returning`);
+    assert.ok(/markUserActive\((\{ operatorTook: [^}]*\})?\);/.test(MAIN.slice(at, at + 700)), `${ev} counts as the operator returning`);
   }
   assert.ok(/jtcatPopoutWin = null;\s*\/\/[\s\S]{0,300}if \(autoIdleJtcatActive\) markUserActive\(\);/.test(MAIN), 'JTCAT window closed');
   assert.ok(/js8PopoutWin = null;\s*if \(autoIdleJs8Active\) markUserActive\(\);/.test(MAIN), 'JS8 window closed');

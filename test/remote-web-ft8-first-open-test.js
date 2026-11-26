@@ -129,7 +129,7 @@ test('a device taking an idle receive closes the idle window without takeover no
   assert.ok(i >= 0);
   const h = MAIN.slice(i, MAIN.indexOf('startJtcat(mode);', i));
   assert.ok(h.indexOf('const fromIdle = autoRxKind() && autoIdleJtcatActive;') >= 0, 'fromIdle');
-  assert.ok(h.indexOf('const fromIdle') < h.indexOf('markUserActive();'), 'read before markUserActive cancels the idle receive');
+  assert.ok(h.indexOf('const fromIdle') < h.indexOf('markUserActive('), 'read before markUserActive cancels the idle receive');
   const idle = h.slice(h.indexOf('if (fromIdle'), h.indexOf('} else if (jtcatPopoutWin'));
   assert.ok(!/jtcat-owner|jtcat-takeover-notice/.test(idle));
 });

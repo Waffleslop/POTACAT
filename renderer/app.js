@@ -23886,7 +23886,7 @@ catLogClearBtn.addEventListener('click', () => {
       s.enablePota && 'POTA', s.enableSota && 'SOTA', s.enableWwff && 'WWFF', s.enableLlota && 'LLOTA', s.enableWwbota && 'WWBOTA',
       s.enableCluster && 'DX-Cluster', s.enableCwSpots && 'CW-Spots', s.enableRbn && 'RBN',
       s.enablePskr && 'PSKR', s.enableDxcc && 'DXCC', s.enableFreedv && 'FreeDV',
-      s.enableAutoSstv && 'Auto-SSTV',
+      s.enableAutoSstv && ('Idle Mode ' + String(s.idleRxMode || 'sstv').toUpperCase()),
     ].filter(Boolean).join(', ') || '(none)';
     // Setup notes for the reported rig, and which the operator ticked — answers
     // "did you set PC KEYING?" before anyone has to ask.
@@ -28481,6 +28481,7 @@ const welcomeCallsignInput = document.getElementById('welcome-callsign');
 
 // --- Welcome rig editor ---
 let welcomeRig = null; // rig configured in welcome dialog
+let welcomeRigIsNew = false; // true only for a radio added in this Welcome, not the existing one shown on reopen
 let welcomeHamlibLoaded = false;
 let welcomeSerialcatLoaded = false;
 let welcomeIcomLoaded = false;
@@ -28644,6 +28645,7 @@ function showWelcomeRigItem(rig) {
   removeBtn.addEventListener('click', (e) => {
     e.stopPropagation();
     welcomeRig = null;
+    welcomeRigIsNew = false;
     display.innerHTML = '';
     display.classList.add('hidden');
     document.getElementById('welcome-rig-add-btn').classList.remove('hidden');
@@ -28682,6 +28684,7 @@ document.getElementById('welcome-rig-save-btn').addEventListener('click', () => 
     if (bad) { welcomeTciFields.result.textContent = bad; return; }
   }
   welcomeRig = { id: 'rig_' + Date.now(), name, catTarget };
+  welcomeRigIsNew = true;
   // Keep POTACAT's audio/tune slice in sync with the chosen Flex CAT shim port
   // (5002→A …) so a non-A pick doesn't leave audio on slice A while CAT targets
   // another slice.
@@ -28794,7 +28797,15 @@ document.getElementById('welcome-start').addEventListener('click', async () => {
   _welcomeRemoteClose();
   // Reload prefs so the main UI reflects welcome choices
   loadPrefs();
-  // First run is over: the Station Setup launch card was held back until now.
+  // A radio was added in Welcome: open its Station Setup checklist now that
+  // Welcome is closed, the same as saving a new radio in Settings does. Not for
+  // the existing radio a reopened Welcome (F11) shows: Settings opens it only
+  // for a new radio, and the operator may have hidden its reminders.
+  if (welcomeRig && welcomeRigIsNew && typeof window.openStationSetup === 'function') {
+    window.openStationSetup(welcomeRig.id);
+  }
+  // First run is over: the Station Setup launch card was held back until now
+  // (it stays away when the checklist above was just opened).
   if (typeof window.stationSetupAfterWelcome === 'function') window.stationSetupAfterWelcome();
 });
 
@@ -29111,6 +29122,7 @@ async function checkFirstRun(force = false) {
   if (force || s.firstRun) {
     // Reset welcome rig state
     welcomeRig = null;
+    welcomeRigIsNew = false;
     const welcomeRigDisplay = document.getElementById('welcome-rig-display');
     welcomeRigDisplay.innerHTML = '';
     welcomeRigDisplay.classList.add('hidden');
@@ -29123,10 +29135,11 @@ async function checkFirstRun(force = false) {
       if (s.distUnit) document.getElementById('welcome-dist-unit').value = s.distUnit;
       if (s.licenseClass) document.getElementById('welcome-license-class').value = s.licenseClass;
       document.getElementById('welcome-hide-oob').checked = s.hideOutOfBand === true;
-      // Auto-SSTV default is ON for fresh installs (the HTML `checked`
-      // attribute handles that); on re-open we reflect whatever the user
-      // has saved — `!== false` so undefined stays ON.
-      document.getElementById('welcome-enable-auto-sstv').checked = s.enableAutoSstv !== false;
+      // Idle Mode is OFF for new installs (#1051, Casey 2026-11-24: the box
+      // is unticked in the HTML). On re-open it shows what is saved, and unset
+      // reads off, as it runs (startAutoSstvTimer): reopening the welcome
+      // never turns it on for anyone.
+      document.getElementById('welcome-enable-auto-sstv').checked = s.enableAutoSstv === true;
       // Telemetry: a new install's settings carry enableTelemetry: true; an
       // older install that never chose has it unset, which stays unticked.
       { const t = document.getElementById('welcome-enable-telemetry'); if (t) t.checked = s.enableTelemetry === true; }
