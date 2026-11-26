@@ -161,7 +161,9 @@ test('rig editor: loads, resets and saves ampDriveLimitW', () => {
   assert.ok(/id="set-amp-drive-on"/.test(html) && /id="set-amp-drive-w"/.test(html));
   const app = read('renderer/app.js');
   assert.ok(/if \(rigAmpDriveW > 0\) rig\.ampDriveLimitW = rigAmpDriveW; else delete rig\.ampDriveLimitW;/.test(app), 'edit saves');
-  assert.ok(/\.\.\.\(rigAmpDriveW > 0 \? \{ ampDriveLimitW: rigAmpDriveW \} : \{\}\)/.test(app), 'add saves');
+  // A new rig: the record is built by lib/rig-record.js (shared with the first run).
+  assert.ok(/ampDriveLimitW: rigAmpDriveW,/.test(app), 'add passes it on');
+  assert.ok(/\.\.\.\(v\.ampDriveLimitW > 0 \? \{ ampDriveLimitW: v\.ampDriveLimitW \} : \{\}\)/.test(require('fs').readFileSync(require('path').join(__dirname, '..', 'lib', 'rig-record.js'), 'utf8')), 'add saves');
   assert.ok(/on\.checked = lim > 0;/.test(app), 'edit restores');
 });
 
