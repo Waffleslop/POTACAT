@@ -52,6 +52,9 @@ check(L({ host: '[::1]:7300', origin: 'https://[::1]:7300' }, { remoteAddress: '
 check(L({ host: 'localhost:7300' }) === true, 'tunnel on: a native socket (no Origin) needs a token');
 check(L({ host: 'localhost:7300', origin: 'https://localhost:7300', 'x-forwarded-for': '203.0.113.9' }) === true,
   'tunnel on: X-Forwarded-For (a proxy) needs a token');
+for (const hdr of ['x-forwarded-proto', 'x-forwarded-port', 'x-forwarded-server', 'x-original-forwarded-for', 'x-client-ip', 'true-client-ip', 'cdn-loop']) {
+  check(L({ host: 'localhost:7300', origin: 'https://localhost:7300', [hdr]: 'x' }) === true, 'tunnel on: ' + hdr + ' (a proxy) needs a token');
+}
 check(L({ host: 'localhost:7300', origin: 'https://localhost:7300', 'tailscale-user-login': 'a@b' }) === true,
   'tunnel on: a Tailscale identity header (tailscale serve) needs a token');
 check(L({ host: 'shack.ngrok-free.app', origin: 'https://shack.ngrok-free.app' }) === true,

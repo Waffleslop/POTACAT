@@ -125,16 +125,25 @@ Checked at the WebSocket upgrade, before the server `hello`
   this PC: `Host` is `localhost`, `127.x.x.x` or `[::1]`, the request carries
   no proxy header (`Forwarded`, `X-Forwarded-For`, `X-Forwarded-Host`,
   `X-Real-IP`, `Via`, or a `Tailscale-*` identity header), and the upgrade
-  carries this server's `Origin`. Anything else from loopback (a script,
-  `scripts/echocat-cli.js`, another program, a local reverse proxy such as
-  ngrok, nginx or tailscale serve pointed at the ECHOCAT port) gets `auth-mode:
-  token` and must authenticate with the ECHOCAT token or a paired-device
+  carries this server's `Origin`. Anything else from loopback (a script or
+  `scripts/echocat-cli.js` that does not present itself as the page, or a local
+  reverse proxy that keeps its public `Host` or adds a forwarding header, such
+  as ngrok, Caddy, Apache or tailscale serve pointed at the ECHOCAT port) gets
+  `auth-mode: token` and must authenticate with the ECHOCAT token or a paired-device
   token, as with "require token" on. The page is served with
   `window.__authMode` from the same rule (a page load sends no Origin, so the
   HTTP side checks `Host` and the proxy headers). `/api/ptt` through such a
   proxy needs `?token=` and is refused when no ECHOCAT token is set; a
   program on this PC calling `localhost` (Stream Deck) is served as before.
   With the tunnel off, loopback is unchanged.
+  Limits: this sorts proxies and honest clients; it is not a defence against
+  hostile software on the shack PC, which can send the page's `Host` and
+  `Origin` itself (and already controls the PC). A proxy that rewrites `Host`
+  to `127.0.0.1` and adds no forwarding header (nginx with only `proxy_pass`
+  and default settings) looks exactly like a local program: its WebSocket is
+  refused (the browser's `Origin` is the public name), but its plain HTTP
+  requests, `/api/ptt` included, are served as local. Do not expose the
+  ECHOCAT port through such a proxy; use the Cloud Tunnel.
 
 LAN and Tailscale clients, and loopback clients while the Cloud Tunnel is off,
 keep the local-trust behaviour of a fresh install: `auth-mode: none` and
@@ -1088,7 +1097,9 @@ diagnostics.
 
 For Apple Shortcuts, Stream Deck HTTP actions and similar native callers, on
 the LAN and the tailnet only (over the Cloud Tunnel it is the 503 stub). Any
-method; `?token=` is required only when the operator requires a token; the
+method; `?token=` is required when the operator requires a token, and (since
+2026-11-26) for a caller that came through a local proxy while the Cloud
+Tunnel is on, which is refused when no ECHOCAT token is set; the
 reply is `{ptt: true|false}`. Since 2026-11-22:
 
 - The reply carries **no** `Access-Control-Allow-Origin`, so another web page
