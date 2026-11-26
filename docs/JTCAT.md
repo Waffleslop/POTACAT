@@ -70,6 +70,25 @@ Rule: a setting that is operating policy is per profile; a setting about this ma
 - Not built: the ECHOCAT app and ECHOCAT Web do not chime (handoff 2026-11-24), and a laptop driving a remote
   shack does not either (its decodes arrive over the bridge, not through this PC's decode path).
 
+### Run answers the stations waiting on it (W5XY 2026-11-25)
+- lib/jtcat-run-callers.js remembers every station calling us ("MYCALL THEIRCALL" + grid, report, R+report or
+  nothing) for 4 periods (60 s FT8, 30 s FT4) while Run is on. A decode recovered only with AP is never remembered.
+  A station heard calling CQ, working someone else or signing off is dropped. main.js jtcatRunCallersTick feeds it
+  in both decode paths before the done blocks.
+- When a QSO ends or is given up (rearmCq), Run answers the best waiting caller with a report (the CQ-side state
+  machine, handed that caller's message) and calls CQ only when nobody is waiting. Only a caller heard twice in the
+  window, or in the last T/R cycle, is answered, so a one-off false decode is not called a minute later. While the
+  CQ is listening the queue picks the best caller; with nobody to pick the state machine answers as before.
+  Ranking is "Who goes first"; the TX slot lock and the worked-before policy apply; Hunt's signal floor does not
+  (Run never applied it). The station just worked is never answered again. A station Run gave up on may be answered
+  once more while it keeps calling. An R+report caller gets a fresh report. TIME_ON starts when Run answers.
+- A check that ends Run (a session deadline) goes at the top of rearmCq, above the answer: past it, Run neither
+  answers a waiting caller nor calls CQ.
+- Part of "Answer stations that call me" (jtcatAnswerCallers, default on); off, Run behaves as before. Not in Field
+  Day, Hound mode or with auto-sequence off. With TX Off while the CQ listens, the queue does not answer (it would
+  turn TX on); the state machine takes the caller as before. CAT log: "[JTCAT] Run: answering N8PFK (-12 dB), who called during the
+  last QSO"; a skipped caller is named once per Run.
+
 ## When a QSO is logged (#807, Casey 2026-11-20)
 A QSO is logged when WE start transmitting a 73-family message (RR73, RRR or 73) to that station,
 or when THEIR RR73, RRR or 73 for the QSO is received, whichever comes first, once. Not a setting.

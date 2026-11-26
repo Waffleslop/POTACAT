@@ -608,8 +608,11 @@ test('the review\'s wiring spots: picked model, Test Connection, descriptions, s
   assert.ok(read('preload.js').includes("testCommander: (config) => ipcRenderer.invoke('test-commander', config)"));
   assert.ok(/id="dxlab-commander-test-btn"/.test(read('renderer/index.html')), 'the Test Connection button');
   const app = read('renderer/app.js');
-  assert.ok(/\['flrig', 'dxlab-commander', 'rigctldnet'\]\.includes\(getSelectedRadioType\(\)\)/.test(app),
-    'picking a Radio Model keeps the Commander connection');
+  // #1084: the Radio Model rule lives in lib/rig-model-connection.js.
+  assert.ok(/RigModelConnection\.connectionForModel\(/.test(app), 'the editor asks the rule');
+  const ft710 = require('../lib/rig-models').getModelList().find((g) => g.models.includes('FT-710'));
+  assert.deepStrictEqual(require('../lib/rig-model-connection').connectionForModel({ model: 'FT-710', group: ft710, current: 'dxlab-commander' }),
+    { type: 'dxlab-commander', keep: true }, 'picking a Radio Model keeps the Commander connection');
   assert.ok(/window\.api\.testCommander\(/.test(app), 'the button calls test-commander');
   assert.ok(/'dxlab-commander': 'DXLab Commander'/.test(read('lib/station-setup.js')), 'station-setup "through" wording');
   const { describeRigTarget } = { describeRigTarget: null };

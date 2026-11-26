@@ -93,7 +93,12 @@ test('Pebble HF is a real model: no CAT, 20 m, 5 W — and the picker selects th
   assert.deepStrictEqual(getModelList().find((g) => g.brand === 'Yaesu').noCat.slice().sort(), ['FTM-100D', 'FTM-510D'], 'Yaesu carries its no-CAT mobiles');
   assert.ok(!getModelList().find((g) => g.brand === 'Icom').noCat, 'a brand with no such model carries no noCat list');
   const app = read('renderer/app.js');
-  assert.ok(app.includes("if (noCat) setRadioType('nocat');"), 'picking the model picks the type');
+  // #1084: the Radio Model rule lives in lib/rig-model-connection.js.
+  assert.ok(/RigModelConnection\.connectionForModel\(/.test(app), 'the editor asks the rule');
+  const { connectionForModel } = require('../lib/rig-model-connection');
+  for (const current of ['flex', 'serialcat', 'flrig']) {
+    assert.strictEqual(connectionForModel({ model: 'Pebble HF', group, current }).type, 'nocat', 'picking the model picks the type');
+  }
   // Setup notes: the one note the Pebble needs, under the audio feature.
   const { resolveSetupNotes } = require('../lib/rig-setup-notes');
   const notes = resolveSetupNotes({ model: 'Pebble HF', modelInfo: m, radioType: 'nocat', platform: 'win32', done: [] });

@@ -3074,19 +3074,30 @@ function _applyPopoutTheme(payload) {
 
   // ULTRACAT — Full Auto CQ run mode (button hidden unless π-unlocked)
   var fullAutoCqActive = false;
+  // A Run start this window asked for and has no answer to yet (#1085): the
+  // answer that refuses it carries the reason, shown in the error toast. A
+  // replayed or unrelated state (no start pending) shows nothing.
+  var runStartPendingUntil = 0;
   if (fullAutoCqBtn) {
     fullAutoCqBtn.addEventListener('click', function() {
       var turningOn = !fullAutoCqActive;
-      window.api.jtcatSetFullAutoCq({ on: turningOn, modifier: chaseTarget });
-      if (turningOn) { // run mode drives TX
+      // Run drives TX: the TX on rides with the start (txOn), so a refused
+      // start leaves TX off wherever the engine is (#1085).
+      window.api.jtcatSetFullAutoCq(turningOn ? { on: true, modifier: chaseTarget, txOn: true } : { on: false, modifier: chaseTarget });
+      if (turningOn) {
+        runStartPendingUntil = Date.now() + 15000;
         setTxOnState(true);
-        window.api.jtcatEnableTx(true);
       }
     });
   }
   window.api.onJtcatFullAutoCqState(function(state) {
     fullAutoCqActive = !!(state && state.active);
     var paused = !!(state && state.paused);
+    if (runStartPendingUntil && (fullAutoCqActive || Date.now() > runStartPendingUntil)) runStartPendingUntil = 0;
+    if (runStartPendingUntil && state && state.reason) {
+      runStartPendingUntil = 0;
+      showJtcatErrorToast(String(state.reason));
+    }
     if (fullAutoCqBtn) {
       fullAutoCqBtn.classList.toggle('active', fullAutoCqActive);
       // Paused = still running, deliberately not transmitting because the band

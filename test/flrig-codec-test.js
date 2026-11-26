@@ -456,7 +456,11 @@ function rig(port, { model } = {}) {
     assert.ok(/currentTarget\.type === 'flrig'\) \{\s+setRadioType\('flrig'\)/.test(app), 'editor reopens it');
     assert.ok(/\['serialcat', 'icom', 'civ-tcp', 'icom-network', 'hamlib', 'rigctldnet', 'flrig'[^\]]*\]\.includes\(type\)/.test(app), 'Voice in DATA mode row');
     assert.ok(/window\.api\.testFlrig\(/.test(app), 'the Test Connection button calls test-flrig');
-    assert.ok(/const shared = \[[^\]]*'flrig'[^\]]*\]\.includes\(getSelectedRadioType\(\)\);/.test(app), 'picking a model keeps the flrig connection');
+    // #1084: the Radio Model rule lives in lib/rig-model-connection.js.
+    assert.ok(/RigModelConnection\.connectionForModel\(\{ model: modelName, group: groupOf, current: getSelectedRadioType\(\) \}\)/.test(app), 'the editor asks the rule');
+    const RMC = require('../lib/rig-model-connection');
+    const ft710 = require('../lib/rig-models').getModelList().find((g) => g.models.includes('FT-710'));
+    assert.deepStrictEqual(RMC.connectionForModel({ model: 'FT-710', group: ft710, current: 'flrig' }), { type: 'flrig', keep: true }, 'picking a model keeps the flrig connection');
   });
   await test('libs: rig family, setup-note radio type, setup-share wording, port presence, generic caps, test runner', () => {
     const RF = require('../lib/rig-family');

@@ -307,9 +307,9 @@ function bodyOf(name) {
 test('main.js: kiwi-connect probes any port but 8073, and a newer connect wins', () => {
   const at = MAIN.indexOf("ipcMain.on('kiwi-connect', async");
   assert.ok(at > 0, 'the handler is async (the probe)');
-  const h = MAIN.slice(at, at + 10000);
+  const h = MAIN.slice(at, at + 12000); // the handler grew an SDRconnect branch
   assert.ok(/const isKiwi = port === 8073/.test(h));
-  assert.ok(/isKiwi \|\| scopeShare \? null : await RtlTcpAudio\.probeRtlTcp\(host, port, 1000\)/.test(h));
+  assert.ok(/isKiwi \|\| scopeShare \|\| isSdrConnect \? null : await RtlTcpAudio\.probeRtlTcp\(host, port, 1000\)/.test(h), 'SDRconnect (port 5454) is never probed as rtl_tcp');
   assert.ok(/if \(seq !== kiwiConnectSeq\) return;/.test(h));
   assert.ok(/new RtlTcpAudio\.RtlTcpAudioClient\(\{ sdr: rtlTcpSdrSettingsFor\(host, port\) \}\)/.test(h));
   assert.ok(/kiwiClient\.attach\(scopeShare\.client, scopeShare\)/.test(h), 'shares a server the scope already holds');

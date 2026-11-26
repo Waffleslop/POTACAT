@@ -456,6 +456,9 @@ const YaesuScope = require('./lib/yaesu-scope');
 const Ft4222Lib = require('./lib/ft4222-library');
 const SdrScope = require('./lib/sdr-scope');
 const RtlTcpAudio = require('./lib/rtltcp-audio');
+const SdrConnect = require('./lib/sdrconnect-client');          // SDRconnect's WebSocket API (SDRplay nRSP-ST, any SDRplay)
+const SdrConnectAudio = require('./lib/sdrconnect-audio');
+const SdrConnectProto = require('./lib/sdrconnect-protocol');
 const ScopeOverlay = require('./lib/scope-overlay');
 const { explainRigctldFailure } = require('./lib/rigctld-stderr');
 const RigFamily = require('./lib/rig-family');
@@ -567,8 +570,11 @@ const StationCounty = require('./lib/station-county');
 const JtcatSnrFloor = require('./lib/jtcat-snr-floor');
 const JtcatCallingTime = require('./lib/jtcat-calling-time');
 const JtcatSessionLimit = require('./lib/jtcat-session-limit'); // "Stop Run and Hunt after N minutes" (W5XY 2026-11-25)
+const JtcatRunRefusal = require('./lib/jtcat-run-refusal'); // why the shack refused Run, and TX left off after it (#1085)
 const OriginHealth = require('./lib/origin-health');
 const RemoteAccess = require('./lib/remote-access'); // ECHOCAT access: off | cloud | lan (the door itself)
+const PairingSessionLib = require('./lib/pairing-session'); // simpler pairing: the code that renews itself
+const PairingScreen = require('./lib/pairing-screen'); // simpler pairing: the https link, best web address, state line
 const { planImport, findDuplicateGroups } = require('./lib/qso-match');
 const { SmartSdrClient, setColorblindMode: setSmartSdrColorblind, sliceFilterEdges } = require('./lib/smartsdr');
 const { SmartSdrAudio } = require('./lib/smartsdr-audio');
@@ -1758,6 +1764,14 @@ let spotsPopoutWin = null; // pop-out spots window (activator mode)
 let clusterPopoutWin = null; // pop-out DX cluster terminal window
 let propPopoutWin = null;    // pop-out propagation map window
 let pairPopoutWin = null;    // pop-out ECHOCAT pairing QR window
+let _pairScreen = null;      // the open "Pair my device" screen (simpler pairing), see pairing-screen-open
+// What the mDNS advert says for simpler pairing (lib/pairing-session.js advertTxtExtras).
+function _pairScreenAdvertState() {
+  return {
+    pairingOpen: !!_pairScreen,
+    cloudDeviceId: settings && settings.cloudAccessToken ? (settings.cloudDeviceId || '') : '',
+  };
+}
 let pairRequestPopoutWin = null; // tap-to-pair Approve/Deny popout
 let vfoPopoutWin = null;     // pop-out VFO window
 let _lastVfoTunedSpot = null; // the last activator card sent to the VFO window
@@ -8395,6 +8409,7 @@ function bridgeIpcToShack(channel, args, e) {
   if (!isRemoteMode()) return false;
   const rule = RemoteBridge.OUT[channel];
   if (!rule) return false;
+  _remoteBridgeState.serverCaps = (remoteClient && remoteClient.state && remoteClient.state().serverCapabilities) || null; // the shack's hello (#1085 jtcat-run-tx-on)
   const r = rule(args || [], _remoteBridgeState) || { drop: true };
   if (r.local) return false; // this PC's own preference (the Winlink window's waterfall speed)
   if (r.drop) return true;
@@ -22329,7 +22344,8 @@ function jtcatMaxQsoRetries() {
   return (Number.isFinite(n) && n >= 1 && n <= 60) ? n : JTCAT_MAX_QSO_RETRIES;
 }
 
-function broadcastFullAutoCqState(reason) {
+function broadcastFullAutoCqState(reason, opts) {
+  const o = opts || {};
   const state = {
     active: jtcatFullAutoCq,
     owner: jtcatFullAutoCqOwner,
@@ -22339,9 +22355,13 @@ function broadcastFullAutoCqState(reason) {
     paused: jtcatFullAutoCqPaused,
     unanswered: jtcatFullAutoCqUnanswered,
   };
+  // o.here: a Run start this computer's own JTCAT window asked for was refused
+  // (#1085). Only that window hears why; nothing changed for the phone.
+  if (o.here) { state.code = o.code || ''; state.reason = o.here; }
   if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
     jtcatPopoutWin.webContents.send('jtcat-full-auto-cq-state', state);
   }
+  if (o.here) return;
   // Mirror to ECHOCAT clients (phone) so they can show the run indicator.
   // `reason` (display-ready string) rides along on stop/refusal pushes so
   // the phone can say WHY a run ended — the Part 97 watchdog stop must
@@ -22356,6 +22376,9 @@ function broadcastFullAutoCqState(reason) {
       owner: jtcatFullAutoCqOwner,
       maxQsoAttempts: jtcatMaxQsoRetries(),
       reason: reason || null,
+      // #1085: on a refused start, which of the three causes (lib/jtcat-run-refusal.js);
+      // reason then carries that cause's sentence. Absent otherwise.
+      ...(o.code ? { code: o.code } : {}),
     });
   }
 }
@@ -22496,6 +22519,15 @@ async function rearmCq(owner) {
   // Session limit FIRST ("Stop Run and Hunt after N minutes"): past the deadline
   // Run neither answers a waiting caller nor calls CQ; it stops here.
   if (!JtcatSessionLimit.mayStartNew(_jtcatSessionLimit, Date.now())) { jtcatSessionLimitStop(); return false; }
+  // Any other check that ends Run or Hunt here belongs ABOVE this point:
+  // past it, Run answers a waiting caller or calls CQ.
+  // Someone called us during the QSO that just ended: answer them, not CQ.
+  if (jtcatRunAnswerWaiting(owner, { afterQso: true })) {
+    jtcatFullAutoCqUnanswered = 0;
+    jtcatFullAutoCqPaused = false;
+    jtcatFullAutoCqLastActivity = Date.now();
+    return true;
+  }
   const qso = await jtcatBuildCqQso(jtcatFullAutoCqModifier);
   if (!qso) { stopFullAutoCq('callsign/grid not set'); return false; }
   // A re-arm follows real activity (a QSO finished, stalled, or the band came
@@ -22509,12 +22541,160 @@ async function rearmCq(owner) {
   return true;
 }
 
+// A Run start the operator asked for (the JTCAT window, a remote JTCAT window
+// or the phone). txOn: the click also asked for TX on (the JTCAT window's Run
+// does); a refusal leaves TX as it was before the click, and the operator is
+// told which of the three causes refused it (#1085).
+async function jtcatRequestRunStart(owner, modifier, txOn) {
+  const r = await JtcatRunRefusal.requestStart({
+    engine: ft8Engine,
+    txOn: !!txOn,
+    onTxOn: jtcatNoteOperatorAtRadio, // turning TX on is the operator (transmit watchdog)
+    start: (why) => startFullAutoCq(owner, modifier || '', { why }),
+  });
+  if (r.ok) return true;
+  if (owner === 'remote') broadcastFullAutoCqState(JtcatRunRefusal.text(r.code, 'shack'), { code: r.code });
+  else broadcastFullAutoCqState(undefined, { code: r.code, here: JtcatRunRefusal.text(r.code, 'here') });
+  sendCatLog('[JTCAT] Run refused (' + (r.code || 'unknown') + '): ' + JtcatRunRefusal.text(r.code, owner === 'remote' ? 'shack' : 'here'));
+  return false;
+}
+
+// Run's waiting callers (lib/jtcat-run-callers.js, W5XY 2026-11-25): every
+// station that called us in the last few periods, so one that called during a
+// QSO is answered when it ends instead of Run calling CQ over them.
+const JtcatRunCallers = require('./lib/jtcat-run-callers');
+const jtcatRunCallers = new JtcatRunCallers.RunCallerQueue();
+
+/** Does Run answer waiting callers itself? Off: the CQ phase behaves as before. */
+function jtcatRunServesCallers() {
+  return !!jtcatFullAutoCq && settings.jtcatAnswerCallers !== false && _autoSeqEnabled()
+    && !jtcatFdContext() && !settings.jtcatHoundMode;
+}
+
+/** Run's dupe test for a waiting caller: the worked-before policy, the Log QSO
+ *  window, Never answer, and this session's attempts, except that a station
+ *  Run gave up on may be answered once more while it keeps calling.
+ *  Returns why it is not answered, or '' when it may be. */
+function jtcatRunCallerBlocked(call, band, mode) {
+  const where = `on ${band || 'this band'} ${mode}`.trimEnd();
+  if (HuntFilters.isIgnored(call, jtcatIgnoreList())) return 'on your Never answer list';
+  if (jtcatLogReviews.holds(call, band, mode)) return 'waiting in the Log QSO window';
+  if (jtcatWorkedInfo(call, band, mode).blocking) return 'already worked ' + where;
+  if (jtcatSessionHas(call, band, mode) && !jtcatRunCallers.mayRetry(jtcatSessionKey(call, band, mode))) {
+    return 'already worked or tried ' + where + ' this session';
+  }
+  return '';
+}
+
+function jtcatRunCallersWindowMs() {
+  return JtcatRunCallers.windowMs(ft8Engine && typeof ft8Engine._cycleSec === 'function' ? ft8Engine._cycleSec() : 15);
+}
+
+/** Feed one decode cycle to the queue; while Run's CQ is listening, answer
+ *  the best waiting caller. Runs before the QSO machines in each decode path. */
+function jtcatRunCallersTick(results) {
+  if (!jtcatRunServesCallers()) return;
+  const myCall = onAirCall();
+  if (!myCall) return;
+  const bm = jtcatCurrentBandMode(ft8Engine);
+  jtcatRunCallers.note(results, myCall, Date.now(), bm.band + '|' + bm.mode, jtcatRunCallersWindowMs());
+  const owner = jtcatFullAutoCqOwner;
+  const q = owner === 'remote' ? remoteJtcatQso : popoutJtcatQso;
+  if (!q || q.mode !== 'cq' || q.phase !== 'cq' || jtcatFullAutoCqPaused) return;
+  // TX Off (the window's TX On/Off, the phone's enable) leaves Run on with the
+  // engine disabled. The answer turns TX on, so it is not made here: the state
+  // machine takes the caller as before and nothing keys until TX is back on.
+  if (!ft8Engine || !ft8Engine._txEnabled) return;
+  // The CQ is listening: the queue picks the best caller (ranking, dupes, slot
+  // lock). With nobody to pick, the state machine answers exactly as before.
+  if (jtcatRunAnswerWaiting(owner, {})) {
+    jtcatFullAutoCqUnanswered = 0;
+    jtcatFullAutoCqLastActivity = Date.now();
+  }
+}
+
+/**
+ * Answer the best station waiting on us: a CQ-side QSO shell handed the
+ * caller's own message, so the state machine builds the report (or R+report)
+ * exactly as for an answer to our CQ. Synchronous: the shell is in place
+ * before this cycle's QSO processing runs. Returns true when engaged.
+ */
+function jtcatRunAnswerWaiting(owner, opts) {
+  if (!jtcatRunServesCallers() || jtcatFullAutoCqOwner !== owner) return false;
+  if (!ft8Engine || _swrTripped) return false;
+  // Past the session deadline Run starts nothing new, a waiting caller included.
+  if (!JtcatSessionLimit.mayStartNew(_jtcatSessionLimit, Date.now())) return false;
+  const myCall = onAirCall();
+  const myGrid = (settings.grid || '').toUpperCase().substring(0, 4);
+  if (!myCall || !myGrid) return false;
+  const { band, mode } = jtcatCurrentBandMode(ft8Engine);
+  const prev = owner === 'remote' ? remoteJtcatQso : popoutJtcatQso;
+  const prevCall = (prev && prev.call) || '';
+  if (prevCall) {
+    const key = jtcatSessionKey(prevCall, band, mode);
+    if (prev.phase === 'done') jtcatRunCallers.noteCompleted(key);
+    else jtcatRunCallers.noteAbandoned(key);
+    jtcatRunCallers.forget(prevCall);
+  }
+  // No signal floor: that is Hunt's (jtcatHuntMinDb), and Run never applied
+  // it to answers to its CQ. Only callers heard twice, or in the last T/R
+  // cycle, so a one-off false decode is not called a minute later.
+  const pick = jtcatRunCallers.pick({
+    nowMs: Date.now(),
+    windowMs: jtcatRunCallersWindowMs(),
+    scope: band + '|' + mode,
+    exclude: [prevCall, myCall],
+    confirmedOnly: true,
+    isBlocked: (call) => jtcatRunCallerBlocked(call, band, mode),
+    slotOk: (slot) => JtcatTxSlot.workableUnderLock(jtcatTxSlotLock(), slot),
+    rank: (list) => HuntFilters.rankCallers(list, { priority: HuntFilters.normalizePriority(settings.jtcatHuntPriority), myGrid }),
+  });
+  for (const b of pick.blocked) {
+    if (jtcatRunCallers.firstSkipNote(b.call)) sendCatLog(`[JTCAT] Run: not answering ${b.call}, ${b.why}`);
+  }
+  const best = pick.best;
+  if (!best) return false;
+  const shell = { mode: 'cq', phase: 'cq', call: null, grid: null, txMsg: '',
+    report: null, sentReport: null, myCall, myGrid, txRetries: 0,
+    // The previous QSO's last TX is not a try for this one.
+    _retryTxCounted: ft8Engine._lastTxPeriodKey || '' };
+  let msg = '';
+  _jtcatStateMachine.advanceJtcatQso(shell, [JtcatRunCallers.answerDecode(best, myCall)], (m) => { msg = m; }, () => {},
+    { engine: ft8Engine, log: sendCatLog });
+  if (shell.phase === 'cq' || !msg) return false;
+  if (!jtcatReplySlot(ft8Engine, best.call, best.slot)) return false;
+  jtcatRunCallers.forget(best.call);
+  const retry = jtcatSessionHas(best.call, band, mode);
+  // Called before this cycle's QSO processing (the CQ listening, a QSO just
+  // done): those decodes were just used to start it. After an abandon the
+  // cycle has already been processed.
+  if (!prev || prev.phase === 'done' || prev.phase === 'cq') shell._skipAdvanceOnce = true;
+  ft8Engine._txEnabled = true;
+  // TIME_ON: the advance wrapper notes the partner each cycle, but this first
+  // one ran outside it.
+  _jtcatQsoClock.note(best.call, Date.now());
+  if (owner === 'remote') { remoteJtcatQso = shell; remoteJtcatBroadcastQso(); }
+  else { popoutJtcatQso = shell; popoutBroadcastQso(); }
+  sendCatLog(JtcatRunCallers.answerLogLine(best, { afterQso: !!(opts && opts.afterQso) && !!prevCall, retry, more: pick.ranked.length - 1 }));
+  Promise.resolve(ft8Engine.setTxMessage(msg)).then(() => {
+    const cur = owner === 'remote' ? remoteJtcatQso : popoutJtcatQso;
+    if (cur === shell && typeof ft8Engine.tryImmediateTx === 'function') ft8Engine.tryImmediateTx();
+  }).catch(() => {});
+  return true;
+}
+
 // Start run mode for an owner: 'popout' (desktop window) or 'remote' (the
 // ECHOCAT phone via jtcat-full-auto-cq). Guarded by the ULTRACAT unlock so a
-// locked client can't drive it.
+// locked client can't drive it. opts.why (an object): a refusal sets why.code
+// (lib/jtcat-run-refusal.js) and leaves telling the operator to the caller.
 async function startFullAutoCq(owner, modifier, opts) {
-  if (!settings.ultracat) { sendCatLog('[JTCAT] Full Auto CQ blocked — ULTRACAT locked'); return false; }
-  if (!ft8Engine) { sendCatLog('[JTCAT] Full Auto CQ blocked — engine not running'); return false; }
+  const why = (opts && opts.why) || {};
+  const blocked = JtcatRunRefusal.precheck({ ultracat: settings.ultracat, engine: !!ft8Engine });
+  if (blocked) {
+    why.code = blocked;
+    sendCatLog('[JTCAT] Full Auto CQ blocked — ' + (blocked === JtcatRunRefusal.CODES.ULTRACAT_LOCKED ? 'ULTRACAT locked' : 'engine not running'));
+    return false;
+  }
   // opts.auto = started by the Hunt fallback rather than by the operator.
   // Two things must NOT happen on an automatic start:
   //  - the 30-minute attended watchdog must keep running from when the
@@ -22534,6 +22714,7 @@ async function startFullAutoCq(owner, modifier, opts) {
   jtcatFullAutoCqPaused = false;
   jtcatAutoCqMode = 'off';        // run and hunt are mutually exclusive
   if (!auto) jtcatAutoCqWorkedSession.clear();
+  jtcatRunCallers.clear();
   broadcastAutoCqState();
   // Run supersedes any armed Spot Target (K3SBP 2026-07-17): calling CQ and
   // waiting on a specific activator are mutually exclusive intents — without
@@ -22547,7 +22728,12 @@ async function startFullAutoCq(owner, modifier, opts) {
   const quietPick = jtcatQuietPick();
   ft8Engine.setTxFreq(quietPick.hz);
   const qso = await jtcatBuildCqQso(jtcatFullAutoCqModifier);
-  if (!qso) { stopFullAutoCq('callsign/grid not set'); return false; }
+  if (!qso) {
+    why.code = JtcatRunRefusal.CODES.NO_CALL_GRID;
+    // A caller that reports the refusal itself (opts.why) gets one state push, its own.
+    stopFullAutoCq('callsign/grid not set', opts && opts.why ? { silent: true } : undefined);
+    return false;
+  }
   if (owner === 'remote') { remoteJtcatQso = qso; remoteJtcatBroadcastQso(); }
   else { popoutJtcatQso = qso; popoutBroadcastQso(); }
   broadcastFullAutoCqState();
@@ -22558,10 +22744,13 @@ async function startFullAutoCq(owner, modifier, opts) {
 // Stop run mode and silence TX. `reason` (if set) surfaces a popout notice —
 // pass opts.quiet for a normal, expected stop (the Hunt fallback handing back)
 // so the reason still reaches the log without being dressed as an error.
+// opts.silent: no state push and no notice (a refused start, whose caller
+// pushes the refusal itself).
 function stopFullAutoCq(reason, opts) {
   const wasActive = jtcatFullAutoCq;
   jtcatFullAutoCq = false;
   jtcatFullAutoCqOwner = null;
+  jtcatRunCallers.clear();
   JtcatSessionLimit.noteStop(_jtcatSessionLimit, 'run');
   jtcatFullAutoCqUnanswered = 0;
   jtcatFullAutoCqPaused = false;
@@ -22577,8 +22766,8 @@ function stopFullAutoCq(reason, opts) {
     try { ft8Engine.setTxSlot('auto'); } catch {}
     if (ft8Engine._txActive && typeof ft8Engine.txComplete === 'function') ft8Engine.txComplete();
   }
-  broadcastFullAutoCqState(wasActive ? reason : undefined);
-  if (wasActive && reason && !(opts && opts.quiet) && jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
+  if (!(opts && opts.silent)) broadcastFullAutoCqState(wasActive ? reason : undefined);
+  if (wasActive && reason && !(opts && (opts.quiet || opts.silent)) && jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
     jtcatPopoutWin.webContents.send('jtcat-qso-state', { phase: 'error', error: 'Full Auto CQ stopped — ' + reason });
   }
   if (wasActive) sendCatLog('[JTCAT] Full Auto CQ STOPPED (' + (reason || 'user') + ')');
@@ -24026,6 +24215,8 @@ function advanceJtcatQso(q, results, setTxMsg, onDone) {
   // engine + log dependencies injected so the unit tests in
   // test/jtcat-test.js can drive it without spinning the full app.
   const deps = { engine: ft8Engine, log: sendCatLog };
+  // Run's waiting-caller pick (jtcatRunCallersTick) already used this cycle.
+  if (q && q._skipAdvanceOnce) { q._skipAdvanceOnce = false; return; }
   // Run mode only: don't re-work a station we've already logged on this band
   // and mode. Left off every other path deliberately — a human who pressed CQ
   // answers whoever calls (WSJT-X parity), and the double-click reply gets the
@@ -24236,9 +24427,13 @@ async function jtcatTryAnswerDirectCaller(results, myCall, myGrid) {
   // Decodes calling us: call1 === our call. That excludes CQs and our OWN
   // echoes (whose call1 is the other station, never us — the N3VD echo guard),
   // with no order-blind "contains both calls" ambiguity. Sender (call2) must be
-  // a real callsign we haven't already logged (skip completed dupes; a station
-  // still in jtcatAutoCqWorkedSession from an *abandon* is intentionally NOT
-  // skipped — that's the callback we want to catch).
+  // a real callsign the worked-before policy does not block (jtcatWorkedInfo:
+  // this band and mode, "Call a station again after N days", the park rule),
+  // the same test Hunt's CQ pick and Run use. A bare "anywhere in the log,
+  // ever" test here skipped a station worked days ago on a 1-day setting. A
+  // station still in jtcatAutoCqWorkedSession from an *abandon* is
+  // intentionally NOT skipped — that's the callback we want to catch.
+  const callerBm = jtcatCurrentBandMode(ft8Engine);
   const callers = results
     .map((d) => ({ d, parts: (d.text || '').toUpperCase().replace(/[<>]/g, '').trim().split(/\s+/) }))
     .filter(({ parts }) =>
@@ -24246,7 +24441,7 @@ async function jtcatTryAnswerDirectCaller(results, myCall, myGrid) {
       parts[0] === myCall &&
       parts[1] !== myCall &&
       JtcatParser.looksLikeCallsign(parts[1]) &&
-      !(workedQsos && workedQsos.has(parts[1])) &&
+      !jtcatWorkedInfo(parts[1], callerBm.band, callerBm.mode).blocking &&
       !HuntFilters.isIgnored(parts[1], jtcatIgnoreList()))
     // A caller in our own locked slot can't be worked without moving.
     .filter(({ d }) => JtcatTxSlot.workableUnderLock(jtcatTxSlotLock(), d.slot));
@@ -24998,6 +25193,8 @@ function startJtcat(mode) {
     jtcatChimeCallers(data);
     // Attended-operator watchdog for Full Auto CQ run mode (Part 97).
     jtcatFullAutoCqWatchdog();
+    // Run: remember who is calling us; answer the best of them rather than CQ.
+    jtcatRunCallersTick(data.results || []);
     // Clean up completed QSOs. In Full Auto CQ run mode the owning session
     // re-arms a fresh CQ instead of going idle (work-then-CQ-again loop) —
     // both owners now, since the phone can drive run mode (jtcat-full-auto-cq).
@@ -31640,6 +31837,8 @@ function connectRemote() {
   // Tap-to-pair toggle. Default on; operator can flip off in
   // Settings → ECHOCAT if they share their LAN with strangers.
   try { remoteServer.setAllowPairRequests(settings.allowPairRequests !== false); } catch {}
+  // mDNS: pair=1 while the pairing screen is open; sid = derived Cloud id.
+  try { remoteServer.setAdvertState(_pairScreenAdvertState()); } catch {}
   // More than one of the owner's devices at a time (default off for one release).
   try { remoteServer.setMultiClient(settings.echocatMultiClient === true); } catch {}
   // When the server adds or revokes a device, persist the new list.
@@ -33978,10 +34177,11 @@ function connectRemote() {
   // refusal we re-broadcast the (unchanged) state so an optimistic phone
   // toggle reconciles back to "not running". Stop is unconditional — any
   // client silencing TX is always allowed, even for a popout-owned run.
-  remoteServer.on('jtcat-full-auto-cq', async ({ on, modifier } = {}) => {
+  // txOn (a remote JTCAT window's Run click, capability jtcat-run-tx-on): TX
+  // on with the start, and left off again when the start is refused (#1085).
+  remoteServer.on('jtcat-full-auto-cq', async ({ on, modifier, txOn } = {}) => {
     if (on) {
-      const ok = await startFullAutoCq('remote', modifier || '');
-      if (!ok) broadcastFullAutoCqState('start refused — ULTRACAT locked, FT8 engine not running, or callsign/grid not set');
+      await jtcatRequestRunStart('remote', modifier || '', !!txOn);
     } else {
       stopFullAutoCq('stopped from phone');
     }
@@ -41476,6 +41676,7 @@ function startSdrScope() {
   if (sdrScopeClient) return;
   const cfg = sdrScopeSettingsForActiveRig();
   sdrScopeCfg = cfg;
+  if (cfg.kind === 'sdrconnect') { startSdrConnectScope(cfg); return; }
   const dial = _currentFreqHz || yaesuScopeState.centerHz || 0;
   Object.assign(yaesuScopeState, {
     source: 'sdr', kind: 0, spanCode: null, spanHz: SdrScope.spanForRate(cfg.sampleRate), anchor: 'center',
@@ -41513,6 +41714,51 @@ function startSdrScope() {
   client.start();
 }
 
+// The band scope from SDRconnect (lib/sdrconnect-client.js): the spectrum
+// bins of an SDRplay nRSP-ST, or any SDRplay that SDRconnect has open, in the
+// same 850-level frames and through the same fan-out as the rtl_tcp SDR. One
+// connection per SDRconnect, shared with a listener on the same address.
+function startSdrConnectScope(cfg) {
+  const dial = _currentFreqHz || yaesuScopeState.centerHz || 0;
+  const scope = new SdrConnect.SdrConnectScope({ cfg, fps: Math.min(30, settings.yaesuScopeFps || 12) });
+  Object.assign(yaesuScopeState, {
+    source: 'sdr', kind: 0, spanCode: null, spanHz: scope.spanHz, anchor: 'center',
+    modeCode: null, speed: null, scuLan: null, frames: 0, misaligned: 0, helperPath: '', catReads: null,
+    centerHz: dial || yaesuScopeState.centerHz,
+  });
+  sdrScopeClient = scope;
+  sdrScopeBuilder = null;
+  sdrScopeTunedHz = SdrScope.sdrTuneHz(dial, cfg);
+  scope.on('frame', (f) => { if (sdrScopeClient === scope) yaesuScopeOnFrame(SdrScope.orientFrame(f, cfg)); });
+  scope.on('span', (hz) => {
+    if (sdrScopeClient !== scope) return;
+    yaesuScopeState.spanHz = hz;
+    sendCatLog(`[Scope] SDRconnect: span ${(hz / 1000).toFixed(0)} kHz (what the receiver's sample rate allows)`);
+    yaesuScopeBroadcastState();
+  });
+  scope.on('ready', (info) => {
+    if (sdrScopeClient !== scope || !info) return;
+    sendCatLog(`[Scope] SDRconnect connected: ${cfg.host}:${cfg.port}, ${info.activeDevice || 'receiver'}, API ${info.apiVersion || '?'}, ${info.canControl ? 'in control' : 'someone else is in control'}`
+      + `, span ${(scope.spanHz / 1000).toFixed(0)} kHz, gain ${cfg.gain === 'auto' ? 'as SDRconnect has it' : 'step ' + cfg.gain}`
+      + (SdrScope.isFixedIf(cfg) ? `, on the radio's IF output at ${cfg.ifHz} Hz${cfg.invertIf ? ' (mirrored)' : ''}` : (cfg.offsetHz ? `, offset ${cfg.offsetHz} Hz` : '')));
+  });
+  scope.on('control', (ok) => {
+    if (sdrScopeClient !== scope) return;
+    const d = SdrConnectProto.describeSdrConnectError('no-control');
+    sendCatLog(ok ? '[Scope] SDRconnect: control is back; the receiver follows the dial again' : `[Scope] SDRconnect: ${d.headline}. ${d.detail}`);
+  });
+  scope.on('state', (st, info) => {
+    if (sdrScopeClient !== scope) return;
+    if ((st === 'retrying' || st === 'failed') && info) {
+      sendCatLog(`[Scope] SDRconnect: ${info.headline}${info.detail ? ' — ' + info.detail : ''}${st === 'retrying' ? ` (retrying in ${Math.round(info.retryInMs / 1000)} s)` : ''}`);
+      yaesuScopeSetStatus(info.severity === 'blocker' ? 'blocked' : 'error', info);
+    }
+  });
+  sendCatLog(`[Scope] SDR source: connecting to SDRconnect at ${cfg.host}:${cfg.port}`);
+  yaesuScopeSetStatus('starting', null);
+  scope.start(sdrScopeTunedHz);
+}
+
 // ─── Listening through an rtl_tcp server (lib/rtltcp-audio.js) ───────────────
 // The SDR menu's rtl_tcp receiver and the band scope may be the same server.
 // The scope owns it while it runs; the listener demodulates the scope's IQ.
@@ -41523,7 +41769,7 @@ function rtlTcpScopeShareOf(client, cfg) {
 
 /** The band scope's stream, if the scope is reading host:port right now. */
 function rtlTcpScopeShareFor(host, port) {
-  if (!sdrScopeClient || !sdrScopeCfg) return null;
+  if (!sdrScopeClient || !sdrScopeCfg || sdrScopeCfg.kind === 'sdrconnect') return null;
   if (!RtlTcpAudio.sameHost(sdrScopeCfg.host, host) || Number(sdrScopeCfg.port) !== Number(port)) return null;
   return rtlTcpScopeShareOf(sdrScopeClient, sdrScopeCfg);
 }
@@ -41531,6 +41777,12 @@ function rtlTcpScopeShareFor(host, port) {
 /** The rtl_tcp listener connected to host:port, if there is one. */
 function rtlTcpListenerFor(host, port) {
   return kiwiClient instanceof RtlTcpAudio.RtlTcpAudioClient && kiwiClient.sameServer(host, port) ? kiwiClient : null;
+}
+
+/** The rig's band scope block when it reads this address through SDRconnect, else null. */
+function sdrConnectSettingsFor(host, port) {
+  const cfg = sdrScopeSettingsForActiveRig();
+  return cfg.kind === 'sdrconnect' && SdrConnect.normHost(cfg.host) === SdrConnect.normHost(host) && cfg.port === Number(port) ? cfg : null;
 }
 
 /** The SDR's settings: the rig's "Band scope from an SDR" block when it names this server, else defaults. */
@@ -47219,7 +47471,7 @@ function sdrCandidateFor(hz) {
     if (!clean) continue;
     const parts = clean.split(':');
     const port = parseInt(parts[1], 10) || 8073;
-    const reach = port === 8073 ? ListenSource.KIWI_REACH : ListenSource.RTL_TCP_ASSUMED;   // a WebSDR.org port is tried as rtl_tcp first
+    const reach = port === 8073 ? ListenSource.KIWI_REACH : port === SdrConnectProto.DEFAULT_PORT ? ListenSource.SDRPLAY_REACH : ListenSource.RTL_TCP_ASSUMED;   // a WebSDR.org port is tried as rtl_tcp first
     if (ListenSource.covers(reach, hz)) return { host: parts[0], port, label: (e && e.label) || clean };
   }
   return null;
@@ -47321,7 +47573,7 @@ function kiwiStatusHint() {
   if (!win || win.isDestroyed()) return;
   const connected = !!(kiwiClient && kiwiClient.connected);
   let reach = connected && kiwiClient.reach !== undefined ? kiwiClient.reach : null;
-  if (!reach) { const c = sdrCandidateFor(144e6) || sdrCandidateFor(14e6); if (c) reach = c.port === 8073 ? ListenSource.KIWI_REACH : ListenSource.RTL_TCP_ASSUMED; }
+  if (!reach) { const c = sdrCandidateFor(144e6) || sdrCandidateFor(14e6); if (c) reach = c.port === 8073 ? ListenSource.KIWI_REACH : c.port === SdrConnectProto.DEFAULT_PORT ? ListenSource.SDRPLAY_REACH : ListenSource.RTL_TCP_ASSUMED; }
   win.webContents.send('kiwi-status', { connected: listenSdr.live, host: kiwiLiveHost || undefined, kind: kiwiKind || undefined, available: !!reach, reach: reach || undefined, rigReach: rigReachNow() || undefined });
 }
 
@@ -48758,7 +49010,7 @@ function cloudShackNotice(text, kind) {
       minWidth: 360, minHeight: 420, // never smaller than its own controls (N0KAH 2026-10-24)
       width: 500,
       height: 600,
-      title: 'POTACAT — Pair Mobile App',
+      title: 'POTACAT — Pair ECHOCAT',
       backgroundColor: getThemeWindowBg(),
       show: false,
       resizable: true,
@@ -48805,9 +49057,9 @@ function cloudShackNotice(text, kind) {
     }
     const isMac = process.platform === 'darwin';
     pairRequestPopoutWin = new BrowserWindow({
-      minWidth: 340, minHeight: 260, // never smaller than its own controls (N0KAH 2026-10-24)
+      minWidth: 340, minHeight: 540, // room for the six-digit number; never smaller than its own controls (N0KAH 2026-10-24)
       width: 420,
-      height: 440,
+      height: 580,
       title: 'POTACAT — Pair request',
       show: false,
       backgroundColor: getThemeWindowBg(),
@@ -48821,7 +49073,7 @@ function cloudShackNotice(text, kind) {
         nodeIntegration: false,
       },
     });
-    rememberWindowPlace(pairRequestPopoutWin, 'pairRequestPopoutBounds', { minWidth: 340, minHeight: 260 });
+    rememberWindowPlace(pairRequestPopoutWin, 'pairRequestPopoutBounds', { minWidth: 340, minHeight: 540 });
     pairRequestPopoutWin.setMenuBarVisibility(false);
     pairRequestPopoutWin.loadFile(path.join(__dirname, 'renderer', 'pair-request-popout.html'), { query: themeQuery() });
     pairRequestPopoutWin.once('ready-to-show', () => {
@@ -52508,6 +52760,12 @@ function cloudShackNotice(text, kind) {
   ipcMain.on('scope-popout-minimize', (e) => { const w = BrowserWindow.fromWebContents(e.sender); if (w) w.minimize(); });
   ipcMain.on('scope-popout-maximize', (e) => { const w = BrowserWindow.fromWebContents(e.sender); if (w) { if (w.isMaximized()) w.unmaximize(); else w.maximize(); } });
   ipcMain.handle('icom-scope-capture', () => icomScopeCapture(30));
+  // Settings > Radio, Band scope from an SDR, SDRconnect: is it there, which receivers. Read-only.
+  ipcMain.handle('sdrconnect-probe', async (_e, { host, port } = {}) => {
+    const h = String(host || '127.0.0.1').trim() || '127.0.0.1';
+    const p = parseInt(port, 10) || SdrConnectProto.DEFAULT_PORT;
+    try { return await SdrConnect.probeSdrConnect(h, p); } catch (e) { return { ok: false, problem: SdrConnectProto.describeSdrConnectError('unreachable', { host: h, port: p, detail: e && e.message }) }; }
+  });
   ipcMain.on('scope-enable-on-radio', () => {
     // Remote shack: its own Enable (SCU-LAN10 on the shack's FT-710).
     if (isRemoteMode()) { if (isRemoteLinked()) remoteClient.sendRaw({ type: 'scope-enable-radio' }); else refuseRemoteNotLinked(null); return; }
@@ -53004,10 +53262,11 @@ function cloudShackNotice(text, kind) {
   });
 
   // ULTRACAT Full Auto CQ run mode — start/stop. Server-side ULTRACAT guard
-  // lives in startFullAutoCq. `payload` = { on, modifier }.
+  // lives in startFullAutoCq. `payload` = { on, modifier, txOn } (txOn: the Run
+  // click's TX on, applied with the start and undone if it is refused, #1085).
   ipcMain.on('jtcat-popout-full-auto-cq', (_e, payload) => {
     const on = payload && typeof payload === 'object' ? payload.on : payload;
-    if (on) startFullAutoCq('popout', (payload && payload.modifier) || '');
+    if (on) jtcatRequestRunStart('popout', (payload && payload.modifier) || '', !!(payload && payload.txOn));
     else stopFullAutoCq('stopped by operator');
   });
 
@@ -53845,13 +54104,20 @@ function cloudShackNotice(text, kind) {
     // EventEmitter shape so the wiring below works for any of them.
     const seq = ++kiwiConnectSeq;
     const isKiwi = port === 8073;
-    const scopeShare = isKiwi ? null : rtlTcpScopeShareFor(host, port);
-    const rtlHeader = isKiwi || scopeShare ? null : await RtlTcpAudio.probeRtlTcp(host, port, 1000);
+    // SDRconnect (an SDRplay nRSP-ST, or any SDRplay): its WebSocket API port
+    // 5454, or the address the rig's band scope reads through SDRconnect.
+    // Known before the rtl_tcp probe, which would only cost it a second.
+    const isSdrConnect = !isKiwi && (Number(port) === SdrConnectProto.DEFAULT_PORT || sdrConnectSettingsFor(host, port) !== null);
+    const scopeShare = isKiwi || isSdrConnect ? null : rtlTcpScopeShareFor(host, port);
+    const rtlHeader = isKiwi || scopeShare || isSdrConnect ? null : await RtlTcpAudio.probeRtlTcp(host, port, 1000);
     if (seq !== kiwiConnectSeq) return; // the operator picked another receiver meanwhile
     const isRtlTcp = !!(scopeShare || rtlHeader);
-    const isWebSdr = !isKiwi && !isRtlTcp;
-    const sdrKind = isRtlTcp ? 'rtl_tcp' : isWebSdr ? 'websdr' : 'kiwisdr';
-    if (isRtlTcp) {
+    const isWebSdr = !isKiwi && !isRtlTcp && !isSdrConnect;
+    const sdrKind = isSdrConnect ? 'sdrconnect' : isRtlTcp ? 'rtl_tcp' : isWebSdr ? 'websdr' : 'kiwisdr';
+    if (isSdrConnect) {
+      kiwiClient = new SdrConnectAudio.SdrConnectAudioClient({ sdr: sdrConnectSettingsFor(host, port) || {} });
+      sendCatLog(`[WebSDR] ${host}:${port} is SDRconnect: it does the receiving, POTACAT tunes it and plays its audio`);
+    } else if (isRtlTcp) {
       kiwiClient = new RtlTcpAudio.RtlTcpAudioClient({ sdr: rtlTcpSdrSettingsFor(host, port) });
       sendCatLog(`[WebSDR] ${host}:${port} is an rtl_tcp server (${rtlHeader ? rtlHeader.tunerName : 'shared with the band scope'}): POTACAT demodulates its IQ`);
     } else if (isWebSdr) {
@@ -53960,7 +54226,11 @@ function cloudShackNotice(text, kind) {
         remoteServer.sendToClient({ type: 'kiwi-status', connected: false, error: msg });
       }
     });
-    if (isRtlTcp) {
+    if (isSdrConnect) {
+      // SDRconnect: the target first, so the receiver goes straight to the dial.
+      if (_currentFreqHz > 0) kiwiClient.tune(_currentFreqHz / 1000, sdrListenMode(_currentMode || 'USB', _currentFreqHz));
+      kiwiClient.connect(host, port);
+    } else if (isRtlTcp) {
       // rtl_tcp: the target first, so the SDR goes straight to the dial.
       if (_currentFreqHz > 0) kiwiClient.tune(_currentFreqHz / 1000, _currentMode || 'USB'); // normalizeMode reads DIGU/PKTLSB/…
       if (scopeShare) {
@@ -55277,6 +55547,58 @@ function cloudShackNotice(text, kind) {
       sendCatLog('[Pair QR] FAILED — createPairingToken returned empty.');
       return { error: 'Pairing token came back empty. ECHOCAT may not be fully started yet — wait a moment and tap Regenerate.' };
     }
+    const { qrParamsObj, fingerprint, wsUrl, hostname, cloudHost, tsHost, tsIp, effectiveMode } = _pairQrParamsFor(pairingToken, opts);
+    const qrParams = new URLSearchParams(qrParamsObj);
+    const qrText = `potacat://pair?${qrParams.toString()}`;
+    // Generate BOTH formats best-effort. The QR is a convenience: the
+    // pairing data (qrText / pairingToken / fingerprint / host) is the
+    // source of truth and is ALWAYS returned, even if both QR rendering
+    // paths fail on this platform. KD2TJU on Linux Mint 22.3 hit a case
+    // where qrcode's PNG output was an unreadable payload AND the SVG
+    // path also failed — the renderer was emptying the manual fields
+    // on the resulting error and leaving the user with no path to pair.
+    // Now we surface a non-fatal `qrError` instead so the UI can still
+    // populate the fields.
+    let svg = '';
+    let dataUrl = '';
+    let qrError = '';
+    try {
+      svg = await qrcode.toString(qrText, { type: 'svg', errorCorrectionLevel: 'M', margin: 2 });
+    } catch (err) {
+      console.error('[Echo CAT] QR SVG generation failed:', err.message);
+      sendCatLog('[Pair QR] SVG render failed: ' + err.message);
+      qrError = err.message;
+    }
+    try {
+      dataUrl = await qrcode.toDataURL(qrText, { errorCorrectionLevel: 'M', width: 320, margin: 2 });
+    } catch (err) {
+      console.error('[Echo CAT] QR PNG generation failed:', err.message);
+      sendCatLog('[Pair QR] PNG render failed: ' + err.message);
+      if (!qrError) qrError = err.message;
+    }
+    // Every leg the QR carries: a phone pairing away from the LAN can only
+    // use what is listed here, so a bug report shows what it had.
+    sendCatLog(`[Pair QR] OK — mode=${effectiveMode} lan=${effectiveMode === 'cloud' ? 'none' : wsUrl} tailscale=${tsHost || tsIp ? [tsHost, tsIp].filter(Boolean).join(' / ') : 'none'} cloud=${cloudHost || 'none'} fp=${fingerprint ? fingerprint.slice(0, 16) + '…' : 'none'} svg=${svg ? 'yes' : 'no'} png=${dataUrl ? 'yes' : 'no'}${qrError && !(svg || dataUrl) ? ' qrError=' + qrError : ''}`);
+    return {
+      qrText,
+      dataUrl,
+      svg,
+      qrError: (svg || dataUrl) ? '' : qrError, // only surface when BOTH formats failed
+      pairingToken,
+      fingerprint,
+      host: wsUrl,
+      cloudHost,
+      hostname,
+      ttlSeconds: tokenTtlMs ? Math.floor(tokenTtlMs / 1000) : 5 * 60,
+      shareMode: !!opts.share,
+      warn: softWarn || '',
+    };
+  });
+
+  // The potacat://pair parameters for one pairing token: host, fingerprint,
+  // name and the Tailscale / Cloud legs. Shared by the older QR window and
+  // the simpler-pairing screen (lib/pairing-screen.js builds the link).
+  function _pairQrParamsFor(pairingToken, opts = {}) {
     let fingerprint = '';
     try {
       if (remoteServer._tlsCertPem) {
@@ -55360,51 +55682,148 @@ function cloudShackNotice(text, kind) {
     // Tailscale-issued LE cert that validates publicly (dial tsHost with
     // standard TLS, no pin). Absent = self-signed or unknown → pin `fp`.
     if (altHosts.tsCertPublic) qrParamsObj.tsCertPublic = '1';
-    const qrParams = new URLSearchParams(qrParamsObj);
-    const qrText = `potacat://pair?${qrParams.toString()}`;
-    // Generate BOTH formats best-effort. The QR is a convenience: the
-    // pairing data (qrText / pairingToken / fingerprint / host) is the
-    // source of truth and is ALWAYS returned, even if both QR rendering
-    // paths fail on this platform. KD2TJU on Linux Mint 22.3 hit a case
-    // where qrcode's PNG output was an unreadable payload AND the SVG
-    // path also failed — the renderer was emptying the manual fields
-    // on the resulting error and leaving the user with no path to pair.
-    // Now we surface a non-fatal `qrError` instead so the UI can still
-    // populate the fields.
-    let svg = '';
-    let dataUrl = '';
-    let qrError = '';
+    return { qrParamsObj, fingerprint, wsUrl, hostname, cloudHost, tsHost, tsIp, effectiveMode };
+  }
+
+  // ─── Simpler pairing: the "Pair my device" screen (2026-11-25) ─────────
+  // lib/pairing-session.js keeps one fresh single-use code on screen and
+  // revokes every code when the screen closes; lib/pairing-screen.js builds
+  // the https link and the state line. This block only wires them to the
+  // ECHOCAT server and the main window. The older potacat:// QR window
+  // (echocat-create-pairing-qr) is untouched.
+  function _pairScreenBestWeb() {
+    const t = cloudTunnel ? cloudTunnel.getState() : null;
+    const access = RemoteAccess.normalizeRemoteAccess(settings).access;
+    const originOk = !(t && t.origin) || t.origin.state === 'ok';
+    let lan = [];
+    try { lan = RemoteServer.getLocalIPs().filter((ip) => !ip.tailscale).map((ip) => ip.address); } catch {}
+    return PairingScreen.bestWeb({
+      access,
+      cloudUrl: (t && t.status === 'live' && t.cloudHost && originOk) ? 'https://' + t.cloudHost : '',
+      addresses: access === 'cloud' ? [] : lan,
+      port: (remoteServer && remoteServer._port) || 7300,
+    });
+  }
+
+  function _pairScreenFingerprint() {
     try {
-      svg = await qrcode.toString(qrText, { type: 'svg', errorCorrectionLevel: 'M', margin: 2 });
-    } catch (err) {
-      console.error('[Echo CAT] QR SVG generation failed:', err.message);
-      sendCatLog('[Pair QR] SVG render failed: ' + err.message);
-      qrError = err.message;
+      if (remoteServer && remoteServer._tlsCertPem) {
+        return new (require('crypto').X509Certificate)(remoteServer._tlsCertPem).fingerprint256 || '';
+      }
+    } catch {}
+    return '';
+  }
+
+  async function _pairScreenPush() {
+    const ps = _pairScreen;
+    if (!ps || !ps.sender || ps.sender.isDestroyed()) return;
+    const seq = ++ps.seq;
+    const web = _pairScreenBestWeb();
+    const webUrl = web.url;
+    const payload = { seq, state: ps.state, line: PairingScreen.stateLine(ps.state), webUrl, webKind: web.kind, webHint: PairingScreen.browserHint(web.kind) };
+    const cur = ps.session.current();
+    if (cur && remoteServer) {
+      const p = _pairQrParamsFor(cur.token, {});
+      const link = PairingScreen.buildPairLink(p.qrParamsObj, { web: webUrl });
+      const legacy = PairingScreen.buildLegacyPairUri(p.qrParamsObj);
+      const qrcode = require('qrcode');
+      let qrSvg = '';
+      let legacyQrSvg = '';
+      try { qrSvg = await qrcode.toString(link, { type: 'svg', errorCorrectionLevel: 'M', margin: 2 }); } catch (err) { sendCatLog('[Pair screen] QR render failed: ' + err.message); }
+      try { legacyQrSvg = await qrcode.toString(legacy, { type: 'svg', errorCorrectionLevel: 'M', margin: 2 }); } catch {}
+      Object.assign(payload, { link, legacy, qrSvg, legacyQrSvg, host: p.wsUrl, token: cur.token, fingerprint: p.fingerprint });
     }
-    try {
-      dataUrl = await qrcode.toDataURL(qrText, { errorCorrectionLevel: 'M', width: 320, margin: 2 });
-    } catch (err) {
-      console.error('[Echo CAT] QR PNG generation failed:', err.message);
-      sendCatLog('[Pair QR] PNG render failed: ' + err.message);
-      if (!qrError) qrError = err.message;
+    if (_pairScreen !== ps || ps.sender.isDestroyed()) return; // closed meanwhile
+    ps.sender.send('pairing-screen-update', payload);
+  }
+
+  function _pairScreenSetState(ev) {
+    const ps = _pairScreen;
+    if (!ps) return;
+    const next = PairingScreen.nextState(ps.state, ev);
+    if (next === ps.state) return;
+    ps.state = next;
+    _pairScreenPush();
+    if (next.phase === 'connected' && !ps.closeTimer) {
+      sendCatLog('[Pair screen] connected: ' + next.name);
+      ps.closeTimer = setTimeout(() => {
+        if (_pairScreen === ps && !ps.sender.isDestroyed()) ps.sender.send('pairing-screen-done');
+      }, PairingScreen.CLOSE_AFTER_CONNECT_MS);
     }
-    // Every leg the QR carries: a phone pairing away from the LAN can only
-    // use what is listed here, so a bug report shows what it had.
-    sendCatLog(`[Pair QR] OK — mode=${effectiveMode} lan=${effectiveMode === 'cloud' ? 'none' : wsUrl} tailscale=${tsHost || tsIp ? [tsHost, tsIp].filter(Boolean).join(' / ') : 'none'} cloud=${cloudHost || 'none'} fp=${fingerprint ? fingerprint.slice(0, 16) + '…' : 'none'} svg=${svg ? 'yes' : 'no'} png=${dataUrl ? 'yes' : 'no'}${qrError && !(svg || dataUrl) ? ' qrError=' + qrError : ''}`);
-    return {
-      qrText,
-      dataUrl,
-      svg,
-      qrError: (svg || dataUrl) ? '' : qrError, // only surface when BOTH formats failed
-      pairingToken,
-      fingerprint,
-      host: wsUrl,
-      cloudHost,
-      hostname,
-      ttlSeconds: tokenTtlMs ? Math.floor(tokenTtlMs / 1000) : 5 * 60,
-      shareMode: !!opts.share,
-      warn: softWarn || '',
-    };
+  }
+
+  function _pairScreenClose(why) {
+    const ps = _pairScreen;
+    if (!ps) return;
+    _pairScreen = null;
+    ps.session.stop(); // every code this screen showed is revoked here
+    clearInterval(ps.watch);
+    clearTimeout(ps.closeTimer);
+    try { if (remoteServer) remoteServer.setAdvertState(_pairScreenAdvertState()); } catch {}
+    sendCatLog('[Pair screen] closed (' + why + '); its codes are revoked');
+  }
+
+  ipcMain.handle('pairing-screen-open', async (e) => {
+    _pairScreenClose('reopened');
+    if (!remoteServer || !remoteServer.running) {
+      return { error: 'ECHOCAT is not running. Choose who can reach this computer under Settings > ECHOCAT first.' };
+    }
+    // Same preparation as the older QR: a Tailscale certificate if one is
+    // due, and the current Tailscale / Cloud hosts.
+    try { await ensureTailscaleCertReady((msg) => sendCatLog('[Pair screen] ' + msg)); } catch {}
+    try { await _refreshAltHosts(); } catch {}
+    if (!remoteServer || !remoteServer.running) return { error: 'ECHOCAT restarted. Close this window and open it again.' };
+    const sender = e.sender;
+    const session = new PairingSessionLib.PairingSession({
+      // Owner's own phone: a trusted device, as the 24-hour owned link was.
+      mint: (ttlMs) => remoteServer.createPairingToken({ ttlMs, trusted: true }),
+      revoke: (token) => { try { if (remoteServer) remoteServer.revokePairingToken(token); } catch {} },
+      onRotate: ({ reason }) => { if (reason !== 'renew') sendCatLog('[Pair screen] new code (' + reason + ')'); _pairScreenPush(); },
+    });
+    const ps = { session, sender, state: PairingScreen.initialState(), seq: 0, watch: null, closeTimer: null };
+    _pairScreen = ps;
+    session.start(_pairScreenFingerprint());
+    // A certificate change or an ECHOCAT restart makes the code on screen
+    // dead; replace it within seconds, never leave it up.
+    ps.watch = setInterval(() => {
+      if (_pairScreen !== ps || !remoteServer) return;
+      if (session.noteFingerprint(_pairScreenFingerprint())) return;
+      const cur = session.current();
+      if (cur && !remoteServer.hasPairingToken(cur.token)) session.rotate('server');
+    }, 5000);
+    // The window going away or reloading closes the screen too: no code
+    // (and no pair=1 advert) may outlive the dialog that showed it.
+    sender.once('destroyed', () => { if (_pairScreen === ps) _pairScreenClose('window gone'); });
+    sender.once('did-navigate', () => { if (_pairScreen === ps) _pairScreenClose('window reloaded'); }); // main frame only; iframes do not fire it
+    sender.once('render-process-gone', () => { if (_pairScreen === ps) _pairScreenClose('window crashed'); });
+    try { remoteServer.setAdvertState(_pairScreenAdvertState()); } catch {}
+    sendCatLog('[Pair screen] open; code renews every ' + Math.round(session.rotateMs / 1000) + ' s');
+    return { ok: true, allowTapToPair: settings.allowPairRequests !== false };
+  });
+
+  ipcMain.on('pairing-screen-close', () => _pairScreenClose('closed'));
+
+  onRemoteServer((rs) => {
+    rs.on('pairing-token-redeemed', ({ token, deviceId, name }) => {
+      const ps = _pairScreen;
+      if (!ps || !ps.session.owns(token)) return;
+      ps.session.noteRedeemed(token, deviceId); // replaced at once
+      _pairScreenSetState({ type: 'paired', deviceId, name });
+    });
+    rs.on('pair-request', (req) => {
+      if (_pairScreen) _pairScreenSetState({ type: 'request', name: req.deviceName, code: req.code });
+    });
+    rs.on('pair-request-resolved', ({ approved, deviceId }) => {
+      const ps = _pairScreen;
+      if (!ps) return;
+      if (approved && deviceId) ps.session.pairedDeviceIds.add(String(deviceId));
+      _pairScreenSetState({ type: 'request-resolved', approved, deviceId });
+    });
+    rs.on('paired-device-connected', ({ deviceId, name }) => {
+      const ps = _pairScreen;
+      if (!ps || !ps.session.pairedDeviceIds.has(String(deviceId))) return;
+      _pairScreenSetState({ type: 'connected', deviceId, name });
+    });
   });
 
   ipcMain.handle('echocat-list-paired-devices', () => {
@@ -55575,11 +55994,14 @@ function cloudShackNotice(text, kind) {
   // redeemPairLinkUrl still fires the 'pair-link-redeemed' event for the UI;
   // we also return a result for immediate feedback. K3SBP 2026-06-10.
   ipcMain.handle('pair-redeem-url', async (_e, url) => {
-    if (!url || !/^potacat:\/\/pair\?/i.test(String(url))) {
-      return { ok: false, error: 'Not a potacat://pair link' };
+    // Both forms: potacat://pair?... and the https link with the
+    // parameters after "#" (lib/pairing-screen.js). Redeemed as potacat://.
+    const parsed = PairingScreen.parsePairLink(url);
+    if (parsed.error) {
+      return { ok: false, error: 'Not a POTACAT pairing link' };
     }
     try {
-      await redeemPairLinkUrl(url);
+      await redeemPairLinkUrl(parsed.form === 'https' ? PairingScreen.buildLegacyPairUri(parsed.params) : url);
       return { ok: true };
     } catch (err) {
       return { ok: false, error: err && err.message ? err.message : String(err) };
@@ -59404,6 +59826,8 @@ function cloudShackNotice(text, kind) {
         // Advance QSO state machine from this slice's decodes
         // (same logic as single-engine path in startJtcat)
         jtcatFullAutoCqWatchdog();
+        // Run answers only callers heard on the slice it transmits on (ft8Engine).
+        if (engine === ft8Engine) jtcatRunCallersTick(data.results || []);
         if (popoutJtcatQso && popoutJtcatQso.phase === 'done') {
           if (JtcatSpotTarget.qsoEndClearsTarget(jtcatSpotTarget, popoutJtcatQso.call)) {
             clearSpotTarget('worked');
@@ -60698,6 +61122,7 @@ function gracefulCleanup() {
 }
 
 let _yaesuLanQuitDone = false;
+let _sdrConnectQuitDone = false;
 let _quitWatchdog = null;
 let _serialQuitDone = false;
 app.on('before-quit', (e) => {
@@ -60715,6 +61140,14 @@ app.on('before-quit', (e) => {
     try { saveSettings(settings); } catch {}
   }
   winlinkHoldAwake(false); // never leave the Winlink session's App Nap block behind (#187)
+  // SDRconnect: every receiver POTACAT changed goes back as its owner left it
+  // (at most 1.5 s), then the sockets close.
+  if (SdrConnect.defaultRegistry.size && !_sdrConnectQuitDone) {
+    _sdrConnectQuitDone = true;
+    e.preventDefault();
+    Promise.race([SdrConnect.defaultRegistry.closeAll(), new Promise((r) => setTimeout(r, 1500))]).finally(() => app.quit());
+    return;
+  }
   try { aprsMessagesSaveNow(); } catch { /* APRS A1: the conversations are on disk before the process goes */ }
   // A Winlink return still pending (#187): the radio goes back while CAT is up.
   if (winlinkReturnBeforeQuit(() => app.quit())) { e.preventDefault(); return; }

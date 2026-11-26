@@ -10862,6 +10862,21 @@
     // elements LZ3AW heard only in his own sidetone.
     var heldBy = null;   // 'dit' | 'dah': the held contact that chose this element
     var undoState = null; // the keyer before that choice
+    // Paddle memory (#244, lib/cw-paddle-memory.js): when in an element a
+    // press is remembered. 'on' is the standard keyer and the default; the
+    // late settings forget a touch early in the element that is let go again
+    // before the keyer chooses, for an operator who hears his sidetone late.
+    var memory = 'on';
+    var elementStartAt = 0;
+    function memoryLib() {
+      if (typeof window !== 'undefined' && window.CwPaddleMemory) return window.CwPaddleMemory;
+      return typeof CwPaddleMemory !== 'undefined' ? CwPaddleMemory : null;
+    }
+    function memoryTakes() {
+      if (memory === 'on') return true;
+      var M = memoryLib();
+      return M ? M.remembers(memory, Date.now() - elementStartAt, currentIsDit ? ditMs() : dahMs()) : true;
+    }
     function ditMs() { return Math.round(1200 / wpm); }
     function dahMs() { return ditMs() * 3; }
     function clearTimers() {
@@ -10874,6 +10889,7 @@
       bothAtStart = ditPressed && dahPressed;
       ditLatch = false; dahLatch = false;
       heldBy = null; undoState = null;
+      elementStartAt = Date.now();
       onKey(true, isDit ? ditMs() : dahMs(), { continued: !!continued, spaceMs: ditMs() });
       clearTimers();
       timerDue = performance.now() + (isDit ? ditMs() : dahMs());
@@ -10947,7 +10963,7 @@
         if (Date.now() - ditReleaseAt < BOUNCE_MS) return;
         ditPressStart = Date.now();
         if (state === IDLE) startElement(true);
-        else ditLatch = true;
+        else if (memoryTakes()) ditLatch = true;
       } else {
         ditReleaseAt = Date.now();
         // Ghost-press cleanup (Android BT MIDI etc. — matches server keyer)
@@ -10963,7 +10979,7 @@
         if (Date.now() - dahReleaseAt < BOUNCE_MS) return;
         dahPressStart = Date.now();
         if (state === IDLE) startElement(false);
-        else dahLatch = true;
+        else if (memoryTakes()) dahLatch = true;
       } else {
         dahReleaseAt = Date.now();
         var held = Date.now() - dahPressStart;
@@ -10990,6 +11006,12 @@
         }
       },
       setSwap: function(b) { swap = !!b; },
+      // From the next press on; an over in progress is not cut.
+      setMemory: function(v) {
+        var M = memoryLib();
+        memory = M ? M.normalize(v) : 'on';
+      },
+      getMemory: function() { return memory; },
       stop: function() {
         clearTimers();
         ditPressed = dahPressed = ditLatch = dahLatch = false;
@@ -11081,6 +11103,7 @@
         timerLateMaxMs: Math.round(d.timerMax),
         timerLateAvgMs: d.timerN ? Math.round(d.timerSum / d.timerN) : 0,
         inputLagMaxMs: Math.round(d.inputMax),
+        paddleMemory: localCwKeyer.getMemory(),
       }));
     } catch { /* not connected */ }
   }
@@ -11946,6 +11969,21 @@
   if (!webMidiSupported && paddleType === 'midi') {
     paddleType = 'tinymidi';
     localStorage.setItem('echocat-paddle-type', paddleType);
+  }
+
+  // Paddle memory (#244): this browser's choice, for this page's keyer only.
+  var soPaddleMemory = document.getElementById('so-paddle-memory');
+  var paddleMemory = 'on';
+  try { paddleMemory = localStorage.getItem('echocat-paddle-memory') || 'on'; } catch (e) { /* storage blocked */ }
+  localCwKeyer.setMemory(paddleMemory);
+  paddleMemory = localCwKeyer.getMemory();
+  if (soPaddleMemory) {
+    soPaddleMemory.value = paddleMemory;
+    soPaddleMemory.addEventListener('change', function() {
+      localCwKeyer.setMemory(soPaddleMemory.value);
+      paddleMemory = localCwKeyer.getMemory();
+      try { localStorage.setItem('echocat-paddle-memory', paddleMemory); } catch (e) { /* storage blocked */ }
+    });
   }
 
   if (soPaddleType) {

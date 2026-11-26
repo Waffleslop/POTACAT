@@ -170,7 +170,10 @@ const END = '2026-11-14T20:30:00.000Z';
     assert.strictEqual(t('waiting', 'not_started', { takeAt: '2026-11-15T14:00:00Z' }).title, 'This pass starts at 14:00 UTC 2026-11-15. POTACAT connects then.');
     assert.strictEqual(W.describeState({ state: 'waiting', reason: 'not_started', takeAt: '2026-11-15T14:00:00Z' }, { app: 'ECHOCAT' }).title,
       'This pass starts at 14:00 UTC 2026-11-15. ECHOCAT connects then.');
-    assert.strictEqual(t('on-air', 'none').text, 'You\'re on the air. Your pass runs until 20:30 UTC. Your pass is still good.');
+    assert.strictEqual(t('on-air', 'none').title, 'Operating: K3SBP');
+    assert.strictEqual(t('on-air', 'none').line, 'Your pass runs until 20:30 UTC. Your pass is still good.');
+    // Owner's call unknown: the old title stays (ECHOCAT #163 says the same).
+    assert.strictEqual(W.describeState({ state: 'on-air', reason: 'none', endsAt: END }, {}).title, 'You\'re on the air.');
     const soon = t('on-air', 'owner-soon', { takeAt: '2026-11-14T19:05:00Z', message: 'Net starts at 19:05' });
     assert.strictEqual(soon.text, 'K3SBP will take the radio at 19:05 UTC. You can keep operating until then. Message from K3SBP: "Net starts at 19:05" Your pass is still good.');
     assert.strictEqual(W.describeState({ state: 'over', reason: 'cancelled' }).title, 'The owner cancelled your Guest Pass.', 'no owner known');

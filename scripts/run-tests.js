@@ -202,6 +202,7 @@ const TESTS = [
   'test/rigctld-kenwood-power-test.js', // a TS-590/TS-2000 behind Hamlib keeps its power: raw PC, never Hamlib's PC000/PC255 probe
   'test/jtcat-tx-watchdog-test.js',
   'test/jtcat-calling-time-test.js',
+  'test/jtcat-run-refusal-test.js', // #1085: a refused Run keeps Run visible with the shack's reason, one sentence per cause, TX left off
   'test/jtcat-session-limit-test.js', // "Stop Run and Hunt after N minutes" (W5XY): off by default, waits for a contact in progress, no new CQ/call after, phone-started enforced in main
   'test/jtcat-replace-log-test.js',
   'test/jtcat-second-caller-test.js',
@@ -558,6 +559,7 @@ const TESTS = [
   'test/atu-wizard-test.js',         // Flex ATU Calibration Wizard: plan vs privileges, classifier, run loop on a fake Flex, wiring
   'test/ft8-worker-respawn-test.js',
   'test/rig-setup-notes-test.js',
+  'test/rig-model-connection-test.js', // #1084: picking X6100 keeps a connection that reaches it or selects FLRig, never Serial CAT; other models unchanged
   'test/prop-empty-state-test.js',
   'test/rotctld-client-test.js',
   'test/station-setup-test.js',
@@ -569,6 +571,7 @@ const TESTS = [
   'test/lz3aw-round6-test.js',
   'test/cw-auto-sync-test.js',
   'test/remote-launcher-test.js',
+  'test/launcher-unix-pids-test.js', // Remote Launcher on Linux/macOS: its own tray process and helpers are not "POTACAT is running"
   'test/launcher-cloud-test.js', // restart from anywhere: device token, tunnel policy, the launcher's own connector
   'test/echocat-token-test.js',
   'test/fresh-install-defaults-test.js',
@@ -593,6 +596,7 @@ const TESTS = [
   'test/lz3aw-round12-test.js',
   'test/paddle-bounce-test.js',
   'test/web-keyer-late-release-test.js', // #244: a held paddle's late release withdraws an element not yet sounding
+  'test/cw-paddle-memory-test.js', // #244: ECHOCAT Web Paddle Memory setting (on/half/quarter/off); CW hold set before 'ptt'
   'test/web-keyer-heard-release-test.js', // #244: a late release never takes back an element that has started to sound
   'test/cw-playout-lateness-test.js', // #244 diagnostic: paddle playout edge lateness, one line per over
   'test/cw-sidetone-air-agree-test.js', // #244: ECHOCAT Web's sidetone and the air agree; an element is committed once it sounds
@@ -712,6 +716,9 @@ const TESTS = [
   'test/sdr-scope-test.js',
   'test/sdr-scope-if-tap-test.js', // #394: an SDR on a radio's IF output stays on the IF
   'test/rtltcp-audio-test.js',
+  'test/sdrconnect-protocol-test.js', // SDRconnect WebSocket API (SDRplay nRSP-ST): envelope, binary types, levels from bins, restore set
+  'test/sdrconnect-client-test.js', // SDRconnect against a fake server: discovery, scope follows the dial, reconnect, failures, clean shutdown
+  'test/sdrconnect-audio-test.js', // listening and JTCAT through SDRconnect: 48 kHz audio, demodulator, sharing the scope, main.js wiring
   'test/landmarks-test.js', // Directory > Landmarks: the catalog gate, hours, rig coverage, the NCDXF clock, the feed, wiring
   'test/directory-key-nav-test.js', // #501: Directory arrow keys move from the row you clicked; ends clamp; a tab switch resets
   'test/lz3aw-round14-test.js',
@@ -789,6 +796,7 @@ const TESTS = [
   'test/jtcat-auto-compact-test.js', // #857: the JTCAT window picks a compact layout by itself when short (hysteresis; an explicit Full/Compact wins; never resizes the window)
   'test/jtcat-own-tx-offset-test.js', // #503: our own TX rows show the offset that slot went out on
   'test/jtcat-chimes-test.js', // optional JTCAT chimes: a station calls me, TX stopped by itself (off by default, one sound engine, sound only)
+  'test/jtcat-run-callers-test.js', // Run answers the stations that called during a QSO before calling CQ again (W5XY 2026-11-25)
   'test/net-reminder-row-test.js', // a Net Reminders row always names its net (#284)
   'test/freq-dots-test.js', // every frequency an operator reads is written the VFO way, 14.074.00 (Casey 2026-11-11)
   'test/settings-contrast-test.js', // Settings meets the contrast rule in every theme (VARA button in She's On Frequency); rendered: scripts/settings-contrast-audit.js
@@ -838,6 +846,7 @@ const TESTS = [
   'test/jtcat-hunt-priority-test.js', // Hunt: Who goes first (Strongest default, Farthest, Needed first)
   'test/jtcat-hunt-custom-test.js', // Hunt: Custom (ANY of the ticked targets), Hunt minimum dB in the Filters panel
   'test/jtcat-hunt-ignore-test.js', // Hunt: Never answer (right-click a decode) and 30-min auto-skip after a failed QSO
+  'test/jtcat-hunt-direct-caller-worked-test.js', // Hunt answers a direct caller per "Call a station again after N days" (jtcatWorkedInfo)
   'test/jtcat-hunt-cq-dx-test.js', // Hunt: never answer a CQ DX from our own continent, nor a CQ NA/EU aimed elsewhere
   'test/jtcat-fake-it-test.js', // Split operation "Fake It" (level_death): tone 1500-1999 Hz, dial shifted per transmission and put back
   'test/jtcat-fake-it-default-test.js', // Fake It on for new installs, written off once for existing ones; plain offset where it cannot work (TCI, no CAT, split)
@@ -896,6 +905,10 @@ const TESTS = [
   'test/local-ips-test.js', // which interfaces may be advertised as the LAN (VPN overlays dropped, bridged hypervisor kept)
   'test/lz3aw-round13-test.js', // LZ3AW round 13: Live CW button, log time, F-key macros, readable greys, multi-call filter
   'test/pair-request-retry-test.js', // tap-to-pair: a retry with the same requestId collects or re-attaches; a different one is busy
+  'test/pair-confirm-test.js', // two-step pairing: a held pairing commits once, releases once, times out; old bodies never ask
+  'test/pairing-session-test.js', // simpler pairing: the code renews itself, is replaced when used, dies with the screen; six-digit number; LAN rules; mDNS keys
+  'test/pairing-screen-test.js', // simpler pairing: https link with the parameters after "#", one to one with potacat://pair; browser address; state line; ECHOCAT wording
+  'test/pairing-server-test.js', // simpler pairing on a real server: trusted screen token, used/revoked codes, number on tap-to-pair, no pairing without the click
   'test/park-state-test.js', // a park spanning states writes a clean ADIF STATE
   'test/popout-theme-boot-test.js', // pop-outs open in the theme on the first frame; applyPopoutTheme takes a string or { theme, variant }
   'test/profile-dirs-test.js', // slash-callsign profile directories and the nested-dir migration
@@ -940,6 +953,7 @@ const SERIAL = new Set([
   'test/revoke-kick.test.js', // fixed port 17310, a real ECHOCAT server and 300-1500 ms waits for the kick to land
   'test/remote-client-dial-test.js', // fixed port 17320 and a 2.5 s window of dial rounds with backoff
   'test/pair-request-retry-test.js', // fixed port 17330, sockets killed after 150 ms and 300-400 ms waits
+  'test/pairing-server-test.js', // fixed port 17366, a real ECHOCAT server and 300-500 ms waits for the held pair request
   'test/rotorez-test.js', // the brake-delay state machine on real timers (20-450 ms waits)
 ]);
 
