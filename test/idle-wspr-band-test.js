@@ -44,15 +44,14 @@ test('the WSPR hop skips bands the radio is not used on', () => {
   assert.deepStrictEqual(W.hopBandsForRig(['40m', '20m'], null), ['40m', '20m']);
 });
 
-test('main uses it for the idle start, the settings it hands out and the hop; both dropdowns offer 2 m', () => {
+test('main uses it for the idle start, the settings it hands out and the hop; the Settings dropdown offers 2 m', () => {
   const main = readSrc(path.join(__dirname, '..', 'main.js'));
   assert.ok(/const band = IdleWsprBand\.pickIdleWsprBand\(saved, activeRigBands\(\)\) \|\| saved;/.test(main));
   assert.ok(/idleWsprBand: IdleWsprBand\.pickIdleWsprBand\(settings\.idleWsprBand, activeRigBands\(\)\)/.test(main));
   assert.ok(/const bands = IdleWsprBand\.hopBandsForRig\(jtcatWsprHopBands, activeRigBands\(\)\);/.test(main));
   const html = readSrc(path.join(__dirname, '..', 'renderer', 'index.html'));
   const settingsSel = html.slice(html.indexOf('id="set-idle-wspr-band"'), html.indexOf('</select>', html.indexOf('id="set-idle-wspr-band"')));
-  const welcomeSel = html.slice(html.indexOf('id="welcome-idle-wspr-band"'), html.indexOf('</select>', html.indexOf('id="welcome-idle-wspr-band"')));
-  assert.ok(/value="2m"/.test(settingsSel) && /value="2m"/.test(welcomeSel));
+  assert.ok(/value="2m"/.test(settingsSel)); // the Welcome no longer carries Idle Mode (a shorter first run)
 });
 
 console.log(`\nIdle WSPR band: ${pass} passed, ${fail} failed`);

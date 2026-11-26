@@ -25,15 +25,14 @@ const fnBody = (src, name) => {
   return src.slice(i, j);
 };
 
-test('Idle Mode lists APRS, next to the others, in Settings and the welcome screen', () => {
+test('Idle Mode lists APRS, next to the others, in Settings (the Welcome no longer carries Idle Mode)', () => {
   assert.ok(/IDLE_RX_MODES = \['sstv', 'wspr', 'psk31', 'js8', 'jtty', 'aprs'\]/.test(main));
   const sel = html.slice(html.indexOf('id="set-idle-rx-mode"'), html.indexOf('</select>', html.indexOf('id="set-idle-rx-mode"')));
   assert.ok(/<option value="js8">JS8<\/option>\s*<option value="aprs">APRS<\/option>/.test(sel), 'Settings');
-  const wel = html.slice(html.indexOf('id="welcome-idle-rx-mode"'), html.indexOf('</select>', html.indexOf('id="welcome-idle-rx-mode"')));
-  assert.ok(/<option value="aprs">APRS<\/option>/.test(wel), 'welcome');
+  assert.ok(!/id="welcome-idle-rx-mode"/.test(html), 'Idle Mode left the Welcome (a shorter first run)');
   // load and save keep 'aprs' (every list of idle modes in app.js names it)
   const lists = app.match(/\['wspr', 'psk31', 'js8', 'jtty'[^\]]*\]/g) || [];
-  assert.ok(lists.length >= 4, 'idle mode lists found');
+  assert.ok(lists.length >= 2, 'idle mode lists found'); // Settings load + save; the Welcome's two left with it
   for (const l of lists) assert.ok(l.includes("'aprs'"), l);
 });
 

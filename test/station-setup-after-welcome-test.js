@@ -162,16 +162,26 @@ const withRig = (firstRun) => ({
     assert.strictEqual(h.cardTexts.length, 0);
   });
 
-  await t('app.js calls the hook from Get Started, after Welcome closes', () => {
+  // A shorter first run (2026-11-26): the flow ends on Get Started (remote
+  // shack panel), on "Here" or "No radio yet", or with Esc after the station
+  // step. Every way out closes the Welcome, then runs the hook.
+  await t('app.js runs the hook after the Welcome closes, on every way out of the first run', () => {
     const app = readSrc(path.join(__dirname, '..', 'renderer', 'app.js')).replace(/\r\n/g, '\n');
-    const a = app.indexOf("document.getElementById('welcome-start').addEventListener('click'");
-    const handler = app.slice(a, app.indexOf('// ─── Welcome → Connect to a Remote Shack', a));
-    assert.ok(a > 0 && handler.length > 500, 'the Get Started handler was found');
-    const close = handler.indexOf('welcomeDialog.close()');
-    const hook = handler.indexOf('window.stationSetupAfterWelcome()');
+    const fi = app.indexOf('function welcomeCloseFlow() {');
+    const flow = app.slice(fi, app.indexOf('\n}\n', fi));
+    assert.ok(fi > 0, 'welcomeCloseFlow found');
+    const close = flow.indexOf('welcomeDialog.close()');
+    const hook = flow.indexOf('window.stationSetupAfterWelcome()');
     assert.ok(close > 0 && hook > close, 'order: close, then stationSetupAfterWelcome');
-    const open = handler.indexOf('openStationSetup(');
-    if (open >= 0) assert.ok(open < hook, "#1076's checklist open comes before the hook");
+    const gs = app.indexOf("document.getElementById('welcome-start').addEventListener('click'");
+    assert.ok(gs > 0 && /welcomeCloseFlow\(\);\n\}\);/.test(app.slice(gs, gs + 400)), 'Get Started ends the flow');
+    const ci = app.indexOf('async function welcomeChooseWhere(');
+    const choose = app.slice(ci, app.indexOf('\n}\n', ci));
+    assert.ok(/welcomeCloseFlow\(\);/.test(choose), 'Here and No radio yet end the flow');
+    assert.ok(choose.indexOf('welcomeCloseFlow()') < choose.indexOf('openSettingsDialog('), "#1076's checklist (via the rig editor) comes after the close");
+    const cl = app.indexOf("welcomeDialog.addEventListener('close', () => {");
+    assert.ok(cl > 0 && /if \(_welcomeStationSaved && typeof window\.stationSetupAfterWelcome === 'function'\) window\.stationSetupAfterWelcome\(\);/.test(app.slice(cl, cl + 300)),
+      'Esc after the station step runs it too; before it (firstRun still set) it does not');
   });
 
   console.log(`\n${pass} passed, ${fail} failed`);

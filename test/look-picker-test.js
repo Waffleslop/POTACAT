@@ -58,7 +58,8 @@ test('each swatch paints in its own theme column; the chrome reads only --ds-* r
 test('render(): picking the other mode\'s theme with a fixed Appearance switches the Appearance too', () => {
   // A minimal DOM, enough for render() to build and for clicks to fire.
   function node(tag) {
-    const n = { tagName: tag, children: [], dataset: {}, attrs: {}, listeners: {}, className: '', classList: { add() {} },
+    const n = { tagName: tag, children: [], dataset: {}, attrs: {}, listeners: {}, className: '', classes: new Set(),
+      classList: { add(c) { n.classes.add(c); }, remove(c) { n.classes.delete(c); } },
       setAttribute(k, v) { this.attrs[k] = String(v); }, appendChild(c) { this.children.push(c); c.parentNode = this; return c; },
       addEventListener(t, fn) { this.listeners[t] = fn; }, contains() { return false; }, querySelector() { return null }, focus() {} };
     Object.defineProperty(n, 'textContent', { set(v) { this.children = []; this._text = v; }, get() { return this._text; } });
@@ -84,6 +85,16 @@ test('render(): picking the other mode\'s theme with a fixed Appearance switches
   all2.find((n) => n.dataset.themeId === 'shes-on-frequency').listeners.click();
   assert.strictEqual(got.appearance, 'system');
   assert.strictEqual(got.themeLight, 'shes-on-frequency');
+  assert.ok(!box.classes.has('look-picker-compact'), 'the full picker by default');
+  // Compact (the Welcome's step 1): the class, three colour dots per swatch, no live preview.
+  LookPicker.render(box, { state: { appearance: 'dark' }, systemDark: false, scope: 'active', compact: true, preview: true, onChange: () => {} });
+  const all3 = []; (function walk(n) { all3.push(n); n.children.forEach(walk); })(box);
+  assert.ok(box.classes.has('look-picker-compact'));
+  assert.strictEqual(all3.filter((n) => n.attrs['data-ds']).length, 4, 'one row: the four dark themes');
+  assert.strictEqual(all3.filter((n) => /^lsw-chip /.test(n.className)).length, 12, 'three dots per swatch');
+  assert.ok(!all3.some((n) => n.className === 'lsw-row' || n.className === 'look-preview'), 'no sample rows, no live preview');
+  LookPicker.render(box, { state: { appearance: 'dark' }, systemDark: false, scope: 'all', onChange: () => {} });
+  assert.ok(!box.classes.has('look-picker-compact'), 'a later full render drops the class');
 });
 
 // --- Contrast: every pair the themes draw text with, 4.5:1 or better ---------

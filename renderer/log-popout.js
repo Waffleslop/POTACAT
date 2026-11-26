@@ -540,9 +540,8 @@ function _applyPopoutTheme(payload) {
       (selectedType === 'dx' ? true : !!ref);
     if (wantsRespot) {
       const tmpl = respotCommentEl.value.trim() || templateFor(selectedType);
-      const respotComment = tmpl
+      const respotComment = GridMacros.fillRespotQth(tmpl, myGridPref)
         .replace(/\{rst\}/gi, (rstSentInput.value || '59').slice(0, 3))
-        .replace(/\{QTH\}/gi, myGridPref)
         .replace(/\{mycallsign\}/gi, myCallsignPref)
         .replace(/\{op_firstname\}/gi, '');
       if (selectedType === 'pota') respotFields = { respot: true, respotComment };

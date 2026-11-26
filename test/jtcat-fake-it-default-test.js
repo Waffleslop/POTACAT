@@ -89,7 +89,7 @@ const roundTrip = (s) => JSON.parse(JSON.stringify(s));   // save, then load aga
 
   await test('main.js: a fresh install is seeded on; an existing one is written off once at startup', () => {
     const load = MAIN.slice(MAIN.indexOf('function loadSettingsFromDisk() {'), MAIN.indexOf('// Migration path: legacy settings.json'));
-    assert.ok(/if \(!global\) \{[\s\S]*return \{ grid: 'FN20jb'[^\n]*jtcatFakeIt: FakeIt\.NEW_SETUP_DEFAULT \};/.test(load), 'the fresh-install defaults');
+    assert.ok(/if \(!global\) \{[\s\S]*return \{ catTarget: null,[^\n]*jtcatFakeIt: FakeIt\.NEW_SETUP_DEFAULT \};/.test(load), 'the fresh-install defaults');
     const once = MAIN.indexOf('if (FakeIt.seedSetting(settings)) {');
     assert.ok(once > 0, 'the startup seed');
     assert.ok(/if \(FakeIt\.seedSetting\(settings\)\) \{\s+saveSettings\(settings\);/.test(MAIN.slice(once - 5)), 'written to disk at once');

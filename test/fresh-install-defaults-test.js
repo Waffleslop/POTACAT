@@ -19,8 +19,8 @@ const main = R('main.js');
 const html = R('renderer/index.html');
 
 test('fresh-install settings: System with POTACAT Light and POTACAT Dark, and WSPR', () => {
-  const load = main.slice(main.indexOf('function loadSettings()'), main.indexOf('function loadSettings()') + 1200);
-  const fresh = (load.match(/return \{ grid: 'FN20jb'[^\n]*\};/) || [''])[0];
+  const load = main.slice(main.indexOf('function loadSettings()'), main.indexOf('function loadSettings()') + 1600);
+  const fresh = (load.match(/return \{ catTarget: null,[^\n]*\};/) || [''])[0];
   assert.ok(/\.\.\.AppTheme\.DEFAULTS,/.test(fresh), fresh);
   assert.ok(!/lightMode|darkVariant/.test(fresh), fresh);
   assert.deepStrictEqual(require('../lib/app-theme').DEFAULTS, { appearance: 'system', themeLight: 'potacat-light', themeDark: 'potacat-dark' });
@@ -28,9 +28,13 @@ test('fresh-install settings: System with POTACAT Light and POTACAT Dark, and WS
   assert.ok(!/remoteRequireToken/.test(fresh), 'a fresh install must not require an ECHOCAT token');
 });
 
-test('the first-run welcome screen shows WSPR before any setting is read', () => {
-  const sel = html.slice(html.indexOf('<select id="welcome-idle-rx-mode"'), html.indexOf('</select>', html.indexOf('<select id="welcome-idle-rx-mode"')));
-  assert.ok(/<option value="wspr" selected>WSPR<\/option>/.test(sel));
+// A shorter first run (2026-11-26): the Welcome no longer carries Idle Mode; a
+// fresh install keeps WSPR (above) for whenever the operator turns it on.
+test('a fresh install has no made-up grid square (it used to be FN20jb)', () => {
+  const load = main.slice(main.indexOf('function loadSettings()'), main.indexOf('function loadSettings()') + 1400);
+  const fresh = (load.match(/return \{ catTarget: null,[^\n]*\};/) || [''])[0];
+  assert.ok(fresh && !/grid:/.test(fresh), fresh);
+  assert.ok(!/id="welcome-idle-rx-mode"/.test(html), 'Idle Mode left the Welcome');
 });
 
 test('the welcome screen shows the look the install has (no hidden switch overrides it on Continue)', () => {
@@ -52,8 +56,8 @@ test('existing installs keep their look: settings that never chose map to POTACA
 // Telemetry (Casey 2026-10-01): on for NEW installs, shown as a ticked box on
 // the welcome screen; an existing install that never chose stays off.
 test('telemetry: on in the fresh-install settings, never forced on an existing install', () => {
-  const load = main.slice(main.indexOf('function loadSettings()'), main.indexOf('function loadSettings()') + 1200);
-  const fresh = (load.match(/return \{ grid: 'FN20jb'[^\n]*\};/) || [''])[0];
+  const load = main.slice(main.indexOf('function loadSettings()'), main.indexOf('function loadSettings()') + 1600);
+  const fresh = (load.match(/return \{ catTarget: null,[^\n]*\};/) || [''])[0];
   assert.ok(/enableTelemetry: true/.test(fresh), fresh);
   // Sending stays gated on the setting itself, so unset (an older install) is off.
   assert.ok(/function telemetryAllowed\(\) \{\n  return !!\(settings && settings\.enableTelemetry && !settings\.firstRun\);/.test(main),
@@ -65,8 +69,12 @@ test('telemetry: on in the fresh-install settings, never forced on an existing i
 test('telemetry: the welcome screen shows the choice, ticked, and saves it', () => {
   assert.ok(/<input type="checkbox" id="welcome-enable-telemetry" checked>/.test(html));
   const app = R('renderer/app.js');
-  assert.ok(/if \(telemetryEl\) saveData\.enableTelemetry = telemetryEl\.checked;/.test(app));
-  assert.ok(/t\.checked = s\.enableTelemetry === true;/.test(app), 'reopening the welcome screen does not reflect the saved choice');
+  // lib/first-run.js: the station step saves the box; reopening shows the saved choice, unset unticked.
+  const FR = require('../lib/first-run');
+  assert.strictEqual(FR.finishStation(null, { callsign: 'K1ABC', grid: '', telemetry: false }).patch.enableTelemetry, false);
+  assert.strictEqual(FR.stationFields({}).telemetry, false);
+  assert.ok(/telemetry: document\.getElementById\('welcome-enable-telemetry'\)\.checked/.test(app), 'the station step reads the box');
+  assert.ok(/document\.getElementById\('welcome-enable-telemetry'\)\.checked = f\.telemetry;/.test(app), 'reopening the welcome screen does not reflect the saved choice');
   assert.ok(/setEnableTelemetry\.checked = s\.enableTelemetry === true;/.test(app), 'the Settings checkbox does not reflect it');
 });
 

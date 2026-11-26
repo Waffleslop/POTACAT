@@ -1,8 +1,13 @@
 #!/usr/bin/env node
 'use strict';
-// Saving a new radio in Settings opens its Station Setup checklist. Saving a
-// radio from the Welcome window and pressing Get Started did not. It must open
-// once Welcome has closed, never on top of it.
+// A radio set up from the first run must get its Station Setup checklist, once
+// the Welcome has closed, never on top of it (#1070 / #1076).
+//
+// A shorter first run (2026-11-26) replaced the Welcome rig editor: "Where is
+// your radio?" > Here closes the Welcome and opens the full Settings rig editor,
+// whose save opens Station Setup for a new radio (saveRigEditor). #1076's rule
+// (only a radio added now, not an existing one shown on reopen) holds there:
+// only a new radio sets _stationSetupOpenAfterSave.
 // Run: node test/welcome-rig-station-setup-test.js
 const assert = require('assert');
 const path = require('path');
@@ -13,30 +18,60 @@ function test(name, fn) {
   try { fn(); passed++; console.log('  ok  ' + name); }
   catch (e) { failed++; console.log('  FAIL ' + name + '\n       ' + (e.message || e)); }
 }
-console.log('Welcome rig opens Station Setup');
+console.log('First-run radio opens Station Setup');
 const app = R('renderer/app.js');
-const a = app.indexOf("document.getElementById('welcome-start').addEventListener('click'");
-const handler = app.slice(a, app.indexOf('// ─── Welcome → Connect to a Remote Shack', a));
+const html = R('renderer/index.html');
+const a = app.indexOf('async function welcomeChooseWhere(');
+const choose = app.slice(a, app.indexOf('\n}\n', a));
 
-test('the Get Started handler was found', () => assert.ok(a > 0 && handler.length > 500));
-test('Station Setup opens for the Welcome rig', () => {
-  assert.ok(/openStationSetup\(welcomeRig\.id\)/.test(handler));
+test('the Welcome has one rig editor: the Settings one', () => {
+  assert.ok(!/welcome-rig-editor|welcome-radio-type|welcome-rig-save-btn/.test(html));
+  assert.ok(!/welcomeRigIsNew|showWelcomeRigItem/.test(app));
 });
-test('only when a rig was added in Welcome, not the existing one a reopened Welcome shows', () => {
-  assert.ok(/if \(welcomeRig && welcomeRigIsNew && typeof window\.openStationSetup === 'function'\)/.test(handler));
-  const add = app.slice(app.indexOf("getElementById('welcome-rig-save-btn').addEventListener('click'"));
-  assert.ok(/welcomeRig = \{ id: 'rig_' \+ Date\.now\(\), name, catTarget \};\n\s*welcomeRigIsNew = true;/.test(add), 'adding a radio marks it new');
-  const reset = app.slice(app.indexOf('// Reset welcome rig state'));
-  assert.ok(/welcomeRig = null;\n\s*welcomeRigIsNew = false;/.test(reset), 'reopening Welcome clears it');
-  const shown = reset.slice(0, reset.indexOf('welcomeDialog.showModal()'));
-  assert.ok(/welcomeRig = activeRig;/.test(shown) && !/welcomeRigIsNew = true/.test(shown), 'the existing radio is not new');
+test('Here closes the Welcome first, then opens Settings > Radio and Add', () => {
+  assert.ok(a > 0 && choose.length > 200, 'welcomeChooseWhere found');
+  const close = choose.indexOf('welcomeCloseFlow()');
+  const open = choose.indexOf("await openSettingsDialog('radio')");
+  const add = choose.indexOf("openRigEditor('add')");
+  assert.ok(close > 0 && open > close && add > open, 'order: close the Welcome, open Settings, Add');
+  assert.ok(/if \(r\.action === 'rig-editor'\)/.test(choose));
+  assert.ok(/if \(!\(s\.rigs \|\| \[\]\)\.length\) openRigEditor\('add'\);/.test(choose), 'Add only when there is no radio yet');
 });
-test('after the settings save and after Welcome closes', () => {
-  const save = handler.indexOf('await window.api.saveSettings(saveData)');
-  const close = handler.indexOf('welcomeDialog.close()');
-  const open = handler.indexOf('openStationSetup(welcomeRig.id)');
-  assert.ok(save > 0 && close > save && open > close, 'order: save, close, open');
+test('saving a new radio in that editor opens its Station Setup, after the save', () => {
+  const s = app.slice(app.indexOf('    currentRigs.push(newRig);'));
+  assert.ok(/currentRigs\.push\(newRig\);\n\s*_stationSetupOpenAfterSave = newRig\.id;/.test(s), 'only a new radio is marked');
+  assert.ok(/Promise\.resolve\(_ssSave\)\.then\(\(\) => window\.openStationSetup\(newId\)\)/.test(s), 'opens after the save');
 });
 
-console.log(`\n${passed} passed, ${failed} failed`);
-process.exit(failed ? 1 : 0);
+// "Here" run for real (the function itself, with the window's calls stubbed):
+// no radio saved -> Settings > Radio opens straight into Add; radios already
+// saved -> Settings > Radio shows the saved list and no editor opens.
+async function runHere(rigs) {
+  const calls = [];
+  const deps = {
+    window: { FirstRun: { chooseWhere: () => ({ action: 'rig-editor', state: { step: 'done', where: 'here' }, patch: {} }) },
+      api: { saveSettings: async () => {}, getSettings: async () => ({ rigs }) } },
+    welcomeShowRemotePanel: () => calls.push('remote-panel'),
+    welcomeCloseFlow: () => calls.push('close'),
+    openSettingsDialog: async (tab) => { calls.push('settings:' + tab); },
+    openRigEditor: (mode) => calls.push('editor:' + mode),
+  };
+  const fn = new Function(...Object.keys(deps), 'let _firstRunState = {};\n' + choose + '\n}\nreturn welcomeChooseWhere;')(...Object.values(deps));
+  await fn('here');
+  return calls;
+}
+async function testAsync(name, fn) {
+  try { await fn(); passed++; console.log('  ok  ' + name); }
+  catch (e) { failed++; console.log('  FAIL ' + name + '\n       ' + (e.message || e)); }
+}
+(async () => {
+  await testAsync('Here with no radio saved: Settings > Radio, straight into Add', async () => {
+    assert.deepStrictEqual(await runHere([]), ['close', 'settings:radio', 'editor:add']);
+    assert.deepStrictEqual(await runHere(undefined), ['close', 'settings:radio', 'editor:add']);
+  });
+  await testAsync('Here with radios already saved: Settings > Radio shows the saved list, no editor', async () => {
+    assert.deepStrictEqual(await runHere([{ id: 'r1', name: 'IC-7300' }]), ['close', 'settings:radio']);
+  });
+  console.log(`\n${passed} passed, ${failed} failed`);
+  process.exit(failed ? 1 : 0);
+})();

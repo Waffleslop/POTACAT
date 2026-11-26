@@ -960,7 +960,8 @@ const GLOBAL_KEYS = new Set([
   'rigPresetRules',    // { rigId|'*': [{ bands, families, presetId }] } — band + mode rules, first match wins; byMode is the fallback
   'remoteShackAudio',  // this PC's speaker/mic/volume/PTT key for a remote shack (machine devices)
   'echocatMultiClient', // this shack lets the owner's devices connect together (server property)
-  'firstRun',          // first-time-launch flag
+  'firstRun',          // first-time-launch flag: true until the first-run station step is finished
+  'firstRunState',     // lib/first-run.js: the step reached, the radio answer, a kept draft, local milestone markers
   'yaesuScopeFps',     // band-scope helper frame rate — a display/machine property
   'tuneStepHz',        // VFO knob/wheel + band scope tuning step, one synced value (applyTuneStep)
   'yaesuScopeHelperPath', // explicit yaesu-scope binary on THIS machine
@@ -1243,8 +1244,9 @@ function loadSettingsFromDisk() {
     // by day, POTACAT Dark by night (lib/app-theme.js DEFAULTS). Idle receive
     // mode is WSPR (Casey 2026-09-25). Written here, not as read-side
     // fallbacks, so installs that never chose keep what they were looking at:
-    // the theme migration maps them once, idle stays SSTV.
-    return { grid: 'FN20jb', catTarget: null, enablePota: true, enableSota: false, enableRbn: true, enablePskrMap: true, firstRun: true, watchlist: 'K3SBP', ...AppTheme.DEFAULTS, idleRxMode: 'wspr', enableAutoSstv: false, enableTelemetry: true, jtcatFakeIt: FakeIt.NEW_SETUP_DEFAULT };
+    // the theme migration maps them once, idle stays SSTV. No grid square: the
+    // first run asks, and blank stays unset (it used to be FN20jb, a made-up home).
+    return { catTarget: null, enablePota: true, enableSota: false, enableRbn: true, enablePskrMap: true, firstRun: true, watchlist: 'K3SBP', ...AppTheme.DEFAULTS, idleRxMode: 'wspr', enableAutoSstv: false, enableTelemetry: true, jtcatFakeIt: FakeIt.NEW_SETUP_DEFAULT };
   }
   // Migration path: legacy settings.json (no activeProfile) gets migrated
   // when it has a myCallsign. We do this lazily on first save rather than
@@ -3651,6 +3653,7 @@ function pushCloudState() {
 const typedCalls = new TypedCallTracker();
 const CwRemoteExpand = require('./lib/cw-remote-expand');
 const CwBanks = require('./lib/cw-banks'); // #741 the Run and S&P CW banks
+const GridMacros = require('./lib/grid-macros'); // re-spot {QTH} with no grid set
 const CwGreeting = require('./lib/cw-greeting'); // {greeting} = GM/GA/GE by the other station's local time
 /**
  * Fill {call}/{op_firstname}/{state} left in CW text from a device (the
@@ -20842,11 +20845,11 @@ async function saveQsoRecord(qsoData, opts) {
         if (qrzData) opName = qrzData.nickname || qrzData.fname || '';
       } catch { /* QRZ lookup failed — leave blank */ }
     }
-    const expand = (text) => text
+    // {QTH} first: with no grid, "in {QTH}" goes, never "in" alone (lib/grid-macros.js).
+    const expand = (text) => GridMacros.fillRespotQth(text, ops.grid)
       .replace(/\{op_firstname\}/gi, opName || 'OM') // OM like the desktop log dialog; '' left a double space
       .replace(/\{rst\}/gi, qsoData.rstSent || '59')
       .replace(/\{mycallsign\}/gi, ops.myCallsign || '')
-      .replace(/\{QTH\}/gi, ops.grid || '')
       .replace(/\{call\}/gi, qsoData.callsign || '');
     if (qsoData.respotComment) qsoData.respotComment = expand(qsoData.respotComment);
     if (qsoData.wwffRespotComment) qsoData.wwffRespotComment = expand(qsoData.wwffRespotComment);

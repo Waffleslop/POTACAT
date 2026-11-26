@@ -29,9 +29,9 @@ t('Edit names the rig', () => {
 t('the delete cross names the rig', () => {
   assert(/deleteBtn\.setAttribute\('aria-label', 'Delete ' \+ rigLabel\)/.test(body));
 });
-t('the Welcome rig row remove cross names the rig', () => {
-  const w = app.slice(app.indexOf('function showWelcomeRigItem('));
-  assert(/removeBtn\.setAttribute\('aria-label', 'Remove ' \+/.test(w.slice(0, 1500)));
+// A shorter first run (2026-11-26): the Welcome rig row is gone with the Welcome rig editor.
+t('the Welcome has no rig row of its own any more', () => {
+  assert(!/function showWelcomeRigItem\(/.test(app));
 });
 t('ECHOCAT Web rig picker label is tied to its select', () => {
   assert(/<label class="so-label" for="rig-select">Rig<\/label>/.test(remoteHtml));

@@ -5641,35 +5641,51 @@ a.settings-echocat-badge-link:hover {
   margin-bottom: 16px;
 }
 
-.welcome-beta-note {
-  margin-top: 12px;
-  padding: 10px 12px;
-  background: var(--tint-green);
-  border: 1px solid var(--accent-green);
-  border-radius: 4px;
-  font-size: 12px;
-  color: var(--text-secondary);
-  line-height: 1.5;
-}
-
-.welcome-beta-note a {
-  color: var(--accent-blue);
-  text-decoration: none;
-  cursor: pointer;
-}
-
-.welcome-beta-note a:hover {
-  text-decoration: underline;
-}
-
 #welcome-dialog {
-  max-width: 420px;
+  max-width: 520px; /* wide enough that step 1 fits a 700 px window without scrolling */
+  width: calc(100vw - 32px);
 }
 
 .welcome-field {
   display: block;
   margin-bottom: 8px;
 }
+
+/* A shorter first run: one decision per screen (lib/first-run.js). Text is
+   large enough to read without leaning in. */
+.welcome-step-label {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin-bottom: 4px;
+}
+#welcome-dialog h3 { font-size: 20px; margin: 0 0 6px; }
+#welcome-dialog .welcome-text { font-size: 15px; }
+.welcome-fields-row { display: flex; gap: 12px; flex-wrap: wrap; }
+.welcome-fields-row .welcome-field { flex: 1; min-width: 150px; margin-bottom: 0; font-size: 14px; color: var(--text-primary); }
+.welcome-fields-row input { display: block; width: 100%; box-sizing: border-box; margin-top: 4px; font-size: 16px; padding: 6px 8px; }
+.welcome-grid-note { display: block; margin: 6px 0 4px; font-size: 13px; }
+.welcome-error { display: block; margin: 4px 0; font-size: 14px; color: var(--accent-red, #e94560); }
+.welcome-error.hidden { display: none; }
+.welcome-nav { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: 14px; }
+.welcome-nav .log-save-btn { margin-left: auto; font-size: 15px; padding: 8px 22px; }
+.welcome-back-btn {
+  font: inherit; font-size: 15px; padding: 8px 16px; cursor: pointer;
+  background: transparent; color: var(--text-primary);
+  border: 1px solid var(--border-primary); border-radius: 4px;
+}
+.welcome-back-btn:hover { background: var(--bg-hover); }
+.welcome-choices { display: flex; flex-direction: column; gap: 10px; margin: 12px 0; }
+.welcome-choice {
+  display: block; width: 100%; text-align: left; cursor: pointer;
+  font: inherit; padding: 12px 14px; border-radius: 6px;
+  background: var(--bg-tertiary); color: var(--text-primary);
+  border: 1px solid var(--border-primary);
+}
+.welcome-choice:hover, .welcome-choice:focus-visible { border-color: var(--accent-blue); background: var(--bg-hover); }
+.welcome-choice:focus-visible { outline: 2px solid var(--accent-blue); outline-offset: 2px; }
+.welcome-choice[aria-pressed="true"] { border-color: var(--accent-blue); box-shadow: inset 3px 0 0 var(--accent-blue); }
+.welcome-choice-title { display: block; font-size: 16px; font-weight: 700; }
+.welcome-choice-sub { display: block; font-size: 14px; color: var(--text-secondary); margin-top: 3px; line-height: 1.4; }
 
 #welcome-dialog kbd {
   display: inline-block;
@@ -5694,18 +5710,6 @@ a.settings-echocat-badge-link:hover {
 }
 
 
-
-.welcome-radio-section {
-  background: var(--bg-tertiary);
-  border: 1px solid var(--border-primary);
-  border-radius: 6px;
-  padding: 10px 12px;
-  margin-bottom: 10px;
-}
-
-.welcome-radio-section a {
-  color: var(--accent-blue);
-}
 
 /* Welcome → Connect to a Remote Shack. First-class entry point for
    the desktop-to-desktop flow: mDNS-discovered shacks (LAN/Tailscale)
@@ -6769,32 +6773,6 @@ a.settings-echocat-badge-link:hover {
 .welcome-theme-switch {
   margin-top: 8px;
   margin-bottom: 4px;
-}
-
-.welcome-coffee {
-  margin-top: 12px;
-  text-align: center;
-  font-size: 12px;
-  color: var(--text-tertiary);
-  line-height: 1.5;
-}
-
-.coffee-btn {
-  display: inline-block;
-  margin-top: 8px;
-  padding: 6px 16px;
-  background: #FFDD00;
-  color: #000;
-  border: 1px solid #e6c700;
-  border-radius: 4px;
-  font-weight: bold;
-  font-size: 13px;
-  cursor: pointer;
-}
-
-.coffee-btn:hover {
-  background: #ffe940;
-  color: #000;
 }
 
 /* CAT Log Panel */

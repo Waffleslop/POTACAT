@@ -446,15 +446,13 @@ function rig(port, { model } = {}) {
     const pre = readSrc(path.join(__dirname, '..', 'preload.js'));
     assert.ok(/testFlrig: \(config\) => ipcRenderer\.invoke\('test-flrig', config\)/.test(pre));
   });
-  await test('renderer: radio type in the editor and the wizard, host/port, Test Connection, target builders, voice-as-data row', () => {
+  await test('renderer: radio type in the editor, host/port, Test Connection, target builders, voice-as-data row', () => {
     const html = readSrc(path.join(__dirname, '..', 'renderer', 'index.html'));
     assert.ok(/name="radio-type" value="flrig"> FLRig \(a shared radio\)/.test(html));
     assert.ok(/id="set-flrig-host"/.test(html) && /id="set-flrig-port"[^>]*value="12345"/.test(html) && /id="flrig-test-btn"/.test(html));
-    assert.ok(/name="welcome-radio-type" value="flrig"/.test(html) && /id="welcome-flrig-host"/.test(html));
     assert.ok(/href="https:\/\/sourceforge\.net\/projects\/fldigi\/files\/flrig\/" data-external="1"/.test(html));
     const app = readSrc(path.join(__dirname, '..', 'renderer', 'app.js'));
     assert.ok(/type: 'flrig',\s+host: \(setFlrigHost && setFlrigHost\.value\.trim\(\)\) \|\| '127\.0\.0\.1',\s+port: parseInt\(setFlrigPort && setFlrigPort\.value, 10\) \|\| 12345/.test(app), 'editor builds the target');
-    assert.ok(/type: 'flrig',\s+host: document\.getElementById\('welcome-flrig-host'\)/.test(app), 'wizard builds the target');
     assert.ok(/currentTarget\.type === 'flrig'\) \{\s+setRadioType\('flrig'\)/.test(app), 'editor reopens it');
     assert.ok(/\['serialcat', 'icom', 'civ-tcp', 'icom-network', 'hamlib', 'rigctldnet', 'flrig'[^\]]*\]\.includes\(type\)/.test(app), 'Voice in DATA mode row');
     assert.ok(/window\.api\.testFlrig\(/.test(app), 'the Test Connection button calls test-flrig');

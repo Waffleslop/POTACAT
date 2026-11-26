@@ -7038,9 +7038,8 @@
     const saved = respotPersist.get(isDxc);
     const base = saved != null ? saved : tmpl;
     const rstVal = logRstSent.value || '59';
-    logRespotComment.value = base
+    logRespotComment.value = GridMacros.fillRespotQth(base, phoneGrid)
       .replace(/\{rst\}/gi, rstVal)
-      .replace(/\{QTH\}/gi, phoneGrid || '')
       .replace(/\{mycallsign\}/gi, myCallsign || '');
     // Store targets for submit + persist
     logRespotSection.dataset.targets = targets.join(',');
@@ -7105,9 +7104,8 @@
     const saved = respotPersist.get(isDxc);
     const base = saved != null ? saved : tmpl;
     const rstVal = ltRstSent.value || '59';
-    ltRespotComment.value = base
+    ltRespotComment.value = GridMacros.fillRespotQth(base, phoneGrid)
       .replace(/\{rst\}/gi, rstVal)
-      .replace(/\{QTH\}/gi, phoneGrid || '')
       .replace(/\{mycallsign\}/gi, myCallsign || '');
     ltRespotSection.dataset.targets = targets.join(',');
     ltRespotComment.dataset.dxc = isDxc ? '1' : '';
@@ -10160,6 +10158,8 @@
       btn.addEventListener('click', () => {
         if (pressTimer === 'fired') { pressTimer = null; return; }
         if (!m.text) { pskOpenMacroEditor(i); return; }
+        // $GRID with no grid set: refused, never "QTH grid" with nothing after it.
+        if (GridMacros.pskMacroBlocked(m.text, phoneGrid)) { showToast(GridMacros.NO_GRID_TEXT, 4000, true); return; }
         // Insert the substituted text at the cursor (popout parity).
         const sub = pskSubstituteMacro(m.text);
         const start = pskTxEl.selectionStart == null ? pskTxEl.value.length : pskTxEl.selectionStart;

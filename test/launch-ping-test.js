@@ -78,5 +78,44 @@ t('main.js wires the launch ping to the timer and to the settings save', () => {
   assert.ok(/waiting: \(\) => !!\(settings && settings\.firstRun\)/.test(m));
 });
 
+// A shorter first run (2026-11-26): the station step's Next (callsign, grid,
+// look, statistics) is the save that turns firstRun false, not the end of the
+// flow; later steps never touch firstRun.
+const FirstRun = require('../lib/first-run');
+
+t('first run: nothing on Esc, the ping goes on the station step\'s Next, the next screen sends no more', () => {
+  const s = { enableTelemetry: true, firstRun: true };
+  const { lp, sends } = rig(s);
+  lp.onLaunchTimer();
+  Object.assign(s, { firstRunState: FirstRun.keepDraft(null, { callsign: 'K1ABC' }) }); // Esc: a draft is saved
+  lp.onSettingsSaved();
+  assert.strictEqual(sends.length, 0, 'a draft save keeps firstRun set');
+  const r = FirstRun.finishStation(s.firstRunState, { callsign: 'K1ABC', grid: '', telemetry: true });
+  Object.assign(s, r.patch);
+  lp.onSettingsSaved();
+  assert.strictEqual(sends.length, 1);
+  Object.assign(s, FirstRun.chooseWhere(r.state, 'none').patch);
+  lp.onSettingsSaved();
+  assert.strictEqual(sends.length, 1);
+});
+
+t('first run: the box unticked on the station step, nothing is sent', () => {
+  const s = { enableTelemetry: true, firstRun: true };
+  const { lp, sends } = rig(s);
+  lp.onLaunchTimer();
+  Object.assign(s, FirstRun.finishStation(null, { callsign: 'K1ABC', grid: 'FN20', telemetry: false }).patch);
+  lp.onSettingsSaved();
+  assert.strictEqual(sends.length, 0);
+});
+
+t('app.js saves the station step\'s patch in one save', () => {
+  const app = readSrc(path.join(__dirname, '..', 'renderer', 'app.js')).replace(/\r\n/g, '\n');
+  const i = app.indexOf('async function welcomeStationNext() {');
+  const body = app.slice(i, app.indexOf('\n}\n', i));
+  assert.ok(i > 0 && /window\.FirstRun\.finishStation\(/.test(body));
+  assert.strictEqual((body.match(/window\.api\.saveSettings\(/g) || []).length, 1);
+  assert.ok(/await window\.api\.saveSettings\(r\.patch\);/.test(body));
+});
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

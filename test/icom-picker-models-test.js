@@ -19,7 +19,9 @@ function pickerOptions(id) {
   return [...block.matchAll(/<option value="(0x[0-9A-Fa-f]+)">([^<]+)<\/option>/g)].map((x) => ({ addr: parseInt(x[1], 16), name: x[2].trim() }));
 }
 let passed = 0;
-for (const id of ['set-icom-model', 'set-civ-tcp-model', 'welcome-icom-model']) {
+// A shorter first run (2026-11-26): the Welcome rig editor is gone; "Here" opens
+// the Settings rig editor, so the Settings half of this rule is the whole rule.
+for (const id of ['set-icom-model', 'set-civ-tcp-model']) {
   const opts = pickerOptions(id);
   for (const [name, mod] of Object.entries(RIG)) {
     if (mod.brand !== 'Icom' || mod.protocol !== 'civ') continue;

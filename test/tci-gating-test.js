@@ -104,10 +104,9 @@ test('the only key-downs are lib/tci-tx.js, called from JTCAT tx-start and ECHOC
 
 test('the rig editors offer TCI with a connection test', () => {
   assert.match(HTML, /name="radio-type" value="tci"/);
-  assert.match(HTML, /name="welcome-radio-type" value="tci"/);
   assert.match(HTML, /<script src="\.\.\/lib\/tci-target\.js"><\/script>/);
-  for (const id of ['rig-tci-server', 'rig-tci-host', 'rig-tci-port', 'rig-tci-check', 'welcome-tci-check']) assert.match(HTML, new RegExp(`id="${id}"`), id);
+  for (const id of ['rig-tci-server', 'rig-tci-host', 'rig-tci-port', 'rig-tci-check']) assert.match(HTML, new RegExp(`id="${id}"`), id);
   assert.match(APP, /if \(radioType === 'tci'\) return readTciRigTarget\(rigTciFields\);/);
-  assert.match(APP, /if \(type === 'tci'\) return readTciRigTarget\(welcomeTciFields\);/);
+  assert.ok(!/welcomeTciFields|welcome-radio-type/.test(APP + HTML), 'one rig editor: the Welcome one is gone (a shorter first run)');
   assert.match(APP, /window\.api\.probeTciRig\(target\)/);
 });
