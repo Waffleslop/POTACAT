@@ -838,6 +838,7 @@ const TESTS = [
   'test/jtcat-hunt-priority-test.js', // Hunt: Who goes first (Strongest default, Farthest, Needed first)
   'test/jtcat-hunt-custom-test.js', // Hunt: Custom (ANY of the ticked targets), Hunt minimum dB in the Filters panel
   'test/jtcat-hunt-ignore-test.js', // Hunt: Never answer (right-click a decode) and 30-min auto-skip after a failed QSO
+  'test/jtcat-hunt-direct-caller-worked-test.js', // Hunt answers a direct caller per "Call a station again after N days" (jtcatWorkedInfo)
   'test/jtcat-hunt-cq-dx-test.js', // Hunt: never answer a CQ DX from our own continent, nor a CQ NA/EU aimed elsewhere
   'test/jtcat-fake-it-test.js', // Split operation "Fake It" (level_death): tone 1500-1999 Hz, dial shifted per transmission and put back
   'test/jtcat-fake-it-default-test.js', // Fake It on for new installs, written off once for existing ones; plain offset where it cannot work (TCI, no CAT, split)
