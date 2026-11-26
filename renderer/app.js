@@ -28891,8 +28891,8 @@ async function _welcomeRemoteTapPair(btn) {
     if (r && r.error) {
       _welcomeRemoteStatus('Could not pair: ' + r.error, 'error');
     } else if (r && r.ok) {
-      _welcomeRemoteStatus('Paired with ' + (r.name || target.name) + '. Click Save to finish setup.', 'success');
-      // Activate immediately so the user lands in remote mode on Save.
+      _welcomeRemoteStatus('Paired with ' + (r.name || target.name) + '. Press Get Started to finish setup.', 'success');
+      // Activate immediately so the user lands in remote mode on Get Started.
       try { await window.api.connectionTargetsActivate(r.targetId); } catch {}
     }
   } catch (err) {
@@ -28975,7 +28975,7 @@ async function _welcomeRemoteShowCloudShacks() {
           } else if (p && p.ok) {
             // Activate immediately and report success.
             try { await window.api.connectionTargetsActivate(p.targetId); } catch {}
-            _welcomeRemoteStatus('✓ Paired with ' + (p.name || sname) + ' via ' + (p.leg || '?') + '. Click Save to finish setup.', 'success');
+            _welcomeRemoteStatus('✓ Paired with ' + (p.name || sname) + ' via ' + (p.leg || '?') + '. Press Get Started to finish setup.', 'success');
           }
         } catch (err) {
           _welcomeRemoteStatus('Pair failed: ' + (err.message || err), 'error');
@@ -29100,7 +29100,7 @@ function _welcomeRemoteClose() {
       const dlg = document.getElementById('welcome-dialog');
       if (!_welcomeRemoteResultPending || !dlg || !dlg.open) return;
       if (r && r.ok) {
-        _welcomeRemoteStatus('Paired with ' + (r.name || 'shack') + ' via ' + (r.leg || 'unknown') + '. Click Save to finish.', 'success');
+        _welcomeRemoteStatus('Paired with ' + (r.name || 'shack') + ' via ' + (r.leg || 'unknown') + '. Press Get Started to finish.', 'success');
       } else if (r) {
         _welcomeRemoteStatus('Pair link failed: ' + (r.error || 'unknown'), 'error');
       }

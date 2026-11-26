@@ -754,6 +754,7 @@ const TESTS = [
   'test/bands-everywhere-test.js',
   'test/remote-tx-audio-diag-test.js',
   'test/welcome-cloud-signin-test.js',
+  'test/welcome-pair-text-test.js',
   'test/welcome-rig-station-setup-test.js',
   'test/activation-filename-date-test.js',
   'test/remote-rig-test.js',
