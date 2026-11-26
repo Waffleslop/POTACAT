@@ -50,7 +50,7 @@ test('on idle, APRS starts the window\'s listen path (2 m, else 30 m) without th
 });
 
 test('any radio use ends it at once and the radio goes back, as the other idle modes', () => {
-  assert.ok(/if \(autoSstvActive && !\(opts && opts\.selfDriven\)\) cancelAutoSstv\(\);/.test(fnBody(main, 'markUserActive')));
+  assert.ok(/if \(autoSstvActive && !\(opts && opts\.selfDriven\)\) cancelAutoSstv\(\{ operatorTook: opts && opts\.operatorTook \}\);/.test(fnBody(main, 'markUserActive')));
   const c = fnBody(main, 'cancelAutoSstv');
   const i = c.indexOf('if (autoIdleAprsActive)');
   assert.ok(i > 0, 'an APRS teardown');
@@ -59,7 +59,7 @@ test('any radio use ends it at once and the radio goes back, as the other idle m
   // aprsListenStop sends the radio back (lib/aprs-radio-return.js)
   assert.ok(/aprsReturn\.end\(_currentFreqHz\)/.test(fnBody(main, 'aprsListenStop')));
   // starting JTCAT ends it too (it is not an engine idle mode)
-  assert.ok(/if \(autoSstvActive && !autoIdleJtcatActive && !autoIdleJs8Active\) cancelAutoSstv\(\);/.test(main));
+  assert.ok(/if \(autoSstvActive && !autoIdleJtcatActive && !autoIdleJs8Active\) cancelAutoSstv\(\{ operatorTook: 'JTCAT started' \}\);/.test(main));
   // the switch and the band chips in the window are the operator
   assert.ok(/ipcMain\.on\('aprs-listen-set', \(_e, on\) => \{ markUserActive\(\); aprsListenSet/.test(main));
   assert.ok(/ipcMain\.on\('aprs-listen-band', \(_e, band\) => \{ markUserActive\(\);/.test(main));
@@ -76,7 +76,7 @@ test('closing the APRS window leaves an idle session listening', () => {
 test('ECHOCAT: an APRS idle session is its own kind, never SSTV or an FT8-engine receive', () => {
   assert.ok(/if \(autoIdleAprsActive\) return 'aprs';/.test(fnBody(main, 'autoRxKind')));
   // jtcat-status.idleRx never names aprs: starting JTCAT ends an APRS idle session first.
-  assert.ok(/if \(autoSstvActive && !autoIdleJtcatActive && !autoIdleJs8Active\) cancelAutoSstv\(\);/.test(fnBody(main, 'startJtcat')));
+  assert.ok(/if \(autoSstvActive && !autoIdleJtcatActive && !autoIdleJs8Active\) cancelAutoSstv\(\{ operatorTook: 'JTCAT started' \}\);/.test(fnBody(main, 'startJtcat')));
 });
 
 // Casey 2026-11-20: "iGate should be a setting on the APRS window or APRS Settings, not
