@@ -206,6 +206,43 @@ function appPidsFromProcessTable(rows, myPid) {
     .map(r => r.ProcessId);
 }
 
+/**
+ * Pure: the POTACAT app's PIDs from the text of ps -eww -o pid=,ppid=,args= on
+ * Linux or macOS. Keeps only rows that are the POTACAT binary (Linux:
+ * potacat.bin / potacat / POTACAT; macOS: the main MacOS/POTACAT, not
+ * "POTACAT Helper"), then applies the same launcher filter as Windows, so a
+ * tray launcher (potacat.bin --launcher) and its zygote/gpu/utility helpers
+ * are not "POTACAT is running" and are never killed by Restart.
+ */
+function unixAppPidsFromPs(text, myPid, isMac) {
+  const nameRe = isMac
+    ? /(?:^|\/)MacOS\/POTACAT(?: -|$)|^POTACAT(?: -|$)/
+    : /^(?:\S*\/)?(?:potacat\.bin|potacat|POTACAT)(?:\s|$)/;
+  const rows = [];
+  for (const line of String(text || '').split(/\r?\n/)) {
+    const m = /^\s*(\d+)\s+(\d+)\s+(.*)$/.exec(line);
+    if (!m) continue;
+    const cmd = m[3];
+    const pid = Number(m[1]);
+    // Keep our own row and any launcher row so appPidsFromProcessTable can
+    // recognise them (and their children), whatever the binary is called.
+    if (!nameRe.test(cmd) && pid !== myPid && !/--launcher\b|launcher\.js/i.test(cmd)) continue;
+    rows.push({ ProcessId: pid, ParentProcessId: Number(m[2]), CommandLine: cmd });
+  }
+  // On Linux a launcher's gpu/utility helper can hang off its zygote rather
+  // than the launcher itself, so follow --type= helpers down the whole tree
+  // before the (direct-parent) shared filter runs.
+  const tree = new Set([myPid]);
+  for (const r of rows) if (/--launcher\b|launcher\.js/i.test(r.CommandLine)) tree.add(r.ProcessId);
+  for (let grew = true; grew;) {
+    grew = false;
+    for (const r of rows) {
+      if (!tree.has(r.ProcessId) && tree.has(r.ParentProcessId) && /--type=/.test(r.CommandLine)) { tree.add(r.ProcessId); grew = true; }
+    }
+  }
+  return appPidsFromProcessTable(rows.filter(r => !tree.has(r.ProcessId) || r.ProcessId === myPid), myPid);
+}
+
 /** Pure: the app's main processes (the ones a graceful close is sent to). */
 function appMainPidsFromProcessTable(rows, myPid) {
   const app = new Set(appPidsFromProcessTable(rows, myPid));
@@ -346,14 +383,10 @@ function getOtherPids() {
       }
       return pids;
     } else {
-      const found = new Set();
-      for (const name of (IS_MAC ? [PROCESS_NAME] : LINUX_PROCESS_NAMES)) {
-        try {
-          const out = execSync(`pgrep -x "${name}"`, { encoding: 'utf8', timeout: 5000 });
-          for (const line of out.trim().split('\n')) { const pid = parseInt(line, 10); if (pid && pid !== MY_PID) found.add(pid); }
-        } catch { /* pgrep exits 1 when nothing matches */ }
-      }
-      return [...found];
+      // Same filter as Windows: one process-table read, then drop this launcher,
+      // anything running --launcher / launcher.js, and a launcher's own helpers.
+      const out = execSync('ps -eww -o pid=,ppid=,args=', { encoding: 'utf8', timeout: 5000, maxBuffer: 16 * 1024 * 1024 });
+      return unixAppPidsFromPs(out, MY_PID, IS_MAC);
     }
   } catch {
     return [];
@@ -1303,4 +1336,4 @@ function main() {
 // Run directly (node launcher.js, the extracted copy) it starts at once;
 // POTACAT.exe --launcher requires it and calls main(); tests only require it.
 if (require.main === module) main();
-module.exports = { main, parseProcessTable, treeKillPlan, stillAlive, readWindowsProcessTable, taskkillEach, createDualServer, generateTlsCert, _derInt: derInt, isTunnelRequest, clientKey, routeOf, readPairedDevices, deviceForToken, authorize, sameSecret, CloudReplica, handleRequest };
+module.exports = { main, unixAppPidsFromPs, parseProcessTable, treeKillPlan, stillAlive, readWindowsProcessTable, taskkillEach, createDualServer, generateTlsCert, _derInt: derInt, isTunnelRequest, clientKey, routeOf, readPairedDevices, deviceForToken, authorize, sameSecret, CloudReplica, handleRequest };
