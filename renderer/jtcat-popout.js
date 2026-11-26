@@ -4851,6 +4851,8 @@ function _applyPopoutTheme(payload) {
         + 'right-click to edit';
       btn.addEventListener('click', function() {
         if (!m.text.trim()) { pskOpenMacroEditor(slot); return; }
+        // $GRID with no grid set: refused, never "QTH grid" with nothing after it.
+        if (GridMacros.pskMacroBlocked(m.text, myGrid)) { showJtcatWarnToast(GridMacros.NO_GRID_TEXT); return; }
         var t = pskSubstituteMacro(m.text);
         // Insert at the cursor so macros compose naturally mid-buffer.
         var start = pskTxEl.selectionStart != null ? pskTxEl.selectionStart : pskTxEl.value.length;

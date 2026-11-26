@@ -33,7 +33,7 @@ test('11: bare F1–F12 send CW macros only while the macro box is open, user bi
   assert.ok(/\/\^F\(\[1-9\]\|1\[0-2\]\)\$\/\.test\(e\.key\) && cwMacroBoxVisible/.test(app), 'gated on the box');
   assert.ok(/bareFKey && !e\.shiftKey && \/\^F\(\[1-9\]\|1\[0-2\]\)\$\//.test(app), 'bare keys only — Ctrl+F1 stays the hotkey table\'s');
   assert.ok(/e\.target === cwMacroInput\)\)/.test(app), 'works from the macro box\'s own text field');
-  assert.ok(/function sendCwMacroByIndex\(i\) \{[\s\S]*?return false;[\s\S]*?window\.api\.sendCwText\(expandDesktopCwMacros\(m\.text\)\);\n\s*return true;/.test(app), 'same send as the button; false when there is no macro');
+  assert.ok(/function sendCwMacroByIndex\(i\) \{[\s\S]*?return false;[\s\S]*?const out = expandDesktopCwMacros\(m\.text\);\n\s*if \(out\) window\.api\.sendCwText\(out\);\n\s*return true;/.test(app), 'same send as the button; false when there is no macro');
   const fIdx = app.indexOf("/^F([1-9]|1[0-2])$/.test(e.key) && cwMacroBoxVisible");
   const helpIdx = app.indexOf("if (e.key === 'F1' && bareFKey");
   assert.ok(fIdx > 0 && fIdx < helpIdx, 'macro keys are tried before the F1 help / F2 logbook defaults');

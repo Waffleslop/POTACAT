@@ -5045,7 +5045,7 @@ async function saveBannerQso() {
   if (wantsRespot) {
     const tmplNetwork = (type === '' && clusterConnected) ? 'dxc' : (type === 'wwff' ? 'wwff' : type === 'llota' ? 'llota' : type === 'wwbota' ? 'wwbota' : 'pota');
     const tmpl = respotTemplateFor(tmplNetwork);
-    respotCommentText = tmpl.replace(/\{rst\}/gi, rstSent).replace(/\{QTH\}/gi, grid).replace(/\{mycallsign\}/gi, myCallsign).replace(/\{op_firstname\}/gi, opFirstname);
+    respotCommentText = GridMacros.fillRespotQth(tmpl, grid).replace(/\{rst\}/gi, rstSent).replace(/\{mycallsign\}/gi, myCallsign).replace(/\{op_firstname\}/gi, opFirstname);
   }
 
   // A park that spans states: ask which one (WG9I). The records themselves —
@@ -13703,8 +13703,7 @@ async function openQuickRespot() {
   const tmpl = respotTemplateFor(tmplNetwork);
   const spotQrz = s.callsign ? qrzData.get(JtcatParser.baseCall(s.callsign.toUpperCase())) : null;
   const spotFirstname = (spotQrz && (cleanQrzName(spotQrz.nickname) || cleanQrzName(spotQrz.fname))) || 'OM';
-  commentField.value = tmpl
-    .replace(/\{QTH\}/gi, grid)
+  commentField.value = GridMacros.fillRespotQth(tmpl, grid)
     .replace(/\{rst\}/gi, '')
     .replace(/\{callsign\}/gi, myCallsign)
     .replace(/\{mycallsign\}/gi, myCallsign)
@@ -17055,7 +17054,7 @@ logSaveBtn.addEventListener('click', async () => {
   const primaryCall = callsigns[0] || '';
   const primaryQrz = qrzData.get(JtcatParser.baseCall(primaryCall));
   const opFirstname = (primaryQrz && (cleanQrzName(primaryQrz.nickname) || cleanQrzName(primaryQrz.fname))) || 'OM';
-  const commentText = respotComment.value.trim().replace(/\{rst\}/gi, getRstDigits('rst-sent-digits', '59')).replace(/\{QTH\}/gi, grid).replace(/\{mycallsign\}/gi, myCallsign).replace(/\{op_firstname\}/gi, opFirstname);
+  const commentText = GridMacros.fillRespotQth(respotComment.value.trim(), grid).replace(/\{rst\}/gi, getRstDigits('rst-sent-digits', '59')).replace(/\{mycallsign\}/gi, myCallsign).replace(/\{op_firstname\}/gi, opFirstname);
 
   const rstSent = getRstDigits('rst-sent-digits', '59');
   const rstRcvd = getRstDigits('rst-rcvd-digits', '59');
@@ -25102,7 +25101,8 @@ async function updateCwMacroBar() {
     const cwHk = hotkeyBindings.find(h => h.action === 'cw-macro-' + (i + 1));
     btn.title = (m.text || '') + (cwHk && cwHk.key ? ' (' + cwHk.key + ')' : '');
     btn.addEventListener('click', () => {
-      window.api.sendCwText(expandDesktopCwMacros(m.text));
+      const out = expandDesktopCwMacros(m.text);
+      if (out) window.api.sendCwText(out);
     });
     cwMacroBtns.appendChild(btn);
   });
@@ -25115,7 +25115,8 @@ function sendCwMacroByIndex(i) {
   if (!_cwMacroCache) { updateCwMacroBar(); return false; } // bar never rendered yet: load it, this press keeps its default
   const m = _cwMacroCache && _cwMacroCache[i];
   if (!m || (!m.label && !m.text) || !m.text) return false;
-  window.api.sendCwText(expandDesktopCwMacros(m.text));
+  const out = expandDesktopCwMacros(m.text);
+  if (out) window.api.sendCwText(out);
   return true;
 }
 // Callsign typed in the Log pop-out (a separate BrowserWindow, so its field
@@ -25142,6 +25143,7 @@ function expandDesktopCwMacros(text) {
   // {RST} {NR} {MYGRID} from this activation (#741). An unknown {word} is
   // dropped and named, never keyed as braces (lib/cw-banks.js).
   const ex = CwBanks.expandVars(text, cwVarContext(appMode === 'activator' ? 'run' : 'sp', call));
+  if (ex.missing && ex.missing.length) { cwReportNoGrid(); return ''; } // {MYGRID} with no grid: nothing keyed
   if (ex.unknown.length) cwReportUnknown(ex.unknown);
   return ex.text;
 }
@@ -30951,6 +30953,10 @@ function cwVarContext(side, call) {
     state: (qrzOp && qrzOp.state) || '',
   };
 }
+// {MYGRID} in a CW macro with no grid set: the macro is refused (lib/cw-banks.js).
+function cwReportNoGrid() {
+  showLogToast(GridMacros.NO_GRID_TEXT, { warn: true, duration: 5000 });
+}
 function cwReportUnknown(vars) {
   showLogToast('Not sent: ' + vars.join(' ') + ' is not a macro variable POTACAT knows. Fix it in Settings > Station > Macros.', { warn: true, duration: 5000 });
 }
@@ -30980,7 +30986,11 @@ async function esmEnter(side) {
   const field = esmCallField(side);
   const r = await esmSessions[side].enter({ call: field.value, p2p: esmIsP2p(side) }, {
     bank: () => bank,
-    expand: (text, c) => CwBanks.expandVars(text, cwVarContext(side, c.call)),
+    expand: (text, c) => {
+      const ex = CwBanks.expandVars(text, cwVarContext(side, c.call));
+      if (ex.missing && ex.missing.length) cwReportNoGrid();
+      return ex;
+    },
     log: () => esmLog(side),
     send: esmSend,
     cancel: () => window.api.cwCancel(),
@@ -30997,6 +31007,7 @@ function esmSendKey(side, n, otherBank) {
   const m = esmBank(useSide)[n - 1];
   if (!m || !String(m.text || '').trim()) return false;
   const ex = CwBanks.expandVars(m.text, cwVarContext(side, esmCallField(side).value));
+  if (ex.missing && ex.missing.length) cwReportNoGrid();
   if (ex.unknown.length) cwReportUnknown(ex.unknown);
   if (ex.text) esmSend(ex.text);
   return true;

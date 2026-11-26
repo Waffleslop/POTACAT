@@ -3639,6 +3639,7 @@ function pushCloudState() {
 const typedCalls = new TypedCallTracker();
 const CwRemoteExpand = require('./lib/cw-remote-expand');
 const CwBanks = require('./lib/cw-banks'); // #741 the Run and S&P CW banks
+const GridMacros = require('./lib/grid-macros'); // re-spot {QTH} with no grid set
 const CwGreeting = require('./lib/cw-greeting'); // {greeting} = GM/GA/GE by the other station's local time
 /**
  * Fill {call}/{op_firstname}/{state} left in CW text from a device (the
@@ -20829,11 +20830,11 @@ async function saveQsoRecord(qsoData, opts) {
         if (qrzData) opName = qrzData.nickname || qrzData.fname || '';
       } catch { /* QRZ lookup failed — leave blank */ }
     }
-    const expand = (text) => text
+    // {QTH} first: with no grid, "in {QTH}" goes, never "in" alone (lib/grid-macros.js).
+    const expand = (text) => GridMacros.fillRespotQth(text, ops.grid)
       .replace(/\{op_firstname\}/gi, opName || 'OM') // OM like the desktop log dialog; '' left a double space
       .replace(/\{rst\}/gi, qsoData.rstSent || '59')
       .replace(/\{mycallsign\}/gi, ops.myCallsign || '')
-      .replace(/\{QTH\}/gi, ops.grid || '')
       .replace(/\{call\}/gi, qsoData.callsign || '');
     if (qsoData.respotComment) qsoData.respotComment = expand(qsoData.respotComment);
     if (qsoData.wwffRespotComment) qsoData.wwffRespotComment = expand(qsoData.wwffRespotComment);
