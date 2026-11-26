@@ -129,6 +129,93 @@ test('busy: a wide band whose outside is only the receiver filter skirt reads Cl
   assert.strictEqual(v2.busy, true, 'a wide modem over the tracked floor is Busy');
 });
 
+// #1096: a strong block OUTSIDE the band (an operator's radio with its receive
+// filter sitting at about 650-1300 Hz, below ARDOP's 1250-1750 Hz) lifted the
+// old reference 70 dB, so the badge read Clear while the modem read Busy.
+const DB = 1 / 4.3429; // dB → ln
+// Raise bins [from, to] of a frame by `db`, with a skirt falling `skirtDb` per bin
+// on each side (the recording's skirt is ~4 dB per bin).
+function withBlock(frame, fromHz, toHz, db, skirtDb) {
+  const out = Float32Array.from(frame);
+  const lo = Math.round(fromHz / (3000 / 256)), hi = Math.round(toHz / (3000 / 256));
+  for (let b = 0; b < out.length; b++) {
+    const away = b < lo ? lo - b : b > hi ? b - hi : 0;
+    const lift = Math.max(0, db - away * skirtDb);
+    if (lift > 0) out[b] = Math.max(out[b], frame[b] + lift * DB);
+  }
+  return out;
+}
+function noiseFrames(count, lvl) { return framesOf(tone(1500, 24000, (count + 2) * 2048 / 24000, 0, lvl || 0.02), 24000).slice(1, count + 1); }
+// Feed a list of frames round and round for `ms`; returns {last, busyFrames, total}.
+function feedCycle(det, frames, from, ms) {
+  let v = null, busy = 0, total = 0;
+  for (let t = from, i = 0; t <= from + ms; t += 85, i++) { v = det.update(frames[i % frames.length], t); total++; if (v.busy) busy++; }
+  return { last: v, busyFrames: busy, total: total };
+}
+const ARDOP = S.markerBand('ardop', { ardop: 500 });
+const RECORDING = JSON.parse(require('fs').readFileSync(require('path').join(__dirname, 'fixtures', 'winlink', 'rx-filter-below-ardop-band.json'), 'utf8'));
+
+test('#1096 recording: the receive filter edge in the ARDOP band reads Busy, as the modem read it (the old reference read Clear)', () => {
+  assert.strictEqual(RECORDING.frames.length, 12);
+  assert.ok(RECORDING.frames.every((f) => f.length === S.MAGS));
+  const frames = RECORDING.frames.map((f) => Float32Array.from(f));
+  const r = feedCycle(new S.BusyDetector(ARDOP.lo, ARDOP.hi), frames, 1000, 6000);
+  assert.strictEqual(r.last.busy, true, 'the band with the filter edge in it is Busy');
+  assert.ok(r.last.peakDb >= S.CARRIER_DB, 'peak ' + r.last.peakDb);
+  assert.ok(r.busyFrames >= r.total - 3, 'Busy from the first 150 ms on: ' + r.busyFrames + '/' + r.total);
+});
+
+test('#1096 synthetic: a 70 dB block below the band with its skirt in the band is Busy; a narrow signal beside a block is Busy', () => {
+  const noise = noiseFrames(12);
+  const edge = noise.map((f) => withBlock(f, 650, 1300, 70, 4)); // the recording's shape
+  assert.strictEqual(feedCycle(new S.BusyDetector(ARDOP.lo, ARDOP.hi), edge, 1000, 6000).last.busy, true, 'filter edge in the band');
+  // a signal 150 Hz wide in the band (under half of it), beside a 70 dB block that stops 100 Hz short of the band
+  const narrow = framesOf(modem(1425, 150, 24000, 1.2, 0.3, 0.02), 24000).slice(1, 12);
+  const beside = narrow.map((f) => withBlock(f, 650, 1150, 70, 6));
+  assert.strictEqual(feedCycle(new S.BusyDetector(ARDOP.lo, ARDOP.hi), beside, 1000, 6000).last.busy, true, 'narrow signal beside a block');
+  // (a modem filling more than half the band lifts the band's own median, and the earlier rule decides, as before #1096)
+});
+
+test('#1096: a truly quiet ARDOP band with a strong block just outside it reads Clear, before and after the floor is tracked', () => {
+  const noise = noiseFrames(12);
+  const outside = noise.map((f) => withBlock(f, 650, 1150, 70, 6)); // skirt gone by ~1220 Hz, the band starts at 1250 Hz
+  const det = new S.BusyDetector(ARDOP.lo, ARDOP.hi);
+  const r = feedCycle(det, outside, 1000, S.FLOOR_WARM_MS + 8000);
+  assert.strictEqual(r.busyFrames, 0, 'never Busy: ' + r.busyFrames + '/' + r.total);
+  // the same above the band, and a block on both sides
+  const above = noise.map((f) => withBlock(f, 1850, 2600, 60, 6));
+  assert.strictEqual(feedCycle(new S.BusyDetector(ARDOP.lo, ARDOP.hi), above, 1000, 6000).busyFrames, 0, 'block above');
+  const both = noise.map((f) => withBlock(withBlock(f, 300, 1150, 50, 6), 1850, 2700, 50, 6));
+  assert.strictEqual(feedCycle(new S.BusyDetector(ARDOP.lo, ARDOP.hi), both, 1000, 6000).busyFrames, 0, 'blocks either side');
+});
+
+test('busyBadge: the detector\'s verdict, and the modem\'s while Pat\'s busy-channel prompt is up (#1096)', () => {
+  assert.deepStrictEqual(S.busyBadge(null, null), { state: 'idle', text: '\u2014', title: '' });
+  assert.strictEqual(S.busyBadge({ busy: false, peakDb: 0 }, {}).text, 'Clear');
+  assert.strictEqual(S.busyBadge({ busy: false, peakDb: 0 }, {}).state, 'clear');
+  assert.strictEqual(S.busyBadge({ busy: true, peakDb: 23 }, { prompt: null }).text, 'BUSY +23 dB');
+  const prompt = { prompt: { id: 'p1', kind: 'busy-channel', message: 'busy' } };
+  // the contradiction from the report: our check says Clear, the modem is busy
+  const b = S.busyBadge({ busy: false, peakDb: 0 }, prompt);
+  assert.strictEqual(b.state, 'busy');
+  assert.strictEqual(b.text, 'Busy (modem)');
+  assert.ok(/modem hears the channel as busy/.test(b.title) && /own check hears nothing/.test(b.title), b.title);
+  const agree = S.busyBadge({ busy: true, peakDb: 41 }, prompt);
+  assert.strictEqual(agree.text, 'Busy (modem)');
+  assert.ok(/agrees: a signal 41 dB/.test(agree.title), agree.title);
+  assert.strictEqual(S.busyBadge(null, prompt).text, 'Busy (modem)', 'before the first frame too');
+  // any other prompt is not a busy reading
+  assert.strictEqual(S.busyBadge({ busy: false, peakDb: 0 }, { prompt: { id: 'p2', kind: 'password' } }).text, 'Clear');
+  for (const x of [b, agree]) assert.ok(!/[\u{1F300}-\u{1FAFF}]/u.test(x.text + x.title), 'no emoji');
+});
+
+test('the mail window draws the badge from busyBadge, on every frame and every session push', () => {
+  const popout = require('./_src').readSrc(require('path').join(__dirname, '..', 'renderer', 'winlink-popout.js'));
+  assert.ok(/var b = WinlinkSpectrum\.busyBadge\(busyLast, state && state\.session\);/.test(popout));
+  assert.ok(/window\.api\.onSession\(function \(ss\) \{[^\n]*busyRender\(\); \}\);/.test(popout), 'a session push redraws it');
+  assert.ok(!/BUSY \+' \+ v\.peakDb/.test(popout), 'no second copy of the wording in the window');
+});
+
 test('marker bands follow the mode and each modem\'s own bandwidth, labelled center', () => {
   assert.deepStrictEqual(S.markerBand('ardop', { ardop: 2000 }), { lo: 500 / 3000, hi: 2500 / 3000, label: 'ARDOP center 1500 Hz, 2000 Hz wide' });
   assert.strictEqual(S.markerBand('ardop', {}).lo, 1250 / 3000);
