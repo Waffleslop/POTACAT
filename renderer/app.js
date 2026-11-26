@@ -28481,6 +28481,7 @@ const welcomeCallsignInput = document.getElementById('welcome-callsign');
 
 // --- Welcome rig editor ---
 let welcomeRig = null; // rig configured in welcome dialog
+let welcomeRigIsNew = false; // true only for a radio added in this Welcome, not the existing one shown on reopen
 let welcomeHamlibLoaded = false;
 let welcomeSerialcatLoaded = false;
 let welcomeIcomLoaded = false;
@@ -28644,6 +28645,7 @@ function showWelcomeRigItem(rig) {
   removeBtn.addEventListener('click', (e) => {
     e.stopPropagation();
     welcomeRig = null;
+    welcomeRigIsNew = false;
     display.innerHTML = '';
     display.classList.add('hidden');
     document.getElementById('welcome-rig-add-btn').classList.remove('hidden');
@@ -28682,6 +28684,7 @@ document.getElementById('welcome-rig-save-btn').addEventListener('click', () => 
     if (bad) { welcomeTciFields.result.textContent = bad; return; }
   }
   welcomeRig = { id: 'rig_' + Date.now(), name, catTarget };
+  welcomeRigIsNew = true;
   // Keep POTACAT's audio/tune slice in sync with the chosen Flex CAT shim port
   // (5002→A …) so a non-A pick doesn't leave audio on slice A while CAT targets
   // another slice.
@@ -28794,9 +28797,11 @@ document.getElementById('welcome-start').addEventListener('click', async () => {
   _welcomeRemoteClose();
   // Reload prefs so the main UI reflects welcome choices
   loadPrefs();
-  // A radio was saved from Welcome: open its Station Setup checklist now that
-  // Welcome is closed, the same as saving a new radio in Settings does.
-  if (welcomeRig && typeof window.openStationSetup === 'function') {
+  // A radio was added in Welcome: open its Station Setup checklist now that
+  // Welcome is closed, the same as saving a new radio in Settings does. Not for
+  // the existing radio a reopened Welcome (F11) shows: Settings opens it only
+  // for a new radio, and the operator may have hidden its reminders.
+  if (welcomeRig && welcomeRigIsNew && typeof window.openStationSetup === 'function') {
     window.openStationSetup(welcomeRig.id);
   }
 });
@@ -29114,6 +29119,7 @@ async function checkFirstRun(force = false) {
   if (force || s.firstRun) {
     // Reset welcome rig state
     welcomeRig = null;
+    welcomeRigIsNew = false;
     const welcomeRigDisplay = document.getElementById('welcome-rig-display');
     welcomeRigDisplay.innerHTML = '';
     welcomeRigDisplay.classList.add('hidden');

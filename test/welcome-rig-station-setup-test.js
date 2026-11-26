@@ -22,8 +22,14 @@ test('the Get Started handler was found', () => assert.ok(a > 0 && handler.lengt
 test('Station Setup opens for the Welcome rig', () => {
   assert.ok(/openStationSetup\(welcomeRig\.id\)/.test(handler));
 });
-test('only when a rig was saved from Welcome', () => {
-  assert.ok(/if \(welcomeRig && typeof window\.openStationSetup === 'function'\)/.test(handler));
+test('only when a rig was added in Welcome, not the existing one a reopened Welcome shows', () => {
+  assert.ok(/if \(welcomeRig && welcomeRigIsNew && typeof window\.openStationSetup === 'function'\)/.test(handler));
+  const add = app.slice(app.indexOf("getElementById('welcome-rig-save-btn').addEventListener('click'"));
+  assert.ok(/welcomeRig = \{ id: 'rig_' \+ Date\.now\(\), name, catTarget \};\n\s*welcomeRigIsNew = true;/.test(add), 'adding a radio marks it new');
+  const reset = app.slice(app.indexOf('// Reset welcome rig state'));
+  assert.ok(/welcomeRig = null;\n\s*welcomeRigIsNew = false;/.test(reset), 'reopening Welcome clears it');
+  const shown = reset.slice(0, reset.indexOf('welcomeDialog.showModal()'));
+  assert.ok(/welcomeRig = activeRig;/.test(shown) && !/welcomeRigIsNew = true/.test(shown), 'the existing radio is not new');
 });
 test('after the settings save and after Welcome closes', () => {
   const save = handler.indexOf('await window.api.saveSettings(saveData)');
