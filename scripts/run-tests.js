@@ -567,6 +567,7 @@ const TESTS = [
   'test/lz3aw-round6-test.js',
   'test/cw-auto-sync-test.js',
   'test/remote-launcher-test.js',
+  'test/launcher-unix-pids-test.js', // Remote Launcher on Linux/macOS: its own tray process and helpers are not "POTACAT is running"
   'test/launcher-cloud-test.js', // restart from anywhere: device token, tunnel policy, the launcher's own connector
   'test/echocat-token-test.js',
   'test/fresh-install-defaults-test.js',
