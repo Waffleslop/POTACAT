@@ -3348,6 +3348,59 @@ dialog {
 }
 .pair-device-manual-value button:hover { background: var(--bg-hover); }
 
+/* Simpler pairing (2026-11-25): QR first, one headline, one state line. */
+.pair-screen-head { display: flex; justify-content: space-between; align-items: baseline; }
+.pair-screen-esc { font-size: 11px; font-weight: normal; color: var(--text-tertiary); }
+.pair-screen-headline { font-size: 18px; font-weight: 600; color: var(--text-primary); text-align: center; margin: 4px 0 10px; }
+#pair-device-dialog .pair-device-qr-card { min-height: 0; }
+#pair-device-dialog .pair-device-qr { width: 240px; height: 240px; }
+.pair-screen-qr-fallback { color: #333; font-size: 14px; text-align: center; max-width: 240px; padding: 20px 0; }
+.pair-screen-state {
+  font-size: 15px;
+  text-align: center;
+  color: var(--text-primary);
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-secondary);
+  margin-bottom: 10px;
+  line-height: 1.4;
+}
+.pair-screen-state[data-phase="found"] { border-color: var(--accent-blue); }
+.pair-screen-state[data-phase="paired"] { border-color: var(--accent-blue); }
+.pair-screen-state[data-phase="connected"] { border-color: var(--accent-green); color: var(--accent-green); font-weight: 600; }
+.pair-screen-error {
+  font-size: 14px;
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--accent-red) 14%, var(--bg-primary));
+  border: 1px solid var(--accent-red);
+  border-radius: 6px;
+  padding: 8px 12px;
+  margin-bottom: 10px;
+}
+.pair-screen-why { margin: 0 0 10px; padding-left: 20px; font-size: 14px; color: var(--text-secondary); line-height: 1.5; }
+.pair-screen-secondary { display: flex; justify-content: center; align-items: center; gap: 8px; margin-bottom: 8px; }
+.pair-screen-dot { color: var(--text-tertiary); }
+.pair-screen-linkbtn {
+  background: none;
+  border: none;
+  padding: 2px 0;
+  font: inherit;
+  font-size: 13px;
+  color: var(--accent-blue);
+  cursor: pointer;
+}
+.pair-screen-linkbtn:hover { text-decoration: underline; }
+.pair-screen-browser { background: var(--bg-secondary); border: 1px solid var(--border-secondary); border-radius: 6px; padding: 8px 10px; margin-bottom: 10px; }
+.pair-screen-browser-text { font-size: 13px; color: var(--text-secondary); line-height: 1.4; margin-bottom: 6px; }
+.pair-screen-browser-row { display: flex; gap: 8px; align-items: center; }
+.pair-screen-browser-row code { flex: 1; min-width: 0; word-break: break-all; font-size: 13px; color: var(--text-primary); }
+.pair-screen-browser-row button { font-size: 12px; padding: 4px 10px; background: var(--bg-tertiary); color: var(--text-primary); border: 1px solid var(--border-secondary); border-radius: 3px; cursor: pointer; }
+.pair-screen-trouble { border-top: 1px solid var(--border-secondary); padding-top: 8px; margin-top: 4px; }
+.pair-screen-trouble > summary { cursor: pointer; font-size: 13px; color: var(--text-secondary); user-select: none; }
+.pair-screen-trouble-body { margin-top: 8px; }
+.pair-screen-legacy-toggle { display: block; margin: 4px 0 10px; font-size: 13px; }
+
 /* Pair Another Desktop dialog (persistent share-link flow, v1.9).
    Mirrors the .share-rig-* visual language for consistency — TTL
    preset chips, URL box with copy actions, pending-links list — so

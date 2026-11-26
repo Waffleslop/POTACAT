@@ -899,6 +899,10 @@ const TESTS = [
   'test/local-ips-test.js', // which interfaces may be advertised as the LAN (VPN overlays dropped, bridged hypervisor kept)
   'test/lz3aw-round13-test.js', // LZ3AW round 13: Live CW button, log time, F-key macros, readable greys, multi-call filter
   'test/pair-request-retry-test.js', // tap-to-pair: a retry with the same requestId collects or re-attaches; a different one is busy
+  'test/pair-confirm-test.js', // two-step pairing: a held pairing commits once, releases once, times out; old bodies never ask
+  'test/pairing-session-test.js', // simpler pairing: the code renews itself, is replaced when used, dies with the screen; six-digit number; LAN rules; mDNS keys
+  'test/pairing-screen-test.js', // simpler pairing: https link with the parameters after "#", one to one with potacat://pair; browser address; state line; ECHOCAT wording
+  'test/pairing-server-test.js', // simpler pairing on a real server: trusted screen token, used/revoked codes, number on tap-to-pair, no pairing without the click
   'test/park-state-test.js', // a park spanning states writes a clean ADIF STATE
   'test/popout-theme-boot-test.js', // pop-outs open in the theme on the first frame; applyPopoutTheme takes a string or { theme, variant }
   'test/profile-dirs-test.js', // slash-callsign profile directories and the nested-dir migration
@@ -943,6 +947,7 @@ const SERIAL = new Set([
   'test/revoke-kick.test.js', // fixed port 17310, a real ECHOCAT server and 300-1500 ms waits for the kick to land
   'test/remote-client-dial-test.js', // fixed port 17320 and a 2.5 s window of dial rounds with backoff
   'test/pair-request-retry-test.js', // fixed port 17330, sockets killed after 150 ms and 300-400 ms waits
+  'test/pairing-server-test.js', // fixed port 17366, a real ECHOCAT server and 300-500 ms waits for the held pair request
   'test/rotorez-test.js', // the brake-delay state machine on real timers (20-450 ms waits)
 ]);
 

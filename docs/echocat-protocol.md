@@ -1125,6 +1125,113 @@ Mobile parsing: treat `cloudHost` as optional and forward-compatible. New
 fields may appear in future builds — existing fields will never change
 meaning.
 
+#### Simpler pairing (added 2026-11-25)
+
+Code: `lib/pairing-screen.js` (link, browser address, state line),
+`lib/pairing-session.js` (code renewal, six-digit number, LAN rules, mDNS
+keys); tests `test/pairing-screen-test.js`, `test/pairing-session-test.js`,
+`test/pairing-server-test.js`.
+
+**The pairing link.** The QR on the Pair my device screen is an https link
+with the parameters after `#`, so a browser never sends them to a server:
+
+```
+https://api.potacat.com/pair.html#token=<t>&name=<n>&host=<wss url>&fp=<fp>[&spki=..][&cloudHost=..][&tsHost=..][&tsIp=..][&tsCertPublic=1][&web=<url>]
+```
+
+- Every key is a `potacat://pair` key above, same name, same value, same
+  URL encoding. `potacat://pair?<same keys>` is the same pairing.
+- `web` is the one page-only key: the best ECHOCAT Web address for this
+  desktop (the Cloud address when the tunnel is live, else the first
+  home-network address `https://<ip>:<port>`, else the Tailscale address).
+  It is never forwarded into `potacat://pair`.
+- Parameters in the query string (`?`) are refused by every parser: a token
+  there reaches web server logs.
+- Unknown keys are dropped. The certificate pin (`fp`, `spki`) always travels
+  in the link and the phone still verifies it.
+- The desktop's own paste box (More > Remote Radios) accepts both forms.
+- Trouble pairing? > "Show the older code" draws the `potacat://pair` QR for
+  an ECHOCAT that does not yet read the https link.
+
+**Code lifetime.** While the screen is open the desktop keeps one fresh
+single-use token on screen. Each token is valid 2 minutes; a new one is
+shown every minute, so at most two are valid at once. A used token is
+replaced at once; a change of certificate fingerprint or an ECHOCAT restart
+replaces it within 5 seconds. Closing the screen revokes every token it
+showed. Tokens from this screen mint a trusted, no-expiry device (it pairs
+the operator's own phone). The older QR window and share links are
+unchanged (5 min / 60 min tokens, persistent links).
+
+A token is consumed by `POST /api/pair` (`redeemPairingToken`), not before.
+A pinned leg (LAN, Tailscale) that fails the certificate check fails in the
+TLS handshake, before the token is sent, so it does not use the token. An
+unpinned leg (Cloud) sends the token first and the phone compares the
+returned `fingerprint` afterwards. Without the two-step pairing below, a
+mismatch there has used the token; the screen still
+shows a fresh code at once, so it never shows a dead one.
+
+**Two-step pairing: `confirm` and `/api/pair-confirm`** (added 2026-11-25,
+`lib/pair-confirm.js`). Opt-in per request; works for pairing-screen tokens,
+the older QR tokens and share links.
+
+1. The phone adds `"confirm": 1` to the `POST /api/pair` body.
+2. The desktop answers 200 with the usual fields plus
+   `"confirmRequired": true, "confirmWithinMs": 60000`. The device is NOT
+   saved yet; the code is taken (another `/api/pair` with it gets 401) but
+   not used up.
+3. The phone compares the returned `fingerprint` with the one from the QR
+   (Cloud leg), then:
+   - `POST /api/pair-confirm` `{ "deviceToken": "<from step 2>", "ok": true }`
+     → 200 `{ "ok": true, "committed": true, "deviceId": "..." }`. The
+     device is saved and the code used up.
+   - `POST /api/pair-confirm` `{ "deviceToken": "...", "ok": false }`
+     → 200 `{ "ok": true, "released": true }`. Nothing saved; the code is
+     valid again until its own expiry (a share link is unused again). A code
+     the pairing screen revoked meanwhile is not brought back.
+   - Unknown, already settled or expired `deviceToken` → 404
+     `{ "error": "unknown_or_expired" }`; a body without a boolean `ok` → 400
+     `{ "error": "invalid_request" }`.
+4. No confirm within `confirmWithinMs` releases it, as `ok: false` would.
+   A WebSocket `auth` with the held `deviceToken` commits it (the confirm POST
+   was lost and the phone went on).
+
+`/api/pair-confirm` is reachable through the Cloud tunnel (its credential is
+the deviceToken just issued) and is rate-limited like `/api/pair`.
+Old phones never send `confirm`: their pairing is one step, as before. A
+phone must only send `confirm` to a desktop that understands it; the desktop
+advertises `pairv` (2 or higher) in mDNS, and an older desktop ignores
+`confirm` and answers without `confirmRequired`, so a phone that sees no
+`confirmRequired` treats the pairing as done (one step).
+
+**mDNS TXT keys** (in addition to `version`, `name`, `fingerprint`, `proto`,
+`addr`, `port`):
+
+| Key | When | Meaning |
+|---|---|---|
+| `pairv` | always, value `2` | This desktop shows the six-digit number on tap-to-pair. |
+| `pair` | value `1`, only while a pairing screen is open AND "Allow tap-to-pair from the local network" is on | Offer this desktop first. It does NOT skip the Approve click. |
+| `sid` | only while signed in to POTACAT Cloud | First 16 hex of SHA-256(`potacat-shack-v1|` + cloudDeviceId + `|` + fp), fp lower-case hex without colons. A phone on the same account computes it from its Cloud shack list and the advert's fingerprint to merge the LAN and Cloud entries. The raw deviceId is never advertised. |
+
+The advert is republished (goodbye, then announce) when `pair` changes.
+
+**Tap-to-pair with the six-digit number.** `POST /api/pair-request` takes an
+optional `pairv` (number). A phone that sends `pairv: 2`:
+
+- sends a random `requestId` of at least 16 characters (else HTTP 400
+  `{ "error": "request_id_too_short" }`);
+- shows the number `pairCode(fp, requestId)`: SHA-256 of
+  `echocat-pair-code-v1|` + fp + `|` + requestId, fp = the fingerprint it
+  pinned from the advert, lower-case hex without colons; the first 4 bytes
+  big-endian, modulo 1,000,000, zero-padded to 6 digits. Test vector:
+  fp `AA:BB:CC`, requestId `0123456789abcdef` gives `769857`.
+
+The desktop's Approve window shows the same number. Pairing still needs the
+operator's Approve click on the desktop, always: an open pairing screen and
+matching numbers never stand in for it. The number tells the operator which
+phone is asking and that it reached this desktop's certificate. Without
+`pairv` the request works as before and the window says the phone shows no
+number. Responses are unchanged.
+
 ## Cross-references
 
 - Server → client send sites: `lib/remote-server.js` — search `_sendTo(`,

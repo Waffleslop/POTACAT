@@ -16,6 +16,8 @@
   const denyBtn = document.getElementById('deny-btn');
   const okEl = document.getElementById('resolved-ok');
   const denyResolvedEl = document.getElementById('resolved-deny');
+  const codeEl = document.getElementById('pair-code');
+  const codeHintEl = document.getElementById('pair-code-hint');
 
   let currentRequestId = null;
   let expiresAtMs = 0;
@@ -58,6 +60,13 @@
       metaEl.textContent = platBits.join(' · ');
       iconEl.textContent = platformIcon(req.devicePlatform);
       if (req.fingerprint) fpEl.textContent = req.fingerprint;
+      // The six-digit number (lib/pairing-session.js pairCode). An older
+      // ECHOCAT shows no number, so say so rather than ask for a match.
+      const code = String(req.code || '');
+      codeEl.textContent = code.length === 6 ? code.slice(0, 3) + ' ' + code.slice(3) : (code || '--- ---');
+      codeHintEl.textContent = req.phoneShowsCode
+        ? 'Approve only if the numbers match.'
+        : 'This phone has an older ECHOCAT that shows no number. Approve only if it is the phone in your hand.';
       actionsEl.classList.remove('hidden');
       okEl.classList.add('hidden');
       denyResolvedEl.classList.add('hidden');
