@@ -768,6 +768,7 @@ const TESTS = [
   'test/tailscale-detect-test.js',
   'test/yaesu-legacy-codec-test.js',
   'test/yaesu-audit-ftx1-test.js', // Yaesu CAT audit: FTX-1 width SH00nn from Table 5, RTTY-U/PSK/DATA-FM-N readback
+  'test/ftx1-preamp-readback-test.js', // the FTX-1 preamp is read back (PA0; -> PA02; = AMP2, PA1;/PA2; on 2 m / 70 cm), so a radio already on AMP2 shows it when a window opens (rev 2508-C p.22)
   'test/icom-network-log-routing-test.js',
   'test/icom-network-voice-test.js',
   'test/jtty-chats-test.js',
