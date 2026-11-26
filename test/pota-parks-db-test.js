@@ -77,5 +77,10 @@ test('search with a foreign prefix searches that country', () => {
   assert.ok(/parksListForRef\(m\[1\] \+ '-0'\)/.test(MAIN.slice(at, at + 600)));
 });
 
+test('isPotaRef: known POTA prefixes only, 4 or 5 digits (#1099)', () => {
+  for (const v of ['US-1234', 'K-1234', 'VE-0001', 'GB-0001', 'FI-0003', ' us-12345 ']) assert.ok(P.isPotaRef(v), v);
+  for (const v of ['NA-001', 'SA-001', 'USA-123', 'QQ-1234', 'US-123', 'US-123456', 'US-TEST', 'US-1234@US-ME', 'KFF-1234', '', null]) assert.ok(!P.isPotaRef(v), String(v));
+});
+
 console.log(`\nPOTA parks DB: ${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);
