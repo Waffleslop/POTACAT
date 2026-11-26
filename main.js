@@ -24424,9 +24424,13 @@ async function jtcatTryAnswerDirectCaller(results, myCall, myGrid) {
   // Decodes calling us: call1 === our call. That excludes CQs and our OWN
   // echoes (whose call1 is the other station, never us — the N3VD echo guard),
   // with no order-blind "contains both calls" ambiguity. Sender (call2) must be
-  // a real callsign we haven't already logged (skip completed dupes; a station
-  // still in jtcatAutoCqWorkedSession from an *abandon* is intentionally NOT
-  // skipped — that's the callback we want to catch).
+  // a real callsign the worked-before policy does not block (jtcatWorkedInfo:
+  // this band and mode, "Call a station again after N days", the park rule),
+  // the same test Hunt's CQ pick and Run use. A bare "anywhere in the log,
+  // ever" test here skipped a station worked days ago on a 1-day setting. A
+  // station still in jtcatAutoCqWorkedSession from an *abandon* is
+  // intentionally NOT skipped — that's the callback we want to catch.
+  const callerBm = jtcatCurrentBandMode(ft8Engine);
   const callers = results
     .map((d) => ({ d, parts: (d.text || '').toUpperCase().replace(/[<>]/g, '').trim().split(/\s+/) }))
     .filter(({ parts }) =>
@@ -24434,7 +24438,7 @@ async function jtcatTryAnswerDirectCaller(results, myCall, myGrid) {
       parts[0] === myCall &&
       parts[1] !== myCall &&
       JtcatParser.looksLikeCallsign(parts[1]) &&
-      !(workedQsos && workedQsos.has(parts[1])) &&
+      !jtcatWorkedInfo(parts[1], callerBm.band, callerBm.mode).blocking &&
       !HuntFilters.isIgnored(parts[1], jtcatIgnoreList()))
     // A caller in our own locked slot can't be worked without moving.
     .filter(({ d }) => JtcatTxSlot.workableUnderLock(jtcatTxSlotLock(), d.slot));
