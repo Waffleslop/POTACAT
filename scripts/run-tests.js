@@ -753,6 +753,7 @@ const TESTS = [
   'test/bands-everywhere-test.js',
   'test/remote-tx-audio-diag-test.js',
   'test/welcome-cloud-signin-test.js',
+  'test/welcome-rig-station-setup-test.js',
   'test/activation-filename-date-test.js',
   'test/remote-rig-test.js',
   'test/remote-rig-power-test.js', // #152: rig power on/off from a remote POTACAT; no Power Off under a TX
