@@ -559,14 +559,17 @@ const TESTS = [
   'test/atu-wizard-test.js',         // Flex ATU Calibration Wizard: plan vs privileges, classifier, run loop on a fake Flex, wiring
   'test/ft8-worker-respawn-test.js',
   'test/rig-setup-notes-test.js',
+  'test/rig-model-connection-test.js', // #1084: picking X6100 keeps a connection that reaches it or selects FLRig, never Serial CAT; other models unchanged
   'test/prop-empty-state-test.js',
   'test/rotctld-client-test.js',
   'test/station-setup-test.js',
+  'test/station-setup-after-welcome-test.js',
   'test/launch-ping-test.js',
   'test/setup-share-test.js',
   'test/lz3aw-round6-test.js',
   'test/cw-auto-sync-test.js',
   'test/remote-launcher-test.js',
+  'test/launcher-unix-pids-test.js', // Remote Launcher on Linux/macOS: its own tray process and helpers are not "POTACAT is running"
   'test/launcher-cloud-test.js', // restart from anywhere: device token, tunnel policy, the launcher's own connector
   'test/echocat-token-test.js',
   'test/fresh-install-defaults-test.js',
@@ -591,6 +594,7 @@ const TESTS = [
   'test/lz3aw-round12-test.js',
   'test/paddle-bounce-test.js',
   'test/web-keyer-late-release-test.js', // #244: a held paddle's late release withdraws an element not yet sounding
+  'test/cw-paddle-memory-test.js', // #244: ECHOCAT Web Paddle Memory setting (on/half/quarter/off); CW hold set before 'ptt'
   'test/web-keyer-heard-release-test.js', // #244: a late release never takes back an element that has started to sound
   'test/cw-playout-lateness-test.js', // #244 diagnostic: paddle playout edge lateness, one line per over
   'test/cw-sidetone-air-agree-test.js', // #244: ECHOCAT Web's sidetone and the air agree; an element is committed once it sounds
@@ -754,6 +758,7 @@ const TESTS = [
   'test/bands-everywhere-test.js',
   'test/remote-tx-audio-diag-test.js',
   'test/welcome-cloud-signin-test.js',
+  'test/welcome-pair-text-test.js',
   'test/welcome-rig-station-setup-test.js',
   'test/activation-filename-date-test.js',
   'test/remote-rig-test.js',
@@ -786,6 +791,7 @@ const TESTS = [
   'test/jtcat-auto-compact-test.js', // #857: the JTCAT window picks a compact layout by itself when short (hysteresis; an explicit Full/Compact wins; never resizes the window)
   'test/jtcat-own-tx-offset-test.js', // #503: our own TX rows show the offset that slot went out on
   'test/jtcat-chimes-test.js', // optional JTCAT chimes: a station calls me, TX stopped by itself (off by default, one sound engine, sound only)
+  'test/jtcat-run-callers-test.js', // Run answers the stations that called during a QSO before calling CQ again (W5XY 2026-11-25)
   'test/net-reminder-row-test.js', // a Net Reminders row always names its net (#284)
   'test/freq-dots-test.js', // every frequency an operator reads is written the VFO way, 14.074.00 (Casey 2026-11-11)
   'test/settings-contrast-test.js', // Settings meets the contrast rule in every theme (VARA button in She's On Frequency); rendered: scripts/settings-contrast-audit.js

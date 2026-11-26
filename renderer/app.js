@@ -3073,28 +3073,27 @@ if (rigModelSelect) rigModelSelect.addEventListener('change', async () => {
   }
   if (!brand) return;
   const groupOf = rigModelData.find((g) => g.brand === brand);
-  const noCat = !!(groupOf && Array.isArray(groupOf.noCat) && groupOf.noCat.includes(modelName));
-  const hamlib = groupOf && groupOf.hamlib && groupOf.hamlib[modelName];
-  if (hamlib) {
-    // Xiegu G90: Other Rig (Hamlib) with its Hamlib model and baud rate.
+  // The connection the model needs (lib/rig-model-connection.js): No CAT,
+  // Other Rig (Hamlib) for the G90, FLRig for the X6100 (#1084), a shared
+  // connection kept, else by brand.
+  const conn = window.RigModelConnection.connectionForModel({ model: modelName, group: groupOf, current: getSelectedRadioType() });
+  if (!conn) return;
+  if (conn.hamlib) {
     setRadioType('hamlib');
     hamlibFieldsLoaded = true;
-    await populateHamlibFields({ rigId: hamlib.rigId, baudRate: hamlib.baudRate });
+    await populateHamlibFields({ rigId: conn.hamlib.rigId, baudRate: conn.hamlib.baudRate });
     updateRadioSubPanels();
     if (!setRigName.value.trim()) setRigName.value = modelName;
     return;
   }
-  // A radio reached through another program (flrig, DXLab Commander, a remote
-  // rigctld) keeps that connection: the model picked here only supplies bands
-  // and limits.
-  const shared = ['flrig', 'dxlab-commander', 'rigctldnet'].includes(getSelectedRadioType());
-  if (noCat) setRadioType('nocat');           // Pebble HF and friends: nothing to connect to
-  else if (shared) { /* keep flrig / DXLab Commander / rigctld Network */ }
-  else if (brand === 'Yaesu' && getSelectedRadioType() === 'yaesu-lan') { /* keep the SCU-LAN10 connection */ }
-  else if (groupOf && Array.isArray(groupOf.tcpcat) && groupOf.tcpcat.includes(modelName)) setRadioType('tcpcat'); // Zeus's CAT port (#185)
-  else if (brand === 'FlexRadio') setRadioType('flex');
-  else if (brand === 'Icom') setRadioType('icom');
-  else setRadioType('serialcat');
+  if (!conn.keep) {
+    setRadioType(conn.type);
+    if (conn.type === 'flrig') {
+      // flrig's own defaults when the fields are empty.
+      if (setFlrigHost && !setFlrigHost.value.trim()) setFlrigHost.value = '127.0.0.1';
+      if (setFlrigPort && !setFlrigPort.value) setFlrigPort.value = 12345;
+    }
+  }
   updateRadioSubPanels();
   if (!setRigName.value.trim()) setRigName.value = modelName;
 });
@@ -28804,6 +28803,9 @@ document.getElementById('welcome-start').addEventListener('click', async () => {
   if (welcomeRig && welcomeRigIsNew && typeof window.openStationSetup === 'function') {
     window.openStationSetup(welcomeRig.id);
   }
+  // First run is over: the Station Setup launch card was held back until now
+  // (it stays away when the checklist above was just opened).
+  if (typeof window.stationSetupAfterWelcome === 'function') window.stationSetupAfterWelcome();
 });
 
 // ─── Welcome → Connect to a Remote Shack (v1.9) ──────────────────────
@@ -28888,8 +28890,8 @@ async function _welcomeRemoteTapPair(btn) {
     if (r && r.error) {
       _welcomeRemoteStatus('Could not pair: ' + r.error, 'error');
     } else if (r && r.ok) {
-      _welcomeRemoteStatus('Paired with ' + (r.name || target.name) + '. Click Save to finish setup.', 'success');
-      // Activate immediately so the user lands in remote mode on Save.
+      _welcomeRemoteStatus('Paired with ' + (r.name || target.name) + '. Press Get Started to finish setup.', 'success');
+      // Activate immediately so the user lands in remote mode on Get Started.
       try { await window.api.connectionTargetsActivate(r.targetId); } catch {}
     }
   } catch (err) {
@@ -28972,7 +28974,7 @@ async function _welcomeRemoteShowCloudShacks() {
           } else if (p && p.ok) {
             // Activate immediately and report success.
             try { await window.api.connectionTargetsActivate(p.targetId); } catch {}
-            _welcomeRemoteStatus('✓ Paired with ' + (p.name || sname) + ' via ' + (p.leg || '?') + '. Click Save to finish setup.', 'success');
+            _welcomeRemoteStatus('✓ Paired with ' + (p.name || sname) + ' via ' + (p.leg || '?') + '. Press Get Started to finish setup.', 'success');
           }
         } catch (err) {
           _welcomeRemoteStatus('Pair failed: ' + (err.message || err), 'error');
@@ -29097,7 +29099,7 @@ function _welcomeRemoteClose() {
       const dlg = document.getElementById('welcome-dialog');
       if (!_welcomeRemoteResultPending || !dlg || !dlg.open) return;
       if (r && r.ok) {
-        _welcomeRemoteStatus('Paired with ' + (r.name || 'shack') + ' via ' + (r.leg || 'unknown') + '. Click Save to finish.', 'success');
+        _welcomeRemoteStatus('Paired with ' + (r.name || 'shack') + ' via ' + (r.leg || 'unknown') + '. Press Get Started to finish.', 'success');
       } else if (r) {
         _welcomeRemoteStatus('Pair link failed: ' + (r.error || 'unknown'), 'error');
       }

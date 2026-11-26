@@ -62,7 +62,11 @@ test('the editor saves a yaesu-lan target, and only for the three radios the spe
   assert.ok(app.includes("const YAESU_LAN_MODELS = ['FTDX10', 'FT-710', 'FTDX101D', 'FTDX101MP'];"));
   assert.deepStrictEqual(P.MODELS.slice().sort(), ['FT-710', 'FTDX10', 'FTDX101D', 'FTDX101MP'].sort(), 'the same four as the protocol module');
   assert.ok(/catTarget\.type === 'yaesu-lan' && !YAESU_LAN_MODELS\.includes\(model \|\| ''\)/.test(app), 'save refuses another model');
-  assert.ok(/brand === 'Yaesu' && getSelectedRadioType\(\) === 'yaesu-lan'/.test(app), 'picking a Yaesu model keeps the LAN connection');
+  // #1084: the Radio Model rule lives in lib/rig-model-connection.js.
+  assert.ok(/RigModelConnection\.connectionForModel\(/.test(app), 'the editor asks the rule');
+  const ft710 = require('../lib/rig-models').getModelList().find((g) => g.models.includes('FT-710'));
+  assert.deepStrictEqual(require('../lib/rig-model-connection').connectionForModel({ model: 'FT-710', group: ft710, current: 'yaesu-lan' }),
+    { type: 'yaesu-lan', keep: true }, 'picking a Yaesu model keeps the LAN connection');
   const { getModel } = require('../lib/rig-models');
   for (const name of P.MODELS) assert.ok(getModel(name) && getModel(name).brand === 'Yaesu', name + ' exists in rig-models');
 });

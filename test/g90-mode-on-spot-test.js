@@ -124,6 +124,42 @@ const civ = (modeByte) => [0xFE, 0xFE, 0xA4, 0xE0, 0x06, modeByte, 0xFD];
     assert.ok(!codec._pending.some((e) => e.kind === 'raw'), 'the raw entry is answered');
   });
 
+  // 1.14.8 field report (macOS, bundled Hamlib 4.7.2): rigctld closed the link
+  // ~10 ms after every raw frame, and the reconnect's mode re-send sent it again.
+  await test('a link that drops right after the raw frame turns it off: the next mode set is Hamlib M alone', async () => {
+    const { r, codec, writes } = rig(G90, 'USB');
+    const transport = r._transport;
+    codec.setMode('CW', 14035000);
+    assert.deepStrictEqual(rawBytes(writes[0]), civ(0x03));
+    transport.emit('close');
+    writes.length = 0;
+    codec.setMode('USB', 14235000);
+    assert.deepStrictEqual(writes, ['M USB 0\n']);
+  });
+
+  await test('after that drop the reconnect mode re-send carries no raw frame, so there is no connect-drop loop', async () => {
+    const { r, writes } = rig(G90, 'USB');
+    r.tune(14035000, 'CW', {});
+    await sleep(700);
+    r._transport.emit('close');
+    writes.length = 0;
+    r.connected = true;
+    r._enforceRequestedMode(); // what the reconnect runs, 1.5 s later
+    await sleep(1700);
+    assert.ok(writes.includes('M CW 0\n') && writes.every((l) => !/^w /.test(l)), JSON.stringify(writes));
+  });
+
+  await test('a link that drops long after the raw frame keeps it (the #916 mode fix stays on)', async () => {
+    const { r, codec, writes } = rig(G90, 'USB');
+    codec.setMode('CW', 14035000);
+    codec._civModeSentMs = Date.now() - 60000;
+    r._transport.emit('close');
+    writes.length = 0;
+    codec.setMode('USB', 14235000);
+    assert.deepStrictEqual(rawBytes(writes[0]), civ(0x01));
+    assert.strictEqual(writes[1], 'M USB 0\n');
+  });
+
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);
 })();

@@ -32,6 +32,7 @@
   <!-- jtty-macros-js -->
   <!-- cw-remote-expand-js -->
   <!-- cw-sidetone-commit-js -->
+  <!-- cw-paddle-memory-js -->
   <!-- cw-keyer-timing-diag-js -->
   <!-- pass-wording-js -->
   <!-- wsjtx-mode-notice-js -->
@@ -786,6 +787,18 @@
             </select>
           </div>
         </div>
+        <div class="so-row">
+          <label class="so-label" for="so-paddle-memory">Paddle Memory</label>
+          <div class="so-controls">
+            <select class="so-select" id="so-paddle-memory">
+              <option value="on">On (standard)</option>
+              <option value="half">Second half only</option>
+              <option value="quarter">Last quarter only</option>
+              <option value="off">Off</option>
+            </select>
+          </div>
+        </div>
+        <div id="paddle-memory-help" style="margin:-2px 0 8px;font-size:11px;line-height:1.4;color:var(--text-dim);">Hear your sidetone late and get extra dots or dashes? Choose Second half only, Last quarter only, or Off: the keyer then forgets a quick touch on a paddle early in a dot or dash.</div>
         <!-- Inline help — populated at runtime with platform-specific setup
              notes (desktop / Android / iOS) and a Web MIDI availability
              warning when the browser doesn't support navigator.requestMIDIAccess. -->

@@ -88,5 +88,13 @@ test('Propagation: main prunes a day-old PSKReporter report instead of keeping i
   assert.ok(/if \(pskrMapSpots\.length !== before\) sendPskrMapSpots\(\);/.test(body), 'a prune must re-push, or the clients keep the pruned rows');
 });
 
+test('More menu: the directory item is called "Directory" (Casey 2026-11-25)', () => {
+  const m = html.match(/<button class="view-menu-item" id="view-directory-btn"[^>]*>([^<]*)<\/button>/);
+  assert.ok(m, 'the More menu directory button exists');
+  assert.strictEqual(m[1], 'Directory');
+  assert.ok(!/SWL\/HF Net Directory/.test(html), 'the old name is gone from the window, settings help included');
+  assert.ok(html.includes('(More &gt; Directory)'), 'the settings help points at the new name');
+});
+
 console.log(`\nDesktop UX: ${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);
