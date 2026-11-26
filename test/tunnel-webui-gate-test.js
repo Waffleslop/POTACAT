@@ -144,6 +144,9 @@ check(T(null, '192.168.1.1') === false, 'no headers object → falls through to 
     });
     const done = (v) => { try { ws.close(); } catch {} resolve(v); };
     const t = setTimeout(() => done({ mode, seen }), 2500);
+    // Every client says hello first; with no token required the hello is
+    // what signs it in (2026-11-26, test/kick-after-hello-test.js).
+    ws.on('open', () => ws.send(JSON.stringify({ type: 'hello', protocolVersion: 1, clientVersion: 'test', clientPlatform: 'web' })));
     ws.on('message', (raw) => {
       let m; try { m = JSON.parse(raw.toString()); } catch { return; }
       seen.push(m.type);
@@ -155,7 +158,7 @@ check(T(null, '192.168.1.1') === false, 'no headers object → falls through to 
 
   const lanWs = await wsAuthMode();
   check(lanWs.mode === 'none', 'LAN WS: auth-mode is "none" (tunnel on, no token)');
-  check(lanWs.seen.includes('auth-ok'), 'LAN WS: auto-authenticated (received auth-ok)');
+  check(lanWs.seen.includes('auth-ok'), 'LAN WS: signed in on its hello with no token (received auth-ok)');
 
   const tunnelWs = await wsAuthMode({ 'cf-ray': '9z9z-EWR', 'cf-connecting-ip': '203.0.113.7' });
   check(tunnelWs.mode === 'token', 'tunnel WS (cf-ray): auth-mode is "token" (must authenticate)');

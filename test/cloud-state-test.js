@@ -41,8 +41,15 @@ test('remote-server: cloud-state goes to owner devices on change only, never to 
 
 test('auth-ok carries cloud at every owner admission, and the hello lists cloud-state', () => {
   const src = read('lib/remote-server.js');
-  // The two owner admissions; the Guest Pass auth-ok carries none.
-  assert.strictEqual((src.match(/type: 'auth-ok', cloud: this\._cloudFor\(ws\)/g) || []).length, 2);
+  // One owner auth-ok (_ownerAuthOk), used by both owner admissions (a
+  // credential: _finishWsAuth; no token required, on the hello:
+  // _admitLocalTrust); the Guest Pass auth-ok carries none.
+  assert.strictEqual((src.match(/type: 'auth-ok', cloud: this\._cloudFor\(ws\)/g) || []).length, 1);
+  for (const fn of ['_finishWsAuth(ws, req) {', '_admitLocalTrust(ws, req) {']) {
+    const from = src.slice(src.indexOf(fn));
+    const body = from.slice(0, from.search(/\r?\n  \}\r?\n/)); // CRLF main checkout, LF worktree
+    assert.ok(body.includes('this._sendTo(ws, this._ownerAuthOk(ws));'), fn + ' sends the owner auth-ok');
+  }
   assert.ok(src.includes("'cloud-state',"));
 });
 
