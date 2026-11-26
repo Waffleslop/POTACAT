@@ -163,8 +163,10 @@ const withRig = (firstRun) => ({
   });
 
   // A shorter first run (2026-11-26): the flow ends on Get Started (remote
-  // shack panel), on "Here" or "No radio yet", or with Esc after the station
-  // step. Every way out closes the Welcome, then runs the hook.
+  // shack panel), on "No radio yet", on the radio check's Done or Skip (part
+  // 2, renderer/first-run-radio.js, through welcomeCloseFlow), or with Esc
+  // after the station step. Every way out closes the Welcome, then runs the
+  // hook; after the radio check the hook finds the steps already seen.
   await t('app.js runs the hook after the Welcome closes, on every way out of the first run', () => {
     const app = readSrc(path.join(__dirname, '..', 'renderer', 'app.js')).replace(/\r\n/g, '\n');
     const fi = app.indexOf('function welcomeCloseFlow() {');
@@ -177,8 +179,11 @@ const withRig = (firstRun) => ({
     assert.ok(gs > 0 && /welcomeCloseFlow\(\);\n\}\);/.test(app.slice(gs, gs + 400)), 'Get Started ends the flow');
     const ci = app.indexOf('async function welcomeChooseWhere(');
     const choose = app.slice(ci, app.indexOf('\n}\n', ci));
-    assert.ok(/welcomeCloseFlow\(\);/.test(choose), 'Here and No radio yet end the flow');
-    assert.ok(choose.indexOf('welcomeCloseFlow()') < choose.indexOf('openSettingsDialog('), "#1076's checklist (via the rig editor) comes after the close");
+    assert.ok(/welcomeCloseFlow\(\);/.test(choose), 'No radio yet ends the flow');
+    assert.ok(!/openSettingsDialog\(/.test(choose), 'Here stays in the Welcome (which radio, then the radio check)');
+    const radio = readSrc(path.join(__dirname, '..', 'renderer', 'first-run-radio.js'));
+    assert.ok(/closeFlow: \(\) => welcomeCloseFlow\(\),/.test(app), 'the radio check ends the flow the same way');
+    assert.ok(/flow\(\)\.closeFlow\(\);/.test(radio.slice(radio.indexOf('async function endCheck('))), 'Done and Skip close through it');
     const cl = app.indexOf("welcomeDialog.addEventListener('close', () => {");
     assert.ok(cl > 0 && /if \(_welcomeStationSaved && typeof window\.stationSetupAfterWelcome === 'function'\) window\.stationSetupAfterWelcome\(\);/.test(app.slice(cl, cl + 300)),
       'Esc after the station step runs it too; before it (firstRun still set) it does not');

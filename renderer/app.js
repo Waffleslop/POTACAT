@@ -28561,13 +28561,12 @@ const welcomeCallsignInput = document.getElementById('welcome-callsign');
 
 
 // --- Welcome: a shorter first run (lib/first-run.js) ---
-// Two screens inside the Welcome dialog, one decision each. Station: callsign,
-// grid square, look and the usage statistics choice; its Next is the save that
-// turns firstRun false. Where: where the radio is. "Here" opens the Settings
-// rig editor (the full one: model picker, Icom Network, Yaesu LAN, K4, Flex
-// Discover), whose save opens Station Setup for a new radio, as it always has.
-// "Another computer" shows the remote shack panel below. "No radio yet" closes
-// the flow on the spots table.
+// One decision per screen inside the Welcome dialog. Station: callsign, grid
+// square, look and the usage statistics choice; its Next is the save that
+// turns firstRun false. Where: where the radio is. "Here" goes on to Which
+// radio and the Radio check (renderer/first-run-radio.js, which gets this
+// flow's hooks as window.WelcomeFlow). "Another computer" shows the remote
+// shack panel below. "No radio yet" closes the flow on the spots table.
 let _firstRunState = null; // window.FirstRun.normalize(settings.firstRunState)
 let _welcomeStep = 'station';
 let _welcomeStationSaved = false; // this open got past the station step
@@ -28578,13 +28577,29 @@ function welcomeShowStep(step) {
   _welcomeStep = step;
   for (const el of welcomeDialog.querySelectorAll('.welcome-screen')) el.classList.toggle('hidden', el.dataset.step !== step);
   document.getElementById('welcome-step-label').textContent = window.FirstRun.stepLabel(step);
+  if (window.FirstRunRadio) window.FirstRunRadio.show(step);
   if (step === 'where') {
     welcomeShowRemotePanel(false); // opens only on its own choice; Back closes it again
     document.getElementById('welcome-where-here').focus();
-  } else {
+  } else if (step === 'station') {
     welcomeCallsignInput.focus();
   }
 }
+// Back and forward between the later steps: remembered, so closing there
+// resumes there (from the getting-started card, never at launch).
+async function welcomeGoTo(step) {
+  const r = window.FirstRun.atStep(_firstRunState, step);
+  _firstRunState = r.state;
+  await window.api.saveSettings(r.patch);
+  welcomeShowStep(step);
+}
+window.WelcomeFlow = {
+  getState: () => _firstRunState,
+  setState: (st) => { _firstRunState = st; },
+  showStep: (step) => welcomeShowStep(step),
+  goTo: (step) => welcomeGoTo(step),
+  closeFlow: () => welcomeCloseFlow(),
+};
 function welcomeShowRemotePanel(show) {
   document.getElementById('welcome-remote-panel').classList.toggle('hidden', !show);
   document.getElementById('welcome-start').classList.toggle('hidden', !show);
@@ -28643,16 +28658,10 @@ async function welcomeChooseWhere(choice) {
   _firstRunState = r.state;
   await window.api.saveSettings(r.patch);
   if (r.action === 'remote-panel') { welcomeShowRemotePanel(true); return; }
+  // "Here": Which radio, then the Radio check, inside this dialog. Saving the
+  // radio there does not open Station Setup; the check shows its two steps.
+  if (r.action === 'radio-step') { welcomeShowStep('radio'); return; }
   welcomeCloseFlow();
-  if (r.action === 'rig-editor') {
-    // Until the "which radio" step is built, "Here" opens the Settings rig
-    // editor. A first radio opens straight into Add; an install that already
-    // has radios sees its list first. Saving a new radio there opens its
-    // Station Setup checklist (saveRigEditor), the same as from Settings.
-    const s = await window.api.getSettings();
-    await openSettingsDialog('radio');
-    if (!(s.rigs || []).length) openRigEditor('add');
-  }
 }
 for (const b of welcomeDialog.querySelectorAll('.welcome-choice')) {
   b.addEventListener('click', () => welcomeChooseWhere(b.dataset.where));

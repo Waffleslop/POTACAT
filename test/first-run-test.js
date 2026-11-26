@@ -37,7 +37,7 @@ t('F11 opens the station step on any install', () => {
 });
 
 t('Next and Back walk the steps; Back from the first step goes nowhere', () => {
-  assert.deepStrictEqual(FR.STEPS.slice(0, 2), ['station', 'where']);
+  assert.deepStrictEqual(FR.STEPS.slice(0, 4), ['station', 'where', 'radio', 'check']);
   assert.strictEqual(FR.nextStep('station'), 'where');
   assert.strictEqual(FR.backStep('where'), 'station');
   assert.strictEqual(FR.backStep('station'), null);
@@ -106,10 +106,10 @@ t('F11 on an existing install shows the saved values; unset statistics stay unti
   assert.strictEqual(FR.stationFields({ enableTelemetry: true }).telemetry, true);
 });
 
-t('where is your radio: here opens the rig editor, another computer the pairing panel, no radio the spots', () => {
+t('where is your radio: here goes on to which radio, another computer the pairing panel, no radio the spots', () => {
   const here = FR.chooseWhere({ step: 'where' }, 'here');
-  assert.strictEqual(here.action, 'rig-editor');
-  assert.strictEqual(here.state.step, 'done');
+  assert.strictEqual(here.action, 'radio-step');
+  assert.strictEqual(here.state.step, 'radio', 'a close here resumes at which radio');
   assert.strictEqual(here.state.where, 'here');
   const remote = FR.chooseWhere({ step: 'where' }, 'remote');
   assert.strictEqual(remote.action, 'remote-panel');
@@ -120,11 +120,41 @@ t('where is your radio: here opens the rig editor, another computer the pairing 
   assert.ok(FR.chooseWhere({}, 'elsewhere').error);
 });
 
+t('which radio, then the radio check: saved radio, Back, and how the check ended', () => {
+  const r = FR.saveRadio({ step: 'radio', where: 'here' }, 'rig_123');
+  assert.strictEqual(r.state.step, 'check');
+  assert.strictEqual(r.state.rigId, 'rig_123', 'Back and Save again changes this radio, not a new one');
+  assert.deepStrictEqual(r.patch, { firstRunState: r.state });
+  assert.strictEqual(FR.backStep('check'), 'radio');
+  assert.strictEqual(FR.backStep('radio'), 'where');
+  assert.strictEqual(FR.atStep(r.state, 'radio').state.step, 'radio');
+  assert.strictEqual(FR.atStep(r.state, 'station').state.step, 'check', 'the station step is reopened only by F11');
+  assert.strictEqual(FR.resumeStep({ firstRun: false, firstRunState: r.state }), 'check');
+  const p = FR.finishCheck(r.state, 'passed', 1000);
+  assert.strictEqual(p.state.step, 'done');
+  assert.deepStrictEqual(p.state.radioCheck, { result: 'passed', at: 1000 });
+  assert.strictEqual(p.state.milestones.radioCheck, 1000, 'a pass is the radioCheck marker');
+  assert.strictEqual(FR.milestoneDone({ firstRunState: p.state }, 'radioCheck'), true);
+  assert.strictEqual(FR.radioCheckResult({ firstRunState: p.state }), 'passed');
+  for (const res of ['failed', 'skipped']) {
+    const q = FR.finishCheck(r.state, res, 2000);
+    assert.strictEqual(q.state.step, 'done');
+    assert.strictEqual(q.state.radioCheck.result, res, res + ' is kept for the card');
+    assert.ok(!q.state.milestones.radioCheck, res + ' is not a pass');
+    assert.strictEqual(FR.radioCheckResult({ firstRunState: JSON.parse(JSON.stringify(q.state)) }), res);
+  }
+  assert.ok(FR.finishCheck(r.state, 'maybe').error);
+  assert.strictEqual(FR.radioCheckResult({}), null, 'never run');
+  // None of these touch firstRun or the statistics choice.
+  for (const x of [r.patch, p.patch, FR.atStep(r.state, 'radio').patch]) assert.deepStrictEqual(Object.keys(x), ['firstRunState']);
+});
+
 t('damaged or old state reads as a fresh start, keeping only good markers', () => {
-  assert.deepStrictEqual(FR.normalize(null), { step: 'station', where: null, draft: null, milestones: {} });
-  assert.deepStrictEqual(FR.normalize('x'), { step: 'station', where: null, draft: null, milestones: {} });
-  const n = FR.normalize({ step: 'later', where: 'moon', milestones: { firstQso: 5, cloudOn: 'no', other: 9 } });
-  assert.deepStrictEqual(n, { step: 'station', where: null, draft: null, milestones: { firstQso: 5 } });
+  const fresh = { step: 'station', where: null, draft: null, milestones: {}, rigId: null, radioCheck: null };
+  assert.deepStrictEqual(FR.normalize(null), fresh);
+  assert.deepStrictEqual(FR.normalize('x'), fresh);
+  const n = FR.normalize({ step: 'later', where: 'moon', milestones: { firstQso: 5, cloudOn: 'no', other: 9 }, rigId: 7, radioCheck: { result: 'great' } });
+  assert.deepStrictEqual(n, { ...fresh, milestones: { firstQso: 5 } });
 });
 
 t('milestones: recorded once, kept local, and the existing phone flag counts', () => {

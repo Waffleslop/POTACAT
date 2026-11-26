@@ -569,6 +569,7 @@ const TESTS = [
   'test/rig-record-test.js', // a shorter first run, part 2: a radio saved in the first run has the Settings editor's record and connection-target shape
   'test/rig-quick-setup-test.js', // which radio: model search, connection/baud/CI-V from the model, the port offered from names only, saved as the radio in use
   'test/radio-check-test.js', // radio check: Station Setup's control and hearing steps inline, read-and-listen actions only, the sound input offered
+  'test/first-run-radio-test.js', // which radio and radio check screens: no port opened to look for a radio, Flex search only listens, nothing transmits
   'test/grid-macros-test.js', // macros with no grid set: re-spot drops 'in {QTH}', PSK $GRID and CW {MYGRID} refused, SSTV drops 'Grid {GRID}'
   'test/setup-share-test.js',
   'test/lz3aw-round6-test.js',
