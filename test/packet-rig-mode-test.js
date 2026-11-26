@@ -401,7 +401,10 @@ test('save writes rig.packetMode for fm / fmdata and removes it for Automatic; o
   assert.ok(loadExpr, 'the load expression');
   const load = new Function('rig', 'return ' + loadExpr[1]);
   assert.ok(app.includes("if (rigPacketMode) rig.packetMode = rigPacketMode; else delete rig.packetMode;"), 'edit an existing rig');
-  assert.ok(app.includes("...(rigPacketMode ? { packetMode: rigPacketMode } : {}),"), 'a new rig');
+  // A new rig: the record is built by lib/rig-record.js (shared with the first run).
+  assert.ok(app.includes("packetMode: rigPacketMode,"), 'a new rig passes it on');
+  assert.deepStrictEqual(require('../lib/rig-record').newRigRecord({ packetMode: 'fm' }).packetMode, 'fm', 'a new rig stores it');
+  assert.ok(!('packetMode' in require('../lib/rig-record').newRigRecord({ packetMode: '' })), 'absent = Automatic');
   for (const choice of P.CHOICES) {
     const stored = save({ value: choice });
     const rig = JSON.parse(JSON.stringify(stored ? { id: 'r', packetMode: stored } : { id: 'r' })); // settings.json and back

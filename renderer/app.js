@@ -4333,7 +4333,9 @@ async function saveRigEditor() {
       { const rb = rigBandsToSave(); if (rb) rig.bands = rb; else delete rig.bands; }
     }
   } else {
-    const newRig = {
+    // One record shape for a new radio, shared with the first run's "which
+    // radio" step (lib/rig-record.js; test/rig-record-test.js).
+    const newRig = window.RigRecord.newRigRecord({
       id: 'rig_' + Date.now(),
       name,
       model,
@@ -4353,22 +4355,22 @@ async function saveRigEditor() {
       externalAtuWatts: rigExternalAtuWatts,
       externalAtuSeconds: rigExternalAtuSeconds,
       atuKeepOn: rigAtuKeepOn,
-      ...(rigVoiceAsData ? { voiceAsData: true } : {}),
-      ...(rigAudioJack === 'mic' ? { audioJack: 'mic' } : {}),
-      ...(typeof rigVoiceDataSwitch === 'boolean' ? { voiceDataSwitch: rigVoiceDataSwitch } : {}),
-      ...(rigPowerOffStored !== undefined ? { allowPowerOffNoWake: rigPowerOffStored } : {}),
-      ...(rigAmpDriveW > 0 ? { ampDriveLimitW: rigAmpDriveW } : {}),
-      ...(rigTxAudioInput ? { txAudioInput: rigTxAudioInput } : {}),
-      ...(rigTxLeftOnly ? { txChannel: 'left' } : {}),
-      ...(rigIcomUsbDataModOff ? { icomUsbDataModOff: true } : {}),
-      ...(rigLanVoiceInSsb ? { lanVoiceInSsb: true } : {}),
-      ...(rigPacketMode ? { packetMode: rigPacketMode } : {}),
-      ...(rigCwSideband ? { cwSideband: rigCwSideband } : {}),
+      voiceAsData: rigVoiceAsData,
+      audioJack: rigAudioJack,
+      voiceDataSwitch: rigVoiceDataSwitch,
+      allowPowerOffNoWake: rigPowerOffStored,
+      ampDriveLimitW: rigAmpDriveW,
+      txAudioInput: rigTxAudioInput,
+      txLeftOnly: rigTxLeftOnly,
+      icomUsbDataModOff: rigIcomUsbDataModOff,
+      lanVoiceInSsb: rigLanVoiceInSsb,
+      packetMode: rigPacketMode,
+      cwSideband: rigCwSideband,
       flexBandAntennaMap,
-      ...(rigSdrScope ? { sdrScope: rigSdrScope } : {}),
+      sdrScope: rigSdrScope,
       setupDone: [...rigSetupDone],
-      ...(rigBandsToSave() ? { bands: rigBandsToSave() } : {}),
-    };
+      bands: rigBandsToSave(),
+    });
     currentRigs.push(newRig);
     _stationSetupOpenAfterSave = newRig.id;
   }
