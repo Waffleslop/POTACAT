@@ -156,9 +156,15 @@ check(T(null, '192.168.1.1') === false, 'no headers object → falls through to 
     ws.on('error', () => { clearTimeout(t); done({ mode, seen, error: true }); });
   });
 
-  const lanWs = await wsAuthMode();
-  check(lanWs.mode === 'none', 'LAN WS: auth-mode is "none" (tunnel on, no token)');
-  check(lanWs.seen.includes('auth-ok'), 'LAN WS: signed in on its hello with no token (received auth-ok)');
+  // The served page in a browser on this PC sends this server's Origin. A
+  // loopback socket without it (a script, another program, a local proxy)
+  // must present a token while the tunnel is on (2026-11-26,
+  // test/narrow-local-trust-test.js). Real LAN sources are untouched.
+  const lanWs = await wsAuthMode({ origin: `https://127.0.0.1:${port2}` });
+  check(lanWs.mode === 'none', 'local browser WS (our Origin): auth-mode is "none" (tunnel on, no token)');
+  check(lanWs.seen.includes('auth-ok'), 'local browser WS: signed in on its hello with no token (received auth-ok)');
+  const nativeWs = await wsAuthMode();
+  check(nativeWs.mode === 'token' && !nativeWs.seen.includes('auth-ok'), 'native loopback WS (no Origin), tunnel on: token required');
 
   const tunnelWs = await wsAuthMode({ 'cf-ray': '9z9z-EWR', 'cf-connecting-ip': '203.0.113.7' });
   check(tunnelWs.mode === 'token', 'tunnel WS (cf-ray): auth-mode is "token" (must authenticate)');

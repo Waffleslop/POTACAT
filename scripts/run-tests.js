@@ -920,6 +920,7 @@ const TESTS = [
   'test/remote-tune-echo-test.js', // a tune is echoed to the client at once, not on the next CAT poll
   'test/revoke-kick.test.js', // revoking a device closes its live session (4004), spares others and blocks re-auth
   'test/kick-after-hello-test.js', // ECHOCAT: a no-token socket displaces no one until its hello and is closed by the auth timer; kicked.byName, tunnel byHost
+  'test/narrow-local-trust-test.js', // ECHOCAT: a *.potacat.com Host is tunnel traffic; with the Cloud Tunnel on, loopback needs a token unless it is our page in a local browser
   'test/kicked-by-test.js', // kicked.byName (guest call, paired name, "this computer") and byHost (cf-connecting-ip over the tunnel)
   'test/rig-audio-mirror-test.js', // an empty remoteAudioInput follows the rig's CODEC, never the built-in mic
   'test/rotorez-test.js', // Rotor-EZ wire format, reply parser and the brake-delay queue (fake serial port)
@@ -955,6 +956,7 @@ const SERIAL = new Set([
   // Added 2026-11-23 when they joined TESTS; not yet seen to fail, placed here up front:
   'test/revoke-kick.test.js', // fixed port 17310, a real ECHOCAT server and 300-1500 ms waits for the kick to land
   'test/kick-after-hello-test.js', // fixed ports 17491-17493, a real ECHOCAT server and 200-1500 ms waits
+  'test/narrow-local-trust-test.js', // fixed ports 17661-17663, a real ECHOCAT server and 300-900 ms waits
   'test/remote-client-dial-test.js', // fixed port 17320 and a 2.5 s window of dial rounds with backoff
   'test/pair-request-retry-test.js', // fixed port 17330, sockets killed after 150 ms and 300-400 ms waits
   'test/pairing-server-test.js', // fixed port 17366, a real ECHOCAT server and 300-500 ms waits for the held pair request

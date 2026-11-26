@@ -113,9 +113,33 @@ Checked at the WebSocket upgrade, before the server `hello`
   ranges (10/8, 172.16/12, 192.168/16), loopback, link-local and Tailscale
   (100.64/10) are not public. Over the Cloud Tunnel nothing changes.
 
-LAN, Tailscale and loopback clients keep the local-trust behaviour of a fresh
-install: `auth-mode: none` and `auth-ok` with no token (after the client's
-`hello`, see above), unless the operator requires one.
+- **A Cloud Tunnel name in `Host`** (`potacat.com` or `*.potacat.com`,
+  added 2026-11-26): the request is tunnel traffic with or without
+  Cloudflare's `cf-ray` / `cf-connecting-ip` headers (cloudflared keeps the
+  Host the visitor dialled). With the tunnel on it gets the tunnel gate
+  (`token`, or `cookie` for a signed-in browser); with the tunnel off, the
+  public-address rule above. The Remote Launcher uses the same rule.
+- **Loopback with the Cloud Tunnel on** (added 2026-11-26): a socket from
+  this PC (127.0.0.0/8, ::1) that is not tunnel traffic gets `auth-mode:
+  none` only when it is ECHOCAT Web served by this server in a browser on
+  this PC: `Host` is `localhost`, `127.x.x.x` or `[::1]`, the request carries
+  no proxy header (`Forwarded`, `X-Forwarded-For`, `X-Forwarded-Host`,
+  `X-Real-IP`, `Via`, or a `Tailscale-*` identity header), and the upgrade
+  carries this server's `Origin`. Anything else from loopback (a script,
+  `scripts/echocat-cli.js`, another program, a local reverse proxy such as
+  ngrok, nginx or tailscale serve pointed at the ECHOCAT port) gets `auth-mode:
+  token` and must authenticate with the ECHOCAT token or a paired-device
+  token, as with "require token" on. The page is served with
+  `window.__authMode` from the same rule (a page load sends no Origin, so the
+  HTTP side checks `Host` and the proxy headers). `/api/ptt` through such a
+  proxy needs `?token=` and is refused when no ECHOCAT token is set; a
+  program on this PC calling `localhost` (Stream Deck) is served as before.
+  With the tunnel off, loopback is unchanged.
+
+LAN and Tailscale clients, and loopback clients while the Cloud Tunnel is off,
+keep the local-trust behaviour of a fresh install: `auth-mode: none` and
+`auth-ok` with no token (after the client's `hello`, see above), unless the
+operator requires one.
 
 ## Message catalog
 

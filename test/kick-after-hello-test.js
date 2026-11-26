@@ -137,10 +137,12 @@ function startServer(port, token, opts) {
     rs.setPairedDevices([{ id: 'd2', name: 'Casey\'s iPad', token: 'tok-ipad-2222' }]);
     rs.setTunnelExposed(true);
     await sleep(600);
-    const local = await open(17493);
-    hello(local, 'desktop-test');
+    // With the tunnel on, local trust is for our own page in a browser on
+    // this PC, which sends this server's Origin (test/narrow-local-trust-test.js).
+    const local = await open(17493, { origin: 'https://127.0.0.1:17493' });
+    hello(local, 'web');
     await sleep(400);
-    check(local.has('auth-ok'), 'a LAN-trust device is connected');
+    check(local.has('auth-ok'), 'a local-trust device (ECHOCAT Web on this PC) is connected');
 
     const tunnel = await open(17493, { 'cf-ray': '8f00test-IAD', 'cf-connecting-ip': '203.0.113.7' });
     hello(tunnel, 'ios');
