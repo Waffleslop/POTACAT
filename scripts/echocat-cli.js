@@ -8,6 +8,7 @@
 // Usage:
 //   node scripts/echocat-cli.js wss://192.168.1.42:7300                 # no auth
 //   node scripts/echocat-cli.js wss://192.168.1.42:7300 --token=XXX     # token mode
+//   (on the shack PC itself with the Cloud Tunnel on, --token is needed too)
 //   node scripts/echocat-cli.js wss://host:7300 --watch                 # stay connected, dump events
 //   node scripts/echocat-cli.js wss://host:7300 --insecure              # skip TLS verification (LAN cert)
 //
@@ -47,7 +48,9 @@ Usage:
   node scripts/echocat-cli.js <ws-url> [options]
 
 Options:
-  --token=XXX     auth token (when server requires one)
+  --token=XXX     auth token (when server requires one; also on the shack PC
+                  itself while its Cloud Tunnel is on: the ECHOCAT token or a
+                  paired-device token)
   --watch         stay connected and print incoming messages until Ctrl-C
   --insecure      skip TLS cert verification (for self-signed LAN certs)
   --timeout=MS    give up after this many ms when not in --watch (default 8000)
