@@ -226,5 +226,60 @@ test('#961 wiring: the guest flag reaches main, the start records it, every pass
   assert.ok(/const stopped = passLeaseStopTransmitters\('paused'\);\s*passEnforcement\.pause\(\)/.test(main), 'the owner taking the radio back runs it');
 });
 
+test('#1066: the scanner\'s own tune, echoed by the radio during tune(), never ends the run as a hand tune', () => {
+  let t = 0;
+  const timers = [];
+  const states = [];
+  let runRef = null;
+  const run = S.createScanRun({
+    getSpots: () => V.spots,
+    ctx: () => ({}),
+    tune: (sp) => { runRef.noteDial(parseFloat(sp.frequency)); return true; },
+    dialKhz: () => 0,
+    txActive: () => false,
+    onState: (on, why) => states.push([on, why]),
+    log: () => {},
+    now: () => t,
+    setTimer: (fn, ms) => { timers.push({ fn, at: t + ms }); return timers.length; },
+    clearTimer: (h) => { if (timers[h - 1]) timers[h - 1].fn = null; },
+  });
+  runRef = run;
+  const advance = (ms) => { t += ms; for (const tm of timers.slice()) if (tm.fn && tm.at <= t) { const f = tm.fn; tm.fn = null; f(); } };
+  run.start({ filters: { sort: 'freq' }, dwellSec: 7 });
+  assert.doesNotThrow(() => { advance(7000); advance(7000); advance(7000); });
+  assert.strictEqual(run.scanning, true, 'still scanning after its own tunes');
+  assert.ok(!states.some((s) => s[1] === 'manual-qsy'));
+});
+
+test('#1066: a run ended from inside tune() is not written to afterwards', () => {
+  let runRef = null;
+  const timers = [];
+  const run = S.createScanRun({
+    getSpots: () => V.spots,
+    ctx: () => ({}),
+    tune: () => { runRef.stop('stop'); return true; },
+    dialKhz: () => 0,
+    txActive: () => false,
+    onState: () => {},
+    log: () => {},
+    now: () => 0,
+    setTimer: (fn) => { timers.push(fn); return timers.length; },
+    clearTimer: () => {},
+  });
+  runRef = run;
+  assert.doesNotThrow(() => run.start({ filters: { sort: 'freq' } }));
+  assert.strictEqual(run.scanning, false);
+  assert.strictEqual(timers.length, 0, 'no step is scheduled for a dead run');
+});
+
+test('#1066: a real hand tune after the settle still ends the run as manual-qsy', () => {
+  const h = harness(V.spots);
+  h.run.start({ filters: { sort: 'freq' }, dwellSec: 7 });
+  h.advance(7000);
+  h.advance(3000);
+  h.run.noteDial(3500);
+  assert.deepStrictEqual(h.states[h.states.length - 1], [false, 'manual-qsy']);
+});
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
