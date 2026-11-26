@@ -139,5 +139,30 @@ t('milestones: recorded once, kept local, and the existing phone flag counts', (
   assert.deepStrictEqual(FR.MILESTONES, ['radioCheck', 'cloudOn', 'phoneConnected', 'firstQso', 'logImported']);
 });
 
+t('nothing fills a blank grid with FN20jb: defaults, the Settings save, the maps', () => {
+  const path = require('path');
+  const { readSrc } = require('./_src');
+  const R = (f) => readSrc(path.join(__dirname, '..', f)).replace(/\r\n/g, '\n');
+  const main = R('main.js'), app = R('renderer/app.js'), prop = R('renderer/prop-popout.js');
+  const fresh = (main.match(/return \{ catTarget: null,[^\n]*enableTelemetry: true[^\n]*\};/) || [''])[0];
+  assert.ok(fresh && !/grid:/.test(fresh), 'fresh-install defaults carry no grid');
+  for (const [name, src] of [['main.js', main], ['app.js', app], ['prop-popout.js', prop]]) {
+    assert.ok(!/grid[^\n]*\|\| '(FN20jb|FN20)'/.test(src), name + ' substitutes a made-up grid');
+  }
+  assert.ok(/grid: setGrid\.value\.trim\(\),/.test(app), 'the Settings save keeps a blank grid blank');
+  assert.ok(/if \(!pos\) \{ mainHomePos = null; return; \}/.test(app), 'no home marker without a grid');
+  assert.ok(/if \(!pos\) \{ rbnHomePos = null; return; \}/.test(app), 'no RBN home without a grid');
+});
+
+t('firstRunState is machine-scoped and is not a secret', () => {
+  const path = require('path');
+  const { readSrc } = require('./_src');
+  const main = readSrc(path.join(__dirname, '..', 'main.js'));
+  const g = main.slice(main.indexOf('const GLOBAL_KEYS = new Set(['), main.indexOf(']);', main.indexOf('const GLOBAL_KEYS = new Set([')));
+  assert.ok(/'firstRunState',/.test(g));
+  const secrets = readSrc(path.join(__dirname, '..', 'lib', 'settings-secrets.js'));
+  assert.ok(!/firstRunState/.test(secrets));
+});
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

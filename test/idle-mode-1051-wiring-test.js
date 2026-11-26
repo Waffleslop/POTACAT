@@ -31,19 +31,15 @@ function fnBody(src, start) {
 
 // ── the default ──────────────────────────────────────────────────────────────
 
-test('welcome screen: the Idle Mode box is not ticked in the HTML (new installs get it off)', () => {
-  const m = html.match(/<input[^>]*id="welcome-enable-auto-sstv"[^>]*>/);
-  assert.ok(m, 'the box exists');
-  assert.ok(!/\bchecked\b/.test(m[0]), m[0]);
-});
-
-test('welcome screen reopened: ticked only when the saved setting is true (unset stays off, as it runs)', () => {
-  assert.ok(/getElementById\('welcome-enable-auto-sstv'\)\.checked = s\.enableAutoSstv === true;/.test(app));
-  assert.ok(!/welcome-enable-auto-sstv'\)\.checked = s\.enableAutoSstv !== false/.test(app));
+// A shorter first run (2026-11-26): Idle Mode is no longer on the Welcome, so
+// nothing there can turn it on; it stays off until set in Settings.
+test('the Welcome carries no Idle Mode box, so it can turn it on for no one', () => {
+  assert.ok(!/id="welcome-enable-auto-sstv"/.test(html));
+  assert.ok(!/welcome-enable-auto-sstv/.test(app));
 });
 
 test('a fresh install writes Idle Mode off; nothing at startup turns it on for anyone', () => {
-  const fresh = main.match(/return \{ grid: 'FN20jb', catTarget: null,[^\n]*\};/);
+  const fresh = main.match(/return \{ catTarget: null,[^\n]*\};/);
   assert.ok(fresh, 'fresh-install defaults');
   assert.ok(/enableAutoSstv: false/.test(fresh[0]), fresh[0]);
   assert.ok(!/settings\.enableAutoSstv = true/.test(main), 'no migration flips anyone on');

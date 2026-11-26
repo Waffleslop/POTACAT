@@ -1238,8 +1238,9 @@ function loadSettingsFromDisk() {
     // by day, POTACAT Dark by night (lib/app-theme.js DEFAULTS). Idle receive
     // mode is WSPR (Casey 2026-09-25). Written here, not as read-side
     // fallbacks, so installs that never chose keep what they were looking at:
-    // the theme migration maps them once, idle stays SSTV.
-    return { grid: 'FN20jb', catTarget: null, enablePota: true, enableSota: false, enableRbn: true, enablePskrMap: true, firstRun: true, watchlist: 'K3SBP', ...AppTheme.DEFAULTS, idleRxMode: 'wspr', enableAutoSstv: false, enableTelemetry: true, jtcatFakeIt: FakeIt.NEW_SETUP_DEFAULT };
+    // the theme migration maps them once, idle stays SSTV. No grid square: the
+    // first run asks, and blank stays unset (it used to be FN20jb, a made-up home).
+    return { catTarget: null, enablePota: true, enableSota: false, enableRbn: true, enablePskrMap: true, firstRun: true, watchlist: 'K3SBP', ...AppTheme.DEFAULTS, idleRxMode: 'wspr', enableAutoSstv: false, enableTelemetry: true, jtcatFakeIt: FakeIt.NEW_SETUP_DEFAULT };
   }
   // Migration path: legacy settings.json (no activeProfile) gets migrated
   // when it has a myCallsign. We do this lazily on first save rather than

@@ -69,7 +69,7 @@ function _applyPopoutTheme(payload) {
     myCallsign = (s.myCallsign || '').toUpperCase();
     distUnit = s.distUnit || 'mi';
     distHeader.textContent = distUnit === 'km' ? 'Dist (km)' : 'Dist (mi)';
-    var grid = s.grid || 'FN20jb';
+    var grid = s.grid || ''; // no grid square: no home marker, no arcs from a made-up place
     homePos = gridToLatLon(grid);
     if (homePos && map) {
       map.setView([homePos.lat, homePos.lon], 3);
