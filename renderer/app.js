@@ -3073,28 +3073,27 @@ if (rigModelSelect) rigModelSelect.addEventListener('change', async () => {
   }
   if (!brand) return;
   const groupOf = rigModelData.find((g) => g.brand === brand);
-  const noCat = !!(groupOf && Array.isArray(groupOf.noCat) && groupOf.noCat.includes(modelName));
-  const hamlib = groupOf && groupOf.hamlib && groupOf.hamlib[modelName];
-  if (hamlib) {
-    // Xiegu G90: Other Rig (Hamlib) with its Hamlib model and baud rate.
+  // The connection the model needs (lib/rig-model-connection.js): No CAT,
+  // Other Rig (Hamlib) for the G90, FLRig for the X6100 (#1084), a shared
+  // connection kept, else by brand.
+  const conn = window.RigModelConnection.connectionForModel({ model: modelName, group: groupOf, current: getSelectedRadioType() });
+  if (!conn) return;
+  if (conn.hamlib) {
     setRadioType('hamlib');
     hamlibFieldsLoaded = true;
-    await populateHamlibFields({ rigId: hamlib.rigId, baudRate: hamlib.baudRate });
+    await populateHamlibFields({ rigId: conn.hamlib.rigId, baudRate: conn.hamlib.baudRate });
     updateRadioSubPanels();
     if (!setRigName.value.trim()) setRigName.value = modelName;
     return;
   }
-  // A radio reached through another program (flrig, DXLab Commander, a remote
-  // rigctld) keeps that connection: the model picked here only supplies bands
-  // and limits.
-  const shared = ['flrig', 'dxlab-commander', 'rigctldnet'].includes(getSelectedRadioType());
-  if (noCat) setRadioType('nocat');           // Pebble HF and friends: nothing to connect to
-  else if (shared) { /* keep flrig / DXLab Commander / rigctld Network */ }
-  else if (brand === 'Yaesu' && getSelectedRadioType() === 'yaesu-lan') { /* keep the SCU-LAN10 connection */ }
-  else if (groupOf && Array.isArray(groupOf.tcpcat) && groupOf.tcpcat.includes(modelName)) setRadioType('tcpcat'); // Zeus's CAT port (#185)
-  else if (brand === 'FlexRadio') setRadioType('flex');
-  else if (brand === 'Icom') setRadioType('icom');
-  else setRadioType('serialcat');
+  if (!conn.keep) {
+    setRadioType(conn.type);
+    if (conn.type === 'flrig') {
+      // flrig's own defaults when the fields are empty.
+      if (setFlrigHost && !setFlrigHost.value.trim()) setFlrigHost.value = '127.0.0.1';
+      if (setFlrigPort && !setFlrigPort.value) setFlrigPort.value = 12345;
+    }
+  }
   updateRadioSubPanels();
   if (!setRigName.value.trim()) setRigName.value = modelName;
 });

@@ -30,8 +30,13 @@ test('the model list carries the Hamlib setup for the picker', () => {
 
 test('the rig editor picks Other Rig (Hamlib) and fills model + baud', () => {
   const app = readSrc(path.join(__dirname, '..', 'renderer', 'app.js'));
-  assert.ok(/const hamlib = groupOf && groupOf\.hamlib && groupOf\.hamlib\[modelName\];/.test(app));
-  assert.ok(/setRadioType\('hamlib'\);\s*hamlibFieldsLoaded = true;\s*await populateHamlibFields\(\{ rigId: hamlib\.rigId, baudRate: hamlib\.baudRate \}\);/.test(app));
+  // #1084: the Radio Model rule lives in lib/rig-model-connection.js.
+  const g = require('../lib/rig-models').getModelList().find((x) => x.models.includes('G90'));
+  const conn = require('../lib/rig-model-connection').connectionForModel({ model: 'G90', group: g, current: 'serialcat' });
+  assert.strictEqual(conn.type, 'hamlib');
+  assert.deepStrictEqual(conn.hamlib, { rigId: 3088, baudRate: 19200 });
+  assert.ok(/const conn = window\.RigModelConnection\.connectionForModel\(/.test(app));
+  assert.ok(/setRadioType\('hamlib'\);\s*hamlibFieldsLoaded = true;\s*await populateHamlibFields\(\{ rigId: conn\.hamlib\.rigId, baudRate: conn\.hamlib\.baudRate \}\);/.test(app));
 });
 
 console.log(`\nG90 Hamlib model: ${passed} passed, ${failed} failed`);

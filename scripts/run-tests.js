@@ -558,6 +558,7 @@ const TESTS = [
   'test/atu-wizard-test.js',         // Flex ATU Calibration Wizard: plan vs privileges, classifier, run loop on a fake Flex, wiring
   'test/ft8-worker-respawn-test.js',
   'test/rig-setup-notes-test.js',
+  'test/rig-model-connection-test.js', // #1084: picking X6100 keeps a connection that reaches it or selects FLRig, never Serial CAT; other models unchanged
   'test/prop-empty-state-test.js',
   'test/rotctld-client-test.js',
   'test/station-setup-test.js',
