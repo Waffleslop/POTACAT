@@ -245,7 +245,7 @@ check('#329: the ECHOCAT tune handler asks routeWithoutRig before refusing', () 
   const route = h.indexOf('ListenSource.routeWithoutRig(hz, rigReachNow(), listenSdrState(), !!sdrCandidateFor(hz))');
   assert.ok(route > 0, 'routeWithoutRig in the handler');
   assert.ok(route < h.indexOf("type: 'tune-blocked'"), 'before any refusal');
-  assert.ok(/if \(route === 'sdr'\) \{ listenSdrTake\(hz, mode, why\); return; \}/.test(h));
+  assert.ok(/if \(route === 'sdr'\) \{ listenSdrTakeWithoutRig\(hz, mode, why\); return; \}/.test(h)); // #1100: the take shared with the desktop
   assert.ok(/if \(route === 'connect' && listenSdrConnectFor\(hz, mode, why\)\) return;/.test(h));
   const arb = main.slice(main.indexOf('function listenSdrArbitrate('), main.indexOf('function listenSdrResume('));
   assert.ok(/listenSdrTake\(hz, mode, 'is outside the radio\\'s range'\)/.test(arb), 'the desktop path uses the same helper');

@@ -40,8 +40,9 @@ test('a radio that does not answer shows dashes, not its last dial', () => {
   assert.ok(/radioLinkUp: vfoRadioLinkUp\(\),/.test(main), 'vfo-radio-state carries the link');
   assert.ok(/function vfoRadioLinkUp\(\) \{\s*if \(isRemoteMode\(\) \|\| sdrHoldsDial\(\)\) return true;[^\n]*\n\s*return !_catLinkUpKnown \|\| _catLinkUpLast;/.test(main));
   assert.ok(/_catLinkUpLast = linkUp;\s*stationSetupNotify\(\);\s*sendVfoState\(\);/.test(main), 'a link change reaches the window at once');
-  assert.ok(/renderFreqDisplay\(radioLinkUp \? currentFreqHz : 0\);/.test(html));
-  assert.ok(/modeBadge\.textContent = !radioLinkUp \? '---'/.test(html));
+  // #1100: except while only the SDR is tuned ("Radio off: SDR only"): then the SDR's dial shows.
+  assert.ok(/renderFreqDisplay\(radioLinkUp \|\| sdrOnly \? currentFreqHz : 0\);/.test(html));
+  assert.ok(/modeBadge\.textContent = !\(radioLinkUp \|\| sdrOnly\) \? '---'/.test(html));
 });
 test('Power On / Off say what is under way until the link shows it, or that it has not after 20 s', () => {
   assert.ok(/id="vfo-power-status"[^>]*aria-live="polite"/.test(html));
