@@ -18389,14 +18389,14 @@ function _popoutThemePayload() {
 }
 
 // The look picker (#376, lib/look-picker.js): Settings > Display shows both
-// modes' themes, the Welcome screen's "Pick your look" the mode in force with
-// a live preview, and the Settings sidebar's Appearance menu switches Light,
+// modes' themes, the Welcome screen's "Pick your look" the mode in force in
+// one compact row (it must fit without scrolling), and the Settings sidebar's Appearance menu switches Light,
 // Dark or System. Every change paints every window and saves at once.
 function renderLookPickers() {
   if (!window.LookPicker || !window.AppTheme) return;
   const sd = _systemDark();
   window.LookPicker.render(document.getElementById('set-look-picker'), { state: _themeState, systemDark: sd, scope: 'all', onChange: applyLookChoice });
-  window.LookPicker.render(document.getElementById('welcome-look-picker'), { state: _themeState, systemDark: sd, scope: 'active', preview: true, onChange: applyLookChoice });
+  window.LookPicker.render(document.getElementById('welcome-look-picker'), { state: _themeState, systemDark: sd, scope: 'active', compact: true, onChange: applyLookChoice });
   const q = document.getElementById('quick-appearance');
   if (q) q.value = _themeState.appearance;
 }

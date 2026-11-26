@@ -262,7 +262,7 @@ test('Settings, the sidebar and Welcome: the look picker replaces the old dropdo
   assert.ok(/if \(settings\.themeNotice && window\.AppTheme\) \{\n\s+showLogToast\(window\.AppTheme\.migrationNotice\(settings\.themeNotice\), \{ sticky: true, onClick: \(\) => openSettingsDialog\('display'\) \}\);\n\s+window\.api\.saveSettings\(\{ themeNotice: null \}\);/.test(app), 'the message shows once');
 });
 
-test('Welcome: "Pick your look" comes right after the callsign, with the mode in force and a live preview', () => {
+test('Welcome: "Pick your look" comes right after the callsign, the mode in force, in the compact picker', () => {
   const html = read('renderer/index.html');
   const w0 = html.indexOf('<dialog id="welcome-dialog"');
   const w = html.slice(w0, html.indexOf('</dialog>', w0));
@@ -275,7 +275,12 @@ test('Welcome: "Pick your look" comes right after the callsign, with the mode in
   assert.ok(w.includes('The same six looks as the ECHOCAT app. Change any time in Settings &gt; Display.'));
   assert.ok(!/Idle Mode/.test(w), 'a shorter first run: callsign, grid, look and the statistics choice only');
   const app = read('renderer/app.js');
-  assert.ok(/window\.LookPicker\.render\(document\.getElementById\('welcome-look-picker'\), \{ state: _themeState, systemDark: sd, scope: 'active', preview: true, onChange: applyLookChoice \}\);/.test(app));
+  // Compact (one row of small swatches, no live preview) so step 1 fits the dialog without scrolling.
+  assert.ok(/window\.LookPicker\.render\(document\.getElementById\('welcome-look-picker'\), \{ state: _themeState, systemDark: sd, scope: 'active', compact: true, onChange: applyLookChoice \}\);/.test(app));
+  // The compact picker is the Welcome's only: Settings > Display and ECHOCAT Web keep the full cards.
+  assert.strictEqual(app.split('compact: true').length - 1, 1, 'compact only in the Welcome render');
+  assert.ok(/LookPicker\.render\(document\.getElementById\('set-look-picker'\), \{ state: _themeState, systemDark: sd, scope: 'all', onChange: applyLookChoice \}\);/.test(app), 'Settings > Display: the full picker');
+  assert.ok(!/compact/.test(read('renderer/remote.js').slice(read('renderer/remote.js').indexOf("LookPicker.render(document.getElementById('so-look-picker')")).slice(0, 400)), 'ECHOCAT Web: the full picker');
 });
 
 test('ECHOCAT Web: the six looks, Light / Dark / System, inlined resolver, picker and tokens', () => {

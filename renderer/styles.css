@@ -5589,7 +5589,7 @@ a.settings-echocat-badge-link:hover {
 }
 
 #welcome-dialog {
-  max-width: 460px;
+  max-width: 520px; /* wide enough that step 1 fits a 700 px window without scrolling */
   width: calc(100vw - 32px);
 }
 
