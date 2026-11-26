@@ -28804,6 +28804,9 @@ document.getElementById('welcome-start').addEventListener('click', async () => {
   if (welcomeRig && welcomeRigIsNew && typeof window.openStationSetup === 'function') {
     window.openStationSetup(welcomeRig.id);
   }
+  // First run is over: the Station Setup launch card was held back until now
+  // (it stays away when the checklist above was just opened).
+  if (typeof window.stationSetupAfterWelcome === 'function') window.stationSetupAfterWelcome();
 });
 
 // ─── Welcome → Connect to a Remote Shack (v1.9) ──────────────────────
