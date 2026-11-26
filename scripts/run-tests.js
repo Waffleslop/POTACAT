@@ -568,6 +568,7 @@ const TESTS = [
   'test/launch-ping-test.js',
   'test/first-run-test.js', // a shorter first run: steps, resume, Esc keeps entries, firstRun turns false at the station step, local markers
   'test/grid-macros-test.js', // macros with no grid set: re-spot drops 'in {QTH}', PSK $GRID and CW {MYGRID} refused, SSTV drops 'Grid {GRID}'
+  'test/banner-station-geo-test.js', // #1097: a call-area grid shows as '(estimate)' with no distance/heading; never logged; QRZ help: free account, no grids
   'test/setup-share-test.js',
   'test/lz3aw-round6-test.js',
   'test/cw-auto-sync-test.js',

@@ -9959,6 +9959,9 @@ main.banner-logger-active #event-progress-overlay {
   white-space: nowrap;
   text-align: right;
 }
+/* A call-area / country-centre grid: muted, so it does not read as the
+   station's real grid (#1097). The text itself says "(estimate)". */
+.bl-name-geo.bl-name-geo-estimate { color: var(--text-tertiary); font-style: italic; }
 /* Placeholder parity with the old <input> — shown until any content lands. */
 .bl-name.bl-name-empty::before {
   content: attr(data-placeholder);

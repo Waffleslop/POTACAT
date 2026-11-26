@@ -4978,36 +4978,36 @@ function _blRenderStationInfo(info, callsign, ctyGeo) {
     gridSource = 'cty';
   }
 
-  // Casey's spec example was 4-char grid ("FM20"). The 6-char form is
-  // still computed for accuracy but trimmed for display — the extra
-  // sub-square is noise in the banner.
-  const gridShort = theirGrid ? theirGrid.slice(0, 4) : '';
-
-  let distTxt = '';
-  let hdgTxt = '';
+  // Distance and heading from the operator's own grid. What is shown, and
+  // how an estimate is marked, is lib/banner-station-geo.js (#1097).
+  let distance = null;
+  let heading = null;
+  const useMiles = (typeof distUnit === 'string' ? distUnit : 'mi') !== 'km';
   if (them) {
     const myGrid = (typeof grid === 'string' && grid) || '';
     const me = myGrid ? gridToLatLonLocal(myGrid) : null;
     if (me) {
-      const useMiles = (typeof distUnit === 'string' ? distUnit : 'mi') !== 'km';
-      const d = Math.round(_blHaversine(me.lat, me.lon, them.lat, them.lon, useMiles));
-      distTxt = d.toLocaleString() + (useMiles ? 'mi' : 'km');
-      const b = Math.round(_blBearingDeg(me.lat, me.lon, them.lat, them.lon));
-      hdgTxt = b + '°';
+      distance = _blHaversine(me.lat, me.lon, them.lat, them.lon, useMiles);
+      heading = _blBearingDeg(me.lat, me.lon, them.lat, them.lon);
     }
   }
+  const readout = BannerStationGeo.stationGeoReadout({
+    grid: theirGrid,
+    source: gridSource,
+    estimate: gridSource === 'cty' ? {
+      kind: ctyGeo.source === 'callarea' ? 'callarea' : 'entity',
+      area: ctyGeo.area, region: ctyGeo.region, entity: ctyGeo.name,
+    } : null,
+    distance, heading, unit: useMiles ? 'mi' : 'km',
+  });
 
   // Name on the left (ellipsized when long); grid/distance/heading joined
-  // on the right, pinned against the freq field.
-  _blSetNameDisplay(name, [gridShort, distTxt, hdgTxt].filter(Boolean).join(' | '));
+  // on the right, pinned against the freq field. An estimate is muted.
+  _blSetNameDisplay(name, readout.text);
+  if (blNameGeo) blNameGeo.classList.toggle('bl-name-geo-estimate', readout.estimate);
 
-  // Source hint on hover — keeps the "where did this grid come from?"
-  // affordance from the old chips without burning visible real estate.
-  blName.title = gridSource === 'spot'
-    ? 'Grid derived from spot location (park / cty.dat centroid)'
-    : gridSource === 'qrz' ? 'Grid from QRZ profile'
-    : gridSource === 'cty' ? 'Grid estimated from callsign (DXCC entity / call-area centroid)'
-    : '';
+  // Source on hover; for an estimate, what it is and why.
+  blName.title = readout.title;
 }
 
 blCallsign.addEventListener('input', () => {

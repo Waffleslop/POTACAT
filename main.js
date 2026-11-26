@@ -60109,7 +60109,7 @@ function cloudShackNotice(text, kind) {
     const entity = resolveCallsign(String(callsign).trim(), ctyDb);
     if (!entity) return null;
     const areaCoords = getCallAreaCoords(callsign, entity.name);
-    if (areaCoords) return { lat: areaCoords.lat, lon: areaCoords.lon, name: entity.name, source: 'callarea' };
+    if (areaCoords) return { lat: areaCoords.lat, lon: areaCoords.lon, name: entity.name, source: 'callarea', region: areaCoords.region, area: (String(callsign).match(/\d/) || [''])[0] };
     if (entity.lat != null && entity.lon != null) return { lat: entity.lat, lon: entity.lon, name: entity.name, source: 'cty' };
     return null;
   });
