@@ -31,6 +31,9 @@ const TESTS = [
   'test/icom-baud-list-test.js', // #238: every baud select offers 4800-115200; Icom path accepts each
   'test/cat-port-presence-test.js',
   'test/cat-connect-gate-test.js',
+  'test/cat-client-transmit-test.js', // CatClient (Flex TCP, K4 network, serial): TX;/RX;/TX1;/TX0; per family, ATU tune pair, sendCwText, CW key lines, reconnect never keyed; documented gaps pinned
+  'test/winkeyer-test.js', // WinKeyer host bytes (open/close, text chunks, clear, speed, PTT lead-in/tail, mode) and status busy/idle/XOFF, over a fake port
+  'test/jtcat-tx-arbiter-test.js', // JtcatManager requestTx/releaseTx/scheduleTx (which slice transmits) + modem audio lane client key/endOver/cancelEnd
   'test/wsjtx-mode-notice-test.js',
   'test/guest-pass-listen-test.js',
   'test/guest-pass-state-541-test.js', // #541: a valid pass is never shown as revoked; Cloud answers, auth-fail codes, retry
