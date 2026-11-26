@@ -216,7 +216,11 @@ function appPidsFromProcessTable(rows, myPid) {
  */
 function unixAppPidsFromPs(text, myPid, isMac) {
   const nameRe = isMac
-    ? /(?:^|\/)MacOS\/POTACAT(?: -|$)|^POTACAT(?: -|$)/
+    // Anchored to the executable at the start of the command line, with
+    // space-free path segments: an editor, debugger or shell with the binary
+    // as an ARGUMENT is never the app (and is never killed). A path with a
+    // space fails the safe way: the app is not found, nothing is killed.
+    ? /^(?:\/[^\s\/]+)*\/MacOS\/POTACAT(?:\s|$)|^POTACAT(?:\s|$)/
     : /^(?:\S*\/)?(?:potacat\.bin|potacat|POTACAT)(?:\s|$)/;
   const rows = [];
   for (const line of String(text || '').split(/\r?\n/)) {

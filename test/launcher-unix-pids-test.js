@@ -50,4 +50,16 @@ const macWithApp = macLauncherOnly + `
 `;
 assert.deepStrictEqual(unixAppPidsFromPs(macWithApp, ME, true), [4000], 'mac: only the app main (helpers are not matched by name, as before)');
 
+// The binary as an ARGUMENT of another program is never the app (it would be killed by Stop).
+const macOthers = `
+  500   300 /usr/bin/vim /Applications/POTACAT.app/Contents/MacOS/POTACAT
+  501   300 lldb /Applications/POTACAT.app/Contents/MacOS/POTACAT
+  502   300 codesign -dv /Applications/POTACAT.app/Contents/MacOS/POTACAT
+  503   300 /bin/sh -c /Applications/POTACAT.app/Contents/MacOS/POTACAT --headless
+  504   300 tail -f /Users/op/Library/Application Support/POTACAT/session.log
+`;
+assert.deepStrictEqual(unixAppPidsFromPs(macOthers, ME, true), [], 'mac: editors, debuggers and shells naming the binary are not the app');
+// The app started with a plain argument (a potacat:// link) is still the app.
+assert.deepStrictEqual(unixAppPidsFromPs(macLauncherOnly + ' 4100   300 /Applications/POTACAT.app/Contents/MacOS/POTACAT potacat://pair\n', ME, true), [4100], 'mac: the app with a link argument is found');
+
 console.log('launcher-unix-pids-test: ok');
