@@ -204,6 +204,16 @@ test('CI-V note names the model default the way the radio menu shows it', () => 
   assert.ok(n && /at B2h$/.test(n.title), n && n.title);
 });
 
+test('CI-V note: the IC-7100 path starts with SET on the controller, other Icoms keep MENU > SET', () => {
+  const n7100 = note(resolve({ model: 'IC-7100', radioType: 'icom' }), 'icom-civ-address');
+  assert.ok(n7100, 'IC-7100 gets the CI-V note');
+  assert.strictEqual(n7100.steps[0], 'On the radio: push SET on the controller → Connectors → CI-V → CI-V Address → 88h (the IC-7100 default).');
+  assert.ok(!/MENU/.test(n7100.steps[0]), n7100.steps[0]);
+  const n7610 = note(resolve({ model: 'IC-7610', radioType: 'icom' }), 'icom-civ-address');
+  assert.strictEqual(n7610.steps[0], 'On the radio: MENU → SET → Connectors → CI-V → CI-V Address → 98h (the IC-7610 default).');
+  for (const r of resolve({ model: 'IC-7100', radioType: 'icom' })) for (const st of r.steps) assert.ok(!/\{\w+\}/.test(st), st);
+});
+
 console.log('\n=== scoping ===');
 test('platform notes only on their platform', () => {
   assert.ok(note(resolve({ model: 'FT-710', radioType: 'serialcat', platform: 'linux' }), 'linux-dialout'));
