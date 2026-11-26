@@ -55,7 +55,11 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
         id: 'ct_badpin', name: 'Wrong-pin shack', deviceToken: 'X',
         lanHost: 'wss://127.0.0.1:' + rs._port,
         fingerprint: 'AB'.repeat(32),       // deliberately wrong pin
-        tsHost: '127.0.0.1',                // second leg: nothing on :7300
+        // Second leg: a name that never resolves (RFC 2606 .invalid). Never
+        // 127.0.0.1 or localhost: the Tailscale leg always dials :7300, which on
+        // a shack PC is the operator's live POTACAT, and that dial took over
+        // their phone's session on every suite run (2026-11-26).
+        tsHost: 'no-shack.invalid',
       },
       { clientVersion: 'test', clientPlatform: 'desktop-test' }
     );
@@ -71,6 +75,20 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
     check(logs.some(m => m.includes('fingerprint mismatch')), 'wrong pin detected and refused');
     check(lanDials > 0 && tsDials === lanDials,
       `mismatch advances to the next leg exactly once per round (lan=${lanDials}, tailscale=${tsDials})`);
+  }
+
+  // ── 3. no test dials the live ECHOCAT port ───────────────────────
+  {
+    const fs = require('fs');
+    const path = require('path');
+    const bad = [];
+    for (const f of fs.readdirSync(__dirname)) {
+      if (!f.endsWith('.js')) continue;
+      const src = fs.readFileSync(path.join(__dirname, f), 'utf8');
+      if (/wss?:\/\/(127\.0\.0\.1|localhost):7300\b/.test(src)) bad.push(f + ' (dials :7300)');
+      if (/tsHost:\s*['"](127\.0\.0\.1|localhost)['"]/.test(src)) bad.push(f + ' (tsHost on this PC dials :7300)');
+    }
+    check(bad.length === 0, "no test dials the operator's live POTACAT on :7300" + (bad.length ? ': ' + bad.join(', ') : ''));
   }
 
   await sleep(100);
