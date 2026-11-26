@@ -1152,17 +1152,24 @@
   // Busy: a signal in the modem's band that stands above the noise. The rule
   // is lib/winlink-spectrum.js (BusyDetector — the same one the shack runs
   // for ECHOCAT devices): a sustained signal enters, hysteresis and a 4 s
-  // hold keep it, so the badge does not blink between frames.
-  var busyDet = new WinlinkSpectrum.BusyDetector(0, 1, WF_BINS), busyLastRender = 0, wfMarkersKey = '';
+  // hold keep it, so the badge does not blink between frames. While Pat's
+  // busy-channel prompt is up the badge says the modem's verdict
+  // (WinlinkSpectrum.busyBadge, #1096); it is redrawn on every session push.
+  var busyDet = new WinlinkSpectrum.BusyDetector(0, 1, WF_BINS), busyLastRender = 0, busyLast = null, wfMarkersKey = '';
   function busyUpdate(mags) {
     var now = performance.now();
     var v = busyDet.update(mags, now);
+    busyLast = v;
     if (!v.changed && now - busyLastRender < 500) return;
     busyLastRender = now;
+    busyRender();
+  }
+  function busyRender() {
+    var b = WinlinkSpectrum.busyBadge(busyLast, state && state.session);
     var el = $('wl-wf-busy');
-    el.className = 'wl-busy ' + (v.busy ? 'busy' : 'clear');
-    el.textContent = v.busy ? 'BUSY +' + v.peakDb + ' dB' : 'Clear';
-    el.title = v.busy ? 'A signal in the modem’s band, ' + v.peakDb + ' dB over the noise — wait, or pick another gateway' : 'Nothing above the noise in the modem’s band';
+    el.className = 'wl-busy' + (b.state === 'idle' ? '' : ' ' + b.state);
+    if (el.textContent !== b.text) el.textContent = b.text;
+    el.title = b.title;
   }
   var wfCtx = null, wfStream = null, wfAnalyser = null, wfTimer = null;
   // Why the waterfall is black (lib/winlink-wf-audio.js): when no radio audio,
@@ -2467,8 +2474,8 @@
   }
 
   // ── wiring ───────────────────────────────────────────────────────────────
-  window.api.onState(function (s) { state = s; renderState(); renderSound(); autoSound(); wfSync(); renderTxLevel(); catalogStateChanged(); });
-  window.api.onSession(function (ss) { if (state) state.session = ss; renderSession(ss); });
+  window.api.onState(function (s) { state = s; renderState(); renderSound(); autoSound(); wfSync(); renderTxLevel(); catalogStateChanged(); busyRender(); });
+  window.api.onSession(function (ss) { if (state) state.session = ss; renderSession(ss); busyRender(); });
   window.api.onMailbox(function (d) {
     if (!d || !lists.hasOwnProperty(d.box)) return;
     lists[d.box] = d.messages || [];

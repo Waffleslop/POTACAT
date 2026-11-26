@@ -100,6 +100,36 @@ test('Call anyway is the operator\'s decision: one button per surface, logged, a
   assert.ok(!/respondPrompt\([^)]*'continue'/.test(main), 'main never writes the answer itself: it only passes on what the operator chose');
 });
 
+test('#1096: the busy badge is display only; the busy prompt\'s answer path is exactly as it was', () => {
+  // The badge now says "Busy (modem)" while Pat's busy-channel prompt is up.
+  // That changed what the window SAYS, not what keys the radio: Pat calls on a
+  // busy channel only on the operator's own Call anyway, as before.
+  const ans = fnBody(main, 'winlinkAnswerPrompt');
+  const expected = [
+    'function winlinkAnswerPrompt(id, value) {',
+    '  const s = winlinkState.session;',
+    '  if (!s.prompt || s.prompt.id !== id || !patClient) return false;',
+    "  if (s.prompt.kind === 'busy-channel' && value !== 'abort') {",
+    "    if (value !== 'continue') return false;",
+    '    winlinkLog(',
+    '  }',
+    '  patClient.respondPrompt(id, value);',
+    '  winlinkState.setSession({ prompt: null });',
+    '  winlinkSessionPush();',
+    '  return true;',
+    '}',
+  ];
+  const code = ans.split('\n').filter((l) => l.trim() && !/^\s*\/\//.test(l)).map((l) => l.replace(/^(\s*winlinkLog\().*$/, '$1'));
+  assert.deepStrictEqual(code.slice(0, expected.length), expected, 'winlinkAnswerPrompt changed: a change to PTT gating needs Casey\'s word');
+  const W = require(path.join(root, 'lib', 'winlink-pat.js'));
+  assert.strictEqual(W.autoPromptAnswer({ kind: 'prompt', prompt: 'busy-channel' }, { password: 'x' }), null, 'never answered automatically');
+  const spec = readSrc(path.join(root, 'lib', 'winlink-spectrum.js'));
+  assert.ok(!/answerPrompt|respondPrompt|ptt|setPtt|transmit/i.test(spec.replace(/nothing here keys a radio or\s*\*?\s*answers a prompt/i, '')), 'the badge rule touches no prompt and no PTT');
+  const i = popout.indexOf('function busyRender(');
+  const render = popout.slice(i, popout.indexOf('\n  }\n', i));
+  assert.ok(i > 0 && !/answerPrompt|ptt/i.test(render), 'drawing the badge answers nothing');
+});
+
 test('this test is in the list CI runs', () => {
   assert.ok(readSrc(path.join(root, 'scripts', 'run-tests.js')).includes("'test/winlink-busy-wait-test.js'"));
 });
