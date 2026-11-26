@@ -34,14 +34,15 @@ test('Auto-SSTV remembers whether it opened the SSTV window, before opening it',
 });
 
 test('cancelAutoSstv closes the window it opened, after retuning, and forgets the flag', () => {
-  const fn = body('function cancelAutoSstv() {', 5000);
+  const fn = body('function cancelAutoSstv(opts) {', 7000);
   const end = fn.indexOf('\nfunction ');
   const f = end > 0 ? fn.slice(0, end) : fn;
   const sstvPart = f.slice(f.indexOf("'[Auto-SSTV] Cancelled"));
   assert.ok(/const closeSstvWindow = autoSstvOpenedPopout && sstvPopoutWin && !sstvPopoutWin\.isDestroyed\(\);/.test(sstvPart));
   assert.ok(/autoSstvOpenedPopout = false;/.test(sstvPart));
   assert.ok(/if \(closeSstvWindow\) \{\s*try \{ sstvPopoutWin\.close\(\); \} catch \{\}/.test(sstvPart));
-  assert.ok(f.indexOf('cat.tune(autoSstvPrevFreq') < f.indexOf('sstvPopoutWin.close()'), 'retune first');
+  // #1051: the retune is the one idle return now (idleRxRestore), still before the close.
+  assert.ok(sstvPart.indexOf('idleRxRestore()') > 0 && sstvPart.indexOf('idleRxRestore()') < sstvPart.indexOf('sstvPopoutWin.close()'), 'retune first');
 });
 
 test('closing the SSTV window stops the decoder (what makes running:false)', () => {

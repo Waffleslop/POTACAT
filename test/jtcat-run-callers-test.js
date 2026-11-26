@@ -310,6 +310,8 @@ function harness(over) {
     jtcatRunPauseAfter: () => 8, jtcatHopModeForDrainedRun: () => false, jtcatPauseRunCq() {},
     jtcatMaxQsoRetries: () => 5, JTCAT_MAX_CQ_RETRIES: 5, jtcatAutoSkipMin: () => 0,
     stopFullAutoCq() {}, jtcatChimeTxStopped() {},
+    // the session limit (#1068) is off here: Run may always start something new
+    JtcatSessionLimit: { mayStartNew: () => true }, _jtcatSessionLimit: {}, jtcatSessionLimitStop() {},
     jtcatBuildCqQso: async () => { built.push('CQ'); engine._txEnabled = true; engine.msg = 'CQ W5XY EM12'; return { mode: 'cq', phase: 'cq', call: null, grid: null, txMsg: 'CQ W5XY EM12', report: null, sentReport: null, myCall: ME, myGrid: 'EM12', txRetries: 0 }; },
   };
   ctx.jtcatWorkedInfo = (call) => ({ blocking: ctx.workedSet.has(call) });

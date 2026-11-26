@@ -69,6 +69,7 @@ function loadNote(lines) {
     sendCatLog: (l) => logs.push(l),
     _isEffectivelyTransmitting: () => false, _externalAtuActive: false, _stationSetupTxTest: false, _stationSetupTxBusy: false, _atuTuneEpisode: null,
     pttRouteLabel: () => 'CAT', _currentMode: 'USB', _currentFreqHz: 14200000,
+    idleRxOperatorTook: () => {}, // #1051: a hand-mic over during Idle Mode ends it (test/idle-mode-1051-wiring-test.js)
     TxLimitLib: require('../lib/tx-limit'),
   };
   vm.createContext(ctx);

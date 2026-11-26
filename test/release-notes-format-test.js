@@ -69,5 +69,34 @@ test('the renderer loads the module and app.js delegates to it', () => {
   assert.ok(/window\.ReleaseNotesFormat\.formatReleaseNotes\(md\)/.test(app));
 });
 
+// Desktop release notes carry no ECHOCAT or store review ask (Casey, 2026-11-25).
+// The rule starts with v1.14.9; older files keep what was published with them.
+test('desktop notes from v1.14.9 on carry no app-store review ask', () => {
+  const dir = path.join(__dirname, '..', 'release-notes');
+  const num = (v) => v.split('.').map(Number);
+  const atLeast = (a, b) => { for (let i = 0; i < 3; i++) { if (a[i] !== b[i]) return a[i] > b[i]; } return true; };
+  const offenders = fs.readdirSync(dir)
+    .filter((f) => /^v\d+\.\d+\.\d+\.md$/.test(f))
+    .filter((f) => atLeast(num(f.slice(1, -3)), [1, 14, 9]))
+    .filter((f) => /earns a place in your shack|review on the App Store|Google Play/i.test(fs.readFileSync(path.join(dir, f), 'utf8')));
+  assert.deepStrictEqual(offenders, [], 'store review ask found in ' + offenders.join(', '));
+});
+
+test('the guard sees the ask: a sample with the line is caught', () => {
+  assert.ok(/earns a place in your shack|review on the App Store|Google Play/i.test(
+    'If ECHOCAT earns a place in your shack, a review on the App Store or Google Play helps other hams find it.'));
+});
+
+test('v1.14.8 notes match the published body: no review line', () => {
+  const md = fs.readFileSync(path.join(__dirname, '..', 'release-notes', 'v1.14.8.md'), 'utf8');
+  assert.ok(!/earns a place in your shack/i.test(md));
+});
+
+test('the release skill no longer asks for the review line in desktop notes', () => {
+  const skill = fs.readFileSync(path.join(__dirname, '..', '.claude', 'skills', 'potacat-release', 'SKILL.md'), 'utf8');
+  assert.ok(/Desktop release notes carry no ECHOCAT or store review ask/.test(skill), 'rule missing');
+  assert.ok(!/End with a `---` line and then exactly/.test(skill), 'old instruction still there');
+});
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
