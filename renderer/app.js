@@ -28879,7 +28879,7 @@ async function _welcomeRemoteTapPair(btn) {
       _welcomeRemoteStatus('Could not pair: ' + r.error, 'error');
     } else if (r && r.ok) {
       _welcomeRemoteStatus('Paired with ' + (r.name || target.name) + '. Press Get Started to finish setup.', 'success');
-      // Activate immediately so the user lands in remote mode on Save.
+      // Activate immediately so the user lands in remote mode on Get Started.
       try { await window.api.connectionTargetsActivate(r.targetId); } catch {}
     }
   } catch (err) {
