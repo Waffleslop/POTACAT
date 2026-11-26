@@ -202,6 +202,7 @@ const TESTS = [
   'test/rigctld-kenwood-power-test.js', // a TS-590/TS-2000 behind Hamlib keeps its power: raw PC, never Hamlib's PC000/PC255 probe
   'test/jtcat-tx-watchdog-test.js',
   'test/jtcat-calling-time-test.js',
+  'test/jtcat-run-refusal-test.js', // #1085: a refused Run keeps Run visible with the shack's reason, one sentence per cause, TX left off
   'test/jtcat-session-limit-test.js', // "Stop Run and Hunt after N minutes" (W5XY): off by default, waits for a contact in progress, no new CQ/call after, phone-started enforced in main
   'test/jtcat-replace-log-test.js',
   'test/jtcat-second-caller-test.js',

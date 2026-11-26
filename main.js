@@ -567,6 +567,7 @@ const StationCounty = require('./lib/station-county');
 const JtcatSnrFloor = require('./lib/jtcat-snr-floor');
 const JtcatCallingTime = require('./lib/jtcat-calling-time');
 const JtcatSessionLimit = require('./lib/jtcat-session-limit'); // "Stop Run and Hunt after N minutes" (W5XY 2026-11-25)
+const JtcatRunRefusal = require('./lib/jtcat-run-refusal'); // why the shack refused Run, and TX left off after it (#1085)
 const OriginHealth = require('./lib/origin-health');
 const RemoteAccess = require('./lib/remote-access'); // ECHOCAT access: off | cloud | lan (the door itself)
 const { planImport, findDuplicateGroups } = require('./lib/qso-match');
@@ -8392,6 +8393,7 @@ function bridgeIpcToShack(channel, args, e) {
   if (!isRemoteMode()) return false;
   const rule = RemoteBridge.OUT[channel];
   if (!rule) return false;
+  _remoteBridgeState.serverCaps = (remoteClient && remoteClient.state && remoteClient.state().serverCapabilities) || null; // the shack's hello (#1085 jtcat-run-tx-on)
   const r = rule(args || [], _remoteBridgeState) || { drop: true };
   if (r.local) return false; // this PC's own preference (the Winlink window's waterfall speed)
   if (r.drop) return true;
@@ -22326,7 +22328,8 @@ function jtcatMaxQsoRetries() {
   return (Number.isFinite(n) && n >= 1 && n <= 60) ? n : JTCAT_MAX_QSO_RETRIES;
 }
 
-function broadcastFullAutoCqState(reason) {
+function broadcastFullAutoCqState(reason, opts) {
+  const o = opts || {};
   const state = {
     active: jtcatFullAutoCq,
     owner: jtcatFullAutoCqOwner,
@@ -22336,9 +22339,13 @@ function broadcastFullAutoCqState(reason) {
     paused: jtcatFullAutoCqPaused,
     unanswered: jtcatFullAutoCqUnanswered,
   };
+  // o.here: a Run start this computer's own JTCAT window asked for was refused
+  // (#1085). Only that window hears why; nothing changed for the phone.
+  if (o.here) { state.code = o.code || ''; state.reason = o.here; }
   if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
     jtcatPopoutWin.webContents.send('jtcat-full-auto-cq-state', state);
   }
+  if (o.here) return;
   // Mirror to ECHOCAT clients (phone) so they can show the run indicator.
   // `reason` (display-ready string) rides along on stop/refusal pushes so
   // the phone can say WHY a run ended — the Part 97 watchdog stop must
@@ -22353,6 +22360,9 @@ function broadcastFullAutoCqState(reason) {
       owner: jtcatFullAutoCqOwner,
       maxQsoAttempts: jtcatMaxQsoRetries(),
       reason: reason || null,
+      // #1085: on a refused start, which of the three causes (lib/jtcat-run-refusal.js);
+      // reason then carries that cause's sentence. Absent otherwise.
+      ...(o.code ? { code: o.code } : {}),
     });
   }
 }
@@ -22506,12 +22516,36 @@ async function rearmCq(owner) {
   return true;
 }
 
+// A Run start the operator asked for (the JTCAT window, a remote JTCAT window
+// or the phone). txOn: the click also asked for TX on (the JTCAT window's Run
+// does); a refusal leaves TX as it was before the click, and the operator is
+// told which of the three causes refused it (#1085).
+async function jtcatRequestRunStart(owner, modifier, txOn) {
+  const r = await JtcatRunRefusal.requestStart({
+    engine: ft8Engine,
+    txOn: !!txOn,
+    onTxOn: jtcatNoteOperatorAtRadio, // turning TX on is the operator (transmit watchdog)
+    start: (why) => startFullAutoCq(owner, modifier || '', { why }),
+  });
+  if (r.ok) return true;
+  if (owner === 'remote') broadcastFullAutoCqState(JtcatRunRefusal.text(r.code, 'shack'), { code: r.code });
+  else broadcastFullAutoCqState(undefined, { code: r.code, here: JtcatRunRefusal.text(r.code, 'here') });
+  sendCatLog('[JTCAT] Run refused (' + (r.code || 'unknown') + '): ' + JtcatRunRefusal.text(r.code, owner === 'remote' ? 'shack' : 'here'));
+  return false;
+}
+
 // Start run mode for an owner: 'popout' (desktop window) or 'remote' (the
 // ECHOCAT phone via jtcat-full-auto-cq). Guarded by the ULTRACAT unlock so a
-// locked client can't drive it.
+// locked client can't drive it. opts.why (an object): a refusal sets why.code
+// (lib/jtcat-run-refusal.js) and leaves telling the operator to the caller.
 async function startFullAutoCq(owner, modifier, opts) {
-  if (!settings.ultracat) { sendCatLog('[JTCAT] Full Auto CQ blocked — ULTRACAT locked'); return false; }
-  if (!ft8Engine) { sendCatLog('[JTCAT] Full Auto CQ blocked — engine not running'); return false; }
+  const why = (opts && opts.why) || {};
+  const blocked = JtcatRunRefusal.precheck({ ultracat: settings.ultracat, engine: !!ft8Engine });
+  if (blocked) {
+    why.code = blocked;
+    sendCatLog('[JTCAT] Full Auto CQ blocked — ' + (blocked === JtcatRunRefusal.CODES.ULTRACAT_LOCKED ? 'ULTRACAT locked' : 'engine not running'));
+    return false;
+  }
   // opts.auto = started by the Hunt fallback rather than by the operator.
   // Two things must NOT happen on an automatic start:
   //  - the 30-minute attended watchdog must keep running from when the
@@ -22544,7 +22578,12 @@ async function startFullAutoCq(owner, modifier, opts) {
   const quietPick = jtcatQuietPick();
   ft8Engine.setTxFreq(quietPick.hz);
   const qso = await jtcatBuildCqQso(jtcatFullAutoCqModifier);
-  if (!qso) { stopFullAutoCq('callsign/grid not set'); return false; }
+  if (!qso) {
+    why.code = JtcatRunRefusal.CODES.NO_CALL_GRID;
+    // A caller that reports the refusal itself (opts.why) gets one state push, its own.
+    stopFullAutoCq('callsign/grid not set', opts && opts.why ? { silent: true } : undefined);
+    return false;
+  }
   if (owner === 'remote') { remoteJtcatQso = qso; remoteJtcatBroadcastQso(); }
   else { popoutJtcatQso = qso; popoutBroadcastQso(); }
   broadcastFullAutoCqState();
@@ -22555,6 +22594,8 @@ async function startFullAutoCq(owner, modifier, opts) {
 // Stop run mode and silence TX. `reason` (if set) surfaces a popout notice —
 // pass opts.quiet for a normal, expected stop (the Hunt fallback handing back)
 // so the reason still reaches the log without being dressed as an error.
+// opts.silent: no state push and no notice (a refused start, whose caller
+// pushes the refusal itself).
 function stopFullAutoCq(reason, opts) {
   const wasActive = jtcatFullAutoCq;
   jtcatFullAutoCq = false;
@@ -22574,8 +22615,8 @@ function stopFullAutoCq(reason, opts) {
     try { ft8Engine.setTxSlot('auto'); } catch {}
     if (ft8Engine._txActive && typeof ft8Engine.txComplete === 'function') ft8Engine.txComplete();
   }
-  broadcastFullAutoCqState(wasActive ? reason : undefined);
-  if (wasActive && reason && !(opts && opts.quiet) && jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
+  if (!(opts && opts.silent)) broadcastFullAutoCqState(wasActive ? reason : undefined);
+  if (wasActive && reason && !(opts && (opts.quiet || opts.silent)) && jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
     jtcatPopoutWin.webContents.send('jtcat-qso-state', { phase: 'error', error: 'Full Auto CQ stopped — ' + reason });
   }
   if (wasActive) sendCatLog('[JTCAT] Full Auto CQ STOPPED (' + (reason || 'user') + ')');
@@ -33975,10 +34016,11 @@ function connectRemote() {
   // refusal we re-broadcast the (unchanged) state so an optimistic phone
   // toggle reconciles back to "not running". Stop is unconditional — any
   // client silencing TX is always allowed, even for a popout-owned run.
-  remoteServer.on('jtcat-full-auto-cq', async ({ on, modifier } = {}) => {
+  // txOn (a remote JTCAT window's Run click, capability jtcat-run-tx-on): TX
+  // on with the start, and left off again when the start is refused (#1085).
+  remoteServer.on('jtcat-full-auto-cq', async ({ on, modifier, txOn } = {}) => {
     if (on) {
-      const ok = await startFullAutoCq('remote', modifier || '');
-      if (!ok) broadcastFullAutoCqState('start refused — ULTRACAT locked, FT8 engine not running, or callsign/grid not set');
+      await jtcatRequestRunStart('remote', modifier || '', !!txOn);
     } else {
       stopFullAutoCq('stopped from phone');
     }
@@ -53001,10 +53043,11 @@ function cloudShackNotice(text, kind) {
   });
 
   // ULTRACAT Full Auto CQ run mode — start/stop. Server-side ULTRACAT guard
-  // lives in startFullAutoCq. `payload` = { on, modifier }.
+  // lives in startFullAutoCq. `payload` = { on, modifier, txOn } (txOn: the Run
+  // click's TX on, applied with the start and undone if it is refused, #1085).
   ipcMain.on('jtcat-popout-full-auto-cq', (_e, payload) => {
     const on = payload && typeof payload === 'object' ? payload.on : payload;
-    if (on) startFullAutoCq('popout', (payload && payload.modifier) || '');
+    if (on) jtcatRequestRunStart('popout', (payload && payload.modifier) || '', !!(payload && payload.txOn));
     else stopFullAutoCq('stopped by operator');
   });
 

@@ -161,8 +161,9 @@ test('inbound: stopped is normalized, the replay unpacks, Full Auto reads as thi
   assert.deepStrictEqual(B.IN['jtcat-status']({ type: 'jtcat-status', state: 'running', mode: 'FT4' }), [['jtcat-status', { state: 'running', mode: 'FT4' }]]);
   assert.strictEqual(B.IN['jtcat-decode-batch']({ entries: [{ a: 1 }, { a: 2 }] }).length, 2);
   const u = B.IN['jtcat-ultracat-state']({ fullAutoCq: true, owner: 'remote', ultracat: true });
-  assert.deepStrictEqual(u[0], ['jtcat-full-auto-cq-state', { active: true, owner: 'popout', reason: '' }]);
-  assert.deepStrictEqual(u[1], ['jtcat-ultracat', true]);
+  assert.deepStrictEqual(u[0], ['jtcat-full-auto-cq-state', { active: true, owner: 'popout', reason: '', code: '' }]);
+  // #1085: the shack's ULTRACAT unlock is not this window's (it is per computer).
+  assert.strictEqual(u.length, 1);
   const st = {};
   B.trackState(st, { type: 'jtcat-hold-tx-state', enabled: true });
   B.trackState(st, { type: 'jtcat-tune-state', active: true });
