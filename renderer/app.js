@@ -10988,12 +10988,13 @@ setCwKeyerType.addEventListener('change', () => {
 });
 function updateCwKeyerTypeVisibility() {
   const type = setCwKeyerType.value;
-  cwMidiConfig.classList.toggle('hidden', type !== 'midi');
+  // One paddle choice (#1117): keyboard and MIDI adapters share it; only WinKeyer differs.
+  cwMidiConfig.classList.toggle('hidden', type === 'winkeyer');
   // Keyer Mode is the software keyer's: keyboard and MIDI paddles (#1117).
   const modeRow = document.getElementById('cw-keyer-mode-row');
   if (modeRow) modeRow.classList.toggle('hidden', type === 'winkeyer');
   cwWinkeyerConfig.classList.toggle('hidden', type !== 'winkeyer');
-  cwKeyboardConfig.classList.toggle('hidden', type !== 'keyboard');
+  cwKeyboardConfig.classList.toggle('hidden', type === 'winkeyer');
 }
 async function populateWinKeyerPorts() {
   const ports = await window.api.listPorts();
@@ -19414,7 +19415,8 @@ async function openSettingsDialog(tab) {
   }
   // CW Keyer
   setEnableCwKeyer.checked = s.enableCwKeyer === true;
-  setCwKeyerType.value = s.cwKeyerType || 'midi';
+  // 'keyboard' (before #1117) is the same paddle choice as 'midi' now.
+  setCwKeyerType.value = s.cwKeyerType === 'winkeyer' ? 'winkeyer' : 'midi';
   setCwKeyerMode.value = s.cwKeyerMode || 'iambicB';
   setCwWpm.value = s.cwWpm || 20;
   setCwSwapPaddles.checked = s.cwSwapPaddles === true;
