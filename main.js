@@ -25429,7 +25429,10 @@ function startJtcat(mode) {
         if (!answeredCaller) jtcatHuntStatusPush(candidates, best, huntPriority);
 
         if (best) {
-          jtcatSessionMark(best.call);
+          // No session mark here (#1119): only a completed QSO marks the
+          // station (the done blocks below). A try that gives up goes through
+          // the timed skip (jtcatAutoSkip, "Skip a call for N min after a QSO
+          // gives up"); marking at the pick skipped it for the whole session.
           jtcatHuntStatusWorking(best.call);
           const evNote = evRank(best) ? ' [event-needed]' : '';
           console.log(`[JTCAT Auto-CQ] Responding to ${best.call} (${best.grid}) SNR ${best.db}dB${evNote}`);
