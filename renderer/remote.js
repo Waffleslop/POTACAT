@@ -5482,6 +5482,7 @@
   });
 
   var customCatEditBtn = document.getElementById('rc-custom-cat-edit');
+  var customCatAddBtn = document.getElementById('rc-custom-cat-add');
   var customCatData = [];
   var customCatEditing = false;
   // #164: up to 25 buttons, never padded; each may be tied to some radios
@@ -5695,6 +5696,7 @@
       customCatBtnsEl.appendChild(btn);
     }
     // Always show section — Edit button allows creating buttons from ECHOCAT
+    customCatUpdateAddBtn();
     // Re-render editor if open — except from the editor's own blur handler:
     // rebuilding the editor there destroyed the field the operator had just
     // clicked into, so the Off command of a toggle could never be typed from
@@ -5702,6 +5704,13 @@
     if (customCatEditing && !(opts && opts.keepEditor)) renderCustomCatEditor();
     // Mirror to the optional VFO Custom CAT widget if it's enabled.
     if (window.__vfRenderCustomCat) window.__vfRenderCustomCat();
+  }
+
+  // Add beside Edit: shown while the buttons are on view and there is room.
+  function customCatUpdateAddBtn() {
+    if (!customCatAddBtn) return;
+    var room = window.CustomCatFollow ? CustomCatFollow.canAdd(customCatData) : customCatData.length < CUSTOM_MAX;
+    customCatAddBtn.classList.toggle('hidden', customCatEditing || !room);
   }
 
   function saveCustomCatButtons() {
@@ -5888,6 +5897,21 @@
       if (kept.length !== customCatData.length) { customCatData = kept; customToggleState = {}; saveCustomCatButtons(); }
       renderCustomCatButtons();
     }
+    customCatUpdateAddBtn();
+  });
+
+  // Add beside Edit: open the editor with a new empty row, cursor in it.
+  if (customCatAddBtn) customCatAddBtn.addEventListener('click', function(e) {
+    e.stopPropagation();
+    if (customCatEditing || !CustomCatFollow.canAdd(customCatData)) return;
+    customCatData = CustomCatFollow.withNewRow(customCatData);
+    customCatEditing = true;
+    customCatEditBtn.textContent = 'Done';
+    customCatSection.classList.remove('hidden');
+    renderCustomCatEditor();
+    customCatUpdateAddBtn();
+    var names = customCatSection.querySelectorAll('.rc-custom-cat-editor .cce-name');
+    if (names.length) names[names.length - 1].focus();
   });
 
   rcVfoA.addEventListener('click', () => {
