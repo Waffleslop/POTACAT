@@ -60,7 +60,7 @@ test('both messages are in the protocol registry and validate', () => {
 
 const rsSrc = fs.readFileSync(path.join(__dirname, '..', 'lib', 'remote-server.js'), 'utf8');
 test('the shack advertises the contact-card capability', () => {
-  assert.match(rsSrc, /^\s*'contact-card',\s*$/m);
+  assert.match(rsSrc, /^\s*'contact-card'[\],]/m);
 });
 
 const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8').replace(/\r\n/g, '\n');
