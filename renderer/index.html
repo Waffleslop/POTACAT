@@ -1744,7 +1744,7 @@
       <span class="help-text" style="display:block;margin-bottom:6px;">Written on contacts made from your home grid square and sent to LoTW and your other loggers. Contacts with another grid get no county rather than the wrong one. On an activation, POTACAT uses the county you choose for that park.</span>
       <label class="checkbox-label"><input type="checkbox" id="set-enable-qrz"> QRZ.com Callsign Lookup</label>
       <div id="qrz-config" class="radio-sub hidden">
-        <span class="help-text" style="font-size:12px;">Looks up operator first names from QRZ.com and shows them in the Operator column. Uses the QRZ XML API — a free QRZ account works.</span>
+        <span class="help-text" style="font-size:12px;">Looks up operator first names from QRZ.com and shows them in the Operator column. A free QRZ account gives names but no grid squares; grid squares need a QRZ XML Data subscription.</span>
         <label>QRZ Username (callsign):
           <input type="text" id="set-qrz-username" maxlength="10" placeholder="K3SBP" style="text-transform:uppercase;">
         </label>
@@ -5453,6 +5453,7 @@
   <script src="../lib/look-picker.js"></script>
   <script src="../lib/first-run.js"></script>
   <script src="../lib/grid-macros.js"></script>
+  <script src="../lib/banner-station-geo.js"></script>
   <script src="../lib/rig-bands.js"></script>
   <script src="../lib/spot-band-filter.js"></script>
   <script src="../lib/listen-source.js"></script>
