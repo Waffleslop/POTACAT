@@ -271,6 +271,27 @@ test('#1099: a SIG-less WWFF-shaped SIG_INFO is WWFF, not POTA', () => {
   assert.strictEqual(cell(vm, 'WWFF'), 'KFF-1234');
 });
 
+test('#1099: with no SIG, only a known POTA program prefix is a park (IOTA, lighthouses are not)', () => {
+  assert.deepStrictEqual(CC.sigPair({ SIG_INFO: 'K-1234' }), ['POTA', 'K-1234'], 'old-style ref');
+  assert.deepStrictEqual(CC.sigPair({ SIG_INFO: 'us-12345' }), ['POTA', 'US-12345'], 'five digits');
+  assert.deepStrictEqual(CC.sigPair({ SIG_INFO: 'VE-0001' }), ['POTA', 'VE-0001']);
+  assert.deepStrictEqual(CC.sigPair({ SIG_INFO: 'FI-0003' }), ['POTA', 'FI-0003']);
+  for (const v of ['NA-001', 'EU-005', 'SA-001', 'USA-123', 'USA-1234', 'QQ-1234', 'US-12', 'US-1234@US-ME']) {
+    assert.strictEqual(CC.sigPair({ SIG_INFO: v }), null, v);
+  }
+  const vm = CC.build({ ...base, history: [], record: { CALL: 'W1XYZ', QSO_DATE: '20260720', TIME_ON: '140200', BAND: '20M', SIG_INFO: 'NA-001' } });
+  assert.strictEqual(cell(vm, 'POTA'), '—');
+  // An explicit SIG still wins whatever the ref looks like.
+  assert.deepStrictEqual(CC.sigPair({ SIG: 'IOTA', SIG_INFO: 'NA-001' }), ['IOTA', 'NA-001']);
+});
+
+test('#1099: a SIG-less comma list of POTA parks shows the whole list; one bad entry and it is not a park', () => {
+  assert.deepStrictEqual(CC.sigPair({ SIG_INFO: 'US-1234, us-5678' }), ['POTA', 'US-1234,US-5678']);
+  assert.strictEqual(CC.sigPair({ SIG_INFO: 'US-1234,NA-001' }), null);
+  const vm = CC.build({ ...base, history: [], record: { CALL: 'W1XYZ', QSO_DATE: '20260720', TIME_ON: '140200', BAND: '20M', SIG_INFO: 'US-1234,US-5678' } });
+  assert.strictEqual(cell(vm, 'POTA'), 'US-1234,US-5678');
+});
+
 test('this test is in the list CI runs', () => {
   assert.ok(readSrc(path.join(__dirname, '..', 'scripts', 'run-tests.js')).includes("'test/contact-card-test.js'"));
 });
