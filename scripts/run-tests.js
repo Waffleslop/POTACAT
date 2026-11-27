@@ -660,6 +660,7 @@ const TESTS = [
   'test/echocat-web-micgain-test.js',
   'test/cloud-billing-ui-test.js',
   'test/ts590-flow-control-test.js',
+  'test/ts2000-smeter-test.js',
   'test/rts-asserted-no-flow-test.js', // #136: RTS line "Asserted, no flow control" (YT-1200 pass-through) + the CTS-low log line
   'test/github-issues-2026-10-26-test.js', // #107 FT-450 test, #106 interface PTT, #103 Auto RTS trial
   'test/duo-vfo-wire-test.js',        // iPhone Duo VFO pane: tuned-spot, swr-guard-state, atu-tune, tx-eq, status.meters
