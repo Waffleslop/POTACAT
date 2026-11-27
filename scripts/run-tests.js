@@ -619,6 +619,7 @@ const TESTS = [
   'test/nocat-rig-test.js',
   'test/commander-codec-test.js',
   'test/logger-cat-test.js',
+  'test/logger-cat-lan-ptt-test.js', // #770: an outside program keys the Yaesu LAN: VFO PTT path, hard timeout, release on disconnect, off by default
   'test/cm108-ptt-test.js',
   'test/window-security-test.js', // app windows: only the permissions POTACAT uses (mic, MIDI, CM108 WebHID, copy, audio output, full screen) for its own pages; no navigation away; no new windows, web links through the open-external allowlist
   'test/removed-features-test.js',

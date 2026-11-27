@@ -3780,6 +3780,13 @@ async function pttStart() {
   window.api.nakedPtt(true);
   vfoPttMicProbe(gen, settingsNow, stream, failure, txPath);
 }
+// #770: a logger (fldigi, GTTY, N1MM+) keyed over Logger CAT on the Yaesu
+// LAN. Its audio comes in on the PTT microphone (a virtual cable), so the
+// key-down is this window's own press: the same mic, the same LAN stream, the
+// same refusals and the same release when no audio arrives.
+if (window.api.onExternalPtt) {
+  window.api.onExternalPtt((d) => { if (d && d.on) pttStart(); else pttStop(); });
+}
 function pttStop() {
   if (!pttDown) return;
   pttDown = false;

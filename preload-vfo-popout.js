@@ -46,6 +46,8 @@ contextBridge.exposeInMainWorld('api', {
   // voiceMacroPtt so SSB-over-DATA doesn't disable the rig's hand mic
   // when the user is just keying TX from the popout button.
   nakedPtt: (state) => ipcRenderer.send('naked-ptt', state),
+  // #770: a logger keyed over Logger CAT on the Yaesu LAN — press this window's PTT.
+  onExternalPtt: (cb) => ipcRenderer.on('external-ptt', (_e, d) => cb(d)),
   // #170: what the PC mic did on a PTT press (device, output, level) → one log line.
   vfoPttMicReport: (r) => ipcRenderer.send('vfo-ptt-mic-report', r),
   // #247: POTACAT switched the radio on — reopen the radio audio once its
