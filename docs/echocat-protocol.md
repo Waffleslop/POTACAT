@@ -342,6 +342,8 @@ Brief: docs/activation-ask-before-tune.md.
 | `lookup-call` | C→S | QRZ lookup proxied through the desktop (avoids storing creds on phone). |
 | `qrz-lookup` | C→S | Alternate alias used in some paths. |
 | `call-lookup` | S→C | Lookup result. |
+| `get-contact-card` | C→S | Contact details for one QSO's station (2026-11-27, server capability `contact-card`): `{reqId, call, idx?, identity?}`. `idx` and `identity` are the clicked QSO's, as in `update-qso` (#988); with them the card marks that QSO and uses its fields first, without them the card is for the call. Read only: it never writes the log. Refused for a Guest Pass guest (it reads the owner's log and QRZ record). |
+| `contact-card` | S→C | The answer, to the asking device only: `{reqId, ok: true, vm}`, where `vm` is the model the desktop's Contact details window draws (lib/contact-card.js `build()`: `call`, `status`, `statusLabel`, `headline`, `count`, `qrzUrl`, `full`, `operator`, `path`, `time`, `station`, `stationNote`, `qsl`, `contacts`, `source`). `path` is from the shack's own grid square. `weather` is always `null`: the device asks Open-Meteo itself. `vm.operator.note` and the path hint name desktop settings (Settings > Station). Failure: `{reqId, ok: false, error}` with `error` `guest` (Guest Pass), `bad-request` (no valid call) or `failed`. A shack without the capability does not answer: the device shows its own log-only card. |
 | `search-parks` | C→S | Park name/ref search. |
 | `nearby-parks` | C→S | Distance-sorted parks around `{lat, lon, limit?}` — powers "Parks near me" on the mobile activation-start screen. |
 | `nearby-park-results` | S→C | Reply: parks nearest-first, each with `distanceMi` and `bearingDeg`. |

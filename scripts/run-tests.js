@@ -266,6 +266,7 @@ const TESTS = [
   'test/contact-card-test.js', // Contact details: view model (worked/confirmed line, SP/LP bearing, distance in the operator's units, local time, address, missing fields hidden)
   'test/contact-weather-test.js', // Contact details: Open-Meteo weather at the grid-square centre, 30 min cache per square, stubbed fetch
   'test/contact-card-wiring-test.js', // Contact details: Logbook row Details and Log QSO Details open one themed window by call + QSO identity; it never writes the log
+  'test/contact-card-wire-test.js', // ECHOCAT get-contact-card: the window's model to the asking device only; Guest Pass refused
   'test/prefix-overlay-test.js',
   'test/dxpedition-dials-test.js',
   'test/renderer-global-api-test.js',
