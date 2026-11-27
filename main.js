@@ -9267,6 +9267,16 @@ function tearDownRemoteClient() {
     } catch { /* Winlink is declared further down; nothing to show yet */ }
   }
   if (_remotePaddleHoldTimer) { clearInterval(_remotePaddleHoldTimer); _remotePaddleHoldTimer = null; }
+  // FT8 (#1120): a JTCAT window that drove the shack's engine stays in remote
+  // mode (the shack's waterfall, no local capture). Back on this PC's own
+  // radio, reload it: it starts this PC's engine and audio, as when opened.
+  if (!isRemoteMode() && _remoteJtcatMode) {
+    _remoteJtcatMode = '';
+    if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
+      sendCatLog('[JTCAT] Back on this PC\'s radio: the FT8 window restarts on local audio');
+      try { jtcatPopoutWin.webContents.reload(); } catch { /* window closing */ }
+    }
+  }
   // The shack's VFO lock was mirrored here; this PC's radio starts unlocked.
   if (_vfoLocked) {
     _vfoLocked = false;
