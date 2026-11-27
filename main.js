@@ -445,6 +445,7 @@ const ClusterNodeChoice = require('./lib/cluster-node-choice'); // turn saved cl
 const { parseAdifFile, parseWorkedQsos, parseAllQsos, parseAllRawQsos, parseAdifStream, parseSqliteFile, parseSqliteConfirmed, isSqliteFile, parseRecord: parseAdifRecord, normalizeMode: normalizeLogMode } = require('./lib/adif');
 const { qsoDayInScheduleEntry, matchChecklistItem, matchRegionPatterns, activeScheduleEntry, coveringScheduleEntries, matchingRegionEntry, matchEventQsoForStamp, retroStampMatches, retroCorrectStamps } = require('./lib/event-progress');
 const { cwPaddleAvailability } = require('./lib/cw-paddle-availability');
+const CwKeyPortRoute = require('./lib/cw-key-port-route');
 const { txrxPttOnlyHint } = require('./lib/cw-paddle-hint');
 const { resolveCwKeyPins, resolveKeyPortPins, keyLineLabel } = require('./lib/cw-key-line');
 const { buildPersistentKeyerScript } = require('./lib/cw-keyer-script');
@@ -1580,6 +1581,8 @@ app.on('browser-window-created', (_e, w) => {
       if (!/Render frame was disposed|Object has been destroyed|WebFrameMain/i.test(msg)) throw err;
     }
   };
+  // A keyboard paddle (Vail / VBand) keys from this window too (#1117).
+  wc.on('before-input-event', (_ev, input) => keyboardPaddleInput(w, input));
   // Name the CAUSE next time. A dead renderer behind a live window is exactly
   // the state that produced the flood, and nothing said so.
   wc.on('render-process-gone', (_ev, details) => {
@@ -10542,6 +10545,14 @@ async function connectCat() {
       // Notify the phone so its local CW keyer stops generating sidetone
       // for keys that produce no RF — the prior behavior misled users
       // into bug reports about "ECHOCAT broken" (KM4CFT 2026-04-29).
+      // A CW Key Port that can key (the QMX's second port, keyed by pyserial
+      // on Linux) is the paddle's route: the CAT port's lines failing says
+      // nothing about it, and switching the paddle off here refused every
+      // ECHOCAT press while the key port worked (#1117, KH7QO QMX+).
+      if (_keyPortKeysPaddle()) {
+        sendCatLog(`[CW] The CAT port ${path} cannot set DTR/RTS (${error}); the paddle keys on the CW Key Port ${settings.cwKeyPort} instead.`);
+        return;
+      }
       sendCatLog(
         `[CW paddle] DTR keying not supported on ${path} (${error}) — phone-side paddle disabled. ` +
         'Macros/text-send (CI-V 0x17, hamlib send_morse) still work. ' +
@@ -30326,6 +30337,29 @@ let _cwTextKyHintLogged = false;
 let _lastCwSendText = '';
 let _lastCwSendAt = 0;
 let _cwPythonProc = null;
+// #1117: keying POTACAT did on the CW Key Port (paddle edges, pyserial text).
+// The radio reports that as TX, and txNoteRadioPtt must count it as ours, not
+// warn "POTACAT did not key it". Paddle: held 2 s past each edge (the radio's
+// TX report lags); text: the message's own length plus the same margin.
+let _cwOwnKeyUntil = 0;
+function _cwOwnKeyFor(ms) { _cwOwnKeyUntil = Math.max(_cwOwnKeyUntil, Date.now() + ms); }
+function _cwOwnKeyingNow() { return Date.now() < _cwOwnKeyUntil || !!_cwPythonProc; }
+// A configured CW Key Port that can key the paddle (lib/cw-key-port-route.js).
+function _keyPortKeysPaddle() {
+  return CwKeyPortRoute.keyPortCanKey({
+    platform: process.platform, cwKeyPort: settings.cwKeyPort,
+    ioctlLatched: _cwKeyPortIoctlLatched, pythonPath: _cwKeyPortPathForPython,
+  });
+}
+// The ModemManager line, once per session (lib/cw-key-port-route.js).
+let _cwKeyPortBusyHintSaid = false;
+function _cwKeyPortBusyHint(stderr) {
+  if (_cwKeyPortBusyHintSaid) return;
+  const hint = CwKeyPortRoute.keyPortBusyHint({ platform: process.platform, stderr });
+  if (!hint) return;
+  _cwKeyPortBusyHintSaid = true;
+  sendCatLog(hint);
+}
 function sendCwTextViaPython(text, wpm, pins) {
   if (!_cwKeyPortPathForPython) return false;
   const cleaned = String(text).toUpperCase().replace(/[^A-Z0-9 /?.=,+\-]/g, '');
@@ -30418,8 +30452,10 @@ function sendCwTextViaPython(text, wpm, pins) {
           ? ' (the CW Key Port is busy — another program or POTACAT still holds it)'
           : '');
       sendCatLog(`[CW] Python helper exited with code ${code}${tip}${tbErr ? ': ' + tbErr : ''}`);
+      _cwKeyPortBusyHint(stderr);
     }
     _cwPythonProc = null;
+    _cwOwnKeyFor(2000); // the radio's TX report lags the last element
   });
   return true;
 }
@@ -30482,6 +30518,7 @@ function ensureCwPersistentKeyer(pins) {
         ? ' (pyserial not installed — Debian/Ubuntu: sudo apt install python3-serial)'
         : (/busy|errno 16/i.test(stderr) ? ' (CW Key Port busy — another program holds it)' : '');
       sendCatLog(`[CW] Persistent keyer exited code ${code}${tip}${tbErr ? ': ' + tbErr : ''}`);
+      _cwKeyPortBusyHint(stderr);
     }
     if (_cwPersistentKeyerProc === proc) { _cwPersistentKeyerProc = null; _cwPersistentKeyerKey = null; }
   });
@@ -30511,11 +30548,16 @@ function cwPersistentText(wpm, text, pins) {
   if (!ensureCwPersistentKeyer(pins)) return false; // keeps the line in sync (respawn if changed)
   const clean = String(text).toUpperCase().replace(/[^A-Z0-9 /?.=,+\-]/g, '');
   if (!clean) return true; // keyer is up; nothing to send
-  return _writePersistentKeyer(`T ${Math.max(5, Math.min(60, wpm | 0)) || 20} ${clean}`);
+  const w = Math.max(5, Math.min(60, wpm | 0)) || 20;
+  const took = _writePersistentKeyer(`T ${w} ${clean}`);
+  // Queued behind any text still keying: count from the later of now and that one's end.
+  if (took) _cwOwnKeyUntil = Math.max(_cwOwnKeyUntil, Date.now()) + CwKeyPortRoute.morseTextMs(clean, w, _MORSE_TABLE) + 2000;
+  return took;
 }
 
 function abortCwPersistentText() {
   _writePersistentKeyer('A');
+  _cwOwnKeyUntil = Math.min(_cwOwnKeyUntil, Date.now() + 2000);
 }
 
 function killCwPersistentKeyer() {
@@ -31566,6 +31608,7 @@ function buildPaddleKeyRig() {
     // seconds into an over — which forced the key line low mid-word
     // (LZ3AW's TinyMidi paddle: "stops transmitting after a few seconds").
     if (down && cat && typeof cat.noteTransmitting === 'function') cat.noteTransmitting(2000);
+    _cwOwnKeyFor(2000); // this keying is POTACAT's: txNoteRadioPtt must not call it unsolicited (#1117)
     // FlexRadio via SmartSDR TCP API — only when Flex is the active CAT rig
     if (detectRigType() === 'flex' && smartSdr && smartSdr.connected) {
       if (down) {
@@ -31655,7 +31698,11 @@ function buildPaddleKeyRig() {
       // menu actually reads, and it produces real RF rather than silent PTT.
       // Falling back to txrx would send CI-V 0x1C 0x00 (PTT only) — on an IC-7300 that
       // keys the transmitter with no CW output (KM4CFT, 2026-04-21).
-      if (paddleMethod === 'dtr' && !(cwKeyPort && cwKeyPort.isOpen)) {
+      // A configured CW Key Port that can key wins even when node's handle is
+      // not open: on a Linux USB-CDC driver it never stays open, and pyserial
+      // keys it below. Keying the CAT port's DTR too failed there and switched
+      // the ECHOCAT paddle off (#1117, QMX+ on Linux).
+      if (paddleMethod === 'dtr' && !(cwKeyPort && cwKeyPort.isOpen) && !_keyPortKeysPaddle()) {
         paddleMethod = 'main-dtr';
       }
       if (!_cwKeyLoggedRoute) {
@@ -31721,8 +31768,7 @@ function buildPaddleKeyRig() {
         // session on Windows — and mid-press, which left the radio keyed
         // (LZ3AW TS-480 + COM4 key port, 1.10.25). Only a Windows driver that
         // rejected the pin ioctl really cannot key (that path reports itself).
-        const _keyPortPaddlePossible = !!settings.cwKeyPort &&
-          !(process.platform === 'win32' && _cwKeyPortIoctlLatched && _cwKeyPortPathForPython === settings.cwKeyPort);
+        const _keyPortPaddlePossible = _keyPortKeysPaddle();
         if (!(cwKeyPort && cwKeyPort.isOpen) && !_keyPortPaddlePossible && !_cwTxrxPttOnlyLogged) {
           _cwTxrxPttOnlyLogged = true;
           sendCatLog(txrxPttOnlyHint(rigModel));
@@ -35489,6 +35535,8 @@ function txNoteRadioPtt(controller, on) {
   // Ours: a PTT POTACAT asserted, a CW envelope, the external-ATU carrier, a test transmit, the radio's own ATU tune.
   if (_isEffectivelyTransmitting() || controller._pttCommanded || controller._cwHoldTimer || _externalAtuActive || _stationSetupTxTest || _stationSetupTxBusy) return;
   if (_atuTuneEpisode) return;
+  // CW POTACAT keyed on the CW Key Port (paddle, pyserial text): the radio's TX is ours (#1117).
+  if (_cwOwnKeyingNow()) return;
   // #1051: the radio keyed at the radio (hand mic, footswitch) during idle: the
   // operator is there. Idle ends, and the radio is not retuned under them.
   idleRxOperatorTook('the radio was keyed at the radio');
@@ -37263,6 +37311,23 @@ function pushSpotsToTci(spots) {
 }
 
 // --- CW Keyer ---
+
+// A keyboard paddle (Vail / VBand adapter: Left Ctrl = dit, Right Ctrl = dah)
+// keys from every POTACAT window (#1117). The main window reads the keys in its
+// own page (renderer/app.js); every other window is read here, so a focused VFO
+// pop-out no longer swallows the paddle (KH7QO: keying worked only while the
+// Report a Bug banner had put the focus back on the main window).
+function keyboardPaddleInput(w, input) {
+  if (!input || input.isAutoRepeat) return;
+  if (input.type !== 'keyDown' && input.type !== 'keyUp') return;
+  const side = input.code === 'ControlLeft' ? 'dit' : (input.code === 'ControlRight' ? 'dah' : null);
+  if (!side) return;
+  if (w === win) return;                       // its page handles the keys
+  if (!settings.enableCwKeyer || !keyer) return; // off, or a WinKeyer (no software keyer)
+  const pressed = input.type === 'keyDown';
+  if (pressed) noteOwnerActivity('cw');
+  if (side === 'dit') keyer.paddleDit(pressed); else keyer.paddleDah(pressed);
+}
 
 function connectKeyer() {
   disconnectKeyer();

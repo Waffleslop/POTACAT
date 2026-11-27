@@ -10989,6 +10989,9 @@ setCwKeyerType.addEventListener('change', () => {
 function updateCwKeyerTypeVisibility() {
   const type = setCwKeyerType.value;
   cwMidiConfig.classList.toggle('hidden', type !== 'midi');
+  // Keyer Mode is the software keyer's: keyboard and MIDI paddles (#1117).
+  const modeRow = document.getElementById('cw-keyer-mode-row');
+  if (modeRow) modeRow.classList.toggle('hidden', type === 'winkeyer');
   cwWinkeyerConfig.classList.toggle('hidden', type !== 'winkeyer');
   cwKeyboardConfig.classList.toggle('hidden', type !== 'keyboard');
 }

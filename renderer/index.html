@@ -3750,8 +3750,9 @@
              WinKeyer (baked into its mode register). Common to both backends. -->
         <label class="checkbox-label" style="margin-top:6px;"><input type="checkbox" id="set-cw-swap-paddles"> Swap paddles</label>
         <span class="help-text" style="margin-left:24px;display:block;">Sends DITs on the thumb-side paddle for left-handed ops (or fixes a miswired keying cable). Applies to MIDI and K1EL WinKeyer.</span>
-        <!-- MIDI-specific settings -->
-        <div id="cw-midi-config" style="margin-top:6px;">
+        <!-- Keyer mode: the software keyer's, so keyboard (Vail / VBand) and
+             MIDI paddles both have it; a WinKeyer keys on its own (#1117). -->
+        <div id="cw-keyer-mode-row" style="margin-top:6px;">
           <label>Keyer Mode:
             <select id="set-cw-keyer-mode" style="width:140px;">
               <option value="iambicB">Iambic B</option>
@@ -3759,6 +3760,9 @@
               <option value="straight">Straight Key</option>
             </select>
           </label>
+        </div>
+        <!-- MIDI-specific settings -->
+        <div id="cw-midi-config" style="margin-top:6px;">
           <label style="margin-top:8px;">MIDI Device:
             <div style="display:flex;gap:6px;margin-top:4px;">
               <select id="set-cw-midi-device" style="flex:1;"><option value="">— No MIDI devices —</option></select>
@@ -3797,7 +3801,7 @@
         </div>
         <!-- Keyboard config -->
         <div id="cw-keyboard-config" class="hidden" style="margin-top:6px;">
-          <span class="help-text" style="display:block;"><b>Left Ctrl</b> = dit, <b>Right Ctrl</b> = dah. Compatible with VBand and Vail apps. The built-in iambic keyer generates CW from your keystrokes.</span>
+          <span class="help-text" style="display:block;"><b>Left Ctrl</b> = dit, <b>Right Ctrl</b> = dah. Compatible with VBand and Vail apps. The built-in keyer generates CW from your keystrokes; pick Straight Key above for a straight key. Works in every POTACAT window.</span>
         </div>
         <!-- Shared CW settings -->
         <label style="margin-top:8px;">Speed (WPM):
