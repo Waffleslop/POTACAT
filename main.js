@@ -48072,6 +48072,8 @@ app.whenReady().then(() => {
     // Once the app has settled: anything logged while signed out (or
     // imported before imports synced) that the cloud does not hold yet.
     setTimeout(() => { cloudIpc.reconcileWithCloud('boot').catch(() => {}); }, 15000);
+    // Deletes the Cloud is holding for review (Settings > Cloud notice).
+    setTimeout(() => { cloudIpc.checkHeldDeletes('boot').catch(() => {}); }, 17000);
 
     // Register this desktop in the cloud_devices directory so signed-in
     // laptops on the same account can find it (and auto-pair without
