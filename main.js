@@ -33440,6 +33440,22 @@ function connectRemote() {
     console.log('[Echo CAT] Tune Click ->', value ? 'ON' : 'OFF');
   });
 
+  // QSO detail view on the phone (Casey 2026-11-27): the same model the
+  // Contact details window draws, built the same way, for one device. The
+  // phone asks Open-Meteo itself, so no weather here. Never writes the log.
+  remoteServer.on('get-contact-card', async ({ call, idx, identity, reply }) => {
+    const req = ContactCard.openRequest({ call, idx, identity });
+    if (!req) { reply({ ok: false, error: 'bad-request' }); return; }
+    try {
+      const vm = await contactCardData(req);
+      vm.weatherPending = false;
+      reply({ ok: true, vm });
+    } catch (err) {
+      sendCatLog('[Contact details] ECHOCAT: ' + ((err && err.message) || err));
+      reply({ ok: false, error: 'failed' });
+    }
+  });
+
   remoteServer.on('lookup-call', async ({ callsign }) => {
     const call = (callsign || '').toUpperCase().trim();
     if (!call) return;
