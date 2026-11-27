@@ -111,9 +111,12 @@ test('a configured CW Key Port that is still opening does not mark the paddle un
   const main = R('main.js');
   const at = main.indexOf('const _keyPortPaddlePossible');
   const decl = main.slice(at, main.indexOf(';', at) + 1);
-  assert.ok(/!!settings\.cwKeyPort/.test(decl), 'a configured key port counts');
-  assert.ok(!/process\.platform !== 'win32';/.test(decl), 'Windows is no longer excluded outright');
-  assert.ok(/_cwKeyPortIoctlLatched/.test(decl), 'only a latched, pin-rejecting Windows driver is excluded');
+  // #1117: the rule lives in lib/cw-key-port-route.js (keyPortCanKey), shared with the CAT-port route.
+  assert.ok(/_keyPortKeysPaddle\(\)/.test(decl), 'the shared key-port rule decides');
+  const { keyPortCanKey } = require('../lib/cw-key-port-route');
+  assert.strictEqual(keyPortCanKey({ platform: 'win32', cwKeyPort: 'COM4' }), true, 'a configured key port counts, still opening or not');
+  assert.strictEqual(keyPortCanKey({ platform: 'win32', cwKeyPort: 'COM4', ioctlLatched: true, pythonPath: 'COM4' }), false, 'only a latched, pin-rejecting Windows driver is excluded');
+  assert.strictEqual(keyPortCanKey({ platform: 'win32', cwKeyPort: '' }), false, 'no key port, no key-port route');
 });
 
 test('the web page always sends a release and resets its paddle state', () => {

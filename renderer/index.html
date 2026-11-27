@@ -1587,8 +1587,7 @@
               <label class="summary-quick-row">
                 <span>Keyer type:</span>
                 <select id="quick-cw-type" data-mirror="set-cw-keyer-type">
-                  <option value="keyboard">Keyboard (VBand / Vail)</option>
-                  <option value="midi">MIDI Paddle (software iambic)</option>
+                  <option value="midi">Paddle: Vail, VBand or MIDI</option>
                   <option value="winkeyer">K1EL WinKeyer</option>
                 </select>
               </label>
@@ -3740,18 +3739,22 @@
       <label class="checkbox-label"><input type="checkbox" id="set-enable-cw-keyer"> Enable CW Keyer</label>
       <div id="cw-keyer-config" class="hidden" style="margin-top:6px;margin-left:12px;">
         <label>Keyer Type:
-          <select id="set-cw-keyer-type" style="width:220px;">
-            <option value="keyboard">Keyboard (VBand / Vail)</option>
-            <option value="midi">MIDI Paddle (software iambic)</option>
+          <select id="set-cw-keyer-type" style="width:260px;max-width:100%;">
+            <option value="midi">Paddle: Vail, VBand or MIDI</option>
             <option value="winkeyer">K1EL WinKeyer</option>
           </select>
         </label>
         <!-- Paddle swap — applies to the software keyer (MIDI) AND the K1EL
              WinKeyer (baked into its mode register). Common to both backends. -->
         <label class="checkbox-label" style="margin-top:6px;"><input type="checkbox" id="set-cw-swap-paddles"> Swap paddles</label>
-        <span class="help-text" style="margin-left:24px;display:block;">Sends DITs on the thumb-side paddle for left-handed ops (or fixes a miswired keying cable). Applies to MIDI and K1EL WinKeyer.</span>
-        <!-- MIDI-specific settings -->
-        <div id="cw-midi-config" style="margin-top:6px;">
+        <span class="help-text" style="margin-left:24px;display:block;">Sends DITs on the thumb-side paddle for left-handed ops (or fixes a miswired keying cable). Applies to paddles and the K1EL WinKeyer.</span>
+        <!-- A paddle adapter in either of its modes keys with nothing to match (#1117). -->
+        <div id="cw-keyboard-config" style="margin-top:6px;">
+          <span class="help-text" style="display:block;">A Vail or VBand adapter works in either of its modes, with nothing to set to match. Keyboard mode: <b>Left Ctrl</b> = dit, <b>Right Ctrl</b> = dah, in every POTACAT window. MIDI mode, or another MIDI paddle: pick it under MIDI Device, then press Learn for dit and dah.</span>
+        </div>
+        <!-- Keyer mode: the software keyer's, so keyboard (Vail / VBand) and
+             MIDI paddles both have it; a WinKeyer keys on its own (#1117). -->
+        <div id="cw-keyer-mode-row" style="margin-top:6px;">
           <label>Keyer Mode:
             <select id="set-cw-keyer-mode" style="width:140px;">
               <option value="iambicB">Iambic B</option>
@@ -3759,6 +3762,9 @@
               <option value="straight">Straight Key</option>
             </select>
           </label>
+        </div>
+        <!-- MIDI-specific settings -->
+        <div id="cw-midi-config" style="margin-top:6px;">
           <label style="margin-top:8px;">MIDI Device:
             <div style="display:flex;gap:6px;margin-top:4px;">
               <select id="set-cw-midi-device" style="flex:1;"><option value="">— No MIDI devices —</option></select>
@@ -3794,10 +3800,6 @@
           <label class="checkbox-label" id="mute-flex-cw-sidetone-row" style="margin-top:6px;" title="Flex only: temporarily mutes the radio's own CW sidetone only WHILE the WinKeyer is keying (busy / paddle breakin). Restores when the WK goes idle. Use this when the WinKeyer has its own sidetone and the radio sits in the same room — stops the doubled-tone effect without affecting POTACAT CW macros, SmartSDR CWX, HaliKey MIDI, or vBand keying (those all bypass the WK device and keep the Flex sidetone on).">
             <input type="checkbox" id="set-mute-flex-cw-sidetone-wk"> Mute Flex CW sidetone while WinKeyer is keying
           </label>
-        </div>
-        <!-- Keyboard config -->
-        <div id="cw-keyboard-config" class="hidden" style="margin-top:6px;">
-          <span class="help-text" style="display:block;"><b>Left Ctrl</b> = dit, <b>Right Ctrl</b> = dah. Compatible with VBand and Vail apps. The built-in iambic keyer generates CW from your keystrokes.</span>
         </div>
         <!-- Shared CW settings -->
         <label style="margin-top:8px;">Speed (WPM):

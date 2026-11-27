@@ -61,7 +61,7 @@ test('after one timeout on a link, later overs there key without waiting', async
   assert.deepStrictEqual(ctx.keys, [true, true]);
 });
 
-function loadNote(lines) {
+function loadNote(lines, ownKeying = false) {
   const logs = [];
   const controller = { _transport: { _lastPinState: lines } };
   const ctx = {
@@ -69,6 +69,7 @@ function loadNote(lines) {
     sendCatLog: (l) => logs.push(l),
     _isEffectivelyTransmitting: () => false, _externalAtuActive: false, _stationSetupTxTest: false, _stationSetupTxBusy: false, _atuTuneEpisode: null,
     pttRouteLabel: () => 'CAT', _currentMode: 'USB', _currentFreqHz: 14200000,
+    _cwOwnKeyingNow: () => ownKeying, // #1117: CW POTACAT keyed on the CW Key Port
     idleRxOperatorTook: () => {}, // #1051: a hand-mic over during Idle Mode ends it (test/idle-mode-1051-wiring-test.js)
     TxLimitLib: require('../lib/tx-limit'),
   };
@@ -89,6 +90,13 @@ test('a line POTACAT holds is HIGH: the WARNING with the line states, every over
   ctx.note(controller, true); ctx.note(controller, false);
   ctx.note(controller, true);
   assert.strictEqual(logs.filter((l) => /\[TX\] WARNING: the radio reports TRANSMIT/.test(l) && /RTS HIGH/.test(l)).length, 2);
+});
+
+test('CW POTACAT keyed on the CW Key Port is not called unsolicited (#1117)', () => {
+  const { ctx, controller, logs } = loadNote({ dtr: true, rts: false }, true);
+  ctx.note(controller, true);
+  ctx.note(controller, false);
+  assert.strictEqual(logs.length, 0, 'no WARNING and no "POTACAT did not start" line');
 });
 
 test('the voice hint is armed only when POTACAT sends the audio', () => {
