@@ -28,13 +28,20 @@ function jtcatCss() {
 const MEASURE = `
 (() => {
   const r = (el) => { const b = el.getBoundingClientRect(); return { left: Math.round(b.left * 10) / 10, top: Math.round(b.top * 10) / 10, width: Math.round(b.width * 10) / 10, height: Math.round(b.height * 10) / 10 }; };
+  const textWidth = (el) => { const range = document.createRange(); range.selectNodeContents(el); return Math.round(range.getBoundingClientRect().width * 10) / 10; };
   const out = {};
   for (const list of document.querySelectorAll('[data-list]')) {
     const rows = [...list.querySelectorAll(list.dataset.rowSelector)];
     out[list.dataset.list] = rows.map(row => ({
       id: row.dataset.fixture || '',
       box: r(row),
-      cells: [...row.children].map(c => ({ cls: c.className, text: c.textContent, sw: c.scrollWidth, cw: c.clientWidth, ...r(c) })),
+      cells: [...row.children].map(c => ({
+        cls: c.className, text: c.textContent, sw: c.scrollWidth, cw: c.clientWidth, ...r(c),
+        ...(c.classList.contains('spot-mode') ? {
+          textWidth: textWidth(c),
+          paddingX: (() => { const s = getComputedStyle(c); return parseFloat(s.paddingLeft) + parseFloat(s.paddingRight); })(),
+        } : {}),
+      })),
     }));
   }
   // The viewport the page was really laid out in; the test checks it against the width it names.
