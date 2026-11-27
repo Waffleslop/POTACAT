@@ -34,7 +34,7 @@ test('6: Hunt engaging a station says "working" on every surface; a direct calle
   vm.runInContext(main.slice(main.indexOf('function jtcatHuntStatusWorking('), main.indexOf('function jtcatHuntStatusClear(')) + '\nthis.w = jtcatHuntStatusWorking;', ctx);
   ctx.w('K4POT');
   assert.deepStrictEqual(sent.map((s) => [s[0], s[1], s[2].text]), [['win', 'jtcat-hunt-status', 'Hunt: working K4POT'], ['ws', 'jtcat-hunt-status', 'Hunt: working K4POT']]);
-  assert.ok(/jtcatSessionMark\(best\.call\);\s*jtcatHuntStatusWorking\(best\.call\);/.test(main), 'the Hunt pick');
+  assert.ok(/if \(best\) \{[\s\S]{0,600}?jtcatHuntStatusWorking\(best\.call\);/.test(main), 'the Hunt pick');
   const direct = main.slice(main.indexOf('async function jtcatTryAnswerDirectCaller('), main.indexOf('async function jtcatTryAnswerDirectCaller(') + 4000);
   assert.ok(/jtcatHuntStatusWorking\(senderCall\);/.test(direct), 'a station calling us');
 });
