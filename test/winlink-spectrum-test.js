@@ -190,7 +190,7 @@ test('#1096: a truly quiet ARDOP band with a strong block just outside it reads 
 });
 
 test('busyBadge: the detector\'s verdict, and the modem\'s while Pat\'s busy-channel prompt is up (#1096)', () => {
-  assert.deepStrictEqual(S.busyBadge(null, null), { state: 'idle', text: '\u2014', title: '' });
+  assert.deepStrictEqual(S.busyBadge(null, null), { state: 'idle', text: '\u2014', title: '', source: 'detector' });
   assert.strictEqual(S.busyBadge({ busy: false, peakDb: 0 }, {}).text, 'Clear');
   assert.strictEqual(S.busyBadge({ busy: false, peakDb: 0 }, {}).state, 'clear');
   assert.strictEqual(S.busyBadge({ busy: true, peakDb: 23 }, { prompt: null }).text, 'BUSY +23 dB');
@@ -207,6 +207,19 @@ test('busyBadge: the detector\'s verdict, and the modem\'s while Pat\'s busy-cha
   // any other prompt is not a busy reading
   assert.strictEqual(S.busyBadge({ busy: false, peakDb: 0 }, { prompt: { id: 'p2', kind: 'password' } }).text, 'Clear');
   for (const x of [b, agree]) assert.ok(!/[\u{1F300}-\u{1FAFF}]/u.test(x.text + x.title), 'no emoji');
+});
+
+test('busyBadge says whose verdict it is: modem during the busy prompt, detector otherwise (#1096, the phone\'s badge)', () => {
+  const prompt = { prompt: { id: 'p1', kind: 'busy-channel', message: 'busy' } };
+  assert.strictEqual(S.busyBadge({ busy: false, peakDb: 0 }, prompt).source, 'modem');
+  assert.strictEqual(S.busyBadge({ busy: true, peakDb: 30 }, prompt).source, 'modem');
+  assert.strictEqual(S.busyBadge(null, prompt).source, 'modem');
+  assert.strictEqual(S.busyBadge({ busy: true, peakDb: 30 }, {}).source, 'detector');
+  assert.strictEqual(S.busyBadge({ busy: false, peakDb: 0 }, { prompt: null }).source, 'detector');
+  assert.strictEqual(S.busyBadge({ busy: false, peakDb: 0 }, { prompt: { id: 'p2', kind: 'password' } }).source, 'detector');
+  // the wire carries the whole object: four plain fields, nothing else
+  assert.deepStrictEqual(Object.keys(S.busyBadge({ busy: true, peakDb: 30 }, {})).sort(), ['source', 'state', 'text', 'title']);
+  assert.deepStrictEqual(Object.keys(S.busyBadge({ busy: false, peakDb: 0 }, prompt)).sort(), ['source', 'state', 'text', 'title']);
 });
 
 test('the mail window draws the badge from busyBadge, on every frame and every session push', () => {

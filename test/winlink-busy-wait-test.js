@@ -130,6 +130,72 @@ test('#1096: the busy badge is display only; the busy prompt\'s answer path is e
   assert.ok(i > 0 && !/answerPrompt|ptt/i.test(render), 'drawing the badge answers nothing');
 });
 
+// main.js winlinkSpectrumPublish, run with stubs: what one frame to the phones carries.
+function publishOnce(verdict, session) {
+  const S = require(path.join(root, 'lib', 'winlink-spectrum.js'));
+  const src = fnBody(main, 'winlinkSpectrumPublish');
+  const sent = [];
+  const env = {
+    _winlinkRemoteWatchers: 1,
+    remoteServer: { running: true, broadcastWinlinkSpectrum: (fr) => sent.push(fr) },
+    WinlinkModes: { pickWinlinkMode: () => 'ardop' },
+    winlinkState: { snapshot: () => ({ modes: [] }), session },
+    settings: {},
+    WinlinkSpectrum: S,
+    winlinkModemBw: () => ({ ardop: 500 }),
+    WinlinkWfAudio: require(path.join(root, 'lib', 'winlink-wf-audio.js')),
+    _winlinkBusy: { loBin: -1, hiBin: -1, setBand() {}, update: () => ({ ...verdict, changed: true }) },
+    _winlinkSpecLastAt: 0,
+  };
+  const names = Object.keys(env);
+  const make = new Function('env', 'let { ' + names.join(', ') + ' } = env;\n' + src + '\nreturn winlinkSpectrumPublish;');
+  make(env)(new Float32Array(S.MAGS), 0.1);
+  assert.strictEqual(sent.length, 1, 'one frame published');
+  return sent[0];
+}
+
+test('#1096: the phone\'s frame carries the window\'s badge: the modem\'s while the busy prompt is pending, busy unchanged', () => {
+  const busyPrompt = { state: 'connecting', prompt: { id: 'p1', kind: 'busy-channel', message: 'busy', at: 1, limitSec: 300 } };
+  const fr = publishOnce({ busy: false, peakDb: 0 }, busyPrompt);
+  assert.ok(fr.badge, 'the frame carries badge');
+  assert.deepStrictEqual({ state: fr.badge.state, text: fr.badge.text, source: fr.badge.source }, { state: 'busy', text: 'Busy (modem)', source: 'modem' });
+  assert.ok(/modem hears the channel as busy/.test(fr.badge.title));
+  assert.strictEqual(fr.busy, false, 'busy stays the detector\'s verdict, for older phones');
+  assert.strictEqual(fr.peakDb, 0);
+  const both = publishOnce({ busy: true, peakDb: 27 }, busyPrompt);
+  assert.strictEqual(both.badge.text, 'Busy (modem)');
+  assert.strictEqual(both.busy, true);
+  assert.strictEqual(both.peakDb, 27);
+});
+
+test('#1096: with no busy prompt the frame\'s badge is the detector\'s verdict, the same words as the window', () => {
+  const S = require(path.join(root, 'lib', 'winlink-spectrum.js'));
+  const quiet = publishOnce({ busy: false, peakDb: 0 }, { state: 'idle', prompt: null });
+  assert.ok(quiet.badge, 'the frame carries badge');
+  assert.deepStrictEqual(quiet.badge, S.busyBadge({ busy: false, peakDb: 0 }, { prompt: null }));
+  assert.strictEqual(quiet.badge.text, 'Clear');
+  assert.strictEqual(quiet.badge.source, 'detector');
+  assert.strictEqual(quiet.busy, false);
+  const loud = publishOnce({ busy: true, peakDb: 23 }, { state: 'idle', prompt: null });
+  assert.strictEqual(loud.badge.text, 'BUSY +23 dB');
+  assert.strictEqual(loud.badge.source, 'detector');
+  assert.strictEqual(loud.busy, true);
+  assert.strictEqual(loud.peakDb, 23);
+  // another prompt (a password) is not a busy reading
+  assert.strictEqual(publishOnce({ busy: false, peakDb: 0 }, { prompt: { id: 'p2', kind: 'password' } }).badge.source, 'detector');
+  // every field a phone already reads is still there
+  for (const k of ['bins', 'busy', 'peakDb', 'lo', 'hi', 'label']) assert.ok(k in quiet, k);
+});
+
+test('#1096: the registry and the protocol doc declare badge as optional on winlink-spectrum', () => {
+  const P = require(path.join(root, 'lib', 'echocat-protocol.js'));
+  const reg = P.MESSAGES['winlink-spectrum'];
+  assert.ok(reg && reg.fields && reg.fields.badge && reg.fields.badge.required === false, 'badge: f.optObject');
+  const doc = readSrc(path.join(root, 'docs', 'echocat-protocol.md'));
+  const row = doc.split('\n').find((l) => l.startsWith('| `winlink-spectrum` |'));
+  assert.ok(/`badge`/.test(row) && /Busy \(modem\)/.test(row) && /`source`/.test(row), 'documented in the winlink-spectrum row');
+});
+
 test('this test is in the list CI runs', () => {
   assert.ok(readSrc(path.join(root, 'scripts', 'run-tests.js')).includes("'test/winlink-busy-wait-test.js'"));
 });

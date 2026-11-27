@@ -13743,7 +13743,8 @@ function winlinkSpectrumPublish(mags, inputPeak) {
   const v = _winlinkBusy.update(mags, now);
   if (now - _winlinkSpecLastAt < 100 && !v.changed) return;
   _winlinkSpecLastAt = now;
-  remoteServer.broadcastWinlinkSpectrum({ bins: WinlinkSpectrum.wireBins(mags), busy: v.busy, peakDb: v.peakDb, lo: band.lo, hi: band.hi, label: band.label, ...WinlinkWfAudio.wireInput(inputPeak) });
+  // badge (#1096): the mail window's own badge decision, so the phone says "Busy (modem)" while Pat's busy prompt waits; busy stays the detector's for older phones.
+  remoteServer.broadcastWinlinkSpectrum({ bins: WinlinkSpectrum.wireBins(mags), busy: v.busy, peakDb: v.peakDb, badge: WinlinkSpectrum.busyBadge(v, winlinkState.session), lo: band.lo, hi: band.hi, label: band.label, ...WinlinkWfAudio.wireInput(inputPeak) });
 }
 
 function winlinkSetRemoteWatch(count) {
