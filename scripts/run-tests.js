@@ -776,6 +776,7 @@ const TESTS = [
   'test/g90-power-scale-test.js', // the Xiegu G90 through rigctld sends RFPOWER on its own 20 W full scale (20 W = 1.000, not 0.200); other radios' bytes unchanged (#989)
   'test/remote-multi-client-test.js',
   'test/remote-bridge-test.js',
+  'test/jtcat-remote-leave-test.js',
   'test/aprs-remote-shack-test.js', // #868: a desktop driving a remote shack starts APRS listening there (aprs-listen), shows the shack's aprs-state and the stations its radio heard
   'test/winlink-remote-shack-test.js', // #299: a desktop driving a remote shack uses the shack's Winlink (mailbox, gateways, radio sessions) over the winlink-* wire
   'test/sstv-context-test.js',
