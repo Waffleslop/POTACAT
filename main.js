@@ -8021,7 +8021,8 @@ function _buildCloudDevicePayload() {
   }
 
   const activeRig = (settings.rigs || []).find(r => r.id === settings.activeRigId);
-  return {
+  // appVersion: Cloud stores it so support can see who still runs an old release.
+  return require('./lib/cloud-device-version').withAppVersion({
     deviceId: settings.cloudDeviceId,
     type,
     name: (require('os').hostname()) || 'POTACAT',
@@ -8037,7 +8038,7 @@ function _buildCloudDevicePayload() {
     // list today, so this is ignored server-side until it grows a column —
     // sent now so desktops in the field populate it the day it does.
     tsCertPublic: !!altHosts.tsCertPublic,
-  };
+  }, (() => { try { return app.getVersion(); } catch { return ''; } })());
 }
 
 // Debounced re-register for event hooks (tunnel state change, ECHOCAT
@@ -8123,7 +8124,8 @@ async function ensureCloudDeviceRegistered(reason, _afterRotate) {
       // the previous account's tokens.
       const live = cloudIpc && cloudIpc.getCloudSync();
       if (!live) return;
-      await live.heartbeatDevice(settings.cloudDeviceId);
+      await live.heartbeatDevice(settings.cloudDeviceId,
+        require('./lib/cloud-device-version').deviceHeartbeatBody((() => { try { return app.getVersion(); } catch { return ''; } })()));
     } catch (err) {
       // Network blip or rotated token — quiet, the next heartbeat
       // retries. Audible log only when it persists.
