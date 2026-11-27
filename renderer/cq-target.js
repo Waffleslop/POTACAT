@@ -119,10 +119,14 @@
   //       (resolve ONCE per cycle, not per decode), OR
   //   - resolvePrefixEntity(tag): fallback that returns { name, ... } | null.
   // Match reliability: program/contest (literal tag), continent, and DXCC
-  // prefix are reliable. US-state is NOT derivable from a callsign via cty.dat
-  // (it resolves only "United States"), so US-state highlight is intentionally
-  // a no-op in v1 — the outgoing CQ tag still works fully. (Follow-up: a
-  // grid->state table would make incoming US-state highlight reliable.)
+  // prefix are reliable. A US state is NOT derivable from a callsign via
+  // cty.dat (it resolves only "United States"), so it comes from decode.state,
+  // which main sets from the station's grid (lib/grid-state.js stateForDecode,
+  // the same value "States I need" hunts on). A state matches only when that
+  // grid puts the station in it: a grid wholly inside the state, or a
+  // straddling grid that QRZ settles to it. A straddle QRZ did not settle, a
+  // QRZ-only state, or no grid at all never matches, so Hunt "Same as Call"
+  // never answers a guess (the same rule as GridState.huntMayAnswer).
   function matchesDecode(target, decode, helpers) {
     var c = classifyTarget(target);
     if (c.kind === 'none' || !decode) return false;
@@ -151,7 +155,17 @@
       return !!name && decode.entity === name;
     }
 
-    // usstate (and any unknown) — no reliable per-decode match in v1.
+    if (c.kind === 'usstate') {
+      var st = decode.state;
+      if (!st || st.source === 'qrz') return false;
+      var cand = st.candidates;
+      if (!cand || !cand.length) return false;
+      for (var i = 0; i < cand.length; i++) {
+        if (String(cand[i]).toUpperCase() !== c.tag) return false;
+      }
+      return true;
+    }
+
     return false;
   }
 

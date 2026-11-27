@@ -135,6 +135,10 @@ Departures from WSJT-X (do not "fix"):
 - A TX try counts per TRANSMISSION (`shouldCountRetry`), never per decode period.
 - Hunt answers a plain CQ from a spotted park station; a straddling grid only when every candidate
   state is wanted.
+- Hunt "Same as Call" with Call set to a US state answers a station only when its grid puts it in that
+  state (decode.state from lib/grid-state.js, as "States I need"; a straddle only when QRZ settles it).
+  Never a QRZ-only state, an unsettled straddle or a CQ with no grid (renderer/cq-target.js; 2026-11-26,
+  until then a state target matched nobody). The gold highlight follows the same rule.
 - Mode hop never changes band.
 - An OPERATOR mode change (pop-out, main window, ECHOCAT) stops TX, including Run, Hunt, the WSPR
   beacon and any QSO in progress, and clears the decode history and the calling list on every surface
@@ -177,6 +181,7 @@ Departures from WSJT-X (do not "fix"):
 lib/ft8-engine-test.js, lib/psk-engine-test.js, test/jtty-*.js, test/jtcat-*.js,
 test/jtcat-chimes-test.js (the chimes: triggers, non-triggers, rate limit, wiring),
 test/jtcat-session-limit-test.js (Stop Run and Hunt after N minutes),
+test/hunt-chase-state-test.js (Same as Call with a US state; the other Call targets unchanged),
 test/decode-contract-test.js (real worker, native and WASM), test/layout-alignment-test.js (rows at
 phone and desktop widths, CI only), test/remote-bridge-test.js, test/k9cyt-requests-test.js.
 
