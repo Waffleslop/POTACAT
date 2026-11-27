@@ -3443,6 +3443,8 @@
       // VK3AWA: cut SDR audio while transmitting so the operator doesn't
       // hear themselves through the remote receiver.
       if (kiwiGainNodeE) kiwiGainNodeE.gain.value = s.txState ? 0 : 1;
+      // A 1.0 shown for a 0 during the over is a dash on receive.
+      if (!s.txState && echoSwrWire === 0) updateEchoSwr(0);
     }
     // Rig controls state
     if (s.nb !== undefined) {
@@ -6252,14 +6254,27 @@
     echoSmeterText.style.color = color;
   }
 
+  // A 0 while transmitting is a perfect match (1.0), on receive a dash
+  // (lib/swr-display.js); before, every 0 was skipped. The last wire value is
+  // kept so the meter goes back to a dash when TX ends (status txState).
+  var echoSwrWire = null;
   function updateEchoSwr(val) {
-    if (val > 0 && window.__vfSetSwr) window.__vfSetSwr(1.0 + val / 60);
-    if (!echoMeterEnabled || val <= 0) return;
-    var swr = 1.0 + (val / 60);
+    echoSwrWire = val;
+    var swr = SwrDisplay.ratio(val, txState);
+    if (swr != null && window.__vfSetSwr) window.__vfSetSwr(swr);
+    if (!echoMeterEnabled) return;
+    if (swr == null) {
+      if (val === 0) { // the rest value after TX: back to the dash
+        drawEchoBar(echoSwrBar, 0, '#333');
+        echoSwrText.textContent = SwrDisplay.DASH;
+        echoSwrText.style.color = '';
+      }
+      return;
+    }
     var level = Math.min(1, (swr - 1) / 4);
     var color = swr <= 1.5 ? '#4ecca3' : swr <= 2.0 ? '#ffd740' : swr <= 3.0 ? '#f0a500' : '#e94560';
     drawEchoBar(echoSwrBar, level, color);
-    echoSwrText.textContent = swr < 10 ? swr.toFixed(1) : '>10';
+    echoSwrText.textContent = SwrDisplay.text(swr);
     echoSwrText.style.color = color;
   }
 
