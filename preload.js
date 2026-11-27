@@ -304,6 +304,7 @@ contextBridge.exposeInMainWorld('api', {
   embedSettingsGet: () => ipcRenderer.invoke('embed-settings-get'),
   embedSettingsPut: (isPublic) => ipcRenderer.invoke('embed-settings-put', isPublic),
   cloudForgotPassword: (email) => ipcRenderer.invoke('cloud-forgot-password', email),
+  cloudRequestAccountDeletion: () => ipcRenderer.invoke('cloud-request-account-deletion'),
   onOpenSettingsPanel: (cb) => {
     const handler = (_e, payload) => cb(payload);
     ipcRenderer.on('open-settings-panel', handler);

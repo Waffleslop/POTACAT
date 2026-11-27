@@ -103,6 +103,9 @@
     }
     loginSection.classList.remove('hidden');
     accountSection.classList.add('hidden');
+    // A half-done Delete account panel does not survive a sign-out.
+    const delPanel = document.getElementById('cloud-delete-account-confirm');
+    if (delPanel) delPanel.classList.add('hidden');
     if (signOutFieldset) signOutFieldset.classList.add('hidden');
     if (apiKeysFieldset) apiKeysFieldset.classList.add('hidden');
     isLoggedIn = false;
@@ -916,6 +919,60 @@
           forgotStatus.style.color = 'var(--accent-red)';
         }
         forgotSendBtn.disabled = false;
+      }
+    });
+  }
+
+  // ── Delete account (signed in) ────────────────────────────────────
+  // CLOUD_TO_DESKTOP 2026-11-26. An in-page confirm (no browser dialog),
+  // then main asks Cloud to email a one-time link. Main hands back the
+  // sentence to show (lib/cloud-delete-account.js). Signed out, the link in
+  // the sign-in section is data-external and opens the web page instead.
+  const delLink = document.getElementById('cloud-delete-account-link');
+  const delConfirm = document.getElementById('cloud-delete-account-confirm');
+  const delSendBtn = document.getElementById('cloud-delete-account-send');
+  const delCancelBtn = document.getElementById('cloud-delete-account-cancel');
+  const delStatus = document.getElementById('cloud-delete-account-status');
+  function _delReset() {
+    if (delConfirm) delConfirm.classList.add('hidden');
+    if (delStatus) { delStatus.textContent = ''; delStatus.classList.add('hidden'); }
+    if (delSendBtn) { delSendBtn.disabled = false; delSendBtn.classList.remove('hidden'); }
+    if (delCancelBtn) delCancelBtn.textContent = 'Cancel';
+  }
+  function _delShow(text, ok) {
+    if (!delStatus) return;
+    delStatus.textContent = text;
+    delStatus.style.color = ok ? 'var(--accent-green)' : 'var(--accent-red-text)';
+    delStatus.classList.remove('hidden');
+  }
+  if (delLink && delConfirm) {
+    delLink.addEventListener('click', (e) => {
+      e.preventDefault();
+      const wasHidden = delConfirm.classList.contains('hidden');
+      _delReset();
+      if (wasHidden) delConfirm.classList.remove('hidden');
+    });
+  }
+  if (delCancelBtn) delCancelBtn.addEventListener('click', _delReset);
+  if (delSendBtn) {
+    delSendBtn.addEventListener('click', async () => {
+      delSendBtn.disabled = true;
+      _delShow('Sending...', true);
+      if (delStatus) delStatus.style.color = 'var(--text-secondary)';
+      let res;
+      try {
+        res = await window.api.cloudRequestAccountDeletion();
+      } catch (err) {
+        res = { ok: false, text: 'Could not send the deletion link. Nothing was deleted.' };
+      }
+      const ok = !!(res && res.ok);
+      _delShow((res && res.text) || 'Could not send the deletion link. Nothing was deleted.', ok);
+      if (ok) {
+        // Sent: one link per request is enough; Cancel becomes Close.
+        delSendBtn.classList.add('hidden');
+        if (delCancelBtn) delCancelBtn.textContent = 'Close';
+      } else {
+        delSendBtn.disabled = false;
       }
     });
   }
