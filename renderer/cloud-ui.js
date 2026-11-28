@@ -96,6 +96,7 @@
   const signedOutNotice = document.getElementById('cloud-signed-out-notice');
 
   function showLogin(hasStaleTokens, notice) {
+    renderHeldNotice(0);
     // undefined = leave the notice as it is; '' = clear it (Sign Out).
     if (signedOutNotice && notice !== undefined) {
       signedOutNotice.textContent = notice || '';
@@ -466,6 +467,7 @@
 
       _lastStatus = status;
       showAccount(status.user, sub);
+      renderHeldNotice(status.held || 0);
       renderUploadNudge(status, sub);
 
       if (status.sync) {
@@ -1839,6 +1841,198 @@
       if (cloudTabBtn) cloudTabBtn.click();
       if (ctFieldset) ctFieldset.scrollIntoView({ behavior: 'smooth', block: 'start' });
     });
+  }
+
+  /** The held-deletes notice in Settings > Cloud ('' text = hidden). Looks its
+   *  elements up each time: showLogin can run before the section below. */
+  function renderHeldNotice(count) {
+    const box = document.getElementById('cloud-held-notice');
+    const Held = window.CloudHeld;
+    if (!box || !Held) return;
+    const text = Held.noticeText(count);
+    const span = document.getElementById('cloud-held-text');
+    if (span) span.textContent = text;
+    box.classList.toggle('hidden', !text);
+  }
+
+  // ── Deletes POTACAT Cloud is holding (lib/cloud-held.js) ──────────
+  // One notice while any are held; Review opens the list. The member picks
+  // rows (or all) and answers Delete from Cloud or Keep in Cloud, confirmed
+  // inline. Nothing here touches this computer's log.
+
+  const heldReview = document.getElementById('cloud-held-review');
+  const heldReviewLink = document.getElementById('cloud-held-review-link');
+  const heldClose = document.getElementById('cloud-held-close');
+  const heldIntro = document.getElementById('cloud-held-intro');
+  const heldAll = document.getElementById('cloud-held-all');
+  const heldAllLabel = document.getElementById('cloud-held-all-label');
+  const heldBody = document.getElementById('cloud-held-body');
+  const heldDeleteBtn = document.getElementById('cloud-held-delete');
+  const heldKeepBtn = document.getElementById('cloud-held-keep');
+  const heldSelected = document.getElementById('cloud-held-selected');
+  const heldActions = document.getElementById('cloud-held-actions');
+  const heldConfirm = document.getElementById('cloud-held-confirm');
+  const heldConfirmText = document.getElementById('cloud-held-confirm-text');
+  const heldConfirmYes = document.getElementById('cloud-held-confirm-yes');
+  const heldConfirmNo = document.getElementById('cloud-held-confirm-no');
+  const heldStatus = document.getElementById('cloud-held-status');
+  let _heldRows = [];
+  let _heldTotal = 0;
+  let _heldPending = null; // { action, sel, n } while the inline confirm shows
+  let _heldBusy = false;
+
+  function heldSetStatus(text, isError) {
+    if (!heldStatus) return;
+    heldStatus.textContent = text || '';
+    heldStatus.style.color = isError ? 'var(--accent-red-text)' : '';
+    heldStatus.classList.toggle('hidden', !text);
+  }
+
+  function heldChecked() {
+    if (!heldBody) return [];
+    return Array.from(heldBody.querySelectorAll('input[type="checkbox"]:checked')).map((cb) => cb.dataset.uuid);
+  }
+
+  /** What the buttons act on: every hold (all: true) or the ticked rows. */
+  function heldSelection() {
+    const picked = heldChecked();
+    const everyRow = _heldRows.length > 0 && picked.length === _heldRows.length;
+    if (everyRow && _heldTotal > _heldRows.length) return { sel: { all: true }, n: _heldTotal };
+    return { sel: { uuids: picked }, n: picked.length };
+  }
+
+  function heldUpdateButtons() {
+    const picked = heldChecked().length;
+    const { n } = heldSelection();
+    if (heldAll) {
+      heldAll.checked = _heldRows.length > 0 && picked === _heldRows.length;
+      heldAll.indeterminate = picked > 0 && picked < _heldRows.length;
+    }
+    if (heldAllLabel) heldAllLabel.textContent = _heldTotal > _heldRows.length ? 'Select all ' + _heldTotal : 'Select all';
+    if (heldSelected) heldSelected.textContent = n ? n + ' selected' : '';
+    const off = _heldBusy || n === 0 || !!_heldPending;
+    if (heldDeleteBtn) heldDeleteBtn.disabled = off;
+    if (heldKeepBtn) heldKeepBtn.disabled = off;
+  }
+
+  function heldRenderRows() {
+    if (!heldBody) return;
+    heldBody.textContent = '';
+    for (const r of _heldRows) {
+      const tr = document.createElement('tr');
+      const tdBox = document.createElement('td');
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.dataset.uuid = r.uuid;
+      cb.setAttribute('aria-label', 'Select ' + (r.call || 'contact') + ' ' + r.date + ' ' + r.time);
+      cb.addEventListener('change', heldUpdateButtons);
+      tdBox.appendChild(cb);
+      tr.appendChild(tdBox);
+      for (const v of [r.call, r.date, r.time, r.band, r.mode, r.stationCall]) {
+        const td = document.createElement('td');
+        td.textContent = v || '';
+        tr.appendChild(td);
+      }
+      heldBody.appendChild(tr);
+    }
+    const Held = window.CloudHeld;
+    if (heldIntro && Held) {
+      heldIntro.textContent = _heldTotal
+        ? Held.reviewIntro(_heldRows.length, _heldTotal)
+        : 'POTACAT Cloud is not holding any deletions for this account.';
+    }
+    heldUpdateButtons();
+  }
+
+  function heldCloseConfirm() {
+    _heldPending = null;
+    if (heldConfirm) heldConfirm.classList.add('hidden');
+    if (heldActions) heldActions.classList.remove('hidden');
+    heldUpdateButtons();
+  }
+
+  async function heldLoad() {
+    if (!window.api || !window.api.cloudHeldList) return false;
+    try {
+      const res = await window.api.cloudHeldList();
+      if (!res || res.error) {
+        heldSetStatus('Could not load the list from POTACAT Cloud: ' + ((res && res.error) || 'no answer'), true);
+        return false;
+      }
+      _heldRows = res.rows || [];
+      _heldTotal = res.total || 0;
+      renderHeldNotice(_heldTotal);
+      heldRenderRows();
+      return true;
+    } catch (err) {
+      heldSetStatus('Could not load the list from POTACAT Cloud: ' + err.message, true);
+      return false;
+    }
+  }
+
+  async function heldOpen() {
+    if (!heldReview) return;
+    heldReview.classList.remove('hidden');
+    heldCloseConfirm();
+    heldSetStatus('Loading...');
+    if (await heldLoad()) heldSetStatus('');
+  }
+
+  function heldAsk(action) {
+    const Held = window.CloudHeld;
+    if (!Held) return;
+    const { sel, n } = heldSelection();
+    if (!n) return;
+    _heldPending = { action, sel, n };
+    if (heldConfirmText) heldConfirmText.textContent = Held.confirmText(action, n);
+    if (heldActions) heldActions.classList.add('hidden');
+    if (heldConfirm) heldConfirm.classList.remove('hidden');
+  }
+
+  async function heldRun() {
+    const p = _heldPending;
+    const Held = window.CloudHeld;
+    if (!p || !Held || _heldBusy || !window.api || !window.api.cloudHeldResolve) return;
+    _heldBusy = true;
+    if (heldConfirmYes) heldConfirmYes.disabled = true;
+    heldSetStatus('Sending to POTACAT Cloud...');
+    let done = '';
+    try {
+      const res = await window.api.cloudHeldResolve(p.action, p.sel);
+      if (!res || res.error) {
+        heldSetStatus('POTACAT Cloud did not accept that: ' + ((res && res.error) || 'no answer'), true);
+      } else {
+        done = Held.doneText(p.action, res.resolved || 0);
+        renderHeldNotice(res.remaining || 0);
+      }
+    } catch (err) {
+      heldSetStatus('POTACAT Cloud did not accept that: ' + err.message, true);
+    } finally {
+      _heldBusy = false;
+      if (heldConfirmYes) heldConfirmYes.disabled = false;
+      heldCloseConfirm();
+    }
+    if (done) {
+      await heldLoad();
+      heldSetStatus(done);
+    }
+  }
+
+  if (heldReviewLink) heldReviewLink.addEventListener('click', (e) => { e.preventDefault(); heldOpen(); });
+  if (heldClose) heldClose.addEventListener('click', () => { heldCloseConfirm(); heldSetStatus(''); heldReview.classList.add('hidden'); });
+  if (heldAll) {
+    heldAll.addEventListener('change', () => {
+      if (!heldBody) return;
+      for (const cb of heldBody.querySelectorAll('input[type="checkbox"]')) cb.checked = heldAll.checked;
+      heldUpdateButtons();
+    });
+  }
+  if (heldDeleteBtn) heldDeleteBtn.addEventListener('click', () => heldAsk('delete'));
+  if (heldKeepBtn) heldKeepBtn.addEventListener('click', () => heldAsk('keep'));
+  if (heldConfirmYes) heldConfirmYes.addEventListener('click', () => { heldRun(); });
+  if (heldConfirmNo) heldConfirmNo.addEventListener('click', heldCloseConfirm);
+  if (window.api && window.api.onCloudHeldNotice) {
+    window.api.onCloudHeldNotice((data) => renderHeldNotice((data && data.count) || 0));
   }
 
   setTimeout(refreshTunnelState, 2000);

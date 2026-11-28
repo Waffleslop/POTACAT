@@ -42,7 +42,7 @@ for (const [k, m] of Object.entries(RIG_MODELS)) {
 }
 
 section('Models: the meter query this generation answers');
-for (const k of ['TS-590S/SG', 'TS-990S', 'TS-480']) {
+for (const k of ['TS-590S/SG', 'TS-990S', 'TS-480', 'TS-2000']) {
   assert(RIG_MODELS[k].smQuery === 'SM0;', `${k}: SM0; (SM; without P1 is a command error)`);
 }
 // The TS-890S guide (p. 61) reads with a bare SM; and answers SM + 4 digits.

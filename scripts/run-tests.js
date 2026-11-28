@@ -556,11 +556,14 @@ const TESTS = [
   'test/cloud-device-revoked-test.js', // a computer removed from the Cloud account is signed out: tokens cleared, loops and tunnel stopped
   'test/cloud-log-sync-test.js',
   'test/cloud-sync-log-test.js', // B10: Cloud sync writes its pulls, errors and "not started" reason to the session log
+  'test/cloud-device-version-test.js', // Cloud ask 2026-11-26: appVersion rides in the device register payload and the heartbeat body
   'test/cloud-pair-errors-test.js', // a second desktop registers before Cloud pairing; Cloud answers in plain words; its device id never leaves in an export
+  'test/cloud-pair-verify-test.js', // Cloud's message and hint reach the browser sign-in page when it refuses a pairing code; shacks not holding their Cloud address are not offered
   'test/launch-origin-test.js',
   'test/cloud-merge-dupe-test.js',
   'test/cloud-pull-per-profile-test.js', // #245: profiles sharing one account: each pulls only its own QSOs; the dupe guard and journal stay per profile
   'test/cloud-delete-account-test.js', // Settings > Cloud > Delete account: Cloud answer to sentence; link, in-page confirm and IPC wired
+  'test/cloud-held-test.js', // Cloud handoff 2026-11-26: deletes the Cloud holds get one Settings > Cloud notice and a review (delete / keep only); push path unchanged
   'test/cloud-delete-guard-test.js', // #245: delete pushes held (another profile's QSOs, or over 25 an hour) until the operator confirms; dupe guard keeps station callsigns apart
   'test/cloud-pull-forward-test.js', // #267/#838: this station's QSOs from a phone or any other device reach MacLoggerDX etc. via the pull, once, retried when a logger refuses; never another PC's or the history
   'test/swr-guard-test.js',
@@ -661,6 +664,7 @@ const TESTS = [
   'test/echocat-web-micgain-test.js',
   'test/cloud-billing-ui-test.js',
   'test/ts590-flow-control-test.js',
+  'test/ts2000-smeter-test.js',
   'test/rts-asserted-no-flow-test.js', // #136: RTS line "Asserted, no flow control" (YT-1200 pass-through) + the CTS-low log line
   'test/github-issues-2026-10-26-test.js', // #107 FT-450 test, #106 interface PTT, #103 Auto RTS trial
   'test/duo-vfo-wire-test.js',        // iPhone Duo VFO pane: tuned-spot, swr-guard-state, atu-tune, tx-eq, status.meters

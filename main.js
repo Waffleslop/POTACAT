@@ -8021,7 +8021,8 @@ function _buildCloudDevicePayload() {
   }
 
   const activeRig = (settings.rigs || []).find(r => r.id === settings.activeRigId);
-  return {
+  // appVersion: Cloud stores it so support can see who still runs an old release.
+  return require('./lib/cloud-device-version').withAppVersion({
     deviceId: settings.cloudDeviceId,
     type,
     name: (require('os').hostname()) || 'POTACAT',
@@ -8037,7 +8038,7 @@ function _buildCloudDevicePayload() {
     // list today, so this is ignored server-side until it grows a column —
     // sent now so desktops in the field populate it the day it does.
     tsCertPublic: !!altHosts.tsCertPublic,
-  };
+  }, (() => { try { return app.getVersion(); } catch { return ''; } })());
 }
 
 // Debounced re-register for event hooks (tunnel state change, ECHOCAT
@@ -8123,7 +8124,8 @@ async function ensureCloudDeviceRegistered(reason, _afterRotate) {
       // the previous account's tokens.
       const live = cloudIpc && cloudIpc.getCloudSync();
       if (!live) return;
-      await live.heartbeatDevice(settings.cloudDeviceId);
+      await live.heartbeatDevice(settings.cloudDeviceId,
+        require('./lib/cloud-device-version').deviceHeartbeatBody((() => { try { return app.getVersion(); } catch { return ''; } })()));
     } catch (err) {
       // Network blip or rotated token — quiet, the next heartbeat
       // retries. Audible log only when it persists.
@@ -31998,8 +32000,11 @@ function connectRemote() {
         resultPayload = { pairToken, ok: false, error: (r && r.error) || 'verify denied' };
       }
     } catch (err) {
-      resultPayload = { pairToken, ok: false, error: err.message || String(err) };
-      sendCatLog(`[Pair-Account] cloud verify FAILED ${err.message || err}`);
+      // Cloud's own message and hint go back to the page (token_used,
+      // shack_mismatch, ...) instead of a bare "Sign-in failed".
+      const f = require('./lib/cloud-pair-verify').verifyFailure(err);
+      resultPayload = { pairToken, ok: false, error: f.error, message: f.message, hint: f.hint };
+      sendCatLog(`[Pair-Account] cloud verify FAILED ${f.error}${f.message ? ': ' + f.message : ''}`);
     }
     remoteServer.emit('verify-pair-token-result', resultPayload);
   });
@@ -47344,7 +47349,11 @@ function _doPairAccountRedeem(wssUrl, pinFingerprint, pairToken, shackDeviceId) 
       res.on('end', () => {
         if (res.statusCode !== 200) {
           let errBody = body;
-          try { errBody = JSON.parse(body).error || errBody; } catch {}
+          try {
+            const j = JSON.parse(body);
+            // Cloud's message and hint when the shack passed them on.
+            errBody = require('./lib/cloud-pair-verify').pairErrorText(j, j.error || errBody);
+          } catch {}
           return reject(new Error('HTTP ' + res.statusCode + ': ' + errBody));
         }
         try {
@@ -48072,6 +48081,8 @@ app.whenReady().then(() => {
     // Once the app has settled: anything logged while signed out (or
     // imported before imports synced) that the cloud does not hold yet.
     setTimeout(() => { cloudIpc.reconcileWithCloud('boot').catch(() => {}); }, 15000);
+    // Deletes the Cloud is holding for review (Settings > Cloud notice).
+    setTimeout(() => { cloudIpc.checkHeldDeletes('boot').catch(() => {}); }, 17000);
 
     // Register this desktop in the cloud_devices directory so signed-in
     // laptops on the same account can find it (and auto-pair without
@@ -56420,7 +56431,9 @@ function cloudShackNotice(text, kind) {
     catch (err) { return { error: 'Could not register this device: ' + (err.message || err) }; }
     try {
       const r = await sync.listDevices('shack');
-      const shacks = Array.isArray(r && r.devices) ? r.devices : [];
+      // A shack whose Cloud address another shack of the account answers
+      // (holds_cloud_host: false) is left out, as login.potacat.com does.
+      const shacks = CloudShacks.listableShacks(r && r.devices);
       // Don't surface our own row if this desktop happens to be a shack.
       const filtered = shacks.filter(s => s.device_id !== settings.cloudDeviceId);
       return { ok: true, shacks: filtered };
