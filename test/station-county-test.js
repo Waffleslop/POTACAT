@@ -87,16 +87,19 @@ check('the home LoTW batch leaves state and county to the TQSL Station Location'
   assert.strictEqual(h.length, 1);
   assert.ok(!('MY_STATE' in h[0]) && !('MY_CNTY' in h[0]), 'TQSL would refuse a batch whose records disagree with the location');
 });
-check('an activation batch is signed with its county, one batch per county', () => {
+check('an activation batch is signed with the park pick county, and no other (#1136)', () => {
   const recs = [
     { CALL: 'W1AW', MY_POTA_REF: 'US-1234', MY_GRIDSQUARE: 'FM18', MY_STATE: 'VA', STATION_CALLSIGN: 'K3SBP', QSO_DATE: '20261027' },
     { CALL: 'W1AX', MY_POTA_REF: 'US-1234', MY_GRIDSQUARE: 'FM18', MY_STATE: 'VA', MY_CNTY: 'VA,Fairfax', STATION_CALLSIGN: 'K3SBP', QSO_DATE: '20261028' },
   ];
-  const { activations } = splitForLotw(recs, { myCallsign: 'K3SBP', fill: () => ({ MY_CNTY: 'VA,Loudoun' }) });
-  assert.strictEqual(activations.length, 2, 'Loudoun (filled) and Fairfax (supplied) are two batches');
+  const pick = { 'US-1234': { state: 'VA', county: 'Loudoun' } };
+  const { activations } = splitForLotw(recs, { myCallsign: 'K3SBP', fill: () => ({ MY_CNTY: 'VA,Loudoun' }), parkCounty: (r) => pick[r] || null });
+  assert.strictEqual(activations.length, 2, 'Loudoun (the pick) and no county are two batches');
   const l = activations.find((b) => b.county === 'VA,Loudoun');
   assert.ok(l && l.records[0].MY_CNTY === 'VA,Loudoun' && /Loudoun/.test(l.label));
-  assert.ok(activations.find((b) => b.county === 'VA,Fairfax'), 'a supplied county is never overwritten');
+  const other = activations.find((b) => b.county === '');
+  assert.ok(other && !('MY_CNTY' in other.records[0]), 'a county that is not the pick is left off the signed copy');
+  assert.strictEqual(recs[1].MY_CNTY, 'VA,Fairfax', 'the log record is not changed');
 });
 
 console.log('Wiring');

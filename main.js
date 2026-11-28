@@ -53688,6 +53688,15 @@ function cloudShackNotice(text, kind) {
         });
         return { MY_GRIDSQUARE: f.myGridsquare, MY_STATE: f.myState, MY_CNTY: f.myCounty };
       },
+      // #1136: an activation is signed with a county only when it is the
+      // operator's pick for the park, and a batch whose state the park is
+      // not in is held back.
+      parkCounty: (ref) => (settings.parkCounties && typeof settings.parkCounties === 'object' ? settings.parkCounties[ref] : null) || null,
+      parkStates: (ref) => {
+        let park = null;
+        try { park = getParkDb(parksMap, ref) || null; } catch {}
+        return park ? parkStatesFromLocation(park.locationDesc || '') : null;
+      },
     });
     const runs = [];
     if (home.length) runs.push({ label: 'Home', records: home, args: (p) => buildTqslArgs({ location, adifPath: p, password }) });
