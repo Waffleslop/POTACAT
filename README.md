@@ -524,8 +524,8 @@ pace yourself.
 | 📝 **Changelog** | [Releases](https://github.com/Waffleslop/POTACAT/releases) |
 | ☕ **Support development** | [potacat.com/coffee](https://potacat.com/coffee) |
 
-**Your data stays yours.** Logs live in a local ADIF file on your machine. Telemetry is opt-in,
-anonymous, and [published publicly](https://telemetry.potacat.com/stats) — what you see there is
+**Your data stays yours.** Logs live in a local ADIF file on your machine. Anonymous usage statistics are on by default
+(turn them off on the Welcome screen or in Settings > Display) and [published publicly](https://telemetry.potacat.com/stats) — what you see there is
 everything that gets collected. Full
 [privacy policy and terms](https://potacat.com/privacy-terms.html).
 
