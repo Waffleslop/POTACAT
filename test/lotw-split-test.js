@@ -12,7 +12,7 @@ const { readSrc } = require('./_src');
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
-const { splitForLotw, activationRef, needsState, buildActivationTqslArgs, batchAdif } = require('../lib/lotw-split');
+const { splitForLotw, activationRef, needsState, dxccForState, buildActivationTqslArgs, batchAdif } = require('../lib/lotw-split');
 const { parseRecord } = require('../lib/adif');
 
 let pass = 0, fail = 0;
@@ -120,6 +120,103 @@ check('main signs each activation with its own args and never the home location'
   assert.ok(h.includes('buildActivationTqslArgs({ call: b.call'), 'activations use the update-mode args');
   assert.ok(/if \(b\.skip\) continue;/.test(h), 'held-back batches are not run');
   assert.ok(!main.includes("fs.copyFileSync(logPath, snap)"), 'no whole-log snapshot upload left');
+});
+
+// ── #1136: DXCC entity, the picked county only, and the park's state ──────
+// Shapes from an operator's full-log upload after moving from another logger
+// (2026-11-27): imported records carried the home county, and a
+// Missouri-only park's records said TN.
+const PICKS = { 'US-8285': { state: 'MO', county: 'Dunklin' }, 'US-3927': { state: 'TN', county: 'Lake' } };
+const STATES = { 'US-8285': ['MO'], 'US-3927': ['TN'], 'US-0538': ['KY', 'TN'], 'US-1352': ['PA'] };
+const parkCounty = (r) => PICKS[r] || null;
+const parkStates = (r) => STATES[r] || null;
+const guards = { fill, parkCounty, parkStates };
+
+check('every activation batch carries MY_DXCC from its state: 291, 6 (AK), 110 (HI)', () => {
+  assert.strictEqual(dxccForState('TN'), '291');
+  assert.strictEqual(dxccForState('dc'), '291');
+  assert.strictEqual(dxccForState('AK'), '6');
+  assert.strictEqual(dxccForState('HI'), '110');
+  assert.strictEqual(dxccForState('PR'), '', 'not a state of 291: nothing guessed');
+  assert.strictEqual(dxccForState(''), '');
+  const q = actQ('K1A', 'US-1352', '20261101');
+  const s = splitForLotw([q], guards);
+  assert.strictEqual(s.activations[0].records[0].MY_DXCC, '291');
+  assert.strictEqual(q.MY_DXCC, undefined, 'the log record is not changed');
+  const text = batchAdif(s.activations[0].records);
+  assert.match(text, /<MY_DXCC:3>291/i, 'the signed copy has it');
+});
+
+check('a MY_DXCC the record has is kept', () => {
+  const s = splitForLotw([actQ('K1A', 'US-1352', '20261101', { MY_DXCC: '291', MY_GRIDSQUARE: 'FN20jc', MY_STATE: 'PA' })], guards);
+  assert.strictEqual(s.activations[0].records[0].MY_DXCC, '291');
+});
+
+check('a Guest Pass batch gets MY_DXCC too; the home batch is left to the Station Location', () => {
+  const s = splitForLotw([
+    { CALL: 'W1AW', QSO_DATE: '20261125', STATION_CALLSIGN: 'K3SBP', MY_GRIDSQUARE: 'FN20', MY_STATE: 'NJ', APP_POTACAT_GUEST_PASS: '1' },
+    homeQ('W1AX'),
+  ], guards);
+  assert.strictEqual(s.activations[0].records[0].MY_DXCC, '291');
+  assert.ok(!('MY_DXCC' in s.home[0]));
+});
+
+check('an imported home county is not signed on an activation', () => {
+  const s = splitForLotw([actQ('K1A', 'US-3927', '20260804', { MY_GRIDSQUARE: 'EM56', MY_STATE: 'TN', MY_CNTY: 'TN,Dyer' })], guards);
+  const b = s.activations[0];
+  assert.strictEqual(b.skip, null);
+  assert.strictEqual(b.county, '');
+  assert.ok(!('MY_CNTY' in b.records[0]));
+  assert.ok(!/Dyer/.test(b.label));
+});
+
+check('the picked county is signed, in the pick spelling, bare or with its state', () => {
+  const s = splitForLotw([
+    actQ('K1A', 'US-3927', '20260804', { MY_GRIDSQUARE: 'EM56', MY_STATE: 'TN', MY_CNTY: 'tn, lake' }),
+    actQ('K1B', 'US-3927', '20260804', { MY_GRIDSQUARE: 'EM56', MY_STATE: 'TN', MY_CNTY: 'Lake' }),
+  ], guards);
+  assert.strictEqual(s.activations.length, 1);
+  assert.deepStrictEqual(s.activations[0].records.map((r) => r.MY_CNTY), ['TN,Lake', 'TN,Lake']);
+});
+
+check('a county with no pick for the park is not signed', () => {
+  const s = splitForLotw([actQ('K1A', 'US-1352', '20261101', { MY_GRIDSQUARE: 'FN20jc', MY_STATE: 'PA', MY_CNTY: 'PA,Bucks' })], guards);
+  assert.ok(!('MY_CNTY' in s.activations[0].records[0]));
+});
+
+check('a Guest Pass activation keeps the county the lending station stamped', () => {
+  const s = splitForLotw([actQ('K1A', 'US-1352', '20261101', { MY_GRIDSQUARE: 'FN20jc', MY_STATE: 'PA', MY_CNTY: 'PA,Bucks', APP_POTACAT_GUEST_PASS: '1' })], guards);
+  assert.strictEqual(s.activations[0].records[0].MY_CNTY, 'PA,Bucks');
+});
+
+check('a batch whose state the park is not in is held back and says why', () => {
+  const s = splitForLotw([actQ('K1A', 'US-8285', '20261027', { MY_GRIDSQUARE: 'EM46', MY_STATE: 'TN', MY_CNTY: 'TN,Dyer' })], guards);
+  assert.match(s.activations[0].skip, /state TN on these QSOs, but US-8285 is in MO/);
+});
+
+check('a two-state park takes either of its states, and holds any other', () => {
+  const ok = splitForLotw([actQ('K1A', 'US-0538', '20261021', { MY_GRIDSQUARE: 'EM56', MY_STATE: 'TN' })], guards);
+  assert.strictEqual(ok.activations[0].skip, null);
+  const bad = splitForLotw([actQ('K1A', 'US-0538', '20261021', { MY_GRIDSQUARE: 'EM56', MY_STATE: 'MO' })], guards);
+  assert.match(bad.activations[0].skip, /US-0538 is in KY or TN/);
+});
+
+check('a park the list does not know is not held over its state', () => {
+  const s = splitForLotw([actQ('K1A', 'US-0002', '20261021', { MY_GRIDSQUARE: 'EM56', MY_STATE: 'TN' })], guards);
+  assert.strictEqual(s.activations[0].skip, null);
+});
+
+check('a two-park n-fer across a state line takes either park state and either pick', () => {
+  const s = splitForLotw([actQ('K1A', 'US-8285,US-3927', '20261021', { MY_GRIDSQUARE: 'EM56', MY_STATE: 'TN', MY_CNTY: 'TN,Lake' })], guards);
+  assert.strictEqual(s.activations[0].skip, null);
+  assert.strictEqual(s.activations[0].records[0].MY_CNTY, 'TN,Lake');
+});
+
+check('main passes the park pick and the park list states to the split', () => {
+  const main = readSrc(path.join(__dirname, '..', 'main.js'));
+  const h = main.slice(main.indexOf("ipcMain.handle('lotw-upload'"), main.indexOf('function runLotwBatch('));
+  assert.ok(/parkCounty: \(ref\) => \(settings\.parkCounties/.test(h), 'the operator pick per park');
+  assert.ok(/parkStates: \(ref\) =>/.test(h) && h.includes('parkStatesFromLocation(park.locationDesc'), 'the park list states');
 });
 
 console.log(`\n${pass} passed, ${fail} failed`);
