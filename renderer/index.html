@@ -4146,6 +4146,7 @@
         <p id="cloud-login-error" class="help-text hidden" style="color:var(--accent-red);margin-top:4px;"></p>
         <p style="margin-top:8px;font-size:12px;">
           <a href="#" id="cloud-forgot-link" style="color:var(--accent-blue);">Forgot password?</a>
+          <a href="https://api.potacat.com/delete-account" id="cloud-delete-account-web-link" data-external="1" style="color:var(--text-secondary);margin-left:12px;">Delete account&hellip;</a>
         </p>
         <!-- Forgot-password inline mini-form. Hidden until the link above
              is clicked. Calls cloud /v1/auth/forgot-password (public, no
@@ -4286,6 +4287,21 @@
               <button type="button" id="cloud-save-bmac-email" class="btn btn-sm" style="margin-top:4px;">Save &amp; Verify</button>
             </div>
           </details>
+        </div>
+        <!-- Delete account (CLOUD_TO_DESKTOP 2026-11-26): quiet on purpose.
+             Cloud emails a one-time link (POST /v1/account/deletion-request);
+             nothing is deleted until the member confirms on the web page.
+             Sentences: lib/cloud-delete-account.js. -->
+        <p style="margin:10px 0 0;font-size:12px;border-top:1px solid var(--border-primary);padding-top:8px;">
+          <a href="#" id="cloud-delete-account-link" style="color:var(--text-secondary);">Delete account&hellip;</a>
+        </p>
+        <div id="cloud-delete-account-confirm" class="hidden" style="margin-top:6px;padding:8px 10px;background:var(--bg-panel);border:1px solid var(--border-primary);border-radius:6px;">
+          <p style="font-size:12px;color:var(--text-primary);margin:0 0 6px;">Email a link to delete your POTACAT Cloud account and its Cloud logbook copy (the log on this computer is not touched)?</p>
+          <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+            <button type="button" id="cloud-delete-account-send" class="btn btn-sm">Send link</button>
+            <button type="button" id="cloud-delete-account-cancel" class="btn btn-sm">Cancel</button>
+          </div>
+          <p id="cloud-delete-account-status" class="help-text hidden" role="status" style="font-size:12px;margin:6px 0 0;"></p>
         </div>
       </div>
     </fieldset>
