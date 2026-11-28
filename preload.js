@@ -819,6 +819,11 @@ contextBridge.exposeInMainWorld('api', {
   cloudSessionGet: () => ipcRenderer.invoke('cloud-session-get'),
   onCloudSignedOut: (cb) => ipcRenderer.on('cloud-signed-out', (_e, data) => cb(data)),
   cloudSyncNow: () => ipcRenderer.invoke('cloud-sync-now'),
+  // Deletes POTACAT Cloud is holding for review (lib/cloud-held.js): the
+  // list, the member's answer ('delete' | 'keep'), and the notice count.
+  cloudHeldList: () => ipcRenderer.invoke('cloud-held-list'),
+  cloudHeldResolve: (action, sel) => ipcRenderer.invoke('cloud-held-resolve', action, sel),
+  onCloudHeldNotice: (cb) => ipcRenderer.on('cloud-held-notice', (_e, data) => cb(data)),
   cloudBulkPrepare: () => ipcRenderer.invoke('cloud-bulk-prepare'),
   cloudBulkUpload: () => ipcRenderer.invoke('cloud-bulk-upload'),
   cloudDownloadAdif: () => ipcRenderer.invoke('cloud-download-adif'),
